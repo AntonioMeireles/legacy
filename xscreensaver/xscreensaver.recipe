@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+ 
+class Xscreensaver(PackageRecipe):
+    
+    buildRequires = [ 'gtk:devel', 'libxml2:devel',
+		      'libjpeg:devel', 'libglade:devel',
+		      'xorg-x11:devel', 'bc:runtime' ]
+
+    extraConfig = ''
+    if Use.pam:
+	buildRequires.append('pam:devel')
+	extraConfig += '--with-pam '
+
+    if Use.krb:
+	buildRequires.append('krb5:devel')
+	extraConfig += '--with-kerberos '
+
+    name = 'xscreensaver'
+    version = '4.18'
+   
+    def setup(r):
+        r.addArchive('http://www.jwz.org/%(name)s/%(name)s-%(version)s.tar.gz')
+	r.addSource('xscreensaver-fortune-standin')
+
+	# --without-gnome disables gnome 1.xx support
+	r.Configure('--with-fortune=%(bindir)s/xscreensaver-fortune-standin '
+		    '--without-gnome --with-gtk ' + 
+		    r.extraConfig)
+
+	# trick program into using a non-existent fortune program
+	r.Run('''sed -i 's|#define FORTUNE_PROGRAM.*|#define FORTUNE_PROGRAM \"%(bindir)s/xscreensaver-fortune-standin\"|' config.h''')
+	r.Make()
+	r.MakeInstall('install_prefix=%(destdir)s '
+	              'GNOME_BINDIR=%(bindir)s '
+		      'GNOME_DATADIR=%(datadir)s '
+		      'KDEDIR=%(prefix)s')
+	r.Install('driver/xscreensaver.pam', '%(sysconfdir)s/pam.d/xscreensaver')
+	r.Install('xscreensaver-fortune-standin', '%(bindir)s/', mode=0755)
