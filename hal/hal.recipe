@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+# FIXME make sure builddocs = True buildRequires is complete
+# FIXME I brute-force-disabled builddocs here because something doesn't
+#       seem to parse properly when building docs
+
+class Hal(PackageRecipe):
+    buildRequires = [ 'expat:devel', 'glib:devel', 'dbus:devel', 
+                      'hwdata:runtime', 'libcap:devel',
+                      'popt:devel' ]
+
+    extraConfig = '--enable-hotplug-map --disable-fstab-sync --with-init-scripts=redhat --with-pid-file=%(localstatedir)s/run/haldaemon.pid --enable-sysfs-carrier'
+    if Use.builddocs:
+	buildRequires.extend(['docbook-utils:runtime', 'openjade:runtime'])
+    else:
+	extraConfig += ' --disable-docbook-docs'
+
+    name = 'hal'
+    version = '0.4.7'
+
+    def setup(r):
+        srpm = "http://download.fedora.redhat.com/pub/fedora/linux/core/3/SRPMS/hal-0.4.0-10.src.rpm"
+	r.addArchive('http://freedesktop.org/~david/dist/%(name)s-%(version)s.tar.gz')
+
+        r.addPatch('hal-0.4.0-allow-floppy-drives.patch', level=0, rpm=srpm)
+        r.addAction("sed -i '/# chkconfig:/s/ 98/ 09/g' hald/haldaemon.in")
+
+	r.Configure(r.extraConfig)
+	r.Make()
+	    
+	r.MakeInstall()
+
+	r.PackageSpec('hal-gnome', '%(datadir)s/%(name)s/device-manager/',
+				   '%(bindir)s/hal-device-manager')
+	r.TagSpec('initscript', '%(initdir)s/')
