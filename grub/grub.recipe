@@ -1,0 +1,80 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+
+class Grub(PackageRecipe):
+    name = 'grub'
+    version = '0.95'
+    buildRequires = [ 'texinfo:runtime', 'autoconf:runtime']
+    # configure is broken and has a depenedency on the order of its 
+    #  command-line arguments
+    conf = ('--target=%(target)s '
+               '--prefix=%(prefix)s '
+               '--exec-prefix=%(exec_prefix)s '
+               '--bindir=%(bindir)s '
+               '--sbindir=%(essentialsbindir)s '
+               '--sysconfdir=%(sysconfdir)s '
+               '--datadir=%(datadir)s '
+               '--includedir=%(includedir)s '
+               '--libdir=%(libdir)s '
+               '--libexecdir=%(libexecdir)s '
+               '--localstatedir=%(localstatedir)s '
+               '--sharedstatedir=%(sharedstatedir)s '
+               '--mandir=%(mandir)s '
+               '--with-readline '
+               '--infodir=%(infodir)s '
+               '--disable-auto-linux-mem-opt')
+
+    Flags.static = False
+
+    def setup(r):
+        r.macros.rpmrevision = '3'
+        srpm = 'http://www.gtlib.cc.gatech.edu/pub/fedora.redhat/linux/core/3/SRPMS/grub-%(version)s-%(rpmrevision)s.src.rpm'
+        r.addArchive('ftp://alpha.gnu.org/gnu/grub/grub-%(version)s.tar.gz')
+        patchesFromRH = (
+            # config file related changes (menu.lst->grub.conf)
+            ('grub-0.93-configfile.patch', 1),
+            ('grub-0.90-symlinkmenulst.patch', 1),
+            # grub-install bits
+            ('grub-0.90-install.in.patch', 1),
+            ('grub-0.94-installcopyonly.patch', 1),
+            ('grub-0.94-addsyncs.patch', 1),
+            # miscellaneous build related patches
+            #  - link against curses statically
+            ('grub-0.95-staticcurses.patch', 1),
+            # patches submitted upstream and pending approval
+            #  - change the message so that how to accept changes is
+            #    clearer (#53846)
+            ('grub-0.93-endedit.patch', 0),
+            # patches for features proposed but not accepted upstream
+            #  - add support for appending kernel arguments
+            ('grub-0.90-append.patch', 1),
+            #  - add support for lilo -R-esque select a new os to boot into
+            ('grub-0.93-once.patch', 1),
+            # Patches below are for graphics mode related patches
+            ('grub-0.95-graphics.patch', 1),
+            ('grub-0.91-splashimagehelp.patch', 1),
+            ('grub-0.93-graphics-bootterm.patch', 1),
+            ('grub-0.95-hiddenmenu-tweak.patch', 1),
+            # miscellaneous things
+            #  - support for non-std devs (eg cciss, etc)
+            ('grub-0.93-special-device-names.patch', 1),
+            #  - support for building on x86_64
+            ('grub-0.94-initrdmax.patch', 1),
+            ('grub-0.94-i2o.patch', 1),
+            ('grub-0.94-geometry-26kernel.patch', 1))
+        
+        for patch, level in patchesFromRH:
+            r.addPatch(patch, rpm=srpm, level=level)
+
+        # NX Support
+        r.addPatch('grub-0.95-nxstack.patch')
+
+        r.macros.cflags = '-Os -g'
+        if Flags.static:
+            r.macros.cflags += ' -static'
+        r.conf += ' CFLAGS="%(cflags)s"'
+        r.ManualConfigure(r.conf)
+        r.Make()
+        r.MakeInstall()
