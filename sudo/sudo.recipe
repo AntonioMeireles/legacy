@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+ 
+class Sudo(PackageRecipe):
+    
+    buildRequires = [ 'pam:devel', 'groff:runtime' ]
+
+    name = 'sudo'
+    version = '1.6.7p5'
+    
+    def setup(r):
+
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/sudo-1.6.7p5-26.src.rpm'
+        r.addArchive('%(name)s-%(version)s.tar.gz', rpm=srpm)   
+        r.addPatch('sudo-selinux.patch', rpm=srpm, use=Use.selinux)
+	r.addSource('sudo.pam')
+
+        if Use.pie:
+            r.macros.cflags += ' -fpie'
+            r.macros.ldflags += ' -pie'
+            
+        extraConfig = ''
+        if Use.pam: extraConfig = ' --with-pam' 
+        r.Configure('--with-logging=syslog --with-logfac=authpriv'
+                    ' --with-editor=%(essentialbindir)s/vi'
+                    ' --with-env-editor --with-ignore-dot'
+                    ' --with-tty-tickets --without-interfaces'
+                    + extraConfig)
+
+        r.Make()
+        
+        r.MakeInstall('install_uid=0 install_gid=0 sudoers_uid=0 sudoers_gid=0')
+        r.Install('%(localstatedir)s/run/sudo/', mode=0700)
+	r.Install('sudo.pam', '%(sysconfdir)s/pam.d/sudo')
+
+        r.SetModes('%(bindir)s/sudo', 04511)
+        r.SetModes('%(sysconfdir)s/sudoers', 0440)
+        
+        r.Doc('BUGS', 'CHANGES', 'HISTORY', 'LICENSE', 'README', 'RUNSON',
+              'TODO', 'TROUBLESHOOTING', 'UPGRADE', '*.pod')
+
