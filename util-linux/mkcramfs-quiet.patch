@@ -1,0 +1,85 @@
+--- util-linux-2.11b/mkcramfs.c.quiet	Thu Jun 14 14:31:13 2001
++++ util-linux-2.11b/mkcramfs.c	Thu Jun 14 14:31:34 2001
+@@ -22,12 +22,13 @@
+ #include "cramfs.h"
+ 
+ static const char *progname = "mkcramfs";
++static int be_verbose = 0;
+ 
+ /* N.B. If you change the disk format of cramfs, please update fs/cramfs/README. */
+ 
+ static void usage(void)
+ {
+-	fprintf(stderr, "Usage: '%s dirname outfile'\n"
++	fprintf(stderr, "Usage: '%s [--verbose] dirname outfile'\n"
+ 		" where <dirname> is the root of the\n"
+ 		" filesystem to be compressed.\n", progname);
+ 	exit(1);
+@@ -402,7 +403,8 @@
+ 			   Most filesystems use UTF8 encoding for filenames,
+ 			   whereas the console is a single-byte character
+ 			   set like iso-latin-1. */
+-			printf("  %s\n", entry->name);
++			if (be_verbose)
++				printf("  %s\n", entry->name);
+ 			if (entry->child) {
+ 				if (stack_entries >= MAXENTRIES) {
+ 					fprintf(stderr, "Exceeded MAXENTRIES.  Raise this value in mkcramfs.c and recompile.  Exiting.\n");
+@@ -439,7 +441,8 @@
+ 		entry = entry_stack[stack_entries];
+ 
+ 		set_data_offset(entry, base, offset);
+-		printf("'%s':\n", entry->name);
++		if (be_verbose)
++			printf("'%s':\n", entry->name);
+ 		entry = entry->child;
+ 	}
+ 	return offset;
+@@ -513,8 +516,9 @@
+ 	   st_blocks * 512.  But if you say that then perhaps
+ 	   administrative data should also be included in both. */
+ 	change = new_size - original_size;
+-	printf("%6.2f%% (%+d bytes)\t%s\n",
+-	       (change * 100) / (double) original_size, change, name);
++	if (be_verbose)
++		printf("%6.2f%% (%+d bytes)\t%s\n",
++		       (change * 100) / (double) original_size, change, name);
+ 
+ 	return curr;
+ }
+@@ -605,6 +609,10 @@
+ 
+ 	if (argc)
+ 		progname = argv[0];
++
++	if (argv[1] && (!strcmp(argv[1], "--verbose") || !strcmp(argv[1], "-v")))
++	    be_verbose = 1, argc--, argv++;
++
+ 	if (argc != 3)
+ 		usage();
+ 
+@@ -652,17 +660,21 @@
+ 		exit(1);
+ 	}
+ 	offset = write_superblock(root_entry, rom_image);
+-	printf("Super block: %d bytes\n", offset);
++	if (be_verbose)
++		printf("Super block: %d bytes\n", offset);
+ 
+ 	offset = write_directory_structure(root_entry->child, rom_image, offset);
+-	printf("Directory data: %d bytes\n", offset);
++	if (be_verbose)
++		printf("Directory data: %d bytes\n", offset);
+ 
+ 	offset = write_data(root_entry, rom_image, offset);
+ 
+ 	/* We always write a multiple of blksize bytes, so that
+            losetup works. */
+ 	offset = ((offset - 1) | (blksize - 1)) + 1;
+-	printf("Everything: %d kilobytes\n", offset >> 10);
++
++	if (be_verbose)
++		printf("Everything: %d kilobytes\n", offset >> 10);
+ 
+ 	written = write(fd, rom_image, offset);
+ 	if (written < 0) {

@@ -1,0 +1,190 @@
+--- util-linux-2.11a/mkcramfs.c.mkcramfs	Tue Apr 17 15:10:39 2001
++++ util-linux-2.11a/mkcramfs.c	Tue Apr 17 15:11:14 2001
+@@ -60,7 +60,8 @@
+ 	unsigned int mode, size, uid, gid;
+ 
+ 	/* FS data */
+-	void *uncompressed;
++	void *compress_path;
++	char * sig;			/* first 32 bytes, or value of symlink */
+         /* points to other identical file */
+         struct entry *same;
+         unsigned int offset;            /* pointer to compressed data in archive */
+@@ -89,11 +90,54 @@
+  */
+ #define MAX_INPUT_NAMELEN 255
+ 
++static void * map_file(const char * path, int size) {
++	int fd;
++	void * data;
++
++	fd = open(path, O_RDONLY);
++	if (fd == -1) {
++		perror(path);
++		return (void *)-1;
++	}
++
++	data = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
++	if (-1 == (int) (long) data) {
++		perror("mmap");
++		exit(5);
++	}
++
++	close(fd);
++
++	return data;
++}
++
++/* this assumes the sizes are the same! */
++static int files_identical(struct entry * one, struct entry * two) {
++	void * data1, * data2;
++	int rc;
++
++	if (!one->compress_path || !two->compress_path) return 0;
++
++	data1 = map_file(one->compress_path, one->size);
++	data2 = map_file(two->compress_path, two->size);
++
++	if ((-1 == (int) (long) data1) || (-1 == (int) (long) data2))
++		return 0;
++
++	rc = memcmp(data1, data2, one->size);
++
++	munmap(data1, one->size);
++	munmap(data2, two->size);
++
++	return (rc == 0);
++}
++
+ static int find_identical_file(struct entry *orig,struct entry *newfile)
+ {
+         if(orig==newfile) return 1;
+         if(!orig) return 0;
+-        if(orig->size==newfile->size && orig->uncompressed && !memcmp(orig->uncompressed,newfile->uncompressed,orig->size)) {
++
++        if(orig->size==newfile->size && orig->sig && !memcmp(orig->sig,newfile->sig,32) && files_identical(orig, newfile)) {
+                 newfile->same=orig;
+                 return 1;
+         }
+@@ -103,7 +147,7 @@
+ 
+ static void eliminate_doubles(struct entry *root,struct entry *orig) {
+         if(orig) {
+-                if(orig->size && orig->uncompressed) 
++                if(orig->size && orig->sig) 
+ 			find_identical_file(root,orig);
+                 eliminate_doubles(root,orig->child);
+                 eliminate_doubles(root,orig->next);
+@@ -210,31 +254,34 @@
+ 
+ 			   While we're at it, do analagously for symlinks
+ 			   (which would just save a little memory). */
+-			int fd = open(path, O_RDONLY);
+-			if (fd < 0) {
+-				perror(path);
+-				continue;
+-			}
+ 			if (entry->size) {
++				int fd;
++
++				fd = open(path, O_RDONLY);
++				if (fd == -1 ){
++				    perror(path);
++				    continue;
++				}
++
+ 				if ((entry->size >= 1 << SIZE_WIDTH)) {
+ 					warn_size = 1;
+ 					entry->size = (1 << SIZE_WIDTH) - 1;
+ 				}
+ 
+-				entry->uncompressed = mmap(NULL, entry->size, PROT_READ, MAP_PRIVATE, fd, 0);
+-				if (-1 == (int) (long) entry->uncompressed) {
+-					perror("mmap");
+-					exit(5);
+-				}
++				entry->sig = calloc(32, 1);
++				read(fd, entry->sig, 32);
++
++				entry->compress_path = strdup(path);
++
++				close(fd);
+ 			}
+-			close(fd);
+ 		} else if (S_ISLNK(st.st_mode)) {
+-			entry->uncompressed = malloc(entry->size);
+-			if (!entry->uncompressed) {
++			entry->sig = malloc(entry->size);
++			if (!entry->sig) {
+ 				perror(NULL);
+ 				exit(5);
+ 			}
+-			if (readlink(path, entry->uncompressed, entry->size) < 0) {
++			if (readlink(path, entry->sig, entry->size) < 0) {
+ 				perror(path);
+ 				continue;
+ 			}
+@@ -269,10 +316,13 @@
+ 	int fd = open("/dev/random", O_RDONLY);
+ 
+ 	if (fd >= 0) {
+-		if (read(fd, area, size) == size)
++		if (read(fd, area, size) == size) {
++			close(fd);
+ 			return;
++		}
+ 	}
+ 	memset(area, 0x00, size);
++	close(fd);
+ }
+ 
+ /* Returns sizeof(struct cramfs_super), which includes the root inode. */
+@@ -477,15 +527,39 @@
+  */
+ static unsigned int write_data(struct entry *entry, char *base, unsigned int offset)
+ {
++	int fd;
++	void * data;
++
+ 	do {
+-		if (entry->uncompressed) {
++		if (entry->sig) {
+                         if(entry->same) {
+                                 set_data_offset(entry, base, entry->same->offset);
+                                 entry->offset=entry->same->offset;
+                         } else {
+                                 set_data_offset(entry, base, offset);
+                                 entry->offset=offset;
+-                                offset = do_compress(base, offset, entry->name, entry->uncompressed, entry->size);
++
++				if (entry->compress_path) {
++					fd = open(entry->compress_path, O_RDONLY);
++					if (-1 == fd) {
++						perror("open");
++						exit(5);
++					}
++					data = mmap(NULL, entry->size, PROT_READ, MAP_PRIVATE, fd, 0);
++					if (-1 == (int) (long) data) {
++						perror("mmap");
++						exit(5);
++					}
++
++					close(fd);
++				} else {
++					data = entry->sig;
++				}
++
++                                offset = do_compress(base, offset, entry->name, data, entry->size);
++
++				if (entry->compress_path)
++					munmap(data, entry->size);
+                         }
+ 		}
+ 		else if (entry->child)
+@@ -622,5 +696,6 @@
+ 			"WARNING: device numbers truncated to %u bits.  This almost certainly means\n"
+ 			"that some device files will be wrong.\n",
+ 			OFFSET_WIDTH);
++
+ 	return 0;
+ }

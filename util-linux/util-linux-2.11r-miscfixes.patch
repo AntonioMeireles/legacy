@@ -1,0 +1,83 @@
+--- util-linux-2.11r/fdisk/fdisk.8.sopwith	Sat Nov 17 14:14:34 2001
++++ util-linux-2.11r/fdisk/fdisk.8	Thu Jun 27 09:07:41 2002
+@@ -64,7 +64,7 @@
+ name followed by a partition number.  For example,
+ .B /dev/hda1
+ is the first partition on the first IDE hard disk in the system.
+-IDE disks can have up to 63 partitions, SCSI disks up to 15.
++Disks can have up to 15 partitions.
+ See also
+ .IR /usr/src/linux/Documentation/devices.txt .
+ 
+--- util-linux-2.11r/fdisk/fdisk.h.sopwith	Thu Sep 13 19:05:35 2001
++++ util-linux-2.11r/fdisk/fdisk.h	Thu Jun 27 07:52:12 2002
+@@ -5,7 +5,7 @@
+ #define DEFAULT_SECTOR_SIZE	512
+ #define MAX_SECTOR_SIZE	2048
+ #define SECTOR_SIZE	512	/* still used in BSD code */
+-#define MAXIMUM_PARTS	60
++#define MAXIMUM_PARTS	16
+ 
+ #define ACTIVE_FLAG     0x80
+ 
+--- util-linux-2.11r/fdisk/fdisk.c.sopwith	Wed May  8 20:42:04 2002
++++ util-linux-2.11r/fdisk/fdisk.c	Thu Jun 27 07:52:12 2002
+@@ -28,6 +28,7 @@
+ #include <errno.h>
+ #include <getopt.h>
+ #include <sys/stat.h>
++#include <sys/types.h>
+ 
+ #include "nls.h"
+ #include "common.h"
+@@ -861,8 +862,8 @@
+ 	if (what == create_empty_sun)
+ 		goto got_table;
+ 
+-	if ((fd = open(disk_device, type_open)) < 0) {
+-	    if ((fd = open(disk_device, O_RDONLY)) < 0) {
++	if ((fd = open(disk_device, type_open|O_LARGEFILE)) < 0) {
++	    if ((fd = open(disk_device, O_RDONLY|O_LARGEFILE)) < 0) {
+ 		if (what == try_only)
+ 		    return 1;
+ 		fatal(unable_to_open);
+@@ -2224,7 +2225,7 @@
+ 	if (!user_specified)
+ 		if (is_ide_cdrom_or_tape(device))
+ 			return;
+-	if ((fd = open(disk_device, type_open)) >= 0) {
++	if ((fd = open(disk_device, type_open|O_LARGEFILE)) >= 0) {
+ 		gb = get_boot(try_only);
+ 		if (gb > 0) {	/* I/O error */
+ 			close(fd);
+@@ -2374,7 +2375,7 @@
+ 
+ 		for (j = optind; j < argc; j++) {
+ 			disk_device = argv[j];
+-			if ((fd = open(disk_device, type_open)) < 0)
++			if ((fd = open(disk_device, type_open|O_LARGEFILE)) < 0)
+ 				fatal(unable_to_open);
+ 			if (ioctl(fd, BLKGETSIZE, &size))
+ 				fatal(ioctl_error);
+--- util-linux-2.11r/mount/pivot_root.c.sopwith	Fri Nov  9 11:49:57 2001
++++ util-linux-2.11r/mount/pivot_root.c	Thu Jun 27 07:52:12 2002
+@@ -4,16 +4,9 @@
+ 
+ 
+ #include <stdio.h>
+-
+-#ifdef __ia64__
+-# include <sys/syscall.h>
+-# define pivot_root(new_root,put_old) syscall(SYS_pivot_root,new_root,put_old)
+-#else
+-# include <linux/unistd.h>
+-
+-static
+-_syscall2(int,pivot_root,const char *,new_root,const char *,put_old)
+-#endif
++#include <sys/syscall.h>
++#include <unistd.h>
++#define pivot_root(new_root,put_old) syscall(SYS_pivot_root,new_root,put_old)
+ 
+ int main(int argc,const char **argv)
+ {
