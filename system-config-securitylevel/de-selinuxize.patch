@@ -1,0 +1,221 @@
+--- system-config-securitylevel-1.4.22/src/securitylevel.py.sel	2005-01-03 11:14:30.000000000 -0500
++++ system-config-securitylevel-1.4.22/src/securitylevel.py	2005-02-02 15:53:36.684009824 -0500
+@@ -27,7 +27,6 @@
+ import os
+ sys.path.append('/usr/share/system-config-securitylevel')
+ import scs_checklist as checklist
+-import selinuxPage
+ 
+ ##
+ ## I18N
+@@ -58,7 +57,6 @@
+         gtk.main_quit()
+     
+     def __init__(self):
+-        self.selinuxPage = None
+         self.doDebug = None
+         self.toplevel = gtk.VBox(gtk.FALSE, 5)
+         self.mainVBox = gtk.VBox(gtk.FALSE, 5)        
+@@ -181,9 +179,6 @@
+             self.destroy(args)
+ 
+     def apply(self, *args):
+-        if self.selinuxPage:
+-            self.selinuxPage.apply()
+-
+         if self.dirty!=True and self.incomingList.dirty!=True and self.trustedList.dirty!=True:
+             return 0
+             
+@@ -387,10 +382,8 @@
+         self.mainWindow.set_border_width(10)
+ 
+         self.notebook = gtk.Notebook()
+-        #XXX - Remove when SELinux is in better shape
+-#        self.notebook.set_show_tabs(gtk.FALSE)
+-#        self.notebook.set_show_border(gtk.FALSE)        
+-        #XXX - Cut to here
++        self.notebook.set_show_tabs(gtk.FALSE)
++        self.notebook.set_show_border(gtk.FALSE)        
+ 
+         bb = gtk.HButtonBox()
+         bb.set_layout(gtk.BUTTONBOX_END)
+@@ -432,7 +425,5 @@
+ 
+         self.notebook.append_page(self.mainVBox, firewallLabel)
+ 
+-        self.selinuxPage = selinuxPage.selinuxPage()
+-        self.notebook.append_page(self.selinuxPage.get_page(), self.selinuxPage.get_label())
+         self.mainWindow.show_all()
+         gtk.main()
+--- system-config-securitylevel-1.4.22/src/lokkit.c.sel	2004-10-15 16:09:26.000000000 -0400
++++ system-config-securitylevel-1.4.22/src/lokkit.c	2005-02-02 15:55:00.148321320 -0500
+@@ -26,9 +26,6 @@
+ #include <popt.h>
+ #include <ctype.h>
+ 
+-char *selinux_mode="enforcing";
+-char *selinux_type="targeted";
+-
+ struct port {
+ 	int port;
+ 	char *proto;
+@@ -37,8 +34,6 @@
+ #define CHAIN_NAME "RH-Firewall-1-INPUT"
+ char *fwscript    = "/etc/sysconfig/iptables";
+ char *config      = "/etc/sysconfig/system-config-securitylevel";
+-char *seconfig    = "/etc/selinux/config";
+-char *oldseconfig    = "/etc/sysconfig/selinux";
+ 
+ static int enabled = -1;
+ static int numports = 0, numdevs = 0;
+@@ -697,98 +692,16 @@
+ 		}
+ 		fclose(cfg);
+ 	}
+-	cfg = fopen(seconfig,"r");
+-	if (!cfg) {
+-	  cfg = fopen(oldseconfig,"r");
+-	}
+-
+-	if (cfg) {
+-	  int i;
+-		buf = malloc(2048);
+-		memset(buf,'\0',2048);
+-		while ((buf = fgets(buf, 2048, cfg)) != NULL) {
+-		  if (strncmp(buf,"SELINUX=",8)==0) {
+-			  args = realloc(args,(numargs+2)*sizeof(char *));
+-			  args[numargs] = strdup(buf+8);
+-			  selinux_mode=strdup(buf+8);
+-			  i=strlen(selinux_mode)-1;
+-			  while(i>=0 && isspace(selinux_mode[i])) {
+-			    selinux_mode[i--]=0;
+-			  }
+-			  args[numargs+1] = NULL;
+-			  numargs++;
+-		  }
+-		  if (strncmp(buf,"SELINUXTYPE=",12)==0) {
+-			  args = realloc(args,(numargs+2)*sizeof(char *));
+-			  args[numargs] = strdup(buf+12);
+-			  selinux_type=strdup(buf+12);
+-			  i=strlen(selinux_type)-1;
+-			  while(i>=0 && isspace(selinux_type[i])) {
+-			    selinux_type[i--]=0;
+-			  }
+-			  args[numargs+1] = NULL;
+-			  numargs++;
+-		  }
+-		}
+-	}
+ 		
+ 	*fileargv = args;
+ 	return 0;
+ }
+ 
+-int write_selinux(int state, int activate, char *type) {
+-	FILE *secfg;
+-	
+-	secfg = fopen(seconfig,"w");
+-	if (!secfg)
+-		return -1;
+-	fprintf(secfg, "# This file controls the state of SELinux on the system.\n");
+-	fprintf(secfg, "# SELINUX= can take one of these three values:\n");
+-	fprintf(secfg, "#\tenforcing - SELinux security policy is enforced.\n");
+-	fprintf(secfg, "#\tpermissive - SELinux prints warnings instead of enforcing.\n");
+-	fprintf(secfg, "#\tdisabled - SELinux is fully disabled.\n");
+-	if (state == 1) {
+-		fprintf(secfg,"SELINUX=enforcing\n");
+-		if (activate)
+-			system("setenforce 1");
+-	}
+-	if (state == 2) {
+-		fprintf(secfg,"SELINUX=permissive\n");
+-		if (activate)
+-			system("setenforce 0");
+-	}
+-	if (state == 0) {
+-		fprintf(secfg,"SELINUX=disabled\n");
+-		if (activate)
+-			system("setenforce 0");
+-	}
+-	if (type != "") {
+-	  fprintf(secfg, "# SELINUXTYPE= type of policy in use. Possible values are:\n");
+-	  fprintf(secfg, "#\ttargeted - Only targeted network daemons are protected.\n");
+-	  fprintf(secfg, "#\tstrict - Full SELinux protection.\n");
+-	  fprintf(secfg,"SELINUXTYPE=%s\n",type);
+-	}
+-
+-	fclose(secfg);
+-	return 0;
+-}
+-int get_selinux_state(char *mode) {
+-	if (mode == NULL)
+-		return -1;
+-	if (!strcasecmp(mode,"enforcing"))
+-		return 1;
+-	else if (!strcasecmp(mode,"permissive"))
+-		return 2;
+-	else if (!strcasecmp(mode,"disabled"))
+-		return 0;
+-	return -1;
+-}
+ 
+ int main(int argc, char **argv) {
+ 	int tmp = 0;
+ 	int ks = 0, nostart = 0, force = 0;
+ 	char *portspec, *devspec;
+-	int selinux_state = -1;
+ 	poptContext context;
+ 	int rc;
+ 	char **fileargv;
+@@ -818,15 +731,6 @@
+ 			  N_("Allow all traffic on the specified device"),
+ 			N_("device to trust")
+ 		},
+-                { "selinux", 0, POPT_ARG_STRING, &selinux_mode, 3,
+- 			N_("Configure SELinux"),
+-		        N_("'enforcing', 'permissive', or 'disabled'"),
+-		},
+-
+-		{ "selinuxtype", 0, POPT_ARG_STRING, &selinux_type, 4,
+-			N_("Configure SELinux Policy"),
+-			N_("Usually 'targeted' or 'strict'")
+-		},
+ 		{ NULL, 'f', POPT_ARG_NONE, &force, 0,
+ 		        N_("ignore settings stored in /etc/sysconfig/system-config-securitylevel"),
+ 			NULL,
+@@ -869,18 +773,7 @@
+ 			add_port(portspec);
+ 		} else if (rc == 2) {
+ 			add_dev(devspec);
+-		} else if (rc == 3) {
+-		  selinux_state=get_selinux_state(selinux_mode);
+-		  if (selinux_state<0) {
+-				fprintf(stderr, "%s: %s\n",
+-					poptBadOption(context, POPT_BADOPTION_NOALIAS),
+-					poptStrerror(POPT_ERROR_BADOPT));
+-				exit(1);
+-			}
+-		}
+-		else if (rc == 4) {
+-		  selinux_state=get_selinux_state(selinux_mode);
+-		}
++                }
+ 	}
+ 	if (rc < -1) {
+ 		fprintf(stderr, "%s: %s\n",
+@@ -894,15 +787,11 @@
+ 		  write_firewall(devs, ports, !nostart);
+ 		else if (enabled == 0)
+ 		  unlink(fwscript);
+-		if (selinux_state >= 0)
+-		  write_selinux(selinux_state, !nostart, selinux_type);
+ 	} else {
+ 		if (enabled == -1) enabled = 1;
+ 		runInterface();
+ 		if (enabled)
+ 		  write_firewall(devs, ports, !nostart);
+-		if (selinux_state >= 0)
+-		  write_selinux(selinux_state, !nostart, selinux_type);
+ 	}
+ 	if (!enabled && !nostart) {
+ 		char path[256];
