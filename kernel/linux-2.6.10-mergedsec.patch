@@ -1,0 +1,469 @@
+diff -purN ../kernel/linux-2.6.10/arch/ia64/kernel/sys_ia64.c linux-2.6.10/arch/ia64/kernel/sys_ia64.c
+--- ../kernel/linux-2.6.10/arch/ia64/kernel/sys_ia64.c	2004-12-24 15:34:58.000000000 -0600
++++ linux-2.6.10/arch/ia64/kernel/sys_ia64.c	2005-01-17 11:09:04.818538525 -0600
+@@ -147,7 +147,7 @@ ia64_brk (unsigned long brk)
+ 		goto out;
+ 
+ 	/* Ok, looks good - let it rip. */
+-	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
++	if (__do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
+ 		goto out;
+ set_brk:
+ 	mm->brk = brk;
+diff -purN ../kernel/linux-2.6.10/arch/mips/kernel/irixelf.c linux-2.6.10/arch/mips/kernel/irixelf.c
+--- ../kernel/linux-2.6.10/arch/mips/kernel/irixelf.c	2004-12-24 15:35:50.000000000 -0600
++++ linux-2.6.10/arch/mips/kernel/irixelf.c	2005-01-17 10:06:48.550727649 -0600
+@@ -127,7 +127,9 @@ static void set_brk(unsigned long start,
+ 	end = PAGE_ALIGN(end);
+ 	if (end <= start)
+ 		return;
++	down_write(&current->mm->mmap_sem);
+ 	do_brk(start, end - start);
++	up_write(&current->mm->mmap_sem);
+ }
+ 
+ 
+@@ -375,7 +377,9 @@ static unsigned int load_irix_interp(str
+ 
+ 	/* Map the last of the bss segment */
+ 	if (last_bss > len) {
++		down_write(&current->mm->mmap_sem);
+ 		do_brk(len, (last_bss - len));
++		up_write(&current->mm->mmap_sem);
+ 	}
+ 	kfree(elf_phdata);
+ 
+@@ -562,7 +566,9 @@ void irix_map_prda_page (void)
+ 	unsigned long v;
+ 	struct prda *pp;
+ 
++	down_write(&current->mm->mmap_sem);
+ 	v =  do_brk (PRDA_ADDRESS, PAGE_SIZE);
++	up_write(&current->mm->mmap_sem);
+ 
+ 	if (v < 0)
+ 		return;
+@@ -852,8 +858,11 @@ static int load_irix_library(struct file
+ 
+ 	len = (elf_phdata->p_filesz + elf_phdata->p_vaddr+ 0xfff) & 0xfffff000;
+ 	bss = elf_phdata->p_memsz + elf_phdata->p_vaddr;
+-	if (bss > len)
++	if (bss > len) {
++	  down_write(&current->mm->mmap_sem);
+ 	  do_brk(len, bss-len);
++	  up_write(&current->mm->mmap_sem);
++	}
+ 	kfree(elf_phdata);
+ 	return 0;
+ }
+diff -purN ../kernel/linux-2.6.10/arch/mips/kernel/sysirix.c linux-2.6.10/arch/mips/kernel/sysirix.c
+--- ../kernel/linux-2.6.10/arch/mips/kernel/sysirix.c	2004-12-24 15:35:28.000000000 -0600
++++ linux-2.6.10/arch/mips/kernel/sysirix.c	2005-01-17 11:09:35.779090192 -0600
+@@ -591,7 +591,7 @@ asmlinkage int irix_brk(unsigned long br
+ 	 * Ok, looks good - let it rip.
+ 	 */
+ 	mm->brk = brk;
+-	do_brk(oldbrk, newbrk-oldbrk);
++	__do_brk(oldbrk, newbrk-oldbrk);
+ 	ret = 0;
+ 
+ out:
+diff -purN ../kernel/linux-2.6.10/arch/sparc/kernel/sys_sunos.c linux-2.6.10/arch/sparc/kernel/sys_sunos.c
+--- ../kernel/linux-2.6.10/arch/sparc/kernel/sys_sunos.c	2004-12-24 15:34:32.000000000 -0600
++++ linux-2.6.10/arch/sparc/kernel/sys_sunos.c	2005-01-17 11:10:17.023164437 -0600
+@@ -207,7 +207,7 @@ asmlinkage int sunos_brk(unsigned long b
+ 	 * Ok, we have probably got enough memory - let it rip.
+ 	 */
+ 	current->mm->brk = brk;
+-	do_brk(oldbrk, newbrk-oldbrk);
++	__do_brk(oldbrk, newbrk-oldbrk);
+ 	retval = 0;
+ out:
+ 	up_write(&current->mm->mmap_sem);
+diff -purN ../kernel/linux-2.6.10/arch/sparc64/kernel/binfmt_aout32.c linux-2.6.10/arch/sparc64/kernel/binfmt_aout32.c
+--- ../kernel/linux-2.6.10/arch/sparc64/kernel/binfmt_aout32.c	2004-12-24 15:34:45.000000000 -0600
++++ linux-2.6.10/arch/sparc64/kernel/binfmt_aout32.c	2005-01-17 10:06:48.550727649 -0600
+@@ -49,7 +49,9 @@ static void set_brk(unsigned long start,
+ 	end = PAGE_ALIGN(end);
+ 	if (end <= start)
+ 		return;
++	down_write(&current->mm->mmap_sem);
+ 	do_brk(start, end - start);
++	up_write(&current->mm->mmap_sem);
+ }
+ 
+ /*
+@@ -246,10 +248,14 @@ static int load_aout32_binary(struct lin
+ 	if (N_MAGIC(ex) == NMAGIC) {
+ 		loff_t pos = fd_offset;
+ 		/* Fuck me plenty... */
++		down_write(&current->mm->mmap_sem);	
+ 		error = do_brk(N_TXTADDR(ex), ex.a_text);
++		up_write(&current->mm->mmap_sem);
+ 		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
+ 			  ex.a_text, &pos);
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(N_DATADDR(ex), ex.a_data);
++		up_write(&current->mm->mmap_sem);
+ 		bprm->file->f_op->read(bprm->file, (char __user *)N_DATADDR(ex),
+ 			  ex.a_data, &pos);
+ 		goto beyond_if;
+@@ -257,8 +263,10 @@ static int load_aout32_binary(struct lin
+ 
+ 	if (N_MAGIC(ex) == OMAGIC) {
+ 		loff_t pos = fd_offset;
++		down_write(&current->mm->mmap_sem);
+ 		do_brk(N_TXTADDR(ex) & PAGE_MASK,
+ 			ex.a_text+ex.a_data + PAGE_SIZE - 1);
++		up_write(&current->mm->mmap_sem);
+ 		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
+ 			  ex.a_text+ex.a_data, &pos);
+ 	} else {
+@@ -272,7 +280,9 @@ static int load_aout32_binary(struct lin
+ 
+ 		if (!bprm->file->f_op->mmap) {
+ 			loff_t pos = fd_offset;
++			down_write(&current->mm->mmap_sem);
+ 			do_brk(0, ex.a_text+ex.a_data);
++			up_write(&current->mm->mmap_sem);
+ 			bprm->file->f_op->read(bprm->file,
+ 				  (char __user *)N_TXTADDR(ex),
+ 				  ex.a_text+ex.a_data, &pos);
+@@ -389,7 +399,9 @@ static int load_aout32_library(struct fi
+ 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
+ 	bss = ex.a_text + ex.a_data + ex.a_bss;
+ 	if (bss > len) {
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(start_addr + len, bss - len);
++		up_write(&current->mm->mmap_sem);
+ 		retval = error;
+ 		if (error != start_addr + len)
+ 			goto out;
+diff -purN ../kernel/linux-2.6.10/arch/sparc64/kernel/sys_sunos32.c linux-2.6.10/arch/sparc64/kernel/sys_sunos32.c
+--- ../kernel/linux-2.6.10/arch/sparc64/kernel/sys_sunos32.c	2004-12-24 15:35:00.000000000 -0600
++++ linux-2.6.10/arch/sparc64/kernel/sys_sunos32.c	2005-01-17 11:10:41.645626855 -0600
+@@ -164,7 +164,7 @@ asmlinkage int sunos_brk(u32 baddr)
+ 		goto out;
+ 	/* Ok, we have probably got enough memory - let it rip. */
+ 	current->mm->brk = brk;
+-	do_brk(oldbrk, newbrk-oldbrk);
++	__do_brk(oldbrk, newbrk-oldbrk);
+ 	retval = 0;
+ out:
+ 	up_write(&current->mm->mmap_sem);
+diff -purN ../kernel/linux-2.6.10/arch/x86_64/ia32/ia32_aout.c linux-2.6.10/arch/x86_64/ia32/ia32_aout.c
+--- ../kernel/linux-2.6.10/arch/x86_64/ia32/ia32_aout.c	2004-12-24 15:35:40.000000000 -0600
++++ linux-2.6.10/arch/x86_64/ia32/ia32_aout.c	2005-01-17 10:06:48.551727507 -0600
+@@ -114,7 +114,9 @@ static void set_brk(unsigned long start,
+ 	end = PAGE_ALIGN(end);
+ 	if (end <= start)
+ 		return;
++	down_write(&current->mm->mmap_sem);
+ 	do_brk(start, end - start);
++	up_write(&current->mm->mmap_sem);
+ }
+ 
+ #if CORE_DUMP
+@@ -324,7 +326,10 @@ static int load_aout_binary(struct linux
+ 		pos = 32;
+ 		map_size = ex.a_text+ex.a_data;
+ 
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(text_addr & PAGE_MASK, map_size);
++		up_write(&current->mm->mmap_sem);
++
+ 		if (error != (text_addr & PAGE_MASK)) {
+ 			send_sig(SIGKILL, current, 0);
+ 			return error;
+@@ -360,7 +365,9 @@ static int load_aout_binary(struct linux
+ 
+ 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
+ 			loff_t pos = fd_offset;
++			down_write(&current->mm->mmap_sem);
+ 			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
++			up_write(&current->mm->mmap_sem);
+ 			bprm->file->f_op->read(bprm->file,(char *)N_TXTADDR(ex),
+ 					ex.a_text+ex.a_data, &pos);
+ 			flush_icache_range((unsigned long) N_TXTADDR(ex),
+@@ -468,8 +475,9 @@ static int load_aout_library(struct file
+ 			error_time = jiffies;
+ 		}
+ #endif
+-
++		down_write(&current->mm->mmap_sem);
+ 		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
++		up_write(&current->mm->mmap_sem);
+ 		
+ 		file->f_op->read(file, (char *)start_addr,
+ 			ex.a_text + ex.a_data, &pos);
+@@ -493,7 +501,9 @@ static int load_aout_library(struct file
+ 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
+ 	bss = ex.a_text + ex.a_data + ex.a_bss;
+ 	if (bss > len) {
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(start_addr + len, bss - len);
++		up_write(&current->mm->mmap_sem);
+ 		retval = error;
+ 		if (error != start_addr + len)
+ 			goto out;
+diff -purN ../kernel/linux-2.6.10/drivers/block/scsi_ioctl.c linux-2.6.10/drivers/block/scsi_ioctl.c
+--- ../kernel/linux-2.6.10/drivers/block/scsi_ioctl.c	2005-01-17 12:17:47.284263814 -0600
++++ linux-2.6.10/drivers/block/scsi_ioctl.c	2005-01-17 10:07:59.428650080 -0600
+@@ -339,7 +339,8 @@ static int sg_scsi_ioctl(struct file *fi
+ 			 struct gendisk *bd_disk, Scsi_Ioctl_Command __user *sic)
+ {
+ 	struct request *rq;
+-	int err, in_len, out_len, bytes, opcode, cmdlen;
++	int err;
++	unsigned int in_len, out_len, bytes, opcode, cmdlen;
+ 	char *buffer = NULL, sense[SCSI_SENSE_BUFFERSIZE];
+ 
+ 	/*
+diff -purN ../kernel/linux-2.6.10/fs/binfmt_aout.c linux-2.6.10/fs/binfmt_aout.c
+--- ../kernel/linux-2.6.10/fs/binfmt_aout.c	2004-12-24 15:35:50.000000000 -0600
++++ linux-2.6.10/fs/binfmt_aout.c	2005-01-17 10:06:48.552727365 -0600
+@@ -50,7 +50,10 @@ static int set_brk(unsigned long start, 
+ 	start = PAGE_ALIGN(start);
+ 	end = PAGE_ALIGN(end);
+ 	if (end > start) {
+-		unsigned long addr = do_brk(start, end - start);
++		unsigned long addr;
++		down_write(&current->mm->mmap_sem);
++		addr = do_brk(start, end - start);
++		up_write(&current->mm->mmap_sem);
+ 		if (BAD_ADDR(addr))
+ 			return addr;
+ 	}
+@@ -323,10 +326,14 @@ static int load_aout_binary(struct linux
+ 		loff_t pos = fd_offset;
+ 		/* Fuck me plenty... */
+ 		/* <AOL></AOL> */
++		down_write(&current->mm->mmap_sem);	
+ 		error = do_brk(N_TXTADDR(ex), ex.a_text);
++		up_write(&current->mm->mmap_sem);
+ 		bprm->file->f_op->read(bprm->file, (char *) N_TXTADDR(ex),
+ 			  ex.a_text, &pos);
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(N_DATADDR(ex), ex.a_data);
++		up_write(&current->mm->mmap_sem);
+ 		bprm->file->f_op->read(bprm->file, (char *) N_DATADDR(ex),
+ 			  ex.a_data, &pos);
+ 		goto beyond_if;
+@@ -346,8 +353,9 @@ static int load_aout_binary(struct linux
+ 		pos = 32;
+ 		map_size = ex.a_text+ex.a_data;
+ #endif
+-
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(text_addr & PAGE_MASK, map_size);
++		up_write(&current->mm->mmap_sem);
+ 		if (error != (text_addr & PAGE_MASK)) {
+ 			send_sig(SIGKILL, current, 0);
+ 			return error;
+@@ -382,7 +390,9 @@ static int load_aout_binary(struct linux
+ 
+ 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
+ 			loff_t pos = fd_offset;
++			down_write(&current->mm->mmap_sem);
+ 			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
++			up_write(&current->mm->mmap_sem);
+ 			bprm->file->f_op->read(bprm->file,
+ 					(char __user *)N_TXTADDR(ex),
+ 					ex.a_text+ex.a_data, &pos);
+@@ -487,8 +497,9 @@ static int load_aout_library(struct file
+ 			       file->f_dentry->d_name.name);
+ 			error_time = jiffies;
+ 		}
+-
++		down_write(&current->mm->mmap_sem);
+ 		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
++		up_write(&current->mm->mmap_sem);
+ 		
+ 		file->f_op->read(file, (char __user *)start_addr,
+ 			ex.a_text + ex.a_data, &pos);
+@@ -512,7 +523,9 @@ static int load_aout_library(struct file
+ 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
+ 	bss = ex.a_text + ex.a_data + ex.a_bss;
+ 	if (bss > len) {
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(start_addr + len, bss - len);
++		up_write(&current->mm->mmap_sem);
+ 		retval = error;
+ 		if (error != start_addr + len)
+ 			goto out;
+diff -purN ../kernel/linux-2.6.10/fs/binfmt_elf.c linux-2.6.10/fs/binfmt_elf.c
+--- ../kernel/linux-2.6.10/fs/binfmt_elf.c	2004-12-24 15:34:33.000000000 -0600
++++ linux-2.6.10/fs/binfmt_elf.c	2005-01-17 10:06:48.553727223 -0600
+@@ -88,7 +88,10 @@ static int set_brk(unsigned long start, 
+ 	start = ELF_PAGEALIGN(start);
+ 	end = ELF_PAGEALIGN(end);
+ 	if (end > start) {
+-		unsigned long addr = do_brk(start, end - start);
++		unsigned long addr;
++		down_write(&current->mm->mmap_sem);
++		addr = do_brk(start, end - start);
++		up_write(&current->mm->mmap_sem);
+ 		if (BAD_ADDR(addr))
+ 			return addr;
+ 	}
+@@ -408,7 +411,9 @@ static unsigned long load_elf_interp(str
+ 
+ 	/* Map the last of the bss segment */
+ 	if (last_bss > elf_bss) {
++		down_write(&current->mm->mmap_sem);
+ 		error = do_brk(elf_bss, last_bss - elf_bss);
++		up_write(&current->mm->mmap_sem);
+ 		if (BAD_ADDR(error))
+ 			goto out_close;
+ 	}
+@@ -448,7 +453,9 @@ static unsigned long load_aout_interp(st
+ 		goto out;
+ 	}
+ 
++	down_write(&current->mm->mmap_sem);	
+ 	do_brk(0, text_data);
++	up_write(&current->mm->mmap_sem);
+ 	if (!interpreter->f_op || !interpreter->f_op->read)
+ 		goto out;
+ 	if (interpreter->f_op->read(interpreter, addr, text_data, &offset) < 0)
+@@ -456,8 +463,11 @@ static unsigned long load_aout_interp(st
+ 	flush_icache_range((unsigned long)addr,
+ 	                   (unsigned long)addr + text_data);
+ 
++
++	down_write(&current->mm->mmap_sem);	
+ 	do_brk(ELF_PAGESTART(text_data + ELF_MIN_ALIGN - 1),
+ 		interp_ex->a_bss);
++	up_write(&current->mm->mmap_sem);
+ 	elf_entry = interp_ex->a_entry;
+ 
+ out:
+@@ -1024,8 +1034,11 @@ static int load_elf_library(struct file 
+ 
+ 	len = ELF_PAGESTART(elf_phdata->p_filesz + elf_phdata->p_vaddr + ELF_MIN_ALIGN - 1);
+ 	bss = elf_phdata->p_memsz + elf_phdata->p_vaddr;
+-	if (bss > len)
++	if (bss > len) {
++		down_write(&current->mm->mmap_sem);
+ 		do_brk(len, bss - len);
++		up_write(&current->mm->mmap_sem);
++	}
+ 	error = 0;
+ 
+ out_free_ph:
+diff -purN ../kernel/linux-2.6.10/include/linux/mm.h linux-2.6.10/include/linux/mm.h
+--- ../kernel/linux-2.6.10/include/linux/mm.h	2004-12-24 15:33:50.000000000 -0600
++++ linux-2.6.10/include/linux/mm.h	2005-01-17 11:14:43.078941268 -0600
+@@ -703,6 +703,7 @@ out:
+ 
+ extern int do_munmap(struct mm_struct *, unsigned long, size_t);
+ 
++extern unsigned long __do_brk(unsigned long, unsigned long);
+ extern unsigned long do_brk(unsigned long, unsigned long);
+ 
+ /* filemap.c */
+diff -purN ../kernel/linux-2.6.10/mm/mmap.c linux-2.6.10/mm/mmap.c
+--- ../kernel/linux-2.6.10/mm/mmap.c	2004-12-24 15:35:00.000000000 -0600
++++ linux-2.6.10/mm/mmap.c	2005-01-17 12:17:08.105912698 -0600
+@@ -145,7 +145,7 @@ asmlinkage unsigned long sys_brk(unsigne
+ 		goto out;
+ 
+ 	/* Ok, looks good - let it rip. */
+-	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
++	if (__do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
+ 		goto out;
+ set_brk:
+ 	mm->brk = brk;
+@@ -1347,6 +1347,11 @@ int expand_stack(struct vm_area_struct *
+ 	address &= PAGE_MASK;
+ 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
+ 
++	/* Someone beat us to it */
++	if (grow <= 0) {
++		anon_vma_unlock(vma);
++		return 0;
++	}
+ 	/* Overcommit.. */
+ 	if (security_vm_enough_memory(grow)) {
+ 		anon_vma_unlock(vma);
+@@ -1360,6 +1365,13 @@ int expand_stack(struct vm_area_struct *
+ 		vm_unacct_memory(grow);
+ 		return -ENOMEM;
+ 	}
++	if ((vma->vm_flags & VM_LOCKED) && !capable(CAP_IPC_LOCK) &&
++			((vma->vm_mm->locked_vm + grow) << PAGE_SHIFT) >
++			current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur) {
++		anon_vma_unlock(vma);
++		vm_unacct_memory(grow);
++		return -ENOMEM;
++	}
+ 	vma->vm_end = address;
+ 	vma->vm_mm->total_vm += grow;
+ 	if (vma->vm_flags & VM_LOCKED)
+@@ -1409,6 +1421,11 @@ int expand_stack(struct vm_area_struct *
+ 	address &= PAGE_MASK;
+ 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
+ 
++	/* Someone beat us to it */
++	if (grow <= 0) {
++		anon_vma_unlock(vma);
++		return 0;
++	}
+ 	/* Overcommit.. */
+ 	if (security_vm_enough_memory(grow)) {
+ 		anon_vma_unlock(vma);
+@@ -1422,6 +1439,13 @@ int expand_stack(struct vm_area_struct *
+ 		vm_unacct_memory(grow);
+ 		return -ENOMEM;
+ 	}
++	if ((vma->vm_flags & VM_LOCKED) && !capable(CAP_IPC_LOCK) &&
++			((vma->vm_mm->locked_vm + grow) << PAGE_SHIFT) >
++			current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur) {
++		anon_vma_unlock(vma);
++		vm_unacct_memory(grow);
++		return -ENOMEM;
++	}
+ 	vma->vm_start = address;
+ 	vma->vm_pgoff -= grow;
+ 	vma->vm_mm->total_vm += grow;
+@@ -1742,7 +1766,7 @@ asmlinkage long sys_munmap(unsigned long
+  *  anonymous maps.  eventually we may be able to do some
+  *  brk-specific accounting here.
+  */
+-unsigned long do_brk(unsigned long addr, unsigned long len)
++unsigned long __do_brk(unsigned long addr, unsigned long len)
+ {
+ 	struct mm_struct * mm = current->mm;
+ 	struct vm_area_struct * vma, * prev;
+@@ -1770,6 +1794,12 @@ unsigned long do_brk(unsigned long addr,
+ 	}
+ 
+ 	/*
++	 * mm->mmap_sem is required to protect against another thread
++	 * changing the mappings in case we sleep.
++	 */
++	WARN_ON(down_read_trylock(&mm->mmap_sem));
++
++	/*
+ 	 * Clear old maps.  this also does some error checking for us
+ 	 */
+  munmap_back:
+@@ -1824,6 +1854,18 @@ out:
+ 	return addr;
+ }
+ 
++EXPORT_SYMBOL(__do_brk);
++
++unsigned long do_brk(unsigned long addr, unsigned long len)
++{
++	unsigned long ret;
++
++	down_write(&current->mm->mmap_sem);
++	ret = __do_brk(addr, len);
++	up_write(&current->mm->mmap_sem);
++	return ret;
++}
++
+ EXPORT_SYMBOL(do_brk);
+ 
+ /* Release all mmaps. */

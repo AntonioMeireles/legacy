@@ -1,0 +1,663 @@
+diff -purN ../oldkernel/linux-2.6.10/arch/i386/kernel/Makefile linux-2.6.10/arch/i386/kernel/Makefile
+--- ../oldkernel/linux-2.6.10/arch/i386/kernel/Makefile	2005-01-03 11:34:20.497353558 -0600
++++ linux-2.6.10/arch/i386/kernel/Makefile	2005-01-03 11:29:26.228310768 -0600
+@@ -33,7 +33,7 @@ obj-$(CONFIG_HPET_TIMER) 	+= time_hpet.o
+ obj-$(CONFIG_EFI) 		+= efi.o efi_stub.o
+ obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
+ 
+-EXTRA_AFLAGS   := -traditional
++EXTRA_AFLAGS   := -traditional -m32
+ 
+ obj-$(CONFIG_SCx200)		+= scx200.o
+ 
+@@ -51,7 +51,7 @@ quiet_cmd_syscall = SYSCALL $@
+ 
+ export CPPFLAGS_vsyscall.lds += -P -C -U$(ARCH)
+ 
+-vsyscall-flags = -shared -s -Wl,-soname=linux-gate.so.1
++vsyscall-flags = -m32 -shared -s -Wl,-soname=linux-gate.so.1
+ SYSCFLAGS_vsyscall-sysenter.so	= $(vsyscall-flags)
+ SYSCFLAGS_vsyscall-int80.so	= $(vsyscall-flags)
+ 
+@@ -66,6 +66,6 @@ extra-y += vsyscall-syms.o
+ $(obj)/built-in.o: $(obj)/vsyscall-syms.o
+ $(obj)/built-in.o: ld_flags += -R $(obj)/vsyscall-syms.o
+ 
+-SYSCFLAGS_vsyscall-syms.o = -r
++SYSCFLAGS_vsyscall-syms.o = -m32 -r
+ $(obj)/vsyscall-syms.o: $(src)/vsyscall.lds $(obj)/vsyscall-sysenter.o FORCE
+ 	$(call if_changed,syscall)
+diff -purN ../oldkernel/linux-2.6.10/arch/i386/kernel/microcode.c linux-2.6.10/arch/i386/kernel/microcode.c
+--- ../oldkernel/linux-2.6.10/arch/i386/kernel/microcode.c	2005-01-03 11:34:20.498353415 -0600
++++ linux-2.6.10/arch/i386/kernel/microcode.c	2005-01-03 11:29:26.228310768 -0600
+@@ -364,7 +364,7 @@ static void do_update_one (void * unused
+ 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu_num;
+ 
+ 	if (uci->mc == NULL) {
+-		printk(KERN_INFO "microcode: No suitable data for CPU%d\n", cpu_num);
++		printk(KERN_INFO "microcode: No new microdata for cpu %d\n", cpu_num);
+ 		return;
+ 	}
+ 
+diff -purN ../oldkernel/linux-2.6.10/arch/i386/kernel/nmi.c linux-2.6.10/arch/i386/kernel/nmi.c
+--- ../oldkernel/linux-2.6.10/arch/i386/kernel/nmi.c	2005-01-03 11:34:20.498353415 -0600
++++ linux-2.6.10/arch/i386/kernel/nmi.c	2005-01-03 11:29:26.229310625 -0600
+@@ -487,7 +487,7 @@ void nmi_watchdog_tick (struct pt_regs *
+ 		 * wait a few IRQs (5 seconds) before doing the oops ...
+ 		 */
+ 		alert_counter[cpu]++;
+-		if (alert_counter[cpu] == 5*nmi_hz)
++		if (alert_counter[cpu] == 30*nmi_hz)
+ 			die_nmi(regs, "NMI Watchdog detected LOCKUP");
+ 	} else {
+ 		last_irq_sums[cpu] = sum;
+diff -purN ../oldkernel/linux-2.6.10/arch/i386/kernel/timers/timer.c linux-2.6.10/arch/i386/kernel/timers/timer.c
+--- ../oldkernel/linux-2.6.10/arch/i386/kernel/timers/timer.c	2005-01-03 11:34:20.498353415 -0600
++++ linux-2.6.10/arch/i386/kernel/timers/timer.c	2005-01-03 11:29:26.229310625 -0600
+@@ -19,10 +19,10 @@ static struct init_timer_opts* __initdat
+ #ifdef CONFIG_HPET_TIMER
+ 	&timer_hpet_init,
+ #endif
++	&timer_tsc_init,
+ #ifdef CONFIG_X86_PM_TIMER
+ 	&timer_pmtmr_init,
+ #endif
+-	&timer_tsc_init,
+ 	&timer_pit_init,
+ 	NULL,
+ };
+diff -purN ../oldkernel/linux-2.6.10/arch/i386/Makefile linux-2.6.10/arch/i386/Makefile
+--- ../oldkernel/linux-2.6.10/arch/i386/Makefile	2005-01-03 11:34:20.499353273 -0600
++++ linux-2.6.10/arch/i386/Makefile	2005-01-03 11:29:26.230310483 -0600
+@@ -20,7 +20,7 @@ OBJCOPYFLAGS	:= -O binary -R .note -R .c
+ LDFLAGS_vmlinux :=
+ CHECKFLAGS	+= -D__i386__
+ 
+-CFLAGS += -pipe -msoft-float
++CFLAGS += -pipe -msoft-float -m32 -fno-builtin-sprintf -fno-builtin-log2 -fno-builtin-puts 
+ 
+ # prevent gcc from keeping the stack 16 byte aligned
+ CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
+@@ -113,7 +113,7 @@ drivers-$(CONFIG_OPROFILE)		+= arch/i386
+ drivers-$(CONFIG_PM)			+= arch/i386/power/
+ 
+ CFLAGS += $(mflags-y)
+-AFLAGS += $(mflags-y)
++AFLAGS += $(mflags-y) -m32
+ 
+ boot := arch/i386/boot
+ 
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/kernel/head.S linux-2.6.10/arch/ppc/kernel/head.S
+--- ../oldkernel/linux-2.6.10/arch/ppc/kernel/head.S	2005-01-03 11:34:20.500353130 -0600
++++ linux-2.6.10/arch/ppc/kernel/head.S	2005-01-03 11:29:26.231310340 -0600
+@@ -1512,7 +1512,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_HIGH_B
+ flush_tlbs:
+ 	lis	r10, 0x40
+ 1:	addic.	r10, r10, -0x1000
+-	tlbie	r10
++	tlbie	r10,0
+ 	blt	1b
+ 	sync
+ 	blr
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/kernel/misc.S linux-2.6.10/arch/ppc/kernel/misc.S
+--- ../oldkernel/linux-2.6.10/arch/ppc/kernel/misc.S	2005-01-03 11:34:20.501352987 -0600
++++ linux-2.6.10/arch/ppc/kernel/misc.S	2005-01-03 11:29:26.231310340 -0600
+@@ -565,7 +565,7 @@ _GLOBAL(_tlbie)
+ 	SYNC_601
+ 	isync
+ #else /* CONFIG_SMP */
+-	tlbie	r3
++	tlbie	r3,0
+ 	sync
+ #endif /* CONFIG_SMP */
+ #endif /* ! CONFIG_40x */
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/Makefile linux-2.6.10/arch/ppc/Makefile
+--- ../oldkernel/linux-2.6.10/arch/ppc/Makefile	2005-01-03 11:34:20.501352987 -0600
++++ linux-2.6.10/arch/ppc/Makefile	2005-01-03 11:29:26.232310197 -0600
+@@ -74,6 +74,7 @@ CPPFLAGS_vmlinux.lds	:= -Upowerpc
+ 
+ # All the instructions talk about "make bzImage".
+ bzImage: zImage
++	cp vmlinux arch/ppc/boot/bzImage
+ 
+ boot := arch/$(ARCH)/boot
+ 
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/mm/hashtable.S linux-2.6.10/arch/ppc/mm/hashtable.S
+--- ../oldkernel/linux-2.6.10/arch/ppc/mm/hashtable.S	2005-01-03 11:34:20.502352845 -0600
++++ linux-2.6.10/arch/ppc/mm/hashtable.S	2005-01-03 11:29:26.232310197 -0600
+@@ -375,7 +375,7 @@ _GLOBAL(hash_page_patch_A)
+ 	 */
+ 	andi.	r6,r6,_PAGE_HASHPTE
+ 	beq+	10f			/* no PTE: go look for an empty slot */
+-	tlbie	r4
++	tlbie	r4,0
+ 
+ 	addis	r4,r7,htab_hash_searches@ha
+ 	lwz	r6,htab_hash_searches@l(r4)
+@@ -616,7 +616,7 @@ _GLOBAL(flush_hash_patch_B)
+ 3:	li	r0,0
+ 	STPTE	r0,0(r12)		/* invalidate entry */
+ 4:	sync
+-	tlbie	r4			/* in hw tlb too */
++	tlbie	r4,0			/* in hw tlb too */
+ 	sync
+ 
+ 8:	ble	cr1,9f			/* if all ptes checked */
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/platforms/85xx/sbc8560.c linux-2.6.10/arch/ppc/platforms/85xx/sbc8560.c
+--- ../oldkernel/linux-2.6.10/arch/ppc/platforms/85xx/sbc8560.c	2005-01-03 11:34:20.502352845 -0600
++++ linux-2.6.10/arch/ppc/platforms/85xx/sbc8560.c	2005-01-03 11:29:26.233310055 -0600
+@@ -32,6 +32,7 @@
+ #include <linux/serial_core.h>
+ #include <linux/initrd.h>
+ #include <linux/module.h>
++#include <linux/initrd.h>
+ 
+ #include <asm/system.h>
+ #include <asm/pgtable.h>
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc/platforms/pmac_sleep.S linux-2.6.10/arch/ppc/platforms/pmac_sleep.S
+--- ../oldkernel/linux-2.6.10/arch/ppc/platforms/pmac_sleep.S	2005-01-03 11:34:20.502352845 -0600
++++ linux-2.6.10/arch/ppc/platforms/pmac_sleep.S	2005-01-03 11:29:26.233310055 -0600
+@@ -339,7 +339,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_HIGH_B
+ 	/* Flush all TLBs */
+ 	lis	r4,0x1000
+ 1:	addic.	r4,r4,-0x1000
+-	tlbie	r4
++	tlbie	r4, 0
+ 	blt	1b
+ 	sync
+ 
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc64/boot/main.c linux-2.6.10/arch/ppc64/boot/main.c
+--- ../oldkernel/linux-2.6.10/arch/ppc64/boot/main.c	2005-01-03 11:34:20.503352702 -0600
++++ linux-2.6.10/arch/ppc64/boot/main.c	2005-01-03 11:29:26.233310055 -0600
+@@ -8,6 +8,7 @@
+  * as published by the Free Software Foundation; either version
+  * 2 of the License, or (at your option) any later version.
+  */
++#define __KERNGLUE__
+ #include "ppc32-types.h"
+ #include "zlib.h"
+ #include <linux/elf.h>
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc64/boot/Makefile linux-2.6.10/arch/ppc64/boot/Makefile
+--- ../oldkernel/linux-2.6.10/arch/ppc64/boot/Makefile	2005-01-03 11:34:20.503352702 -0600
++++ linux-2.6.10/arch/ppc64/boot/Makefile	2005-01-03 11:29:26.234309912 -0600
+@@ -104,6 +104,9 @@ $(obj)/zImage: obj-boot += $(call obj-se
+ $(obj)/zImage: $(call obj-sec, $(required)) $(obj-boot) $(obj)/addnote FORCE
+ 	$(call if_changed,addnote)
+ 
++$(obj)/zImage.stub: $(obj-boot) FORCE
++	$(BOOTLD) -r $(BOOTLFLAGS) -o $@ $(obj-boot)
++
+ $(obj)/zImage.initrd: obj-boot += $(call obj-sec, $(required) $(initrd))
+ $(obj)/zImage.initrd: $(call obj-sec, $(required) $(initrd)) $(obj-boot) $(obj)/addnote FORCE
+ 	$(call if_changed,addnote)
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc64/boot/zImage.lds linux-2.6.10/arch/ppc64/boot/zImage.lds
+--- ../oldkernel/linux-2.6.10/arch/ppc64/boot/zImage.lds	2005-01-03 11:34:20.503352702 -0600
++++ linux-2.6.10/arch/ppc64/boot/zImage.lds	2005-01-03 11:29:26.234309912 -0600
+@@ -1,4 +1,4 @@
+-OUTPUT_ARCH(powerpc)
++OUTPUT_ARCH(powerpc:common)
+ SEARCH_DIR(/lib); SEARCH_DIR(/usr/lib); SEARCH_DIR(/usr/local/lib); SEARCH_DIR(/usr/local/powerpc-any-elf/lib);
+ /* Do we need any of these for elf?
+    __DYNAMIC = 0;    */
+diff -purN ../oldkernel/linux-2.6.10/arch/ppc64/Makefile linux-2.6.10/arch/ppc64/Makefile
+--- ../oldkernel/linux-2.6.10/arch/ppc64/Makefile	2005-01-03 11:34:20.504352560 -0600
++++ linux-2.6.10/arch/ppc64/Makefile	2005-01-03 11:29:26.234309912 -0600
+@@ -43,7 +43,7 @@ endif
+ 
+ # Enable unit-at-a-time mode when possible. It shrinks the
+ # kernel considerably.
+-CFLAGS += $(call cc-option,-funit-at-a-time)
++CFLAGS += $(call cc-option,-fno-unit-at-a-time)
+ 
+ head-y := arch/ppc64/kernel/head.o
+ 
+diff -purN ../oldkernel/linux-2.6.10/arch/x86_64/ia32/sys_ia32.c linux-2.6.10/arch/x86_64/ia32/sys_ia32.c
+--- ../oldkernel/linux-2.6.10/arch/x86_64/ia32/sys_ia32.c	2005-01-03 11:34:20.504352560 -0600
++++ linux-2.6.10/arch/x86_64/ia32/sys_ia32.c	2005-01-03 11:29:26.235309770 -0600
+@@ -1152,4 +1152,3 @@ static int __init ia32_init (void)
+ __initcall(ia32_init);
+ 
+ extern unsigned long ia32_sys_call_table[];
+-EXPORT_SYMBOL(ia32_sys_call_table);
+diff -purN ../oldkernel/linux-2.6.10/arch/x86_64/mm/init.c linux-2.6.10/arch/x86_64/mm/init.c
+--- ../oldkernel/linux-2.6.10/arch/x86_64/mm/init.c	2005-01-03 11:34:20.505352417 -0600
++++ linux-2.6.10/arch/x86_64/mm/init.c	2005-01-03 11:29:26.235309770 -0600
+@@ -411,8 +411,6 @@ void __init mem_init(void)
+ 	int tmp;
+ 
+ #ifdef CONFIG_SWIOTLB
+-	if (swiotlb_force)
+-		swiotlb = 1;
+ 	if (!iommu_aperture &&
+ 	    (end_pfn >= 0xffffffff>>PAGE_SHIFT || force_iommu))
+ 	       swiotlb = 1;
+diff -purN ../oldkernel/linux-2.6.10/crypto/Makefile linux-2.6.10/crypto/Makefile
+--- ../oldkernel/linux-2.6.10/crypto/Makefile	2005-01-03 11:34:20.505352417 -0600
++++ linux-2.6.10/crypto/Makefile	2005-01-03 11:29:26.236309627 -0600
+@@ -31,3 +31,5 @@ obj-$(CONFIG_CRYPTO_MICHAEL_MIC) += mich
+ obj-$(CONFIG_CRYPTO_CRC32C) += crc32c.o
+ 
+ obj-$(CONFIG_CRYPTO_TEST) += tcrypt.o
++
++CFLAGS_twofish.o += -fno-schedule-insns
+diff -purN ../oldkernel/linux-2.6.10/drivers/acpi/ec.c linux-2.6.10/drivers/acpi/ec.c
+--- ../oldkernel/linux-2.6.10/drivers/acpi/ec.c	2005-01-03 11:34:20.506352275 -0600
++++ linux-2.6.10/drivers/acpi/ec.c	2005-01-03 11:29:26.236309627 -0600
+@@ -616,7 +616,7 @@ acpi_ec_add (
+ 	
+ 		acpi_remove_gpe_handler(NULL, ec_ecdt->gpe_bit, &acpi_ec_gpe_handler);
+ 
+-		kfree(ec_ecdt);
++//		kfree(ec_ecdt);
+ 	}
+ 
+ 	/* Get GPE bit assignment (EC events). */
+diff -purN ../oldkernel/linux-2.6.10/drivers/block/scsi_ioctl.c linux-2.6.10/drivers/block/scsi_ioctl.c
+--- ../oldkernel/linux-2.6.10/drivers/block/scsi_ioctl.c	2005-01-03 11:34:20.506352275 -0600
++++ linux-2.6.10/drivers/block/scsi_ioctl.c	2005-01-03 11:29:26.237309485 -0600
+@@ -356,7 +356,7 @@ static int sg_scsi_ioctl(struct file *fi
+ 
+ 	bytes = max(in_len, out_len);
+ 	if (bytes) {
+-		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER);
++		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER | __GFP_NOWARN);
+ 		if (!buffer)
+ 			return -ENOMEM;
+ 
+diff -purN ../oldkernel/linux-2.6.10/drivers/md/Makefile linux-2.6.10/drivers/md/Makefile
+--- ../oldkernel/linux-2.6.10/drivers/md/Makefile	2005-01-03 11:34:20.506352275 -0600
++++ linux-2.6.10/drivers/md/Makefile	2005-01-03 11:29:26.237309485 -0600
+@@ -12,6 +12,8 @@ raid6-objs	:= raid6main.o raid6algos.o r
+ 		   raid6mmx.o raid6sse1.o raid6sse2.o
+ hostprogs-y	:= mktables
+ 
++CFLAGS_raid6int8.o += -O2
++
+ # Note: link order is important.  All raid personalities
+ # and xor.o must come before md.o, as they each initialise 
+ # themselves, and md.o may use the personalities when it 
+diff -purN ../oldkernel/linux-2.6.10/drivers/md/raid5.c linux-2.6.10/drivers/md/raid5.c
+--- ../oldkernel/linux-2.6.10/drivers/md/raid5.c	2005-01-03 11:34:20.508351989 -0600
++++ linux-2.6.10/drivers/md/raid5.c	2005-01-03 11:29:26.238309342 -0600
+@@ -1328,6 +1328,8 @@ static void raid5_unplug_device(request_
+ 	raid5_conf_t *conf = mddev_to_conf(mddev);
+ 	unsigned long flags;
+ 
++	if (!conf) return;
++
+ 	spin_lock_irqsave(&conf->device_lock, flags);
+ 
+ 	if (blk_remove_plug(q))
+diff -purN ../oldkernel/linux-2.6.10/drivers/net/3c59x.c linux-2.6.10/drivers/net/3c59x.c
+--- ../oldkernel/linux-2.6.10/drivers/net/3c59x.c	2005-01-03 11:34:20.510351704 -0600
++++ linux-2.6.10/drivers/net/3c59x.c	2005-01-03 11:29:26.241308915 -0600
+@@ -1804,7 +1804,7 @@ vortex_timer(unsigned long data)
+ 	struct net_device *dev = (struct net_device *)data;
+ 	struct vortex_private *vp = netdev_priv(dev);
+ 	long ioaddr = dev->base_addr;
+-	int next_tick = 60*HZ;
++	int next_tick = 10*HZ;
+ 	int ok = 0;
+ 	int media_status, mii_status, old_window;
+ 
+diff -purN ../oldkernel/linux-2.6.10/drivers/pci/search.c linux-2.6.10/drivers/pci/search.c
+--- ../oldkernel/linux-2.6.10/drivers/pci/search.c	2005-01-03 11:34:20.510351704 -0600
++++ linux-2.6.10/drivers/pci/search.c	2005-01-03 11:29:26.241308915 -0600
+@@ -166,7 +166,7 @@ static struct pci_dev * pci_find_subsys(
+ 	struct list_head *n;
+ 	struct pci_dev *dev;
+ 
+-	WARN_ON(in_interrupt());
++	BUG_ON(in_interrupt());
+ 	spin_lock(&pci_bus_lock);
+ 	n = from ? from->global_list.next : pci_devices.next;
+ 
+diff -purN ../oldkernel/linux-2.6.10/drivers/scsi/ide-scsi.c linux-2.6.10/drivers/scsi/ide-scsi.c
+--- ../oldkernel/linux-2.6.10/drivers/scsi/ide-scsi.c	2005-01-03 11:34:20.511351562 -0600
++++ linux-2.6.10/drivers/scsi/ide-scsi.c	2005-01-03 11:29:26.242308772 -0600
+@@ -753,10 +753,16 @@ static ide_driver_t idescsi_driver = {
+ 	.drives			= LIST_HEAD_INIT(idescsi_driver.drives),
+ };
+ 
++static int ide_scsi_warned;
++
+ static int idescsi_ide_open(struct inode *inode, struct file *filp)
+ {
+ 	ide_drive_t *drive = inode->i_bdev->bd_disk->private_data;
+ 	drive->usage++;
++	if (!ide_scsi_warned++) {
++		printk(KERN_WARNING "ide-scsi: Warning this device driver is only intended for specialist devices.\n");
++		printk(KERN_WARNING "ide-scsi: Do not use for cd burning, use /dev/hdX directly instead.\n");
++	}
+ 	return 0;
+ }
+ 
+diff -purN ../oldkernel/linux-2.6.10/drivers/usb/host/ehci-hcd.c linux-2.6.10/drivers/usb/host/ehci-hcd.c
+--- ../oldkernel/linux-2.6.10/drivers/usb/host/ehci-hcd.c	2005-01-03 11:34:20.512351419 -0600
++++ linux-2.6.10/drivers/usb/host/ehci-hcd.c	2005-01-03 11:29:26.243308630 -0600
+@@ -336,6 +336,7 @@ static int ehci_hc_reset (struct usb_hcd
+ 	dbg_hcc_params (ehci, "reset");
+ 
+ #ifdef	CONFIG_PCI
++	writel(0, &ehci->regs->intr_enable);
+ 	/* EHCI 0.96 and later may have "extended capabilities" */
+ 	if (hcd->self.controller->bus == &pci_bus_type) {
+ 		struct pci_dev	*pdev = to_pci_dev(ehci->hcd.self.controller);
+diff -purN ../oldkernel/linux-2.6.10/drivers/usb/storage/scsiglue.c linux-2.6.10/drivers/usb/storage/scsiglue.c
+--- ../oldkernel/linux-2.6.10/drivers/usb/storage/scsiglue.c	2005-01-03 11:34:20.512351419 -0600
++++ linux-2.6.10/drivers/usb/storage/scsiglue.c	2005-01-03 11:29:26.244308487 -0600
+@@ -446,7 +446,7 @@ struct scsi_host_template usb_stor_host_
+ 	.sg_tablesize =			SG_ALL,
+ 
+ 	/* limit the total size of a transfer to 120 KB */
+-	.max_sectors =                  240,
++	.max_sectors =                  256,
+ 
+ 	/* merge commands... this seems to help performance, but
+ 	 * periodically someone should test to see which setting is more
+diff -purN ../oldkernel/linux-2.6.10/drivers/usb/storage/usb.c linux-2.6.10/drivers/usb/storage/usb.c
+--- ../oldkernel/linux-2.6.10/drivers/usb/storage/usb.c	2005-01-03 11:34:20.513351276 -0600
++++ linux-2.6.10/drivers/usb/storage/usb.c	2005-01-03 11:29:26.244308487 -0600
+@@ -291,7 +291,7 @@ static int usb_stor_control_thread(void 
+ 	 */
+ 	daemonize("usb-storage");
+ 
+-	current->flags |= PF_NOFREEZE;
++	current->flags |= PF_NOFREEZE|PF_MEMALLOC;
+ 
+ 	unlock_kernel();
+ 
+diff -purN ../oldkernel/linux-2.6.10/fs/open.c linux-2.6.10/fs/open.c
+--- ../oldkernel/linux-2.6.10/fs/open.c	2005-01-03 11:34:20.514351134 -0600
++++ linux-2.6.10/fs/open.c	2005-01-03 11:29:26.245308344 -0600
+@@ -968,7 +968,6 @@ out_error:
+ 	fd = error;
+ 	goto out;
+ }
+-EXPORT_SYMBOL_GPL(sys_open);
+ 
+ #ifndef __alpha__
+ 
+diff -purN ../oldkernel/linux-2.6.10/fs/proc/generic.c linux-2.6.10/fs/proc/generic.c
+--- ../oldkernel/linux-2.6.10/fs/proc/generic.c	2005-01-03 11:34:20.514351134 -0600
++++ linux-2.6.10/fs/proc/generic.c	2005-01-03 11:29:26.246308202 -0600
+@@ -685,7 +685,7 @@ void remove_proc_entry(const char *name,
+ 			parent->nlink--;
+ 		proc_kill_inodes(de);
+ 		de->nlink = 0;
+-		WARN_ON(de->subdir);
++		BUG_ON(de->subdir);
+ 		if (!atomic_read(&de->count))
+ 			free_proc_entry(de);
+ 		else {
+diff -purN ../oldkernel/linux-2.6.10/include/asm-ppc/ppc_asm.h linux-2.6.10/include/asm-ppc/ppc_asm.h
+--- ../oldkernel/linux-2.6.10/include/asm-ppc/ppc_asm.h	2005-01-03 11:34:20.515350991 -0600
++++ linux-2.6.10/include/asm-ppc/ppc_asm.h	2005-01-03 11:29:26.246308202 -0600
+@@ -116,7 +116,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_601)
+ 	li	r4,1024;			\
+ 	mtctr	r4;				\
+ 	lis	r4,KERNELBASE@h;		\
+-0:	tlbie	r4;				\
++0:	tlbie	r4, 0;				\
+ 	addi	r4,r4,0x1000;			\
+ 	bdnz	0b
+ #endif
+diff -purN ../oldkernel/linux-2.6.10/include/asm-ppc/setup.h linux-2.6.10/include/asm-ppc/setup.h
+--- ../oldkernel/linux-2.6.10/include/asm-ppc/setup.h	2005-01-03 11:34:20.515350991 -0600
++++ linux-2.6.10/include/asm-ppc/setup.h	2005-01-03 11:29:26.246308202 -0600
+@@ -2,8 +2,8 @@
+ #ifndef _PPC_SETUP_H
+ #define _PPC_SETUP_H
+ 
+-#define m68k_num_memory num_memory
+-#define m68k_memory memory
++#define m68k_num_memory ppc_num_memory
++#define m68k_memory ppc_memory
+ 
+ #include <asm-m68k/setup.h>
+ /* We have a bigger command line buffer. */
+diff -purN ../oldkernel/linux-2.6.10/include/linux/config.h linux-2.6.10/include/linux/config.h
+--- ../oldkernel/linux-2.6.10/include/linux/config.h	2005-01-03 11:34:20.515350991 -0600
++++ linux-2.6.10/include/linux/config.h	2005-01-03 11:29:26.247308059 -0600
+@@ -2,5 +2,7 @@
+ #define _LINUX_CONFIG_H
+ 
+ #include <linux/autoconf.h>
+-
++#if !defined (__KERNEL__) && !defined(__KERNGLUE__)
++#error including kernel header in userspace; use the glibc headers instead!
++#endif
+ #endif
+diff -purN ../oldkernel/linux-2.6.10/include/linux/delay.h linux-2.6.10/include/linux/delay.h
+--- ../oldkernel/linux-2.6.10/include/linux/delay.h	2005-01-03 11:34:20.516350849 -0600
++++ linux-2.6.10/include/linux/delay.h	2005-01-03 11:29:26.247308059 -0600
+@@ -10,7 +10,7 @@
+ extern unsigned long loops_per_jiffy;
+ 
+ #include <asm/delay.h>
+-
++#include <linux/hardirq.h>
+ /*
+  * Using udelay() for intervals greater than a few milliseconds can
+  * risk overflow for high loops_per_jiffy (high bogomips) machines. The
+@@ -25,14 +25,13 @@ extern unsigned long loops_per_jiffy;
+ #define MAX_UDELAY_MS	5
+ #endif
+ 
+-#ifdef notdef
+-#define mdelay(n) (\
+-	{unsigned long __ms=(n); while (__ms--) udelay(1000);})
+-#else
+-#define mdelay(n) (\
+-	(__builtin_constant_p(n) && (n)<=MAX_UDELAY_MS) ? udelay((n)*1000) : \
+-	({unsigned long __ms=(n); while (__ms--) udelay(1000);}))
+-#endif
++#define mdelay(n) (					\
++	{						\
++		static int warned=0; 			\
++		unsigned long __ms=(n); 		\
++		WARN_ON(in_irq() && !(warned++)); 	\
++		while (__ms--) udelay(1000);		\
++	})
+ 
+ #ifndef ndelay
+ #define ndelay(x)	udelay(((x)+999)/1000)
+diff -purN ../oldkernel/linux-2.6.10/include/linux/gfp.h linux-2.6.10/include/linux/gfp.h
+--- ../oldkernel/linux-2.6.10/include/linux/gfp.h	2005-01-03 11:34:20.516350849 -0600
++++ linux-2.6.10/include/linux/gfp.h	2005-01-03 11:29:26.247308059 -0600
+@@ -46,7 +46,7 @@ struct vm_area_struct;
+ 			__GFP_COLD|__GFP_NOWARN|__GFP_REPEAT| \
+ 			__GFP_NOFAIL|__GFP_NORETRY|__GFP_NO_GROW|__GFP_COMP)
+ 
+-#define GFP_ATOMIC	(__GFP_HIGH)
++#define GFP_ATOMIC	(__GFP_HIGH | __GFP_NOWARN)
+ #define GFP_NOIO	(__GFP_WAIT)
+ #define GFP_NOFS	(__GFP_WAIT | __GFP_IO)
+ #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
+diff -purN ../oldkernel/linux-2.6.10/include/linux/kmalloc_sizes.h linux-2.6.10/include/linux/kmalloc_sizes.h
+--- ../oldkernel/linux-2.6.10/include/linux/kmalloc_sizes.h	2005-01-03 11:34:20.516350849 -0600
++++ linux-2.6.10/include/linux/kmalloc_sizes.h	2005-01-03 11:29:26.248307917 -0600
+@@ -12,6 +12,7 @@
+ 	CACHE(256)
+ 	CACHE(512)
+ 	CACHE(1024)
++	CACHE(1620)
+ 	CACHE(2048)
+ 	CACHE(4096)
+ 	CACHE(8192)
+diff -purN ../oldkernel/linux-2.6.10/include/linux/namei.h linux-2.6.10/include/linux/namei.h
+--- ../oldkernel/linux-2.6.10/include/linux/namei.h	2005-01-03 11:34:20.516350849 -0600
++++ linux-2.6.10/include/linux/namei.h	2005-01-03 11:29:26.248307917 -0600
+@@ -10,7 +10,7 @@ struct open_intent {
+ 	int	create_mode;
+ };
+ 
+-enum { MAX_NESTED_LINKS = 5 };
++enum { MAX_NESTED_LINKS = 8 };
+ 
+ struct nameidata {
+ 	struct dentry	*dentry;
+diff -purN ../oldkernel/linux-2.6.10/init/Kconfig linux-2.6.10/init/Kconfig
+--- ../oldkernel/linux-2.6.10/init/Kconfig	2005-01-03 11:34:20.517350706 -0600
++++ linux-2.6.10/init/Kconfig	2005-01-03 11:29:26.248307917 -0600
+@@ -303,7 +303,7 @@ config EPOLL
+ 	  support for epoll family of system calls.
+ 
+ config CC_OPTIMIZE_FOR_SIZE
+-	bool "Optimize for size" if EMBEDDED
++	bool "Optimize for size"
+ 	default y if ARM || H8300
+ 	default n
+ 	help
+diff -purN ../oldkernel/linux-2.6.10/init/main.c linux-2.6.10/init/main.c
+--- ../oldkernel/linux-2.6.10/init/main.c	2005-01-03 11:34:20.518350564 -0600
++++ linux-2.6.10/init/main.c	2005-01-03 11:29:26.249307774 -0600
+@@ -709,7 +709,6 @@ static int init(void * unused)
+ 
+ 	fixup_cpu_present_map();
+ 	smp_init();
+-	sched_init_smp();
+ 
+ 	/*
+ 	 * Do this before initcalls, because some drivers want to access
+@@ -719,6 +718,8 @@ static int init(void * unused)
+ 
+ 	do_basic_setup();
+ 
++	sched_init_smp();
++
+ 	/*
+ 	 * check if there is an early userspace init.  If yes, let it do all
+ 	 * the work
+diff -purN ../oldkernel/linux-2.6.10/kernel/irq/spurious.c linux-2.6.10/kernel/irq/spurious.c
+--- ../oldkernel/linux-2.6.10/kernel/irq/spurious.c	2005-01-03 11:34:20.518350564 -0600
++++ linux-2.6.10/kernel/irq/spurious.c	2005-01-03 11:29:26.249307774 -0600
+@@ -31,7 +31,8 @@ __report_bad_irq(unsigned int irq, irq_d
+ 		printk(KERN_ERR "irq event %d: bogus return value %x\n",
+ 				irq, action_ret);
+ 	} else {
+-		printk(KERN_ERR "irq %d: nobody cared!\n", irq);
++		printk(KERN_ERR "irq %d: nobody cared! (screaming interrupt?)\n", irq);
++		printk(KERN_ERR "irq %d: Please try booting with acpi=off and report a bug\n", irq);
+ 	}
+ 	dump_stack();
+ 	printk(KERN_ERR "handlers:\n");
+diff -purN ../oldkernel/linux-2.6.10/kernel/pid.c linux-2.6.10/kernel/pid.c
+--- ../oldkernel/linux-2.6.10/kernel/pid.c	2005-01-03 11:34:20.518350564 -0600
++++ linux-2.6.10/kernel/pid.c	2005-01-03 11:29:26.249307774 -0600
+@@ -257,7 +257,7 @@ void __init pidhash_init(void)
+ 	int i, j, pidhash_size;
+ 	unsigned long megabytes = nr_kernel_pages >> (20 - PAGE_SHIFT);
+ 
+-	pidhash_shift = max(4, fls(megabytes * 4));
++	pidhash_shift = max(10, fls(megabytes * 4));
+ 	pidhash_shift = min(12, pidhash_shift);
+ 	pidhash_size = 1 << pidhash_shift;
+ 
+diff -purN ../oldkernel/linux-2.6.10/mm/vmscan.c linux-2.6.10/mm/vmscan.c
+--- ../oldkernel/linux-2.6.10/mm/vmscan.c	2004-12-24 15:34:00.000000000 -0600
++++ linux-2.6.10/mm/vmscan.c	2005-01-03 11:35:00.536643597 -0600
+@@ -1063,6 +1063,7 @@ scan:
+ 			shrink_slab(sc.nr_scanned, GFP_KERNEL, lru_pages);
+ 			sc.nr_reclaimed += reclaim_state->reclaimed_slab;
+ 			total_reclaimed += sc.nr_reclaimed;
++			total_scanned += sc.nr_scanned;
+ 			if (zone->all_unreclaimable)
+ 				continue;
+ 			if (zone->pages_scanned >= (zone->nr_active +
+diff -purN ../oldkernel/linux-2.6.10/scripts/kconfig/Makefile linux-2.6.10/scripts/kconfig/Makefile
+--- ../oldkernel/linux-2.6.10/scripts/kconfig/Makefile	2005-01-03 11:34:20.519350421 -0600
++++ linux-2.6.10/scripts/kconfig/Makefile	2005-01-03 11:29:26.250307632 -0600
+@@ -120,7 +120,7 @@ QTLIBPATH = $(QTDIR)/lib
+ 
+ # QT needs some extra effort...
+ $(obj)/.tmp_qtcheck:
+-	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt*; do \
++	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt* /usr/lib64/qt* ; do \
+ 	  if [ -f $$d/include/qconfig.h ]; then DIR=$$d; break; fi; \
+ 	done; \
+ 	if [ -z "$$DIR" ]; then \
+diff -purN ../oldkernel/linux-2.6.10/scripts/reference_discarded.pl linux-2.6.10/scripts/reference_discarded.pl
+--- ../oldkernel/linux-2.6.10/scripts/reference_discarded.pl	2005-01-03 11:34:20.519350421 -0600
++++ linux-2.6.10/scripts/reference_discarded.pl	2005-01-03 11:29:26.250307632 -0600
+@@ -88,6 +88,7 @@ foreach $object (keys(%object)) {
+ 		    ($from !~ /\.text\.exit$/ &&
+ 		     $from !~ /\.exit\.text$/ &&
+ 		     $from !~ /\.data\.exit$/ &&
++		     $from !~ /\.opd$/ &&
+ 		     $from !~ /\.exit\.data$/ &&
+ 		     $from !~ /\.altinstructions$/ &&
+ 		     $from !~ /\.debug_info$/ &&
+@@ -106,4 +107,4 @@ foreach $object (keys(%object)) {
+ }
+ # printf("Done\n");
+ 
+-exit(0);
++exit($errorcount);
+diff -purN ../oldkernel/linux-2.6.10/scripts/reference_init.pl linux-2.6.10/scripts/reference_init.pl
+--- ../oldkernel/linux-2.6.10/scripts/reference_init.pl	2005-01-03 11:34:20.519350421 -0600
++++ linux-2.6.10/scripts/reference_init.pl	2005-01-03 11:29:26.250307632 -0600
+@@ -90,6 +90,7 @@ foreach $object (sort(keys(%object))) {
+ 		if (($line =~ /\.init$/ || $line =~ /\.init\./) &&
+ 		    ($from !~ /\.init$/ &&
+ 		     $from !~ /\.init\./ &&
++		     $from !~ /\.eh_frame$/ &&
+ 		     $from !~ /\.stab$/ &&
+ 		     $from !~ /\.rodata$/ &&
+ 		     $from !~ /\.text\.lock$/ &&
+diff -purN ../oldkernel/linux-2.6.10/sound/core/oss/Makefile linux-2.6.10/sound/core/oss/Makefile
+--- ../oldkernel/linux-2.6.10/sound/core/oss/Makefile	2005-01-03 11:34:20.520350278 -0600
++++ linux-2.6.10/sound/core/oss/Makefile	2005-01-03 11:29:26.251307489 -0600
+@@ -3,6 +3,7 @@
+ # Copyright (c) 1999 by Jaroslav Kysela <perex@suse.cz>
+ #
+ 
++CFLAGS_pcm_plugin.o += -g0
+ snd-mixer-oss-objs := mixer_oss.o
+ 
+ snd-pcm-oss-objs := pcm_oss.o pcm_plugin.o \
+diff -purN ../oldkernel/linux-2.6.10/sound/core/oss/pcm_oss.c linux-2.6.10/sound/core/oss/pcm_oss.c
+--- ../oldkernel/linux-2.6.10/sound/core/oss/pcm_oss.c	2005-01-03 11:34:20.521350136 -0600
++++ linux-2.6.10/sound/core/oss/pcm_oss.c	2005-01-03 11:29:26.252307347 -0600
+@@ -1817,6 +1817,13 @@ static int snd_pcm_oss_open(struct inode
+ 	snd_pcm_oss_setup_t *psetup = NULL, *csetup = NULL;
+ 	int nonblock;
+ 	wait_queue_t wait;
++	static char printed_comm[16];
++
++	if (strncmp(printed_comm, current->comm, 16)) {
++		printk(KERN_DEBUG "application %s uses obsolete OSS audio interface\n",
++		       current->comm);
++		memcpy(printed_comm, current->comm, 16);
++	}
+ 
+ 	snd_assert(cardnum >= 0 && cardnum < SNDRV_CARDS, return -ENXIO);
+ 	device = SNDRV_MINOR_OSS_DEVICE(minor) == SNDRV_MINOR_OSS_PCM1 ?
+diff -purN ../oldkernel/linux-2.6.10/sound/pci/intel8x0.c linux-2.6.10/sound/pci/intel8x0.c
+--- ../oldkernel/linux-2.6.10/sound/pci/intel8x0.c	2005-01-03 11:34:20.523349851 -0600
++++ linux-2.6.10/sound/pci/intel8x0.c	2005-01-03 11:29:26.770233513 -0600
+@@ -1880,6 +1880,24 @@ static struct ac97_quirk ac97_quirks[] _
+ 		.type = AC97_TUNE_HP_ONLY
+ 	},
+ #endif
++	{
++		.vendor = 0x1028,
++		.device = 0x012d,
++		.name = "Dell Precision 450",	/* AD1981B*/
++		.type = AC97_TUNE_HP_ONLY
++	},
++	{
++		.vendor = 0x103c,
++		.device = 0x3008,
++		.name = "HP xw4200",	/* AD1981B*/
++		.type = AC97_TUNE_HP_ONLY
++	},
++	{
++		.vendor = 0x103c,
++		.device = 0x12f1,
++		.name = "HP xw8200",	/* AD1981B*/
++		.type = AC97_TUNE_HP_ONLY
++	},
+ 	{ } /* terminator */
+ };
+ 
