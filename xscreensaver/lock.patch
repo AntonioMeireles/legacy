@@ -1,0 +1,2009 @@
+--- xscreensaver-4.16.orig/driver/lock.c
++++ xscreensaver-4.16/driver/lock.c
+@@ -17,12 +17,27 @@
+ # include "config.h"
+ #endif
+ 
++#define _GNU_SOURCE
++
+ #include <X11/Intrinsic.h>
+ #include <X11/Xos.h>		/* for time() */
++#include <X11/Xft/Xft.h>
+ #include <time.h>
+ #include <sys/time.h>
+ #include "xscreensaver.h"
+ #include "resources.h"
++#include "string.h"
++
++#include "theme.h"
++#include "theme_logo.xpm"
++#include "theme_frame_t.xpm"
++#include "theme_frame_b.xpm"
++#include "theme_frame_l.xpm"
++#include "theme_frame_r.xpm"
++#include "theme_frame_tl.xpm"
++#include "theme_frame_tr.xpm"
++#include "theme_frame_bl.xpm"
++#include "theme_frame_br.xpm"
+ 
+ #ifndef NO_LOCKING              /* (mostly) whole file */
+ 
+@@ -78,7 +93,18 @@
+ #undef MAX
+ #define MAX(a,b) ((a)>(b)?(a):(b))
+ 
+-enum passwd_state { pw_read, pw_ok, pw_null, pw_fail, pw_cancel, pw_time };
++#undef MAX3
++#define MAX3(a,b,c) MAX(a,MAX(b,c))
++
++enum passwd_state { pw_read, pw_check, pw_ok, pw_null, pw_fail, pw_cancel, pw_time };
++
++struct xpm_data {
++  Pixmap pixmap;
++  Dimension width;
++  Dimension height;
++  int npixels;
++  unsigned long *pixels;
++};
+ 
+ struct passwd_dialog_data {
+ 
+@@ -96,34 +122,38 @@
+   Dimension height;
+   Dimension border_width;
+ 
+-  char *heading_label;
+-  char *body_label;
+   char *user_label;
+   char *passwd_label;
+   char *date_label;
+   char *user_string;
+   char *passwd_string;
++  char *status_string;
+ 
+-  XFontStruct *heading_font;
+-  XFontStruct *body_font;
+-  XFontStruct *label_font;
+-  XFontStruct *passwd_font;
+-  XFontStruct *date_font;
++  XftFont *label_font_aa;
++  XftFont *passwd_font_aa;
++  XftFont *date_font_aa;
++  XftFont *status_font_aa;
++
++  XftDraw *xft_draw;
++  
++  XftColor label_fg; 
++  XftColor passwd_fg; 
++  XftColor date_fg; 
++  XftColor denied_fg;
++  XftColor entry_bg;
++  XftColor default_bg;
++  XftColor thermo_fg;
++
++  XGlyphInfo usl_info;
++  XGlyphInfo pwl_info;
++  XGlyphInfo dtl_info;
+ 
+   Pixel foreground;
+   Pixel background;
+-  Pixel passwd_foreground;
+-  Pixel passwd_background;
+-  Pixel thermo_foreground;
+-  Pixel thermo_background;
+-  Pixel shadow_top;
+-  Pixel shadow_bottom;
+ 
+-  Dimension logo_width;
+-  Dimension logo_height;
+   Dimension thermo_width;
+   Dimension internal_border;
+-  Dimension shadow_width;
++  Dimension internal_spacer;
+ 
+   Dimension passwd_field_x, passwd_field_y;
+   Dimension passwd_field_width, passwd_field_height;
+@@ -131,9 +161,20 @@
+   Dimension thermo_field_x, thermo_field_y;
+   Dimension thermo_field_height;
+ 
+-  Pixmap logo_pixmap;
+-  int logo_npixels;
+-  unsigned long *logo_pixels;
++  struct xpm_data logo;
++  struct xpm_data frame_t;
++  struct xpm_data frame_b;
++  struct xpm_data frame_l;
++  struct xpm_data frame_r;
++  struct xpm_data frame_tl;
++  struct xpm_data frame_tr;
++  struct xpm_data frame_bl;
++  struct xpm_data frame_br;
++
++  Dimension frame_max_t;
++  Dimension frame_max_b;
++  Dimension frame_max_l;
++  Dimension frame_max_r;
+ 
+   Pixmap save_under;
+ };
+@@ -154,8 +195,8 @@
+   passwd_dialog_data *pw = (passwd_dialog_data *) calloc (1, sizeof(*pw));
+   Screen *screen;
+   Colormap cmap;
+-  char *f;
+   saver_screen_info *ssi = &si->screens [mouse_screen (si)];
++  XColor dummy, fg;
+ 
+   pw->prompt_screen = ssi;
+   if (si->prefs.verbose_p)
+@@ -167,188 +208,228 @@
+ 
+   pw->ratio = 1.0;
+ 
+-  pw->heading_label = get_string_resource ("passwd.heading.label",
+-					   "Dialog.Label.Label");
+-  pw->body_label = get_string_resource ("passwd.body.label",
+-					"Dialog.Label.Label");
+   pw->user_label = get_string_resource ("passwd.user.label",
+ 					"Dialog.Label.Label");
+   pw->passwd_label = get_string_resource ("passwd.passwd.label",
+ 					  "Dialog.Label.Label");
+-  pw->date_label = get_string_resource ("dateFormat", "DateFormat");
+ 
+-  if (!pw->heading_label)
+-    pw->heading_label = strdup("ERROR: REESOURCES NOT INSTALLED CORRECTLY");
+-  if (!pw->body_label)
+-    pw->body_label = strdup("ERROR: REESOURCES NOT INSTALLED CORRECTLY");
+   if (!pw->user_label) pw->user_label = strdup("ERROR");
+   if (!pw->passwd_label) pw->passwd_label = strdup("ERROR");
+-  if (!pw->date_label) pw->date_label = strdup("ERROR");
+-
+-  /* Put the version number in the label. */
+-  {
+-    char *s = (char *) malloc (strlen(pw->heading_label) + 20);
+-    sprintf(s, pw->heading_label, si->version);
+-    free (pw->heading_label);
+-    pw->heading_label = s;
+-  }
+ 
+   pw->user_string = strdup (p && p->pw_name ? p->pw_name : "???");
+   pw->passwd_string = strdup("");
++  pw->date_label = strdup("%H:%M");
+ 
+-  f = get_string_resource ("passwd.headingFont", "Dialog.Font");
+-  pw->heading_font = XLoadQueryFont (si->dpy, (f ? f : "fixed"));
+-  if (!pw->heading_font) pw->heading_font = XLoadQueryFont (si->dpy, "fixed");
+-  if (f) free (f);
+-
+-  f = get_string_resource("passwd.bodyFont", "Dialog.Font");
+-  pw->body_font = XLoadQueryFont (si->dpy, (f ? f : "fixed"));
+-  if (!pw->body_font) pw->body_font = XLoadQueryFont (si->dpy, "fixed");
+-  if (f) free (f);
+-
+-  f = get_string_resource("passwd.labelFont", "Dialog.Font");
+-  pw->label_font = XLoadQueryFont (si->dpy, (f ? f : "fixed"));
+-  if (!pw->label_font) pw->label_font = XLoadQueryFont (si->dpy, "fixed");
+-  if (f) free (f);
+-
+-  f = get_string_resource("passwd.passwdFont", "Dialog.Font");
+-  pw->passwd_font = XLoadQueryFont (si->dpy, (f ? f : "fixed"));
+-  if (!pw->passwd_font) pw->passwd_font = XLoadQueryFont (si->dpy, "fixed");
+-  if (f) free (f);
+-
+-  f = get_string_resource("passwd.dateFont", "Dialog.Font");
+-  pw->date_font = XLoadQueryFont (si->dpy, (f ? f : "fixed"));
+-  if (!pw->date_font) pw->date_font = XLoadQueryFont (si->dpy, "fixed");
+-  if (f) free (f);
+-
+-  pw->foreground = get_pixel_resource ("passwd.foreground",
+-				       "Dialog.Foreground",
+-				       si->dpy, cmap);
+-  pw->background = get_pixel_resource ("passwd.background",
+-				       "Dialog.Background",
+-				       si->dpy, cmap);
++  /* Set up Xft Fonts */ 
++  pw->label_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), THEME_FONT_LABEL);
++  if (!pw->label_font_aa) pw->label_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), "sans-12:encoding=utf-8");
++
++/*  pw->passwd_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), THEME_FONT_PASSWD);*/
++  if (!pw->passwd_font_aa) pw->passwd_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy),  "FreeSerif-10:encoding=utf-8");
++
++  pw->date_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), THEME_FONT_DATE);
++  if (!pw->date_font_aa) pw->date_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), "sans-12:bold");
++
++  pw->status_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), THEME_FONT_STATUS);
++  if (!pw->status_font_aa) pw->status_font_aa = XftFontOpenName (si->dpy, DefaultScreen(si->dpy), "sans-20:bold");
++
++  pw->foreground = parse_pixel_resource (THEME_FG, si->dpy, cmap);
++  pw->background = parse_pixel_resource (THEME_BG, si->dpy, cmap);
++
++  /* Set up Xft Colors */
++  XAllocNamedColor (si->dpy, cmap, "#565248", &fg, &dummy);  
++  pw->label_fg.color.red = dummy.red;
++  pw->label_fg.color.green = dummy.green;
++  pw->label_fg.color.blue = dummy.blue;
++  pw->label_fg.color.alpha =  0xE580;
++  pw->label_fg.pixel = fg.pixel;
++
++  XAllocNamedColor (si->dpy, cmap, "#565248", &fg, &dummy);
++  pw->passwd_fg.color.red = dummy.red;
++  pw->passwd_fg.color.green = dummy.green;
++  pw->passwd_fg.color.blue = dummy.blue;
++  pw->passwd_fg.color.alpha =  0xE580;
++  pw->passwd_fg.pixel = fg.pixel;
++
++  XAllocNamedColor (si->dpy, cmap, "#a2a0a4", &fg, &dummy);
++  pw->date_fg.color.red = dummy.red;
++  pw->date_fg.color.green = dummy.green;
++  pw->date_fg.color.blue = dummy.blue;
++  pw->date_fg.color.alpha =  0xE580;
++  pw->date_fg.pixel = fg.pixel;
++
++  XAllocNamedColor (si->dpy, cmap, "#980101", &fg, &dummy);
++  pw->denied_fg.color.red = dummy.red;
++  pw->denied_fg.color.green = dummy.green;
++  pw->denied_fg.color.blue = dummy.blue;
++  pw->denied_fg.color.alpha =  0xE580;
++  pw->denied_fg.pixel = fg.pixel;
++ 
++  XAllocNamedColor (si->dpy, cmap, "#d6d6d6", &fg, &dummy);
++  pw->entry_bg.color.red = dummy.red;
++  pw->entry_bg.color.green = dummy.green;
++  pw->entry_bg.color.blue = dummy.blue;
++  pw->entry_bg.color.alpha =  0xE580;
++  pw->entry_bg.pixel = fg.pixel;
++
++  XAllocNamedColor (si->dpy, cmap, "#ffffff", &fg, &dummy);
++  pw->default_bg.color.red = dummy.red;
++  pw->default_bg.color.green = dummy.green;
++  pw->default_bg.color.blue = dummy.blue;
++  pw->default_bg.color.alpha =  0xE580;
++  pw->default_bg.pixel = fg.pixel;
++
++  XAllocNamedColor (si->dpy, cmap, "#b4ccb0", &fg, &dummy);
++  pw->thermo_fg.color.red = dummy.red;
++  pw->thermo_fg.color.green = dummy.green;
++  pw->thermo_fg.color.blue = dummy.blue;
++  pw->thermo_fg.color.alpha =  0xE580;
++  pw->thermo_fg.pixel = fg.pixel;
+ 
+   if (pw->foreground == pw->background)
+     {
+-      /* Make sure the error messages show up. */
++      /* Make sure the error messages show up.*/
+       pw->foreground = BlackPixelOfScreen (screen);
+       pw->background = WhitePixelOfScreen (screen);
+     }
+ 
+-  pw->passwd_foreground = get_pixel_resource ("passwd.text.foreground",
+-					      "Dialog.Text.Foreground",
+-					      si->dpy, cmap);
+-  pw->passwd_background = get_pixel_resource ("passwd.text.background",
+-					      "Dialog.Text.Background",
+-					      si->dpy, cmap);
+-  pw->thermo_foreground = get_pixel_resource ("passwd.thermometer.foreground",
+-					      "Dialog.Thermometer.Foreground",
+-					      si->dpy, cmap);
+-  pw->thermo_background = get_pixel_resource ("passwd.thermometer.background",
+-					      "Dialog.Thermometer.Background",
+-					      si->dpy, cmap);
+-  pw->shadow_top = get_pixel_resource ("passwd.topShadowColor",
+-				       "Dialog.Foreground",
+-				       si->dpy, cmap);
+-  pw->shadow_bottom = get_pixel_resource ("passwd.bottomShadowColor",
+-					  "Dialog.Background",
+-					  si->dpy, cmap);
+-
+-  pw->logo_width = get_integer_resource ("passwd.logo.width",
+-					 "Dialog.Logo.Width");
+-  pw->logo_height = get_integer_resource ("passwd.logo.height",
+-					  "Dialog.Logo.Height");
+-  pw->thermo_width = get_integer_resource ("passwd.thermometer.width",
+-					   "Dialog.Thermometer.Width");
+-  pw->internal_border = get_integer_resource ("passwd.internalBorderWidth",
+-					      "Dialog.InternalBorderWidth");
+-  pw->shadow_width = get_integer_resource ("passwd.shadowThickness",
+-					   "Dialog.ShadowThickness");
+-
+-  if (pw->logo_width == 0)  pw->logo_width = 150;
+-  if (pw->logo_height == 0) pw->logo_height = 150;
+-  if (pw->internal_border == 0) pw->internal_border = 15;
+-  if (pw->shadow_width == 0) pw->shadow_width = 4;
+-  if (pw->thermo_width == 0) pw->thermo_width = pw->shadow_width;
++  pw->thermo_width = THEME_THERMO_WIDTH;
++  pw->internal_border = THEME_INTERNAL_BORDER;
++  pw->internal_spacer = THEME_INTERNAL_SPACER;
+ 
+   {
+-    int direction, ascent, descent;
+-    XCharStruct overall;
++    int w, h, tmp;
++
++    /* THEME HACK: A macro or array would tidy the following. */
++    if (sscanf(*theme_logo_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->logo.width = (int) w;
++      pw->logo.height = (int) h;
++    }
++
++    if (sscanf(*theme_frame_t_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_t.width = (int) w;
++      pw->frame_t.height = (int) h;
++    }
++    if (sscanf(*theme_frame_b_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_b.width = (int) w;
++      pw->frame_b.height = (int) h;
++    }
++    if (sscanf(*theme_frame_l_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_l.width = (int) w;
++      pw->frame_l.height = (int) h;
++    }
++    if (sscanf(*theme_frame_r_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_r.width = (int) w;
++      pw->frame_r.height = (int) h;
++    }
++    if (sscanf(*theme_frame_tl_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_tl.width = (int) w;
++      pw->frame_tl.height = (int) h;
++    }
++    if (sscanf(*theme_frame_tr_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_tr.width = (int) w;
++      pw->frame_tr.height = (int) h;
++    }
++    if (sscanf(*theme_frame_bl_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_bl.width = (int) w;
++      pw->frame_bl.height = (int) h;
++    }
++    if (sscanf(*theme_frame_br_xpm, "%d %d %d %d", &w, &h, &tmp, &tmp) == 4) {
++      pw->frame_br.width = (int) w;
++      pw->frame_br.height = (int) h;
++    }
++
++    /* THEME HACK: As the pixmaps may not have same dimensions and are aligned
++       along outside edges find the maximums. */
++    pw->frame_max_t = MAX3(pw->frame_t.height, pw->frame_tl.height, pw->frame_tr.height);
++    pw->frame_max_b = MAX3(pw->frame_b.height, pw->frame_bl.height, pw->frame_br.height);
++    pw->frame_max_l = MAX3(pw->frame_l.width, pw->frame_tl.width, pw->frame_bl.width);
++    pw->frame_max_r = MAX3(pw->frame_r.width, pw->frame_tr.width, pw->frame_br.width);
++  }
+ 
++  {
+     pw->width = 0;
+     pw->height = 0;
+ 
+-    /* Measure the heading_label. */
+-    XTextExtents (pw->heading_font,
+-		  pw->heading_label, strlen(pw->heading_label),
+-		  &direction, &ascent, &descent, &overall);
+-    if (overall.width > pw->width) pw->width = overall.width;
+-    pw->height += ascent + descent;
+-
+-    /* Measure the body_label. */
+-    XTextExtents (pw->body_font,
+-		  pw->body_label, strlen(pw->body_label),
+-		  &direction, &ascent, &descent, &overall);
+-    if (overall.width > pw->width) pw->width = overall.width;
+-    pw->height += ascent + descent;
+-
+     {
+       Dimension w2 = 0, w3 = 0;
+       Dimension h2 = 0, h3 = 0;
+-      const char *passwd_string = "MMMMMMMMMMMM";
++      XGlyphInfo info;
++      /* THEME HACK: This used to be 12 M's to allow for result strings but on
++         fonts like Neuropol it is just too wide. Result strings now get
++         overwritten by theme so it doesn't matter. */
++      const char *passwd_string = "●●●●●●●●●●●●";
++
++      /* Xft String measuring */
+ 
+       /* Measure the user_label. */
+-      XTextExtents (pw->label_font,
+-		    pw->user_label, strlen(pw->user_label),
+-		    &direction, &ascent, &descent, &overall);
+-      if (overall.width > w2)  w2 = overall.width;
+-      h2 += ascent + descent;
++      XftTextExtentsUtf8 (si->dpy, pw->label_font_aa, (XftChar8 *) pw->user_label, 
++		  	  strlen(pw->user_label), &pw->usl_info);
++      if (pw->usl_info.xOff > w2)  w2 = pw->usl_info.xOff;
++      h2 += pw->usl_info.yOff;
+ 
+       /* Measure the passwd_label. */
+-      XTextExtents (pw->label_font,
+-		    pw->passwd_label, strlen(pw->passwd_label),
+-		    &direction, &ascent, &descent, &overall);
+-      if (overall.width > w2)  w2 = overall.width;
+-      h2 += ascent + descent;
++      XftTextExtentsUtf8 (si->dpy, pw->label_font_aa, (XftChar8 *) pw->passwd_label, 
++		       	  strlen(pw->passwd_label), &pw->pwl_info);
++      if (pw->pwl_info.xOff > w2)  w2 = pw->pwl_info.xOff;
++      h2 += pw->pwl_info.yOff;
+ 
+       /* Measure the user_string. */
+-      XTextExtents (pw->passwd_font,
+-		    pw->user_string, strlen(pw->user_string),
+-		    &direction, &ascent, &descent, &overall);
+-      overall.width += (pw->shadow_width * 4);
+-      ascent += (pw->shadow_width * 4);
+-      if (overall.width > w3)  w3 = overall.width;
+-      h3 += ascent + descent;
++      XftTextExtentsUtf8 (si->dpy, pw->passwd_font_aa, (XftChar8 *) pw->user_string, 
++		       	  strlen(pw->user_string), &info);
++      if (info.xOff > w3)  w3 = info.xOff;
++      h3 += info.yOff;
+ 
+       /* Measure the (maximally-sized, dummy) passwd_string. */
+-      XTextExtents (pw->passwd_font,
+-		    passwd_string, strlen(passwd_string),
+-		    &direction, &ascent, &descent, &overall);
+-      overall.width += (pw->shadow_width * 4);
+-      ascent += (pw->shadow_width * 4);
+-      if (overall.width > w3)  w3 = overall.width;
+-      h3 += ascent + descent;
+-
+-      w2 = w2 + w3 + (pw->shadow_width * 2);
+-      h2 = MAX (h2, h3);
+-
+-      if (w2 > pw->width)  pw->width  = w2;
+-      pw->height += h2;
+-    }
+-
+-    pw->width  += (pw->internal_border * 2);
+-    pw->height += (pw->internal_border * 4);
+-
+-    pw->width += pw->thermo_width + (pw->shadow_width * 3);
+-
+-    if (pw->logo_height > pw->height)
+-      pw->height = pw->logo_height;
+-    else if (pw->height > pw->logo_height)
+-      pw->logo_height = pw->height;
+-
+-    pw->logo_width = pw->logo_height;
++      XftTextExtentsUtf8 (si->dpy, pw->passwd_font_aa, (XftChar8 *) passwd_string, 
++		      	  strlen(passwd_string), &info);
++      if (info.xOff > w3)  w3 = info.xOff;
++      h3 += info.yOff;
++      
++      /* Measure the date label */
++      XftTextExtentsUtf8 (si->dpy, pw->date_font_aa, (XftChar8 *) pw->date_label, 
++		       	  strlen(pw->date_label), &pw->dtl_info);
++
++      pw->width = w2 + w3;
++      pw->height = MAX (h2, h3);
++    }
++
++    if (pw->logo.height > pw->height)
++      pw->height = pw->logo.height;
++
++    pw->width += 2 * pw->internal_border + pw->logo.width +
++                 3 * pw->internal_spacer + pw->thermo_width;
++    pw->height+= 2 * pw->internal_border;
++
++    /* THEME HACK: By default, increase size so as to draw complete pixmaps.
++       Can only do for one (opposing) side - top and left. */
++#if defined THEME_TOP_CENTRED || defined THEME_TOP_FIT
++    if (pw->width % pw->frame_t.width)
++      pw->width += pw->frame_t.width - pw->width % pw->frame_t.width;
++#endif
++#if defined THEME_LEFT_CENTRED || defined THEME_LEFT_FIT
++    if (pw->height % pw->frame_l.height)
++      pw->height += pw->frame_l.height - pw->height % pw->frame_l.height;
++#endif
++#ifdef THEME_BOTTOM_FIT
++    if (pw->width % pw->frame_b.width)
++      pw->width += pw->frame_b.width - pw->width % pw->frame_b.width;
++#endif
++#ifdef THEME_RIGHT_FIT
++    if (pw->height % pw->frame_r.height)
++      pw->height += pw->frame_r.height - pw->height % pw->frame_r.height;
++#endif
++#ifdef THEME_BOTTOM_CENTRED
++    if (pw->width % pw->frame_b.width)
++      pw->width += pw->frame_b.width - pw->width % pw->frame_b.width;
++#endif
++#ifdef THEME_RIGHT_CENTRED
++    if (pw->height % pw->frame_r.height)
++      pw->height += pw->frame_r.height - pw->height % pw->frame_r.height;
++#endif
+ 
+-    pw->width += pw->logo_width;
++    pw->width += pw->frame_max_l + pw->frame_max_r;
++    pw->height+= pw->frame_max_t + pw->frame_max_b;
+   }
+ 
+   attrmask |= CWOverrideRedirect; attrs.override_redirect = True;
+@@ -407,15 +488,71 @@
+ 		   attrmask, &attrs);
+   XSetWindowBackground (si->dpy, si->passwd_dialog, pw->background);
+ 
++  pw->xft_draw = 
++    XftDrawCreate (si->dpy,
++	           (Drawable) si->passwd_dialog,
++		   DefaultVisual(si->dpy, DefaultScreen(si->dpy)),
++		   DefaultColormap(si->dpy, DefaultScreen(si->dpy)));
++
+   /* We use the default visual, not ssi->visual, so that the logo pixmap's
+      visual matches that of the si->passwd_dialog window. */
+-  pw->logo_pixmap = xscreensaver_logo (ssi->screen,
++  pw->logo.pixmap = xscreensaver_xpm (ssi->screen,
+                                        /* ssi->current_visual, */
+                                        DefaultVisualOfScreen(screen),
+                                        si->passwd_dialog, cmap,
+                                        pw->background, 
+-                                       &pw->logo_pixels, &pw->logo_npixels,
+-                                       0, True);
++                                       &pw->logo.pixels, &pw->logo.npixels,
++                                       0, theme_logo_xpm);
++
++  /* THEME HACK: A macro or array would tidy the following. */
++  pw->frame_t.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_t.pixels, &pw->frame_t.npixels,
++                                       0, theme_frame_t_xpm);
++  pw->frame_b.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_b.pixels, &pw->frame_b.npixels,
++                                       0, theme_frame_b_xpm);
++  pw->frame_l.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_l.pixels, &pw->frame_l.npixels,
++                                       0, theme_frame_l_xpm);
++  pw->frame_r.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_r.pixels, &pw->frame_r.npixels,
++                                       0, theme_frame_r_xpm);
++  pw->frame_tl.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_tl.pixels, &pw->frame_tl.npixels,
++                                       0, theme_frame_tl_xpm);
++  pw->frame_tr.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_tr.pixels, &pw->frame_tr.npixels,
++                                       0, theme_frame_tr_xpm);
++  pw->frame_bl.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_bl.pixels, &pw->frame_bl.npixels,
++                                       0, theme_frame_bl_xpm);
++  pw->frame_br.pixmap = xscreensaver_xpm (ssi->screen,
++                                       DefaultVisualOfScreen(screen),
++                                       si->passwd_dialog, cmap,
++                                       pw->background, 
++                                       &pw->frame_br.pixels, &pw->frame_br.npixels,
++                                       0, theme_frame_br_xpm);
+ 
+   /* Before mapping the window, save the bits that are underneath the
+      rectangle the window will occlude.  When we lower the window, we
+@@ -457,6 +594,27 @@
+   XSync (si->dpy, False);
+ }
+ 
++static void
++xpm_passwd_window (saver_info *si, GC gc, Pixmap pixmap, int dx, int dy)
++{
++  passwd_dialog_data *pw = si->pw_data;
++
++  if (pixmap) {
++    Window root;
++    int x, y;
++    unsigned int w, h, bw, d;
++
++    XGetGeometry (si->dpy, pixmap, &root, &x, &y, &w, &h, &bw, &d);
++    XSetForeground (si->dpy, gc, pw->foreground);
++    XSetBackground (si->dpy, gc, pw->background);
++    if (d == 1)
++      XCopyPlane (si->dpy, pixmap, si->passwd_dialog, gc,
++                  0, 0, w, h, dx, dy, 1);
++    else
++      XCopyArea (si->dpy, pixmap, si->passwd_dialog, gc,
++                 0, 0, w, h, dx, dy);
++  }
++}
+ 
+ static void
+ draw_passwd_window (saver_info *si)
+@@ -466,123 +624,73 @@
+   GC gc1, gc2;
+   int spacing, height;
+   int x1, x2, x3, y1, y2;
+-  int sw;
++  int i;
+   int tb_height;
+ 
+-  height = (pw->heading_font->ascent + pw->heading_font->descent +
+-	    pw->body_font->ascent + pw->body_font->descent +
+-	    (2 * MAX ((pw->label_font->ascent + pw->label_font->descent),
+-		      (pw->passwd_font->ascent + pw->passwd_font->descent +
+-		       (pw->shadow_width * 4)))) +
+-            pw->date_font->ascent + pw->date_font->descent
+-            );
+-  spacing = ((pw->height - (2 * pw->shadow_width) -
+-	      pw->internal_border - height)) / 8;
++  height = 2 * MAX (pw->usl_info.height,
++		    pw->pwl_info.height) +
++           	    pw->dtl_info.height;
++  /* THEME HACK: The "spacing" is automatic padding to allow for logo size.
++     Frame->Border->Spacer->User->Spacer->Password->Spacer->Date->Border->Frame
++  */
++  spacing = ((pw->height - pw->frame_max_t - 2 * pw->internal_border -
++              pw->frame_max_b - height)) / 3;
+   if (spacing < 0) spacing = 0;
+ 
+-  gcv.foreground = pw->foreground;
+   gc1 = XCreateGC (si->dpy, si->passwd_dialog, GCForeground, &gcv);
+   gc2 = XCreateGC (si->dpy, si->passwd_dialog, GCForeground, &gcv);
+-  x1 = pw->logo_width + pw->thermo_width + (pw->shadow_width * 3);
+-  x3 = pw->width - (pw->shadow_width * 2);
+-  y1 = (pw->shadow_width * 2) + spacing + spacing;
+-
+-  /* top heading
+-   */
+-  XSetFont (si->dpy, gc1, pw->heading_font->fid);
+-  sw = string_width (pw->heading_font, pw->heading_label);
+-  x2 = (x1 + ((x3 - x1 - sw) / 2));
+-  y1 += spacing + pw->heading_font->ascent + pw->heading_font->descent;
+-  XDrawString (si->dpy, si->passwd_dialog, gc1, x2, y1,
+-	       pw->heading_label, strlen(pw->heading_label));
+-
+-  /* text below top heading
+-   */
+-  XSetFont (si->dpy, gc1, pw->body_font->fid);
+-  y1 += spacing + pw->body_font->ascent + pw->body_font->descent;
+-  sw = string_width (pw->body_font, pw->body_label);
+-  x2 = (x1 + ((x3 - x1 - sw) / 2));
+-  XDrawString (si->dpy, si->passwd_dialog, gc1, x2, y1,
+-	       pw->body_label, strlen(pw->body_label));
++  /* THEME HACK: Changed from original logo-thermometer-test order to
++     logo-text-thermometer. */
++  x1 = pw->frame_max_l + pw->internal_border + pw->logo.width + pw->internal_spacer;
++  y1 = pw->frame_max_t + pw->internal_border;
++  x3 = pw->width - pw->internal_spacer - pw->internal_border - pw->frame_max_r;
+ 
+-
+-  tb_height = (pw->passwd_font->ascent + pw->passwd_font->descent +
+-	       (pw->shadow_width * 4));
++  tb_height = pw->pwl_info.height;
+ 
+   /* the "User:" prompt
+    */
+-  y1 += spacing;
++  y1 += spacing + tb_height;
+   y2 = y1;
+-  XSetForeground (si->dpy, gc1, pw->foreground);
+-  XSetFont (si->dpy, gc1, pw->label_font->fid);
+-  y1 += (spacing + tb_height);
+-  x2 = (x1 + pw->internal_border +
+-	MAX(string_width (pw->label_font, pw->user_label),
+-	    string_width (pw->label_font, pw->passwd_label)));
+-  XDrawString (si->dpy, si->passwd_dialog, gc1,
+-	       x2 - string_width (pw->label_font, pw->user_label),
+-	       y1,
+-	       pw->user_label, strlen(pw->user_label));
++  x2 = x1 + MAX(pw->usl_info.xOff ,
++                pw->pwl_info.xOff);
++
++  XftDrawStringUtf8 (pw->xft_draw, &pw->label_fg, pw->label_font_aa, 
++	    	     x2 - pw->usl_info.xOff,
++	    	     y1, 
++	    	     (XftChar8 *) pw->user_label, strlen(pw->user_label));
+ 
+   /* the "Password:" prompt
+    */
+-  y1 += (spacing + tb_height);
+-  XDrawString (si->dpy, si->passwd_dialog, gc1,
+-	       x2 - string_width (pw->label_font, pw->passwd_label),
+-	       y1,
+-	       pw->passwd_label, strlen(pw->passwd_label));
+-
+-
+-  XSetForeground (si->dpy, gc2, pw->passwd_background);
++  y1 += spacing + tb_height;
++  XftDrawStringUtf8 (pw->xft_draw, &pw->label_fg, pw->label_font_aa, 
++	    	     x2 - pw->pwl_info.xOff,
++	    	     y1, 
++	    	     (XftChar8 *) pw->passwd_label, strlen(pw->passwd_label));
+ 
+   /* the "user name" text field
+    */
+   y1 = y2;
+-  XSetForeground (si->dpy, gc1, pw->passwd_foreground);
+-  XSetFont (si->dpy, gc1, pw->passwd_font->fid);
+-  y1 += (spacing + tb_height);
+-  x2 += (pw->shadow_width * 4);
++  x2 += pw->internal_spacer;
+ 
+   pw->passwd_field_width = x3 - x2 - pw->internal_border;
+-  pw->passwd_field_height = (pw->passwd_font->ascent +
+-			     pw->passwd_font->descent +
+-			     pw->shadow_width);
+-
+-  XFillRectangle (si->dpy, si->passwd_dialog, gc2,
+-		  x2 - pw->shadow_width,
+-		  y1 - (pw->passwd_font->ascent + pw->passwd_font->descent),
+-		  pw->passwd_field_width, pw->passwd_field_height);
+-  XDrawString (si->dpy, si->passwd_dialog, gc1, x2, y1,
+-	       pw->user_string, strlen(pw->user_string));
++  pw->passwd_field_height = pw->pwl_info.height;
+ 
++  XftDrawRect (pw->xft_draw, &pw->entry_bg,
++    	       x2, 
++	       y1 - pw->pwl_info.height - 1,
++	       pw->passwd_field_width, pw->passwd_field_height + 5);
++
++  XftDrawStringUtf8 (pw->xft_draw, &pw->passwd_fg, pw->label_font_aa, 
++	    	     x2, 
++	    	     y1, 
++	    	     (XftChar8 *) pw->user_string, strlen(pw->user_string));
++  
+   /* the "password" text field
+    */
+-  y1 += (spacing + tb_height);
+-
+-  pw->passwd_field_x = x2 - pw->shadow_width;
+-  pw->passwd_field_y = y1 - (pw->passwd_font->ascent +
+-			     pw->passwd_font->descent);
+-
+-  /* The shadow around the text fields
+-   */
+-  y1 = y2;
+-  y1 += (spacing + (pw->shadow_width * 3));
+-  x1 = x2 - (pw->shadow_width * 2);
+-  x2 = pw->passwd_field_width + (pw->shadow_width * 2);
+-  y2 = pw->passwd_field_height + (pw->shadow_width * 2);
+-
+-  draw_shaded_rectangle (si->dpy, si->passwd_dialog,
+-			 x1, y1, x2, y2,
+-			 pw->shadow_width,
+-			 pw->shadow_bottom, pw->shadow_top);
+-
+-  y1 += (spacing + pw->passwd_font->ascent + pw->passwd_font->descent +
+-	 (pw->shadow_width * 4));
+-  draw_shaded_rectangle (si->dpy, si->passwd_dialog,
+-			 x1, y1, x2, y2,
+-			 pw->shadow_width,
+-			 pw->shadow_bottom, pw->shadow_top);
++  y1 += spacing + tb_height;
+ 
++  pw->passwd_field_x = x2;
++  pw->passwd_field_y = y1 - pw->passwd_field_height;
+ 
+   /* The date, below the text fields
+    */
+@@ -590,95 +698,153 @@
+     char buf[100];
+     time_t now = time ((time_t *) 0);
+     struct tm *tm = localtime (&now);
++    XGlyphInfo info;
+     memset (buf, 0, sizeof(buf));
+     strftime (buf, sizeof(buf)-1, pw->date_label, tm);
+ 
+-    XSetFont (si->dpy, gc1, pw->date_font->fid);
+-    y1 += pw->shadow_width;
+-    y1 += (spacing + tb_height);
+-    y1 += spacing/2;
+-    sw = string_width (pw->date_font, buf);
+-    x2 = x1 + x2 - sw;
+-    XDrawString (si->dpy, si->passwd_dialog, gc1, x2, y1, buf, strlen(buf));
+-  }
++    XftTextExtentsUtf8 (si->dpy, pw->date_font_aa, (XftChar8 *) buf, 
++		        strlen(buf), &info);
+ 
++    /* THEME HACK: Place date in centre between logo and thermometer. */
++    x1 += (pw->width - pw->frame_max_l - 2 * pw->internal_border -
++           pw->logo.width - pw->thermo_width - pw->frame_max_r) / 2 -
++           info.xOff / 2;
++    y1 = pw->height - pw->internal_border - pw->frame_max_b;
++
++    XftDrawStringUtf8 (pw->xft_draw, &pw->date_fg, pw->date_font_aa, 
++		       x1, 
++		       y1, 
++		       (XftChar8 *) buf, strlen(buf));
++  }
+ 
+   /* The logo
+    */
+-  x1 = pw->shadow_width * 6;
+-  y1 = pw->shadow_width * 6;
+-  x2 = pw->logo_width - (pw->shadow_width * 12);
+-  y2 = pw->logo_height - (pw->shadow_width * 12);
+-
+-  if (pw->logo_pixmap)
+-    {
+-      Window root;
+-      int x, y;
+-      unsigned int w, h, bw, d;
+-      XGetGeometry (si->dpy, pw->logo_pixmap, &root, &x, &y, &w, &h, &bw, &d);
+-      XSetForeground (si->dpy, gc1, pw->foreground);
+-      XSetBackground (si->dpy, gc1, pw->background);
+-      if (d == 1)
+-        XCopyPlane (si->dpy, pw->logo_pixmap, si->passwd_dialog, gc1,
+-                    0, 0, w, h,
+-                    x1 + ((x2 - (int)w) / 2),
+-                    y1 + ((y2 - (int)h) / 2),
+-                    1);
+-      else
+-        XCopyArea (si->dpy, pw->logo_pixmap, si->passwd_dialog, gc1,
+-                   0, 0, w, h,
+-                   x1 + ((x2 - (int)w) / 2),
+-                   y1 + ((y2 - (int)h) / 2));
+-    }
++  x1 = pw->frame_max_l + pw->internal_border;
++  y1 = pw->frame_max_t + (pw->height - pw->frame_max_t - pw->frame_max_b) / 2 -
++       pw->logo.height / 2;
++  x2 = pw->logo.width;
++  y2 = pw->logo.height;
++
++  if (pw->logo.pixmap) {
++    xpm_passwd_window (si, gc1, pw->logo.pixmap,
++                       x1 + ((x2 - pw->logo.width) / 2),
++                       y1 + ((y2 - pw->logo.height) / 2));
++  }
+ 
+-  /* The thermometer
++  /* The frame
+    */
+-  XSetForeground (si->dpy, gc1, pw->thermo_foreground);
+-  XSetForeground (si->dpy, gc2, pw->thermo_background);
+-
+-  pw->thermo_field_x = pw->logo_width + pw->shadow_width;
+-  pw->thermo_field_y = pw->shadow_width * 5;
+-  pw->thermo_field_height = pw->height - (pw->shadow_width * 10);
+-
+-#if 0
+-  /* Solid border inside the logo box. */
+-  XSetForeground (si->dpy, gc1, pw->foreground);
+-  XDrawRectangle (si->dpy, si->passwd_dialog, gc1, x1, y1, x2-1, y2-1);
++  /* THEME HACK: The side pixmaps are either drawn centred or repeated along
++     outside side of the frame. */
++  if (pw->frame_t.pixmap) {
++#ifdef THEME_TOP_CENTRED
++    xpm_passwd_window (si, gc1, pw->frame_t.pixmap,
++                       pw->frame_max_l +
++                       (pw->width - pw->frame_max_l - pw->frame_max_r) / 2 -
++                       pw->frame_t.width / 2,
++                       0);
++#else
++    for (i = pw->frame_max_l; i < (pw->width - pw->frame_max_r) ; i += pw->frame_t.width) {
++      xpm_passwd_window (si, gc1, pw->frame_t.pixmap, i, 0);
++    }
+ #endif
++  }
++  if (pw->frame_b.pixmap) {
++#ifdef THEME_BOTTOM_CENTRED
++    xpm_passwd_window (si, gc1, pw->frame_b.pixmap,
++                       pw->frame_max_l +
++                       (pw->width - pw->frame_max_l - pw->frame_max_r) / 2 -
++                       pw->frame_b.width / 2,
++                       pw->height - pw->frame_b.height);
++#else
++    for (i = pw->frame_max_l; i < (pw->width - pw->frame_max_r) ; i += pw->frame_b.width) {
++      xpm_passwd_window (si, gc1, pw->frame_b.pixmap,
++                             i, pw->height - pw->frame_b.height);
++    }
++#endif
++  }
++  if (pw->frame_l.pixmap) {
++#ifdef THEME_LEFT_CENTRED
++    xpm_passwd_window (si, gc1, pw->frame_l.pixmap,
++                       0,
++                       pw->frame_max_t +
++                       (pw->height - pw->frame_max_t - pw->frame_max_b) / 2 -
++                       pw->frame_l.height / 2 );
++#else
++    for (i = pw->frame_max_t; i < (pw->height - pw->frame_max_b) ; i += pw->frame_l.height) {
++      xpm_passwd_window (si, gc1, pw->frame_l.pixmap, 0, i);
++    }
++#endif
++  }
++  if (pw->frame_r.pixmap) {
++#ifdef THEME_RIGHT_CENTRED
++    xpm_passwd_window (si, gc1, pw->frame_r.pixmap,
++                       pw->width - pw->frame_r.width,
++                       pw->frame_max_t +
++                       (pw->height - pw->frame_max_t - pw->frame_max_b) / 2 -
++                       pw->frame_r.height / 2 );
++#else
++    for (i = pw->frame_max_t; i < (pw->height - pw->frame_max_b) ; i += pw->frame_r.height) {
++      xpm_passwd_window (si, gc1, pw->frame_r.pixmap,
++                         pw->width - pw->frame_r.width, i);
++    }
++#endif
++  }
++  /* THEME HACK: Black out corners. If corner pixmap is smaller than side
++     pixmaps we need to clear side pixmap overwrite. Additionally if background
++     is not black, then undrawn parts would have that colour. */
++  XSetForeground (si->dpy, gc1, BlackPixelOfScreen (pw->prompt_screen->screen));
++  XFillRectangle (si->dpy, si->passwd_dialog, gc1,
++                  0, 0,
++                  pw->frame_max_l, pw->frame_max_t);
++  XFillRectangle (si->dpy, si->passwd_dialog, gc1,
++                  pw->width - pw->frame_max_r, 0,
++                  pw->frame_max_l, pw->frame_max_t);
++  XFillRectangle (si->dpy, si->passwd_dialog, gc1,
++                  0, pw->height - pw->frame_max_b,
++                  pw->frame_max_l, pw->frame_max_t);
++  XFillRectangle (si->dpy, si->passwd_dialog, gc1,
++                  pw->width - pw->frame_max_r, pw->height - pw->frame_max_b,
++                  pw->frame_max_l, pw->frame_max_t);
++  /* THEME HACK: The corner pixmaps are drawn to the inside corner of the
++     frame. */
++  if (pw->frame_tl.pixmap) {
++    xpm_passwd_window (si, gc1, pw->frame_tl.pixmap,
++                       pw->frame_max_l - pw->frame_tl.width,
++                       pw->frame_max_t - pw->frame_tl.height);
++  }
++  if (pw->frame_tr.pixmap) {
++    xpm_passwd_window (si, gc1, pw->frame_tr.pixmap,
++                       pw->width - pw->frame_max_l,
++                       pw->frame_max_t - pw->frame_tl.height);
++  }
++  if (pw->frame_bl.pixmap) {
++    xpm_passwd_window (si, gc1, pw->frame_bl.pixmap,
++                       pw->frame_max_l - pw->frame_bl.width,
++                       pw->height - pw->frame_max_b);
++  }
++  if (pw->frame_br.pixmap) {
++    xpm_passwd_window (si, gc1, pw->frame_br.pixmap,
++                       pw->width - pw->frame_max_r,
++                       pw->height - pw->frame_max_b);
++  }
+ 
+-  /* The shadow around the logo
+-   */
+-  draw_shaded_rectangle (si->dpy, si->passwd_dialog,
+-			 pw->shadow_width * 4,
+-			 pw->shadow_width * 4,
+-			 pw->logo_width - (pw->shadow_width * 8),
+-			 pw->logo_height - (pw->shadow_width * 8),
+-			 pw->shadow_width,
+-			 pw->shadow_bottom, pw->shadow_top);
+-
+-  /* The shadow around the thermometer
++  /* the thermometer
+    */
+-  draw_shaded_rectangle (si->dpy, si->passwd_dialog,
+-			 pw->logo_width,
+-			 pw->shadow_width * 4,
+-			 pw->thermo_width + (pw->shadow_width * 2),
+-			 pw->height - (pw->shadow_width * 8),
+-			 pw->shadow_width,
+-			 pw->shadow_bottom, pw->shadow_top);
++  pw->thermo_field_x = pw->width - pw->thermo_width - pw->internal_border -
++                       pw->frame_max_r;
++  pw->thermo_field_y = pw->frame_max_t + pw->internal_border;
++  pw->thermo_field_height = pw->height - pw->frame_max_t - 2 * pw->internal_border -
++                            pw->frame_max_b;
+ 
+-#if 1
+   /* Solid border inside the thermometer. */
+-  XSetForeground (si->dpy, gc1, pw->foreground);
+-  XDrawRectangle (si->dpy, si->passwd_dialog, gc1, 
+-		  pw->thermo_field_x, pw->thermo_field_y,
+-                  pw->thermo_width - 1, pw->thermo_field_height - 1);
+-#endif
+-
+-  /* The shadow around the whole window
+-   */
+-  draw_shaded_rectangle (si->dpy, si->passwd_dialog,
+-			 0, 0, pw->width, pw->height, pw->shadow_width,
+-			 pw->shadow_top, pw->shadow_bottom);
++  XftDrawRect (pw->xft_draw, &pw->label_fg,
++	       pw->thermo_field_x, pw->thermo_field_y,
++               pw->thermo_width, pw->thermo_field_height);
++  XftDrawRect (pw->xft_draw, &pw->default_bg,
++	       pw->thermo_field_x + 1,
++	       pw->thermo_field_y + 1,
++	       pw->thermo_width-2,
++	       pw->thermo_field_height-2);
+ 
+   XFreeGC (si->dpy, gc1);
+   XFreeGC (si->dpy, gc2);
+@@ -691,17 +857,13 @@
+ update_passwd_window (saver_info *si, const char *printed_passwd, float ratio)
+ {
+   passwd_dialog_data *pw = si->pw_data;
+-  XGCValues gcv;
+-  GC gc1, gc2;
+   int x, y;
++  const char *buf;
++  const char *nbuf;
+   XRectangle rects[1];
++  XGlyphInfo info;
+ 
+   pw->ratio = ratio;
+-  gcv.foreground = pw->passwd_foreground;
+-  gcv.font = pw->passwd_font->fid;
+-  gc1 = XCreateGC (si->dpy, si->passwd_dialog, GCForeground|GCFont, &gcv);
+-  gcv.foreground = pw->passwd_background;
+-  gc2 = XCreateGC (si->dpy, si->passwd_dialog, GCForeground, &gcv);
+ 
+   if (printed_passwd)
+     {
+@@ -717,56 +879,113 @@
+   rects[0].width = pw->passwd_field_width;
+   rects[0].height = pw->passwd_field_height;
+ 
+-  XFillRectangle (si->dpy, si->passwd_dialog, gc2,
+-                  rects[0].x, rects[0].y, rects[0].width, rects[0].height);
+-
+-  XSetClipRectangles (si->dpy, gc1, 0, 0, rects, 1, Unsorted);
+-
+-  XDrawString (si->dpy, si->passwd_dialog, gc1,
+-               rects[0].x + pw->shadow_width,
+-               rects[0].y + (pw->passwd_font->ascent +
+-                             pw->passwd_font->descent),
+-               pw->passwd_string, strlen(pw->passwd_string));
+-
+-  XSetClipMask (si->dpy, gc1, None);
++  XftDrawRect (pw->xft_draw, &pw->entry_bg,
++    	       rects[0].x - 1,
++	       rects[0].y,
++	       rects[0].width, rects[0].height + 3);
++
++  buf = strdup ("●●●●●●●●●●●●");
++  if (strlen(pw->passwd_string) > 12) nbuf = strdup(buf); 
++  else nbuf = strndup (buf , (strlen(pw->passwd_string)*3));
++
++  XftDrawStringUtf8 (pw->xft_draw, &pw->passwd_fg, pw->passwd_font_aa, 
++     		     rects[0].x, 
++     		     rects[0].y + pw->passwd_field_height, 
++		     (XftChar8 *) nbuf, strlen(nbuf));
+ 
+   /* The I-beam
+    */
++  XftTextExtentsUtf8 (si->dpy, pw->passwd_font_aa, (XftChar8 *) nbuf, 
++		      strlen(nbuf), &info);
++
+   if (pw->i_beam != 0)
+     {
+-      x = (rects[0].x + pw->shadow_width +
+-	   string_width (pw->passwd_font, pw->passwd_string));
+-      y = rects[0].y + pw->shadow_width;
++      x = rects[0].x + info.xOff;
++      y = rects[0].y;
+ 
+       if (x > rects[0].x + rects[0].width - 1)
+         x = rects[0].x + rects[0].width - 1;
+-      XDrawLine (si->dpy, si->passwd_dialog, gc1, 
+-		 x, y, x, y + pw->passwd_font->ascent);
++      XftDrawRect (pw->xft_draw, &pw->passwd_fg,
++		   x, y, 1, pw->passwd_field_height + 2);
+     }
+ 
+   pw->i_beam = (pw->i_beam + 1) % 4;
+ 
+-
+-  /* the thermometer
++  /* The thermometer
+    */
+   y = (pw->thermo_field_height - 2) * (1.0 - pw->ratio);
+   if (y > 0)
+     {
+-      XFillRectangle (si->dpy, si->passwd_dialog, gc2,
+-		      pw->thermo_field_x + 1,
+-		      pw->thermo_field_y + 1,
+-		      pw->thermo_width-2,
+-		      y);
+-      XSetForeground (si->dpy, gc1, pw->thermo_foreground);
+-      XFillRectangle (si->dpy, si->passwd_dialog, gc1,
+-		      pw->thermo_field_x + 1,
+-		      pw->thermo_field_y + 1 + y,
+-		      pw->thermo_width-2,
+-		      MAX (0, pw->thermo_field_height - y - 2));
++      XftDrawRect (pw->xft_draw, &pw->default_bg,
++		   pw->thermo_field_x + 1,
++		   pw->thermo_field_y + 1,
++		   pw->thermo_width-2,
++		   y);
++      XftDrawRect (pw->xft_draw, &pw->thermo_fg,
++		   pw->thermo_field_x + 1,
++		   pw->thermo_field_y + 1 + y,
++		   pw->thermo_width-2,
++		   MAX (0, pw->thermo_field_height - y - 2));
+     }
+ 
+-  XFreeGC (si->dpy, gc1);
+-  XFreeGC (si->dpy, gc2);
++  /* the status mapping
++   */
++  /* THEME HACK: Text is cheaper than pixmaps even though they'd look
++     nicer being anti-aliased. */
++
++  if (pw->state) {
++    XftColor draw_color;
++    XGlyphInfo info;
++
++    draw_color = pw->label_fg;
++    switch (pw->state)
++      {
++        case pw_check:
++          pw->status_string = strdup("VERIFYING");
++          break;
++        case pw_ok:
++          pw->status_string = strdup("APPROVED");
++          break;
++        case pw_fail:
++	  draw_color = pw->denied_fg;
++          pw->status_string = strdup("DENIED");
++          break;
++        case pw_null:
++        case pw_cancel:
++          pw->status_string = strdup("CANCELLED");
++          break;
++        case pw_time:
++          pw->status_string = strdup("TIMED OUT");
++          break;
++        default:
++          break;
++      }
++    if (pw->status_string) {
++      XftDrawRect (pw->xft_draw, &pw->default_bg,
++   		   pw->frame_max_l + pw->internal_border,
++		   pw->frame_max_t + pw->internal_border,
++		   pw->width - pw->frame_max_l - 2 * pw->internal_border -
++                   pw->frame_max_r,
++		   pw->height - pw->frame_max_t - 2 * pw->internal_border -
++                   pw->frame_max_b);
++
++      XftTextExtentsUtf8 (si->dpy, pw->status_font_aa, (XftChar8 *) pw->status_string, 
++		          strlen(pw->status_string), &info);
++
++      x = (pw->width - pw->frame_max_l - pw->frame_max_r) / 2 + pw->frame_max_l - 
++          info.xOff / 2;
++      y = (pw->height - pw->frame_max_t - pw->frame_max_b) / 2 + pw->frame_max_t +
++          info.height / 2;
++
++      XftDrawStringUtf8 (pw->xft_draw, &draw_color, pw->status_font_aa, 
++		         x, 
++		         y, 
++		         (XftChar8 *) pw->status_string, strlen(pw->status_string));
++      
++      free (pw->status_string);
++    }
++  }
++
+   XSync (si->dpy, False);
+ }
+ 
+@@ -778,6 +997,7 @@
+   passwd_dialog_data *pw = si->pw_data;
+   saver_screen_info *ssi = pw->prompt_screen;
+   Colormap cmap = DefaultColormapOfScreen (ssi->screen);
++  Visual *vis = DefaultVisualOfScreen(ssi->screen);
+   Pixel black = BlackPixelOfScreen (ssi->screen);
+   Pixel white = WhitePixelOfScreen (ssi->screen);
+   XEvent event;
+@@ -828,46 +1048,120 @@
+       XFreeGC (si->dpy, gc);
+     }
+ 
+-  if (pw->heading_label) free (pw->heading_label);
+-  if (pw->body_label)    free (pw->body_label);
+   if (pw->user_label)    free (pw->user_label);
+   if (pw->passwd_label)  free (pw->passwd_label);
+   if (pw->date_label)    free (pw->date_label);
+   if (pw->user_string)   free (pw->user_string);
+   if (pw->passwd_string) free (pw->passwd_string);
+ 
+-  if (pw->heading_font) XFreeFont (si->dpy, pw->heading_font);
+-  if (pw->body_font)    XFreeFont (si->dpy, pw->body_font);
+-  if (pw->label_font)   XFreeFont (si->dpy, pw->label_font);
+-  if (pw->passwd_font)  XFreeFont (si->dpy, pw->passwd_font);
+-  if (pw->date_font)    XFreeFont (si->dpy, pw->date_font);
++  if (pw->label_font_aa)  XftFontClose(si->dpy, pw->label_font_aa);
++  if (pw->passwd_font_aa)  XftFontClose(si->dpy, pw->passwd_font_aa);
++  if (pw->date_font_aa)  XftFontClose(si->dpy, pw->date_font_aa);
++  if (pw->status_font_aa)  XftFontClose(si->dpy, pw->status_font_aa);
+ 
+   if (pw->foreground != black && pw->foreground != white)
+     XFreeColors (si->dpy, cmap, &pw->foreground, 1, 0L);
+   if (pw->background != black && pw->background != white)
+     XFreeColors (si->dpy, cmap, &pw->background, 1, 0L);
+-  if (pw->passwd_foreground != black && pw->passwd_foreground != white)
+-    XFreeColors (si->dpy, cmap, &pw->passwd_foreground, 1, 0L);
+-  if (pw->passwd_background != black && pw->passwd_background != white)
+-    XFreeColors (si->dpy, cmap, &pw->passwd_background, 1, 0L);
+-  if (pw->thermo_foreground != black && pw->thermo_foreground != white)
+-    XFreeColors (si->dpy, cmap, &pw->thermo_foreground, 1, 0L);
+-  if (pw->thermo_background != black && pw->thermo_background != white)
+-    XFreeColors (si->dpy, cmap, &pw->thermo_background, 1, 0L);
+-  if (pw->shadow_top != black && pw->shadow_top != white)
+-    XFreeColors (si->dpy, cmap, &pw->shadow_top, 1, 0L);
+-  if (pw->shadow_bottom != black && pw->shadow_bottom != white)
+-    XFreeColors (si->dpy, cmap, &pw->shadow_bottom, 1, 0L);
+-
+-  if (pw->logo_pixmap)
+-    XFreePixmap (si->dpy, pw->logo_pixmap);
+-  if (pw->logo_pixels)
+-    {
+-      if (pw->logo_npixels)
+-        XFreeColors (si->dpy, cmap, pw->logo_pixels, pw->logo_npixels, 0L);
+-      free (pw->logo_pixels);
+-      pw->logo_pixels = 0;
+-      pw->logo_npixels = 0;
++
++  if (&pw->passwd_fg) XftColorFree (si->dpy, vis, cmap, &pw->passwd_fg);
++  if (&pw->label_fg) XftColorFree (si->dpy, vis, cmap, &pw->label_fg);
++  if (&pw->date_fg) XftColorFree (si->dpy, vis, cmap, &pw->date_fg);
++  if (&pw->denied_fg) XftColorFree (si->dpy, vis, cmap, &pw->denied_fg);
++  if (&pw->entry_bg) XftColorFree (si->dpy, vis, cmap, &pw->entry_bg);
++  if (&pw->default_bg) XftColorFree (si->dpy, vis, cmap, &pw->default_bg);
++  if (&pw->thermo_fg) XftColorFree (si->dpy, vis, cmap, &pw->thermo_fg);
++
++  /* THEME HACK: A macro or array would tidy the following. */
++  if (pw->logo.pixmap)
++    XFreePixmap (si->dpy, pw->logo.pixmap);
++  if (pw->logo.pixels)
++    {
++      if (pw->logo.npixels)
++        XFreeColors (si->dpy, cmap, pw->logo.pixels, pw->logo.npixels, 0L);
++      free (pw->logo.pixels);
++      pw->logo.pixels = 0;
++      pw->logo.npixels = 0;
++    }
++  if (pw->frame_t.pixmap)
++    XFreePixmap (si->dpy, pw->frame_t.pixmap);
++  if (pw->frame_t.pixels)
++    {
++      if (pw->frame_t.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_t.pixels, pw->frame_t.npixels, 0L);
++      free (pw->frame_t.pixels);
++      pw->frame_t.pixels = 0;
++      pw->frame_t.npixels = 0;
++    }
++  if (pw->frame_b.pixmap)
++    XFreePixmap (si->dpy, pw->frame_b.pixmap);
++  if (pw->frame_b.pixels)
++    {
++      if (pw->frame_b.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_b.pixels, pw->frame_b.npixels, 0L);
++      free (pw->frame_b.pixels);
++      pw->frame_b.pixels = 0;
++      pw->frame_b.npixels = 0;
++    }
++  if (pw->frame_l.pixmap)
++    XFreePixmap (si->dpy, pw->frame_l.pixmap);
++  if (pw->frame_l.pixels)
++    {
++      if (pw->frame_l.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_l.pixels, pw->frame_l.npixels, 0L);
++      free (pw->frame_l.pixels);
++      pw->frame_l.pixels = 0;
++      pw->frame_l.npixels = 0;
++    }
++  if (pw->frame_r.pixmap)
++    XFreePixmap (si->dpy, pw->frame_r.pixmap);
++  if (pw->frame_r.pixels)
++    {
++      if (pw->frame_r.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_r.pixels, pw->frame_r.npixels, 0L);
++      free (pw->frame_r.pixels);
++      pw->frame_r.pixels = 0;
++      pw->frame_r.npixels = 0;
++    }
++  if (pw->frame_tl.pixmap)
++    XFreePixmap (si->dpy, pw->frame_tl.pixmap);
++  if (pw->frame_tl.pixels)
++    {
++      if (pw->frame_tl.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_tl.pixels, pw->frame_tl.npixels, 0L);
++      free (pw->frame_tl.pixels);
++      pw->frame_tl.pixels = 0;
++      pw->frame_tl.npixels = 0;
++    }
++  if (pw->frame_tr.pixmap)
++    XFreePixmap (si->dpy, pw->frame_tr.pixmap);
++  if (pw->frame_tr.pixels)
++    {
++      if (pw->frame_tr.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_tr.pixels, pw->frame_tr.npixels, 0L);
++      free (pw->frame_tr.pixels);
++      pw->frame_tr.pixels = 0;
++      pw->frame_tr.npixels = 0;
++    }
++  if (pw->frame_bl.pixmap)
++    XFreePixmap (si->dpy, pw->frame_bl.pixmap);
++  if (pw->frame_bl.pixels)
++    {
++      if (pw->frame_bl.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_bl.pixels, pw->frame_bl.npixels, 0L);
++      free (pw->frame_bl.pixels);
++      pw->frame_bl.pixels = 0;
++      pw->frame_bl.npixels = 0;
++    }
++  if (pw->frame_br.pixmap)
++    XFreePixmap (si->dpy, pw->frame_br.pixmap);
++  if (pw->frame_br.pixels)
++    {
++      if (pw->frame_br.npixels)
++        XFreeColors (si->dpy, cmap, pw->frame_br.pixels, pw->frame_br.npixels, 0L);
++      free (pw->frame_br.pixels);
++      pw->frame_br.pixels = 0;
++      pw->frame_br.npixels = 0;
+     }
+ 
+   if (pw->save_under)
+@@ -1202,6 +1496,7 @@
+ 	pw->state = pw_null;
+       else
+         {
++          pw->state = pw_check;
+           update_passwd_window (si, "Checking...", pw->ratio);
+           XSync (si->dpy, False);
+           if (passwd_valid_p (typed_passwd, p->verbose_p))
+@@ -1254,7 +1549,7 @@
+ 
+   switch (si->pw_data->state)
+     {
+-    case pw_ok:   msg = 0; break;
++    case pw_ok:   msg = "Success!"; break;
+     case pw_null: msg = ""; break;
+     case pw_time: msg = "Timed out!"; break;
+     default:      msg = "Sorry!"; break;
+--- xscreensaver-4.16.orig/driver/theme_frame_tr.xpm
++++ xscreensaver-4.16/driver/theme_frame_tr.xpm
+@@ -0,0 +1,28 @@
++/* XPM */
++static char * theme_frame_tr_xpm[] = {
++"5 5 20 1",
++" 	c #000000",
++".	c #4A4131",
++"+	c #7B654A",
++"@	c #846D52",
++"#	c #8C7152",
++"$	c #8C7552",
++"%	c #8C755A",
++"&	c #94795A",
++"*	c #9C7D5A",
++"=	c #9C8263",
++"-	c #A58663",
++";	c #A58A63",
++">	c #A58A6B",
++",	c #AD8E6B",
++"'	c #B5926B",
++")	c #B59673",
++"!	c #BD9A73",
++"~	c #BD9E73",
++"{	c #C69E7B",
++"]	c #EFDFCE",
++"     ",
++"]]]] ",
++"{{{+ ",
++"~~~+ ",
++"+!!+ "};
+--- xscreensaver-4.16.orig/driver/theme_logo.xpm
++++ xscreensaver-4.16/driver/theme_logo.xpm
+@@ -0,0 +1,145 @@
++/* XPM */
++static char * theme_logo_xpm[] = {
++"221 51 91 1",
++" 	c None",
++".	c #000100",
++"+	c #070A06",
++"@	c #0F110E",
++"#	c #121411",
++"$	c #181917",
++"%	c #1D1E1C",
++"&	c #222321",
++"*	c #2C2E2B",
++"=	c #313330",
++"-	c #363735",
++";	c #3B3C3A",
++">	c #3E403D",
++",	c #344832",
++"'	c #3A463A",
++")	c #344C30",
++"!	c #434542",
++"~	c #414F41",
++"{	c #494B48",
++"]	c #515350",
++"^	c #485C45",
++"/	c #505854",
++"(	c #555654",
++"_	c #565E5A",
++":	c #5B5D5B",
++"<	c #516555",
++"[	c #616360",
++"}	c #606862",
++"|	c #5D6B5E",
++"1	c #656764",
++"2	c #5E735B",
++"3	c #6B6C6A",
++"4	c #4C824F",
++"5	c #6F716E",
++"6	c #6E7B70",
++"7	c #767775",
++"8	c #638A64",
++"9	c #7B7D7A",
++"0	c #738472",
++"a	c #828381",
++"b	c #7C897D",
++"c	c #878986",
++"d	c #8C8D8A",
++"e	c #7D9D7E",
++"f	c #89968A",
++"g	c #7AA178",
++"h	c #919390",
++"i	c #899D88",
++"j	c #979996",
++"k	c #9B9D9A",
++"l	c #97A397",
++"m	c #A2A0A4",
++"n	c #A0A29F",
++"o	c #8DB58B",
++"p	c #A4A6A3",
++"q	c #A9ABA7",
++"r	c #90BE8B",
++"s	c #99BA99",
++"t	c #A5B2A6",
++"u	c #ADAFAC",
++"v	c #A6BAA3",
++"w	c #AAB8AC",
++"x	c #B2B4B1",
++"y	c #AFBBAF",
++"z	c #B8B5BA",
++"A	c #B9BBB8",
++"B	c #B2C0B4",
++"C	c #BDBFBC",
++"D	c #BAC2BA",
++"E	c #B4CCB0",
++"F	c #C5C3C7",
++"G	c #C3C5C2",
++"H	c #B8D1B8",
++"I	c #C9CBC8",
++"J	c #C4D2C5",
++"K	c #CED0CD",
++"L	c #D3D5D2",
++"M	c #D6D4D8",
++"N	c #CEDBCE",
++"O	c #DCD9DE",
++"P	c #DBDDDA",
++"Q	c #E0DEE2",
++"R	c #DFE1DE",
++"S	c #DCE6DB",
++"T	c #E5E7E4",
++"U	c #EDEFEB",
++"V	c #F1F3F0",
++"W	c #F7F9F6",
++"X	c #FEFBFF",
++"Y	c #FCFEFB",
++"Z	c #FEFFFC",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWTGqh7({dRZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZTxc(-$.....3VXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWC9;$........%mXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZUq3-@.........%aFXYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZPAAAIZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZPAAAIZZZZZZZZZZZZZZZZZZZZZZZZIAAAPZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZTn(&@........-7zQXZZYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXa...!ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXa...!ZZZZZZZZZZZZZZZZZZZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYA3&$.......$(mMXXZZZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXd...!ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXd...!ZZZZZZZZZZZZZZZZZZZZZZZX!...aZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZLa;$.......>7zQUVYZYXYYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXa...!XZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXa...!XZZZZZZZZZZZZZZZZZZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZu(%+.....$(azMQVXXXYYXZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYd...!ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYd...!ZZZZZZZZZZZZZZZZZZZZZZZX!...dZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWp($.....$;3dzGLRVVZZXXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXQAAzMYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXa...!XZZZZZZZZZZZZZZZZZZZZZZX!...cYZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZZYXh;$....#-:7hmzzFMQQVWXZYYXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXZZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYd...!ZZZZZZZZZZZZZZZZZZZZZZZX!...aZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZZXn;$....$-:7ahmnqACKPTXWZYYYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYYZZYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXc...!XZZZZZZZZZZZZZZZZZZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZZZx($...+%-(:77adhmqzFIQQVWXYXZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXZZZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZYa...!ZZZZZZZZZZZZZZZZZZZZZZZX!...dZZZZZZZZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZZZP3&...+$-!(:337adhmpxFILMFAmc7[(>*{]dIZZZZZZZZZZZZZZZPc1!!!!!ZZZZZZZIjc(!!!!!ccIZZZZZZZZZZZUjc!!!!!!!!!!!!!!!!jZZZZZj!!!7ZZZZZZZZZUjc!!!!!!!!!!!!1cUZZZZZXc...@!!!!!!!!!!!3cPZZZZZZj!!!@...&!!!!!!7ZZZ",
++"ZZZZZZZZZZZZZZZZZZZZZWj-...*]*>{((:337admmqzCzFzuqma7:(;*%$..&qZZZZZZZZZZZU1........ZZZZZj&............&jZZZZZZZZF&..................aZZZZXa...!ZZZZZZZU1.................&IZZZZXd..................7UZZZXa..............!ZZZ",
++"ZZZZZZZZZZZZZZZZZZZZF($..%azf'](:(337aahhmqzAAAAxqmd73(;-%$....1ZZZZZZZZZF$.........ZZZU(................(UZZZZZI#...................cZZZZXc...!ZZZZZZF-...................!ZZZZXc...................=UZZXc..............!ZZZ",
++"ZZZZZZZZZZZZZZZZZZWh*..+[mOP0'_:[(337addmmqxAzAAzAKMOMFzm($.....1ZZZZZZZU@.....&(cccZZV-.....@!ccc1=......!ZZZZX!....&7cccccccccccdadzZZZZXd...!ZZZZZU#.....=7cccccccc7@....UZZZYa...&ccccccccc7=.....(ZZZzccc&...!ccdadamZZZ",
++"ZZZZZZZZZZZZZZZZZM3$..;dIPRG<!_11:337aahmmzzAAFMXXXWXXZXXXVd@....cZZZZZX3....&zXXXXZXX7....&mXXXXXXZPc.....cZZZM....3XXXXXXXXXXXXXXXZZZZZZXc...!XZZZX!....=zXXXXXXXXXXXA....AZZZXc...!XXXXXXXXXXZA@....AZZXXXX!...aXXXXXZZZZZ",
++"ZZZZZZZZZZZZZZZZG>..+[zOOMPI^~||}(3dmzmmhnqxAzKWWWYXZZXZZYXXM@...@UZZZZZ....@VZZZZZZZP....-QZZZZZZZZXXj....@UZZc....VZZZZZZZZZZZZZZZZZZZZZYa...!ZZZYm....-VZZZZZZZZZZZZX....zZZZXd...!ZZZZZZZZZZZXz....7ZZZZZZ!...dZZZZZXXXZZ",
++"ZZZZZZZZZZZZZZYm-..*7zLKLLPI2~|6b[aFFFIFzmqzAFPWYYZYXZZZZZZZXA....jZZXXA....mWZZZZZZX1...@RXZZZZZZZZZXZc....aXXc...!XZZZZZZZZZZZZZZZZZZZZZXc...!XZXZ]....OZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZ!...!ZZZZZX!...cYZZZZZZZZZ",
++"ZZZZZZZZZZZZZWd$..!hFKIMMOQL6,|qGqmFCGFIIAzzFIQWYYXYYYXZZYYXZX!...!ZZZYa....UXZZZZZZX@...7XZZZZZZZZZZZXV@...!ZYa...!ZZZZZZZZZZZZZZZZZZZZZZXd...!ZZZY....1ZZZZZZZZZZZZZZZ...+zZZZYa...!ZZZZZZZZZZZZXa...@ZZZZZX!...aZZZZZZZZZZ",
++"ZZZZZZZZZZZZVa..@:mFFFIKKLQPl)2BRNxmzFFKMKxAGGTXXYXZYYZZZXZZZXj....ZZZXc...+XZZZZZZZQ....KZZZZZZZZZZZZXX7...@XXc...@XZZZZZZZZZZZZZZZZZZZZZXc...!XZXF+...qZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZXA....ZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZZZZZZYVa+.%3mzxGIFIKMKMG0ivNNNljuAFFKDDDLVYYZZXXZXZZZZZZZQ....AZZXd...!ZZZZZZZZA....ZZZZZZZZZZZZZZZm....ZZz....AZZZZZZZZZZZZZZZZZZZZZYa...!ZZZA....VZZZZZZZZZZZZZZZ...+zZZZXd...!ZZZZZZZZZZZZZz....ZZZZZX!...dZZZZZZZZZZ",
++"ZZZZZZZZZZX7..%7mqmAFCFFGFIFMGLJJNSEeilwDyyDDTWWXYYZXZZZZZZZZZZ....qZZXc...!XZZZZZZXc...&XZZZZZZZZZZZZZZC....ZZU@...@AZZZZZZZZZZZZZZZZZZZZXc...!XZXc....ZZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cYZZZZZZZZZ",
++"ZZZZZZZZZWh..$3mmmqzxAAAACCCGFDJssHErsssvvyAMVXXWYZZZZXXZZZZZXZ!...aZZYa...!ZZZZZZZYa...!ZZZZZZZZZZZZZZXa....ZZXd.....=cPZZZZZZZZZZZZZZZZZXd...!ZZXa...!XZZZZZZZZZZZZZZZ...+zZZZYa...!ZZZZZZZZZZZZZz....ZZZZZX!...aZZZZZZZZZZ",
++"ZZZZZZZXXm..$:djhmkzmzqzzmzzAAAte4oorossBvBLYYYYXXXZZZWUTMzRZZX!...cZZXc...!XZZZZZZXc.......................&ZZXY1.......@(cAZZZZZZZZZZZZZXc...!XZXc...!ZZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZZZZL%.$(addddhkqmmnqqqquzzqi848eeiliqzLQRRPPLLIAma:-&:MZZX!...dZZXd...!ZZZZZZZXd.......................7ZZZZXA&..........!7qUZZZZZZZZYa...!ZZXd...!ZZZZZZZZZZZZZZZZ...+zZZZXd...!ZZZZZZZZZZZZZz....ZZZZZX!...dZZZZZZZZZZ",
++"ZZZZZZZT{..{777addddjkmnmhaaa9753:,,'''!!]((!!;;;*&$&*-(dMZZZZX!...cYZXc...!XZZZZZZXc......................!VZZZZXXZI7=...........=cUZZZZZXc...!XZXc...!YZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cYZZZZZZZZZ",
++"ZZZZZZX7..-3377aaaadaa93]-&$$$#$$$%$%&&#....;;{:3dmFOVXXXZXZZZX!...aZZYa...!ZZZZZZZYa...=AAAAAAAAAAAAAAAAAQXXXZZZZZZXXXUqc!.........@jZZZZXd...!ZZYa...!ZZZZZZZZZZZZZZZZ...+zZZZYa...!ZZZZZZZZZZZZZz....ZZZZZX!...aZZZZZZZZZZ",
++"ZZZZZZM$.%(333377a773{*&*;(33admmmzzAFK5...;XXXXXYZYXXYZYZZZZZX!...cZZXc...!XZZZZZZXc...!XXXXXXXXXXXXXXXXZZZZZZZZZZZZZXXXXZZIc(@......jZZZXc...!XZXc...-ZZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cZZZZZZZZZZ",
++"ZZZZZV(..{((:3333({-!7zOXXXXXXXXZZZZYYYz....YYZZZZXYZZZZYZZZZZZ....zZZXd...!ZZZZZZZXd...!ZZZZZZZZZZZZZZZZYZZZZZZZZZZZZZZZZZZXXXXI(....@UZZYa...!ZZZz....XZZZZZZZZZZZZZZZ...+zZZZXd...!ZZZZZZZZZZZZZz....ZZZZZX!...dZZZZZZZZZZ",
++"ZZZZXz..-(((((((;;3FXXYYZYZZZZZZZZZZZYZI....PZZZZZZZZZZZZZZZZZP....IZZXc...!XZZZZZZXq....ZZZZZZZZZZZZZZZXZZZZZZZZZZZZZZZZZZZZZZXXZc....qZZXc...!XZZA....PZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cYZZZZZZZZZ",
++"ZZZZY>.@-;;;-*-:mXXXYYXZZZZZZZZZZZZZZZZX....mZZZZZZZZZZZZZZZZYm....XZZYa...!ZZZZZZZZz....PZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX@...aZZXd...!ZZXV...+mZZZZZZZZZZZZZZZ...+zZZZYa...!ZZZZZZZZZZZZZz....ZZZZZX!...aZZZZZZZZZZ",
++"ZZZXF$...@.$-dOXYZZZZZZZZZZZZZZZZZZZZZZZ(...!ZZZZZZZZZZZZZZZXZ=...(ZZZXc...!XZZZZZZZP....jZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX!...cZZXc...!XZXZ@...1ZZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZX!...cZZZZZZZZZZ",
++"ZZZZ7.%--(aFXXYZXXZZZZZZZZZZZZZZZZZZZZZYm....mZZZZZZZZZZZZZZZa...+mZZZXd...!ZZZZZZZZX&...&ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX-...dZZYa...!ZZZX(...$UZZZZZZZZZZZZZZ...+zZZZXd...!ZZZZZZZZZZZZZz....ZZZZZX(...!ZZZZZZZZZZ",
++"ZZZX*.FXXXXZZZZZZZZZZZZZZZZZZZZZZZZZZZXYZ&...@AZZZZZZZZZZZZZz#...&ZZZZXc...!XZZZZZZZXc....1ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZV....cYZXc...!XZZXq....7ZZZZZZZZZZZZZZ....AZZZXc...!XZZZZZZZZZZZZA....ZZZZZXc...@VZZZZZZZZZ",
++"ZZZF.(QYYYYXZZZZZZZZZZZZZZZZZZZZZZZZZZZZXm.....7UZZZZZZZZZU7.....qZZZZYa...!ZZZZZZZZZV@....(PZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX[....zZZXd...!ZZZZX&....cZZZZZZZZZZZZZ...+zZZZYa...!ZZZZZZZZZZZZZz....ZZZZZZm....[XZZZZZZZZ",
++"ZZZ7.xXXXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXZZZ1......!cjAAAjc!......3XZZZZXc...!XZZZZZZZXXj......(ccccccccccccccPZZZccccccccccccccca9&....#ZZZXc...!XZZZXA.....@1ccccccccccc....AZZZXc...!XZZZZZZZZZZZZA....ZZZZYYU.....&(ccccPZZ",
++"ZYX%$QZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX7...................7XZZZZZXd...!ZZZZZZZZZZXj....................zZZZ......................aZZZYa...!ZZZZZXj....................+zZZZXd...!ZZZZZZZZZZZZZz....ZZZZXXXc..........zZZ",
++"XZz.(VZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXZA!...............!zZZZZZZZXc...!XZZZZZZZZZXZq&..................AZZZ.....................7XZZZXc...!XZZZZXZA&...................AZZZXc...!XZZZZZZZZZZZZA....ZZZZZZXZc.........AZZ",
++"ZY9.dXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXPc(!.......!(cPXZZZZZZZZZm!!!7ZZZZZZZZZZZZXXqa!!!!!!!!!!!!!!!!MZZX!!!!!!!!!!!!!!!!!!(cPXZZZZYm!!!7ZZZZZZZXXqc!!!!!!!!!!!!!....QZZZZm!!!7ZZZZZZZZZZZZYM!!!!ZZZZZZZZXPc(!!!!!!MZZ",
++"YX;.FYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXXXZZZZZZZXXXXZZZZZZZZZYXXXXXZZZZZZZZZZZZZZXXXXXXXXXXXXXXXXXXZZZZXXXXXXXXXXXXXXXXXXXXXZZZZZXXXXXXZZZZZZZZZXXXXXXXXXXXXXXXq....ZZZYXXXXXZZZZZZZZZZZZXZXXXXZZZZZZZZZXXXXXXXXXZZZZ",
++"ZT$.RYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX3...=ZZZXZZZZZZZZZZZZZZZZZZXZZZZZZZZZZZZZZZZZZZZZZXXXZ",
++"Xz.=VYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZO....1ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"Zc.{VXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZP=....zZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X3.:XZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZI7$....!ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X!.3VXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ7!!!!!!!!!!!!.......=VZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X*.3WZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX!..................!VXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X&.7WZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZX!................(zXXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X%.{VZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXmccccccccccccccAXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"Z..aXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXXXXXXXXXXXXXXZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
++"X3mRZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZXXYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"};
+--- xscreensaver-4.16.orig/driver/theme_frame_t.xpm
++++ xscreensaver-4.16/driver/theme_frame_t.xpm
+@@ -0,0 +1,11 @@
++/* XPM */
++static char * theme_frame_t_xpm[] = {
++"17 5 3 1",
++" 	c #000000",
++".	c #EFDFCE",
++"+	c #D6C3AD",
++"                 ",
++".................",
++"+++++++++++++++++",
++"+++++++++++++++++",
++"                 "};
+--- xscreensaver-4.16.orig/driver/theme_frame_b.xpm
++++ xscreensaver-4.16/driver/theme_frame_b.xpm
+@@ -0,0 +1,11 @@
++/* XPM */
++static char * theme_frame_b_xpm[] = {
++"17 5 3 1",
++" 	c #000000",
++".	c #7B654A",
++"+	c #D6C3AD",
++"                 ",
++"+++++++++++++++++",
++"+++++++++++++++++",
++".................",
++"                 "};
+--- xscreensaver-4.16.orig/driver/theme_frame_l.xpm
++++ xscreensaver-4.16/driver/theme_frame_l.xpm
+@@ -0,0 +1,37 @@
++/* XPM */
++static char * theme_frame_l_xpm[] = {
++"5 25 9 1",
++" 	c #000000",
++".	c #C6AE9C",
++"+	c #C6B29C",
++"@	c #C6B6A5",
++"#	c #CEB6A5",
++"$	c #CEBAA5",
++"%	c #CEBEAD",
++"&	c #D6C3AD",
++"*	c #EFDFCE",
++" *.. ",
++" *++ ",
++" *@@ ",
++" *## ",
++" *$$ ",
++" *%% ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& ",
++" *&& "};
+--- xscreensaver-4.16.orig/driver/theme_frame_tl.xpm
++++ xscreensaver-4.16/driver/theme_frame_tl.xpm
+@@ -0,0 +1,27 @@
++/* XPM */
++static char * theme_frame_tl_xpm[] = {
++"5 5 19 1",
++" 	c #000000",
++".	c #4A4131",
++"+	c #846D52",
++"@	c #8C7152",
++"#	c #8C7552",
++"$	c #8C755A",
++"%	c #94795A",
++"&	c #9C7D5A",
++"*	c #9C8263",
++"=	c #A58663",
++"-	c #A58A63",
++";	c #A58A6B",
++">	c #AD8E6B",
++",	c #B5926B",
++"'	c #B59673",
++")	c #BD9A73",
++"!	c #BD9E73",
++"~	c #C69E7B",
++"{	c #EFDFCE",
++"     ",
++" {{{{",
++" {~~~",
++" {!!!",
++" {))+"};
+--- xscreensaver-4.16.orig/driver/theme_frame_r.xpm
++++ xscreensaver-4.16/driver/theme_frame_r.xpm
+@@ -0,0 +1,31 @@
++/* XPM */
++static char * theme_frame_r_xpm[] = {
++"5 25 3 1",
++" 	c #000000",
++".	c #7B654A",
++"+	c #D6C3AD",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. ",
++" ++. "};
+--- xscreensaver-4.16.orig/driver/theme.h
++++ xscreensaver-4.16/driver/theme.h
+@@ -0,0 +1,75 @@
++/* THE XSCREENSAVER LOCK WINDOW THEME HEADER */
++/* Alan Swanson <swanson@ukfsn.org>          */
++/* THEME - Neuropol Green On Black           */
++
++/* General foreground and background colours. */
++
++#define THEME_FG	"#a2a0a4"
++#define THEME_BG	"#FFFFFF"
++
++/* The username and password labels. */
++
++#define THEME_FONT_LABEL	"sans-10:encoding=utf-8"
++#define THEME_FG_LABEL		"#a2a0a4"
++#define THEME_BG_LABEL		"#000000"
++
++/* The usernane and password field. */
++
++#define THEME_FONT_PASSWD	"sans-10:encoding=utf-8"
++#define THEME_FG_PASSWD		"#565248"
++#define THEME_BG_PASSWD		"#EFEFEF"
++
++/* The date field. */
++
++#define THEME_FONT_DATE		"sans-12:bold"
++#define THEME_FG_DATE		"#a2a0a4"
++#define THEME_BG_DATE		"#000000"
++
++/* The countdown thermometer. Note the background is the outline box, not
++   the background. */
++
++#define THEME_FG_THERMO	"#D9BB7A"
++#define THEME_BG_THERMO	"#515151"
++
++/* The width of the countdown thermometer. */
++
++#define THEME_THERMO_WIDTH      10
++
++/* The status shown when the password is entered. Note unlike the pasword
++   maxmimum string length check, this font size is not taken into account
++   when defining window size. */
++
++#define THEME_FONT_STATUS       "sans-20:bold"
++#define THEME_FG_DENIED		"#CB1B1B"
++
++/* Spacing between frame and outside edge of logo, test and thermometer.
++   Remember to take account of background colours in frames and that
++   pixmaps are aligned on outside edge.
++   
++   For example, if the corner pixmap is 15x15 with inner 3x3 of background
++   colour (allowing for corner effects) and the edge pixmaps are 12x20 and
++   20x12 then instead of a border of 15 select 12. */
++   
++#define THEME_INTERNAL_BORDER	15
++
++/* Spacing between logo to label, label to password and password to
++   thermometer. */
++   
++#define THEME_INTERNAL_SPACER 8	
++
++/* Define these if the repeating pixmaps need to be drawn complete,
++   i.e. not cut-off on last image. Only define only one opposing side as
++   top and bottom widths and right and left heights will usually be same
++   size. */
++   
++#define THEME_TOP_FIT
++#define THEME_LEFT_FIT
++/* #define THEME_BOTTOM_FIT */
++/* #define THEME_RIGHT_FIT */
++
++/* Define these if the side pixmaps are to be centred once and not repeated. */
++
++/* #define THEME_TOP_CENTRED */
++/* #define THEME_BOTTOM_CENTRED */
++/* #define THEME_LEFT_CENTRED */
++/* #define THEME_RIGHT_CENTRED */
+--- xscreensaver-4.16.orig/driver/theme_frame_bl.xpm
++++ xscreensaver-4.16/driver/theme_frame_bl.xpm
+@@ -0,0 +1,14 @@
++/* XPM */
++static char * theme_frame_bl_xpm[] = {
++"5 5 6 1",
++" 	c #000000",
++".	c #735D4A",
++"+	c #7B654A",
++"@	c #D6C3AD",
++"#	c #EFDFCE",
++"$	c #EFEFEF",
++" #@@.",
++" #@@@",
++" #@@@",
++" $+++",
++"     "};
+--- xscreensaver-4.16.orig/driver/theme_frame_br.xpm
++++ xscreensaver-4.16/driver/theme_frame_br.xpm
+@@ -0,0 +1,12 @@
++/* XPM */
++static char * theme_frame_br_xpm[] = {
++"5 5 4 1",
++" 	c #735D4A",
++".	c #D6C3AD",
++"+	c #7B654A",
++"@	c #000000",
++" ..+@",
++"...+@",
++"...+@",
++"++++@",
++"@@@@@"};
+--- xscreensaver-4.16.orig/driver/Makefile.in
++++ xscreensaver-4.16/driver/Makefile.in
+@@ -66,7 +66,7 @@
+ X_CFLAGS	= @X_CFLAGS@
+ X_LIBS		= @X_LIBS@
+ X_PRE_LIBS	= @X_PRE_LIBS@
+-X_EXTRA_LIBS	= @X_EXTRA_LIBS@
++X_EXTRA_LIBS	= -lXft @X_EXTRA_LIBS@
+ XMU_LIBS	= @XMU_LIBS@
+ XPM_LIBS	= @XPM_LIBS@
+ 
+--- xscreensaver-4.16.orig/hacks/glx/Makefile.in
++++ xscreensaver-4.16/hacks/glx/Makefile.in
+@@ -14,12 +14,10 @@
+ exec_prefix	= @exec_prefix@
+ bindir		= @bindir@
+ mandir		= @mandir@
+-# maybe this should be 6 (games)?
+-mansuffix	= 1
+-manNdir		= $(mandir)/man$(mansuffix)
+ 
+ # maybe this should be 6 (games)?
+-mansuffix	= 1
++man6dir		= $(mandir)/man6
++mansuffix	= 6x
+ 
+ CC		= @CC@
+ CFLAGS		= @CFLAGS@
+@@ -215,7 +213,7 @@
+ 
+ install-man: $(MEN)
+ 	@men="$(MEN)" ;							\
+-	 idir="$(install_prefix)$(manNdir)" ;				\
++	 idir="$(install_prefix)$(man6dir)" ;				\
+ 	 if [ ! -d $$idir ]; then					\
+ 	  $(INSTALL_DIRS) $$idir ;					\
+ 	 fi ;								\
+@@ -245,7 +243,7 @@
+ 
+ uninstall-man:
+ 	@men="$(MEN)" ;							\
+-	 idir="$(install_prefix)$(manNdir)" ;				\
++	 idir="$(install_prefix)$(man6dir)" ;				\
+ 	 for man in $$men; do						\
+ 	   instname=`echo $$man | sed 's/\.man$$/\.$(mansuffix)/'` ;	\
+ 	   echo rm -f $$idir/$$instname ;				\
+--- xscreensaver-4.16.orig/hacks/Makefile.in
++++ xscreensaver-4.16/hacks/Makefile.in
+@@ -14,8 +14,8 @@
+ bindir		= @bindir@
+ mandir		= @mandir@
+ # maybe this should be 6 (games)?
+-mansuffix	= 1
+-manNdir		= $(mandir)/man$(mansuffix)
++man6dir		= $(mandir)/man6
++mansuffix	= 6x
+ 
+ CC		= @CC@
+ CFLAGS		= @CFLAGS@
+@@ -291,15 +291,15 @@
+ 
+ install-man: $(MEN)
+ 	@men="$(MEN)" ;							\
+-	if [ ! -d $(install_prefix)$(manNdir) ]; then			\
+-	  $(INSTALL_DIRS) $(install_prefix)$(manNdir) ;			\
++	if [ ! -d $(install_prefix)$(man6dir) ]; then			\
++	  $(INSTALL_DIRS) $(install_prefix)$(man6dir) ;			\
+ 	 fi ;								\
+ 	for man in $$men; do						\
+ 	  instname=`echo $$man | sed 's/\.man$$/\.$(mansuffix)/'` ;	\
+ 	  echo $(INSTALL_DATA) $(srcdir)/$$man				\
+-	   $(install_prefix)$(manNdir)/$$instname ;			\
++	   $(install_prefix)$(man6dir)/$$instname ;			\
+ 	  $(INSTALL_DATA) $(srcdir)/$$man				\
+-	    $(install_prefix)$(manNdir)/$$instname ;			\
++	    $(install_prefix)$(man6dir)/$$instname ;			\
+ 	done
+ 
+ install-xml:
+@@ -324,8 +324,8 @@
+ 	@men="$(MEN)" ;							\
+ 	for man in $$men; do						\
+ 	  instname=`echo $$man | sed 's/\.man$$/\.$(mansuffix)/'` ;	\
+-	  echo rm -f $(install_prefix)$(manNdir)/$$instname ;		\
+-	  rm -f $(install_prefix)$(manNdir)/$$instname ;		\
++	  echo rm -f $(install_prefix)$(man6dir)/$$instname ;		\
++	  rm -f $(install_prefix)$(man6dir)/$$instname ;		\
+ 	done
+ 
+ uninstall-xml:
+--- xscreensaver-4.16.orig/utils/resources.c
++++ xscreensaver-4.16/utils/resources.c
+@@ -129,6 +129,52 @@
+   return 0.0;
+ }
+ 
++unsigned int
++parse_pixel_resource (char *s, Display *dpy, Colormap cmap)
++{
++  XColor color;
++  char *s2;
++  Bool ok = True;
++  if (!s) goto DEFAULT;
++
++  for (s2 = s + strlen(s) - 1; s2 > s; s2--)
++    if (*s2 == ' ' || *s2 == '\t')
++      *s2 = 0;
++    else
++      break;
++
++  if (! XParseColor (dpy, cmap, s, &color))
++    {
++      fprintf (stderr, "%s: can't parse color %s", progname, s);
++      ok = False;
++      goto DEFAULT;
++    }
++  if (! XAllocColor (dpy, cmap, &color))
++    {
++      fprintf (stderr, "%s: couldn't allocate color %s", progname, s);
++      ok = False;
++      goto DEFAULT;
++    }
++  return color.pixel;
++ DEFAULT:
++  {
++    if (!ok)
++      fprintf (stderr, ": using black.\n");
++    color.flags = DoRed|DoGreen|DoBlue;
++    color.red = color.green = color.blue = 0;
++    if (XAllocColor (dpy, cmap, &color))
++      return color.pixel;
++    else
++      {
++        fprintf (stderr, "%s: couldn't allocate black either!\n", progname);
++        /* We can't use BlackPixel/WhitePixel here, because we don't know
++           what screen we're allocating on (only an issue when running inside
++           the xscreensaver daemon: for hacks, DefaultScreen is fine.)
++         */
++        return 0;
++      }
++  }
++}
+ 
+ unsigned int
+ get_pixel_resource (char *res_name, char *res_class,
+--- xscreensaver-4.16.orig/utils/logo.c
++++ xscreensaver-4.16/utils/logo.c
+@@ -27,6 +27,11 @@
+    you didn't write; please don't alter its logo either.
+  */
+ 
++/* THEME HACK: Reasonable enough, but the lock window is bloody ugly and
++   I cannot stand to look at it anymore. Replacing the lock window does not
++   prevent people knowing that it is xscreensaver running.
++ */
++
+ #include "utils.h"
+ #include "resources.h"
+ #include "visual.h"
+@@ -242,3 +247,50 @@
+     }
+   return p;
+ }
++
++
++
++/* Returns a pixmap of the XPM data passed.
++ */
++Pixmap
++xscreensaver_xpm  (Screen *screen, Visual *visual,
++                   Drawable drawable, Colormap cmap,
++                   unsigned long background_color,
++                   unsigned long **pixels_ret, int *npixels_ret,
++                   Pixmap *mask_ret,
++                   const char * const *xpm_data)
++{
++  Display *dpy = DisplayOfScreen (screen);
++  int depth = visual_depth (screen, visual);
++  int iw, ih;
++  XImage *image;
++  Pixmap p = 0;
++  unsigned char *mask = 0;
++
++  image = parse_xpm_data (dpy, visual, cmap, depth, background_color,
++                          xpm_data,
++                          &iw, &ih, pixels_ret, npixels_ret,
++                          (mask_ret ? &mask : 0));
++
++  if (image)
++    {
++      XGCValues gcv;
++      GC gc;
++      p = XCreatePixmap (dpy, drawable, iw, ih, depth);
++      gc = XCreateGC (dpy, p, 0, &gcv);
++      XPutImage (dpy, p, gc, image, 0, 0, 0, 0, iw, ih);
++      free (image->data);
++      image->data = 0;
++      XDestroyImage (image);
++      XFreeGC (dpy, gc);
++
++      if (mask_ret && mask)
++        {
++          *mask_ret = (Pixmap)
++            XCreatePixmapFromBitmapData (dpy, drawable, (char *) mask,
++                                         iw, ih, 1L, 0L, 1);
++          free (mask);
++        }
++    }
++  return p;
++}
+--- xscreensaver-4.16.orig/utils/resources.h
++++ xscreensaver-4.16/utils/resources.h
+@@ -17,6 +17,7 @@
+ extern Bool get_boolean_resource (char*,char*);
+ extern int get_integer_resource (char*,char*);
+ extern double get_float_resource (char*,char*);
++extern unsigned int parse_pixel_resource (char*,Display*,Colormap);
+ extern unsigned int get_pixel_resource (char*,char*,Display*,Colormap);
+ extern unsigned int get_minutes_resource (char*,char*);
+ extern unsigned int get_seconds_resource (char*,char*);
+@@ -29,5 +30,12 @@
+                    unsigned long **pixels_ret, int *npixels_ret,
+                    Pixmap *mask_ret,
+                    Bool big_p);
++extern Pixmap
++xscreensaver_xpm  (Screen *screen, Visual *visual,
++                   Drawable drawable, Colormap cmap,
++                   unsigned long background_color,
++                   unsigned long **pixels_ret, int *npixels_ret,
++                   Pixmap *mask_ret,
++                   const char * const *xpm_data);
+ 
+ #endif /* __XSCREENSAVER_RESOURCES_H__ */
