@@ -1,33 +1,63 @@
-inotify, bitches.
+inotify, bitches
 
 Signed-off-by: Robert Love <rml@novell.com>
 
+ arch/sparc64/Kconfig       |   13 
  drivers/char/Kconfig       |   13 
  drivers/char/Makefile      |    2 
- drivers/char/inotify.c     | 1072 +++++++++++++++++++++++++++++++++++++++++++++
+ drivers/char/inotify.c     | 1053 +++++++++++++++++++++++++++++++++++++++++++++
  drivers/char/misc.c        |   14 
- fs/attr.c                  |   73 ++-
- fs/file_table.c            |    7 
+ fs/attr.c                  |   34 -
+ fs/compat.c                |   14 
+ fs/file_table.c            |    4 
  fs/inode.c                 |    3 
- fs/namei.c                 |   36 +
- fs/open.c                  |    5 
- fs/read_write.c            |   33 +
- fs/super.c                 |    2 
+ fs/namei.c                 |   38 -
+ fs/open.c                  |    9 
+ fs/read_write.c            |   28 -
+ fs/super.c                 |    3 
  include/linux/fs.h         |    7 
- include/linux/inotify.h    |  150 ++++++
+ include/linux/fsnotify.h   |  235 ++++++++++
+ include/linux/inotify.h    |  118 +++++
  include/linux/miscdevice.h |    5 
  include/linux/sched.h      |    2 
  kernel/user.c              |    2 
- 16 files changed, 1387 insertions(+), 39 deletions(-)
+ 19 files changed, 1522 insertions(+), 75 deletions(-)
 
+diff -urN linux-2.6.10/arch/sparc64/Kconfig linux/arch/sparc64/Kconfig
+--- linux-2.6.10/arch/sparc64/Kconfig	2004-12-24 16:35:25.000000000 -0500
++++ linux/arch/sparc64/Kconfig	2005-02-01 12:24:26.000000000 -0500
+@@ -88,6 +88,19 @@
+ 	bool
+ 	default y
+ 
++config INOTIFY
++	bool "Inotify file change notification support"
++	default y
++	---help---
++	  Say Y here to enable inotify support and the /dev/inotify character
++	  device.  Inotify is a file change notification system and a
++	  replacement for dnotify.  Inotify fixes numerous shortcomings in
++	  dnotify and introduces several new features.  It allows monitoring
++	  of both files and directories via a single open fd.  Multiple file
++	  events are supported.
++
++	  If unsure, say Y.
++
+ config SMP
+ 	bool "Symmetric multi-processing support"
+ 	---help---
 diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 --- linux-2.6.10/drivers/char/inotify.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux/drivers/char/inotify.c	2005-01-31 14:26:05.250863048 -0500
-@@ -0,0 +1,1072 @@
++++ linux/drivers/char/inotify.c	2005-02-09 16:05:07.959265648 -0500
+@@ -0,0 +1,1053 @@
 +/*
-+ * Inode based directory notifications for Linux.
++ * drivers/char/inotify.c - inode-based file event notifications
 + *
-+ * Copyright (C) 2004 John McCutchan
++ * Authors:
++ *	John McCutchan	<ttb@tentacle.dhs.org>
++ *	Robert Love	<rml@novell.com>
++ *
++ * Copyright (C) 2005 John McCutchan
 + *
 + * This program is free software; you can redistribute it and/or modify it
 + * under the terms of the GNU General Public License as published by the
@@ -93,11 +123,11 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +
 +struct inotify_watch {
 +	s32 			wd;	/* watch descriptor */
-+	u32			mask;
-+	struct inode		*inode;
-+	struct inotify_device	*dev;
-+	struct list_head	d_list;	/* device list */
-+	struct list_head	i_list; /* inode list */
++	u32			mask;	/* event mask for this watch */
++	struct inode		*inode;	/* associated inode */
++	struct inotify_device	*dev;	/* associated device */
++	struct list_head	d_list;	/* entry in device's list */
++	struct list_head	i_list; /* entry in inotify_data's list */
 +};
 +
 +/*
@@ -279,11 +309,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +#define inotify_dev_get_event(dev)		\
 +		(list_to_inotify_kernel_event(dev->events.next))
 +
-+/* Does this events mask get sent to the watch ? */
-+#define event_and(event_mask,watches_mask) 	((event_mask == IN_UNMOUNT) || \
-+						(event_mask == IN_IGNORED) || \
-+						(event_mask & watches_mask))
-+
 +/*
 + * inotify_dev_queue_event - add a new event to the given device
 + *
@@ -319,10 +344,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		kevent = kernel_event(-1, IN_Q_OVERFLOW, cookie, NULL);
 +		goto add_event_to_queue;
 +	}
-+
-+	if (!event_and(mask, watch->inode->inotify_data->watch_mask) ||
-+			!event_and(mask, watch->mask))
-+		return;
 +
 +	kevent = kernel_event(watch->wd, mask, cookie, filename);
 +
@@ -533,32 +554,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +}
 +
 +/*
-+ * inode_update_watch_mask - update inode->inotify_data->watch_mask
-+ *
-+ * Grabs inode->inotify_data->lock.
-+ */
-+static void inode_update_watch_mask(struct inode *inode)
-+{
-+	struct inotify_inode_data *data;
-+	struct inotify_watch *watch;
-+	u32 new_mask;
-+
-+	data = get_inode_data(inode);
-+	if (!data)	/* XXX: this should never happen */
-+		return;
-+	spin_lock(&data->lock);
-+
-+	new_mask = 0;
-+	list_for_each_entry(watch, &data->watches, i_list)
-+		new_mask |= watch->mask;
-+
-+	data->watch_mask = new_mask;
-+
-+	spin_unlock(&data->lock);
-+	put_inode_data(inode);
-+}
-+
-+/*
 + * inode_add_watch - add a watch to the given inode
 + *
 + * Callers must hold dev->lock, because we call inode_find_dev().
@@ -582,7 +577,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +
 +		atomic_set(&inode->inotify_data->count, 0);
 +		INIT_LIST_HEAD(&inode->inotify_data->watches);
-+		inode->inotify_data->watch_mask = 0;
 +		spin_lock_init(&inode->inotify_data->lock);
 +	} else if (inode_find_dev(inode, watch->dev)) {
 +		/* a watch is already associated with this (inode,dev) pair */
@@ -593,7 +587,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	spin_unlock(&inode->i_lock);
 +
 +	list_add(&watch->i_list, &inode->inotify_data->watches);
-+	inode_update_watch_mask(inode);
 +
 +	return 0;
 +out_lock:
@@ -608,7 +601,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		return -EINVAL;
 +
 +	list_del_init(&watch->i_list);
-+	inode_update_watch_mask(inode);
 +
 +	/* clean up inode->inotify_data */
 +	put_inode_data(inode);	
@@ -625,7 +617,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 + * inode must be pinned prior to calling.
 + */
 +void inotify_inode_queue_event(struct inode *inode, u32 mask, u32 cookie,
-+			       const char *filename)
++			       const char *name)
 +{
 +	struct inotify_watch *watch;
 +
@@ -633,10 +625,12 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		return;
 +
 +	list_for_each_entry(watch, &inode->inotify_data->watches, i_list) {
-+		spin_lock(&watch->dev->lock);
-+		inotify_dev_queue_event(watch->dev, watch, mask, cookie,
-+					filename);
-+		spin_unlock(&watch->dev->lock);
++		if (watch->mask & mask) {
++			struct inotify_device *dev = watch->dev;
++			spin_lock(&dev->lock);
++			inotify_dev_queue_event(dev, watch, mask, cookie, name);
++			spin_unlock(&dev->lock);
++		}
 +	}
 +}
 +EXPORT_SYMBOL_GPL(inotify_inode_queue_event);
@@ -668,28 +662,35 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +EXPORT_SYMBOL_GPL(inotify_get_cookie);
 +
 +/*
-+ * watch->inode must be pinned.  We drop a reference before returning.
++ * Caller must hold dev->lock.
 + */
-+static void ignore_helper(struct inotify_watch *watch, int event)
++static void __remove_watch(struct inotify_watch *watch,
++			   struct inotify_device *dev)
 +{
-+	struct inotify_device *dev;
 +	struct inode *inode;
 +
 +	inode = watch->inode;
-+	dev = watch->dev;
-+
-+	spin_lock(&dev->lock);
-+
-+	if (event)
-+		inotify_dev_queue_event(dev, watch, event, 0, NULL);
 +
 +	inode_rm_watch(inode, watch);
-+	inotify_dev_rm_watch(watch->dev, watch);
-+
++	inotify_dev_rm_watch(dev, watch);
 +	delete_watch(dev, watch);
-+	spin_unlock(&dev->lock);
 +
 +	iput(inode);
++}
++
++/*
++ * destroy_watch - remove a watch from both the device and the inode.
++ *
++ * watch->inode must be pinned.  We drop a reference before returning.  Grabs
++ * dev->lock.
++ */
++static void remove_watch(struct inotify_watch *watch)
++{
++	struct inotify_device *dev = watch->dev;
++
++	spin_lock(&dev->lock);
++	__remove_watch(watch, dev);
++	spin_unlock(&dev->lock);
 +}
 +
 +void inotify_super_block_umount(struct super_block *sb)
@@ -714,8 +715,14 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		if (!inode_data)
 +			continue;
 +
-+		list_for_each_entry(watch, &inode_data->watches, i_list)
-+			ignore_helper(watch, IN_UNMOUNT);
++		list_for_each_entry(watch, &inode_data->watches, i_list) {
++			struct inotify_device *dev = watch->dev;
++			spin_lock(&dev->lock);
++			inotify_dev_queue_event(dev, watch, IN_UNMOUNT, 0,
++						NULL);
++			__remove_watch(watch, dev);
++			spin_unlock(&dev->lock);
++		}
 +		put_inode_data(inode);
 +	}
 +
@@ -735,7 +742,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	if (!data)
 +		return;
 +	list_for_each_entry_safe(watch, next, &data->watches, i_list)
-+		ignore_helper(watch, 0);
++		remove_watch(watch);
 +	put_inode_data(inode);
 +}
 +EXPORT_SYMBOL_GPL(inotify_inode_is_dead);
@@ -879,14 +886,14 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +/*
 + * inotify_release_all_watches - destroy all watches on a given device
 + *
-+ * FIXME: Do we want a lock here?
++ * FIXME: We need a lock on the watch here.
 + */
 +static void inotify_release_all_watches(struct inotify_device *dev)
 +{
 +	struct inotify_watch *watch, *next;
 +
 +	list_for_each_entry_safe(watch, next, &dev->watches, d_list)
-+		ignore_helper(watch, 0);
++		remove_watch(watch);
 +}
 +
 +/*
@@ -925,7 +932,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	struct nameidata nd;
 +	int ret;
 +
-+	ret = find_inode((const char __user*) request->dirname, &nd);
++	ret = find_inode((const char __user*) request->name, &nd);
 +	if (ret)
 +		return ret;
 +
@@ -943,7 +950,6 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +
 +		owatch = inode_find_dev(inode, dev);
 +		owatch->mask = request->mask;
-+		inode_update_watch_mask(inode);
 +		spin_unlock(&dev->lock);
 +		path_release(&nd);
 +
@@ -994,19 +1000,20 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +static int inotify_ignore(struct inotify_device *dev, s32 wd)
 +{
 +	struct inotify_watch *watch;
++	int ret = 0;
 +
-+	/*
-+	 * FIXME: Silly to grab dev->lock here and then drop it, when
-+	 * ignore_helper() grabs it anyway a few lines down.
-+	 */
 +	spin_lock(&dev->lock);
 +	watch = dev_find_wd(dev, wd);
 +	spin_unlock(&dev->lock);
-+	if (!watch)
-+		return -EINVAL;
-+	ignore_helper(watch, 0);
++	if (!watch) {
++		ret = -EINVAL;
++		goto out;
++	}
++	__remove_watch(watch, dev);
 +
-+	return 0;
++out:
++	spin_unlock(&dev->lock);
++	return ret;
 +}
 +
 +/*
@@ -1173,16 +1180,17 @@ diff -urN linux-2.6.10/drivers/char/misc.c linux/drivers/char/misc.c
  
 diff -urN linux-2.6.10/fs/attr.c linux/fs/attr.c
 --- linux-2.6.10/fs/attr.c	2004-12-24 16:34:00.000000000 -0500
-+++ linux/fs/attr.c	2005-01-18 16:11:08.000000000 -0500
-@@ -11,6 +11,7 @@
++++ linux/fs/attr.c	2005-01-31 15:52:37.000000000 -0500
+@@ -10,7 +10,7 @@
+ #include <linux/mm.h>
  #include <linux/string.h>
  #include <linux/smp_lock.h>
- #include <linux/dnotify.h>
-+#include <linux/inotify.h>
+-#include <linux/dnotify.h>
++#include <linux/fsnotify.h>
  #include <linux/fcntl.h>
  #include <linux/quotaops.h>
  #include <linux/security.h>
-@@ -103,29 +104,51 @@
+@@ -103,31 +103,8 @@
  out:
  	return error;
  }
@@ -1190,12 +1198,9 @@ diff -urN linux-2.6.10/fs/attr.c linux/fs/attr.c
  EXPORT_SYMBOL(inode_setattr);
  
 -int setattr_mask(unsigned int ia_valid)
-+void setattr_mask (unsigned int ia_valid, int *dn_mask, u32 *in_mask)
- {
+-{
 -	unsigned long dn_mask = 0;
-+	int dnmask;
-+	u32 inmask;
- 
+-
 -	if (ia_valid & ATTR_UID)
 -		dn_mask |= DN_ATTRIB;
 -	if (ia_valid & ATTR_GID)
@@ -1212,92 +1217,79 @@ diff -urN linux-2.6.10/fs/attr.c linux/fs/attr.c
 -	if (ia_valid & ATTR_MODE)
 -		dn_mask |= DN_ATTRIB;
 -	return dn_mask;
-+	inmask = 0;
-+	dnmask = 0;
-+
-+	if (!dn_mask || !in_mask) {
-+		return;
-+	}
-+        if (ia_valid & ATTR_UID) {
-+                inmask |= IN_ATTRIB;
-+		dnmask |= DN_ATTRIB;
-+	}
-+        if (ia_valid & ATTR_GID) {
-+                inmask |= IN_ATTRIB;
-+		dnmask |= DN_ATTRIB;
-+	}
-+        if (ia_valid & ATTR_SIZE) {
-+                inmask |= IN_MODIFY;
-+		dnmask |= DN_MODIFY;
-+	}
-+        /* both times implies a utime(s) call */
-+        if ((ia_valid & (ATTR_ATIME|ATTR_MTIME)) == (ATTR_ATIME|ATTR_MTIME)) {
-+                inmask |= IN_ATTRIB;
-+		dnmask |= DN_ATTRIB;
-+	}
-+        else if (ia_valid & ATTR_ATIME) {
-+                inmask |= IN_ACCESS;
-+		dnmask |= DN_ACCESS;
-+	}
-+        else if (ia_valid & ATTR_MTIME) {
-+                inmask |= IN_MODIFY;
-+		dnmask |= DN_MODIFY;
-+	}
-+        if (ia_valid & ATTR_MODE) {
-+                inmask |= IN_ATTRIB;
-+		dnmask |= DN_ATTRIB;
-+	}
-+
-+	*in_mask = inmask;
-+	*dn_mask = dnmask;
- }
- 
+-}
+-
  int notify_change(struct dentry * dentry, struct iattr * attr)
-@@ -184,9 +207,19 @@
+ {
+ 	struct inode *inode = dentry->d_inode;
+@@ -183,11 +160,10 @@
+ 				error = inode_setattr(inode, attr);
  		}
  	}
- 	if (!error) {
+-	if (!error) {
 -		unsigned long dn_mask = setattr_mask(ia_valid);
-+		int dn_mask;
-+		u32 in_mask;
+-		if (dn_mask)
+-			dnotify_parent(dentry, dn_mask);
+-	}
 +
-+		setattr_mask (ia_valid, &dn_mask, &in_mask);
++	if (!error)
++		fsnotify_change(dentry, ia_valid);
 +
- 		if (dn_mask)
- 			dnotify_parent(dentry, dn_mask);
-+		if (in_mask) {
-+			inotify_inode_queue_event(dentry->d_inode, in_mask, 0,
-+						  NULL);
-+			inotify_dentry_parent_queue_event(dentry, in_mask, 0,
-+							  dentry->d_name.name);
-+		}
- 	}
  	return error;
  }
+ 
+diff -urN linux-2.6.10/fs/compat.c linux/fs/compat.c
+--- linux-2.6.10/fs/compat.c	2004-12-24 16:34:44.000000000 -0500
++++ linux/fs/compat.c	2005-02-04 12:07:47.000000000 -0500
+@@ -35,7 +35,7 @@
+ #include <linux/ctype.h>
+ #include <linux/module.h>
+ #include <linux/dirent.h>
+-#include <linux/dnotify.h>
++#include <linux/fsnotify.h>
+ #include <linux/highuid.h>
+ #include <linux/sunrpc/svc.h>
+ #include <linux/nfsd/nfsd.h>
+@@ -1192,9 +1192,15 @@
+ out:
+ 	if (iov != iovstack)
+ 		kfree(iov);
+-	if ((ret + (type == READ)) > 0)
+-		dnotify_parent(file->f_dentry,
+-				(type == READ) ? DN_ACCESS : DN_MODIFY);
++	if ((ret + (type == READ)) > 0) {
++		struct dentry *dentry = file->f_dentry;
++		if (type == READ)
++			fsnotify_access(dentry, dentry->d_inode,
++					dentry->d_name.name);
++		else
++			fsnotify_modify(dentry, dentry->d_inode,
++					dentry->d_name.name);
++	}
+ 	return ret;
+ }
+ 
 diff -urN linux-2.6.10/fs/file_table.c linux/fs/file_table.c
 --- linux-2.6.10/fs/file_table.c	2004-12-24 16:33:50.000000000 -0500
-+++ linux/fs/file_table.c	2005-01-18 16:11:08.000000000 -0500
++++ linux/fs/file_table.c	2005-01-31 15:46:49.000000000 -0500
 @@ -16,6 +16,7 @@
  #include <linux/eventpoll.h>
  #include <linux/mount.h>
  #include <linux/cdev.h>
-+#include <linux/inotify.h>
++#include <linux/fsnotify.h>
  
  /* sysctl tunables... */
  struct files_stat_struct files_stat = {
-@@ -120,6 +121,12 @@
- 	struct dentry *dentry = file->f_dentry;
+@@ -121,6 +122,9 @@
  	struct vfsmount *mnt = file->f_vfsmnt;
  	struct inode *inode = dentry->d_inode;
-+	u32 mask;
-+
-+
-+	mask = (file->f_mode & FMODE_WRITE) ? IN_CLOSE_WRITE : IN_CLOSE_NOWRITE;
-+	inotify_dentry_parent_queue_event(dentry, mask, 0, dentry->d_name.name);
-+	inotify_inode_queue_event(inode, mask, 0, NULL);
  
++
++	fsnotify_close(dentry, inode, file->f_mode, dentry->d_name.name);
++
  	might_sleep();
  	/*
+ 	 * The function eventpoll_release() should be the first called
 diff -urN linux-2.6.10/fs/inode.c linux/fs/inode.c
 --- linux-2.6.10/fs/inode.c	2004-12-24 16:35:40.000000000 -0500
 +++ linux/fs/inode.c	2005-01-18 16:11:08.000000000 -0500
@@ -1313,156 +1305,170 @@ diff -urN linux-2.6.10/fs/inode.c linux/fs/inode.c
  		inode->i_cdev = NULL;
 diff -urN linux-2.6.10/fs/namei.c linux/fs/namei.c
 --- linux-2.6.10/fs/namei.c	2004-12-24 16:34:30.000000000 -0500
-+++ linux/fs/namei.c	2005-01-20 15:32:24.000000000 -0500
-@@ -22,6 +22,7 @@
++++ linux/fs/namei.c	2005-01-31 17:24:21.000000000 -0500
+@@ -21,7 +21,7 @@
+ #include <linux/namei.h>
  #include <linux/quotaops.h>
  #include <linux/pagemap.h>
- #include <linux/dnotify.h>
-+#include <linux/inotify.h>
+-#include <linux/dnotify.h>
++#include <linux/fsnotify.h>
  #include <linux/smp_lock.h>
  #include <linux/personality.h>
  #include <linux/security.h>
-@@ -1242,6 +1243,8 @@
+@@ -1241,7 +1241,7 @@
+ 	DQUOT_INIT(dir);
  	error = dir->i_op->create(dir, dentry, mode, nd);
  	if (!error) {
- 		inode_dir_notify(dir, DN_CREATE);
-+		inotify_inode_queue_event(dir, IN_CREATE_FILE,
-+				0, dentry->d_name.name);
+-		inode_dir_notify(dir, DN_CREATE);
++		fsnotify_create(dir, dentry->d_name.name);
  		security_inode_post_create(dir, dentry, mode);
  	}
  	return error;
-@@ -1556,6 +1559,8 @@
+@@ -1555,7 +1555,7 @@
+ 	DQUOT_INIT(dir);
  	error = dir->i_op->mknod(dir, dentry, mode, dev);
  	if (!error) {
- 		inode_dir_notify(dir, DN_CREATE);
-+		inotify_inode_queue_event(dir, IN_CREATE_FILE, 0,
-+				dentry->d_name.name);
+-		inode_dir_notify(dir, DN_CREATE);
++		fsnotify_create(dir, dentry->d_name.name);
  		security_inode_post_mknod(dir, dentry, mode, dev);
  	}
  	return error;
-@@ -1629,6 +1634,8 @@
+@@ -1628,7 +1628,7 @@
+ 	DQUOT_INIT(dir);
  	error = dir->i_op->mkdir(dir, dentry, mode);
  	if (!error) {
- 		inode_dir_notify(dir, DN_CREATE);
-+		inotify_inode_queue_event(dir, IN_CREATE_SUBDIR, 0,
-+				dentry->d_name.name);
+-		inode_dir_notify(dir, DN_CREATE);
++		fsnotify_mkdir(dir, dentry->d_name.name);
  		security_inode_post_mkdir(dir,dentry, mode);
  	}
  	return error;
-@@ -1724,6 +1731,11 @@
- 	up(&dentry->d_inode->i_sem);
- 	if (!error) {
- 		inode_dir_notify(dir, DN_DELETE);
-+		inotify_inode_queue_event(dir, IN_DELETE_SUBDIR, 0,
-+				dentry->d_name.name);
-+		inotify_inode_queue_event(dentry->d_inode, IN_DELETE_SELF, 0,
-+				NULL);
-+		inotify_inode_is_dead (dentry->d_inode);
- 		d_delete(dentry);
+@@ -1722,10 +1722,8 @@
+ 		}
  	}
+ 	up(&dentry->d_inode->i_sem);
+-	if (!error) {
+-		inode_dir_notify(dir, DN_DELETE);
+-		d_delete(dentry);
+-	}
++	if (!error)
++		fsnotify_rmdir(dentry, dentry->d_inode, dir);
  	dput(dentry);
-@@ -1796,8 +1808,13 @@
+ 
+ 	return error;
+@@ -1795,10 +1793,9 @@
+ 	up(&dentry->d_inode->i_sem);
  
  	/* We don't d_delete() NFS sillyrenamed files--they still exist. */
- 	if (!error && !(dentry->d_flags & DCACHE_NFSFS_RENAMED)) {
+-	if (!error && !(dentry->d_flags & DCACHE_NFSFS_RENAMED)) {
 -		d_delete(dentry);
- 		inode_dir_notify(dir, DN_DELETE);
-+		inotify_inode_queue_event(dir, IN_DELETE_FILE, 0,
-+				dentry->d_name.name);
-+		inotify_inode_queue_event(dentry->d_inode, IN_DELETE_SELF, 0,
-+				NULL);
-+		inotify_inode_is_dead (dentry->d_inode);
-+		d_delete(dentry);
- 	}
+-		inode_dir_notify(dir, DN_DELETE);
+-	}
++	if (!error && !(dentry->d_flags & DCACHE_NFSFS_RENAMED))
++		fsnotify_unlink(dentry->d_inode, dir, dentry);
++
  	return error;
  }
-@@ -1873,6 +1890,8 @@
+ 
+@@ -1872,7 +1869,7 @@
+ 	DQUOT_INIT(dir);
  	error = dir->i_op->symlink(dir, dentry, oldname);
  	if (!error) {
- 		inode_dir_notify(dir, DN_CREATE);
-+		inotify_inode_queue_event(dir, IN_CREATE_FILE, 0,
-+				dentry->d_name.name);
+-		inode_dir_notify(dir, DN_CREATE);
++		fsnotify_create(dir, dentry->d_name.name);
  		security_inode_post_symlink(dir, dentry, oldname);
  	}
  	return error;
-@@ -1946,6 +1965,8 @@
+@@ -1945,7 +1942,7 @@
+ 	error = dir->i_op->link(old_dentry, dir, new_dentry);
  	up(&old_dentry->d_inode->i_sem);
  	if (!error) {
- 		inode_dir_notify(dir, DN_CREATE);
-+		inotify_inode_queue_event(dir, IN_CREATE_FILE, 0, 
-+					new_dentry->d_name.name);
+-		inode_dir_notify(dir, DN_CREATE);
++		fsnotify_create(dir, new_dentry->d_name.name);
  		security_inode_post_link(old_dentry, dir, new_dentry);
  	}
  	return error;
-@@ -2109,6 +2130,8 @@
+@@ -2109,6 +2106,7 @@
  {
  	int error;
  	int is_dir = S_ISDIR(old_dentry->d_inode->i_mode);
 +	char *old_name;
-+	u32 cookie;
  
  	if (old_dentry->d_inode == new_dentry->d_inode)
   		return 0;
-@@ -2130,6 +2153,8 @@
+@@ -2130,18 +2128,18 @@
  	DQUOT_INIT(old_dir);
  	DQUOT_INIT(new_dir);
  
-+	old_name = inotify_oldname_init(old_dentry);
++	old_name = fsnotify_oldname_init(old_dentry);
 +
  	if (is_dir)
  		error = vfs_rename_dir(old_dir,old_dentry,new_dir,new_dentry);
  	else
-@@ -2141,7 +2166,16 @@
- 			inode_dir_notify(old_dir, DN_DELETE);
- 			inode_dir_notify(new_dir, DN_CREATE);
- 		}
-+
-+		cookie = inotify_get_cookie();
-+
-+		inotify_inode_queue_event(old_dir, IN_MOVED_FROM, cookie,
-+					  old_name);
-+		inotify_inode_queue_event(new_dir, IN_MOVED_TO, cookie,
-+					  old_dentry->d_name.name);
+ 		error = vfs_rename_other(old_dir,old_dentry,new_dir,new_dentry);
+ 	if (!error) {
+-		if (old_dir == new_dir)
+-			inode_dir_notify(old_dir, DN_RENAME);
+-		else {
+-			inode_dir_notify(old_dir, DN_DELETE);
+-			inode_dir_notify(new_dir, DN_CREATE);
+-		}
++		const char *new_name = old_dentry->d_name.name;
++		fsnotify_move(old_dir, new_dir, old_name, new_name);
  	}
-+	inotify_oldname_free(old_name);
++	fsnotify_oldname_free(old_name);
 +
  	return error;
  }
  
 diff -urN linux-2.6.10/fs/open.c linux/fs/open.c
 --- linux-2.6.10/fs/open.c	2004-12-24 16:33:50.000000000 -0500
-+++ linux/fs/open.c	2005-01-18 16:11:08.000000000 -0500
-@@ -11,6 +11,7 @@
++++ linux/fs/open.c	2005-02-02 11:26:06.000000000 -0500
+@@ -10,7 +10,7 @@
+ #include <linux/file.h>
  #include <linux/smp_lock.h>
  #include <linux/quotaops.h>
- #include <linux/dnotify.h>
-+#include <linux/inotify.h>
+-#include <linux/dnotify.h>
++#include <linux/fsnotify.h>
  #include <linux/module.h>
  #include <linux/slab.h>
  #include <linux/tty.h>
-@@ -956,6 +957,10 @@
+@@ -953,9 +953,14 @@
+ 		fd = get_unused_fd();
+ 		if (fd >= 0) {
+ 			struct file *f = filp_open(tmp, flags, mode);
++			struct dentry *dentry;
++
  			error = PTR_ERR(f);
  			if (IS_ERR(f))
  				goto out_error;
-+			inotify_inode_queue_event(f->f_dentry->d_inode,
-+					IN_OPEN, 0, NULL);
-+			inotify_dentry_parent_queue_event(f->f_dentry, IN_OPEN,
-+					0, f->f_dentry->d_name.name);
++			dentry = f->f_dentry;
++			fsnotify_open(dentry, dentry->d_inode,
++				      dentry->d_name.name);
  			fd_install(fd, f);
  		}
  out:
+@@ -1007,7 +1012,7 @@
+ 			retval = err;
+ 	}
+ 
+-	dnotify_flush(filp, id);
++	fsnotify_flush(filp, id);
+ 	locks_remove_posix(filp, id);
+ 	fput(filp);
+ 	return retval;
 diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
 --- linux-2.6.10/fs/read_write.c	2004-12-24 16:35:00.000000000 -0500
-+++ linux/fs/read_write.c	2005-01-18 16:11:08.000000000 -0500
-@@ -11,6 +11,7 @@
++++ linux/fs/read_write.c	2005-01-31 16:35:05.000000000 -0500
+@@ -10,7 +10,7 @@
+ #include <linux/file.h>
  #include <linux/uio.h>
  #include <linux/smp_lock.h>
- #include <linux/dnotify.h>
-+#include <linux/inotify.h>
+-#include <linux/dnotify.h>
++#include <linux/fsnotify.h>
  #include <linux/security.h>
  #include <linux/module.h>
  #include <linux/syscalls.h>
-@@ -216,8 +217,14 @@
+@@ -216,8 +216,11 @@
  				ret = file->f_op->read(file, buf, count, pos);
  			else
  				ret = do_sync_read(file, buf, count, pos);
@@ -1470,16 +1476,13 @@ diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
 -				dnotify_parent(file->f_dentry, DN_ACCESS);
 +			if (ret > 0) {
 +				struct dentry *dentry = file->f_dentry;
-+				dnotify_parent(dentry, DN_ACCESS);
-+				inotify_dentry_parent_queue_event(dentry,
-+						IN_ACCESS, 0, dentry->d_name.name);
-+				inotify_inode_queue_event(inode, IN_ACCESS, 0,
-+						NULL);
++				fsnotify_access(dentry, inode,
++						dentry->d_name.name);
 +			}
  		}
  	}
  
-@@ -260,8 +267,14 @@
+@@ -260,8 +263,11 @@
  				ret = file->f_op->write(file, buf, count, pos);
  			else
  				ret = do_sync_write(file, buf, count, pos);
@@ -1487,16 +1490,13 @@ diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
 -				dnotify_parent(file->f_dentry, DN_MODIFY);
 +			if (ret > 0) {
 +				struct dentry *dentry = file->f_dentry;
-+				dnotify_parent(dentry, DN_MODIFY);
-+				inotify_dentry_parent_queue_event(dentry,
-+						IN_MODIFY, 0, dentry->d_name.name);
-+				inotify_inode_queue_event(inode, IN_MODIFY, 0,
-+						NULL);
++				fsnotify_modify(dentry, inode,
++						dentry->d_name.name);
 +			}
  		}
  	}
  
-@@ -493,9 +506,15 @@
+@@ -493,9 +499,15 @@
  out:
  	if (iov != iovstack)
  		kfree(iov);
@@ -1505,32 +1505,35 @@ diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
 -				(type == READ) ? DN_ACCESS : DN_MODIFY);
 +	if ((ret + (type == READ)) > 0) {
 +		struct dentry *dentry = file->f_dentry;
-+		dnotify_parent(dentry, (type == READ) ? DN_ACCESS : DN_MODIFY);
-+		inotify_dentry_parent_queue_event(dentry,
-+				(type == READ) ? IN_ACCESS : IN_MODIFY, 0,
-+				dentry->d_name.name);
-+		inotify_inode_queue_event (dentry->d_inode,
-+				(type == READ) ? IN_ACCESS : IN_MODIFY, 0, NULL);
++		struct inode *inode = dentry->d_inode;
++
++		if (type == READ)
++			fsnotify_access(dentry, inode, dentry->d_name.name);
++		else
++			fsnotify_modify(dentry, inode, dentry->d_name.name);
 +	}
  	return ret;
  }
  
 diff -urN linux-2.6.10/fs/super.c linux/fs/super.c
 --- linux-2.6.10/fs/super.c	2004-12-24 16:34:33.000000000 -0500
-+++ linux/fs/super.c	2005-01-18 16:11:08.000000000 -0500
-@@ -38,6 +38,7 @@
++++ linux/fs/super.c	2005-01-31 14:53:38.000000000 -0500
+@@ -37,9 +37,9 @@
+ #include <linux/writeback.h>		/* for the emergency remount stuff */
  #include <linux/idr.h>
  #include <linux/kobject.h>
++#include <linux/fsnotify.h>
  #include <asm/uaccess.h>
-+#include <linux/inotify.h>
  
- 
+-
  void get_filesystem(struct file_system_type *fs);
-@@ -227,6 +228,7 @@
+ void put_filesystem(struct file_system_type *fs);
+ struct file_system_type *get_fs_type(const char *name);
+@@ -227,6 +227,7 @@
  
  	if (root) {
  		sb->s_root = NULL;
-+		inotify_super_block_umount(sb);
++		fsnotify_sb_umount(sb);
  		shrink_dcache_parent(root);
  		shrink_dcache_anon(&sb->s_anon);
  		dput(root);
@@ -1565,14 +1568,253 @@ diff -urN linux-2.6.10/include/linux/fs.h linux/include/linux/fs.h
  extern int notify_change(struct dentry *, struct iattr *);
  extern int permission(struct inode *, int, struct nameidata *);
  extern int generic_permission(struct inode *, int,
+diff -urN linux-2.6.10/include/linux/fsnotify.h linux/include/linux/fsnotify.h
+--- linux-2.6.10/include/linux/fsnotify.h	1969-12-31 19:00:00.000000000 -0500
++++ linux/include/linux/fsnotify.h	2005-02-04 12:09:48.000000000 -0500
+@@ -0,0 +1,235 @@
++#ifndef _LINUX_FS_NOTIFY_H
++#define _LINUX_FS_NOTIFY_H
++
++/*
++ * include/linux/fs_notify.h - generic hooks for filesystem notification, to
++ * reduce in-source duplication from both dnotify and inotify.
++ *
++ * We don't compile any of this away in some complicated menagerie of ifdefs.
++ * Instead, we rely on the code inside to optimize away as needed.
++ *
++ * (C) Copyright 2005 Robert Love
++ */
++
++#ifdef __KERNEL__
++
++#include <linux/dnotify.h>
++#include <linux/inotify.h>
++
++/*
++ * fsnotify_move - file old_name at old_dir was moved to new_name at new_dir
++ */
++static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
++				 const char *old_name, const char *new_name)
++{
++	u32 cookie;
++
++	if (old_dir == new_dir)
++		inode_dir_notify(old_dir, DN_RENAME);
++	else {
++		inode_dir_notify(old_dir, DN_DELETE);
++		inode_dir_notify(new_dir, DN_CREATE);
++	}
++
++	cookie = inotify_get_cookie();
++
++	inotify_inode_queue_event(old_dir, IN_MOVED_FROM, cookie, old_name);
++	inotify_inode_queue_event(new_dir, IN_MOVED_TO, cookie, new_name);
++}
++
++/*
++ * fsnotify_unlink - file was unlinked
++ */
++static inline void fsnotify_unlink(struct inode *inode, struct inode *dir,
++				   struct dentry *dentry)
++{
++	inode_dir_notify(dir, DN_DELETE);
++	inotify_inode_queue_event(dir, IN_DELETE_FILE, 0, dentry->d_name.name);
++	inotify_inode_queue_event(inode, IN_DELETE_SELF, 0, NULL);
++
++	inotify_inode_is_dead(inode);
++	d_delete(dentry);
++}
++
++/*
++ * fsnotify_rmdir - directory was removed
++ */
++static inline void fsnotify_rmdir(struct dentry *dentry, struct inode *inode,
++				  struct inode *dir)
++{
++	inode_dir_notify(dir, DN_DELETE);
++	inotify_inode_queue_event(dir, IN_DELETE_SUBDIR,0,dentry->d_name.name);
++	inotify_inode_queue_event(inode, IN_DELETE_SELF, 0, NULL);
++
++	inotify_inode_is_dead(inode);
++	d_delete(dentry);
++}
++
++/*
++ * fsnotify_create - filename was linked in
++ */
++static inline void fsnotify_create(struct inode *inode, const char *filename)
++{
++	inode_dir_notify(inode, DN_CREATE);
++	inotify_inode_queue_event(inode, IN_CREATE_FILE, 0, filename);
++}
++
++/*
++ * fsnotify_mkdir - directory 'name' was created
++ */
++static inline void fsnotify_mkdir(struct inode *inode, const char *name)
++{
++	inode_dir_notify(inode, DN_CREATE);
++	inotify_inode_queue_event(inode, IN_CREATE_SUBDIR, 0, name);
++}
++
++/*
++ * fsnotify_access - file was read
++ */
++static inline void fsnotify_access(struct dentry *dentry, struct inode *inode,
++				   const char *filename)
++{
++	dnotify_parent(dentry, DN_ACCESS);
++	inotify_dentry_parent_queue_event(dentry, IN_ACCESS, 0,
++					  dentry->d_name.name);
++	inotify_inode_queue_event(inode, IN_ACCESS, 0, NULL);
++}
++
++/*
++ * fsnotify_modify - file was modified
++ */
++static inline void fsnotify_modify(struct dentry *dentry, struct inode *inode,
++				   const char *filename)
++{
++	dnotify_parent(dentry, DN_MODIFY);
++	inotify_dentry_parent_queue_event(dentry, IN_MODIFY, 0, filename);
++	inotify_inode_queue_event(inode, IN_MODIFY, 0, NULL);
++}
++
++/*
++ * fsnotify_open - file was opened
++ */
++static inline void fsnotify_open(struct dentry *dentry, struct inode *inode,
++				 const char *filename)
++{
++	inotify_inode_queue_event(inode, IN_OPEN, 0, NULL);
++	inotify_dentry_parent_queue_event(dentry, IN_OPEN, 0, filename);
++}
++
++/*
++ * fsnotify_close - file was closed
++ */
++static inline void fsnotify_close(struct dentry *dentry, struct inode *inode,
++				  mode_t mode, const char *filename)
++{
++	u32 mask;
++
++	mask = (mode & FMODE_WRITE) ? IN_CLOSE_WRITE : IN_CLOSE_NOWRITE;
++	inotify_dentry_parent_queue_event(dentry, mask, 0, filename);
++	inotify_inode_queue_event(inode, mask, 0, NULL);
++}
++
++/*
++ * fsnotify_change - notify_change event.  file was modified and/or metadata
++ * was changed.
++ */
++static inline void fsnotify_change(struct dentry *dentry, unsigned int ia_valid)
++{
++	int dn_mask = 0;
++	u32 in_mask = 0;
++
++	if (ia_valid & ATTR_UID) {
++		in_mask |= IN_ATTRIB;
++		dn_mask |= DN_ATTRIB;
++	}
++	if (ia_valid & ATTR_GID) {
++		in_mask |= IN_ATTRIB;
++		dn_mask |= DN_ATTRIB;
++	}
++	if (ia_valid & ATTR_SIZE) {
++		in_mask |= IN_MODIFY;
++		dn_mask |= DN_MODIFY;
++	}
++	/* both times implies a utime(s) call */
++	if ((ia_valid & (ATTR_ATIME | ATTR_MTIME)) == (ATTR_ATIME | ATTR_MTIME))
++	{
++		in_mask |= IN_ATTRIB;
++		dn_mask |= DN_ATTRIB;
++	} else if (ia_valid & ATTR_ATIME) {
++		in_mask |= IN_ACCESS;
++		dn_mask |= DN_ACCESS;
++	} else if (ia_valid & ATTR_MTIME) {
++		in_mask |= IN_MODIFY;
++		dn_mask |= DN_MODIFY;
++	}
++	if (ia_valid & ATTR_MODE) {
++		in_mask |= IN_ATTRIB;
++		dn_mask |= DN_ATTRIB;
++	}
++
++	if (dn_mask)
++		dnotify_parent(dentry, dn_mask);
++	if (in_mask) {
++		inotify_inode_queue_event(dentry->d_inode, in_mask, 0, NULL);
++		inotify_dentry_parent_queue_event(dentry, in_mask, 0,
++						  dentry->d_name.name);
++	}
++}
++
++/*
++ * fsnotify_sb_umount - filesystem unmount
++ */
++static inline void fsnotify_sb_umount(struct super_block *sb)
++{
++	inotify_super_block_umount(sb);
++}
++
++/*
++ * fsnotify_flush - flush time!
++ */
++static inline void fsnotify_flush(struct file *filp, fl_owner_t id)
++{
++	dnotify_flush(filp, id);
++}
++
++#ifdef CONFIG_INOTIFY	/* inotify helpers */
++
++/*
++ * fsnotify_oldname_init - save off the old filename before we change it
++ *
++ * this could be kstrdup if only we could add that to lib/string.c
++ */
++static inline char *fsnotify_oldname_init(struct dentry *old_dentry)
++{
++	char *old_name;
++
++	old_name = kmalloc(strlen(old_dentry->d_name.name) + 1, GFP_KERNEL);
++	if (old_name)
++		strcpy(old_name, old_dentry->d_name.name);
++	return old_name;
++}
++
++/*
++ * fsnotify_oldname_free - free the name we got from fsnotify_oldname_init
++ */
++static inline void fsnotify_oldname_free(const char *old_name)
++{
++	kfree(old_name);
++}
++
++#else	/* CONFIG_INOTIFY */
++
++static inline char *fsnotify_oldname_init(struct dentry *old_dentry)
++{
++	return NULL;
++}
++
++static inline void fsnotify_oldname_free(const char *old_name)
++{
++}
++
++#endif	/* ! CONFIG_INOTIFY */
++
++#endif	/* __KERNEL__ */
++
++#endif	/* _LINUX_FS_NOTIFY_H */
 diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 --- linux-2.6.10/include/linux/inotify.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux/include/linux/inotify.h	2005-01-18 16:11:12.000000000 -0500
-@@ -0,0 +1,150 @@
++++ linux/include/linux/inotify.h	2005-02-09 16:02:58.291978072 -0500
+@@ -0,0 +1,118 @@
 +/*
 + * Inode based directory notification for Linux
 + *
-+ * Copyright (C) 2004 John McCutchan
++ * Copyright (C) 2005 John McCutchan
 + */
 +
 +#ifndef _LINUX_INOTIFY_H
@@ -1585,14 +1827,14 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 + * struct inotify_event - structure read from the inotify device for each event
 + *
 + * When you are watching a directory, you will receive the filename for events
-+ * such as IN_CREATE, IN_DELETE, IN_OPEN, IN_CLOSE, ...
++ * such as IN_CREATE, IN_DELETE, IN_OPEN, IN_CLOSE, ..., relative to the wd.
 + */
 +struct inotify_event {
-+	__s32 wd;
-+	__u32 mask;
-+	__u32 cookie;
-+	size_t len;
-+	char filename[0];
++	__s32 wd;	/* watch descriptor */
++	__u32 mask;	/* watch mask */
++	__u32 cookie;	/* cookie used for synchronizing two events */
++	size_t len;	/* length (including nulls) of name */
++	char name[0];	/* stub for possible name */
 +};
 +
 +/*
@@ -1601,7 +1843,7 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 + * Pass to the inotify device via the INOTIFY_WATCH ioctl
 + */
 +struct inotify_watch_request {
-+	char *dirname;		/* directory name */
++	char *name;		/* directory name */
 +	__u32 mask;		/* event mask */
 +};
 +
@@ -1640,10 +1882,9 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 +#include <linux/config.h>
 +
 +struct inotify_inode_data {
-+	struct list_head watches;
-+	__u32 watch_mask;
-+	spinlock_t lock;
-+	atomic_t count;
++	struct list_head watches;	/* list of watches on this inode */
++	spinlock_t lock;		/* lock protecting the struct */
++	atomic_t count;			/* ref count */
 +};
 +
 +#ifdef CONFIG_INOTIFY
@@ -1655,23 +1896,6 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 +extern void inotify_super_block_umount(struct super_block *);
 +extern void inotify_inode_is_dead(struct inode *);
 +extern __u32 inotify_get_cookie(void);
-+extern __u32 setattr_mask_inotify(unsigned int);
-+
-+/* this could be kstrdup if only we could add that to lib/string.c */
-+static inline char * inotify_oldname_init(struct dentry *old_dentry)
-+{
-+	char *old_name;
-+
-+	old_name = kmalloc(strlen(old_dentry->d_name.name) + 1, GFP_KERNEL);
-+	if (old_name)
-+		strcpy(old_name, old_dentry->d_name.name);
-+	return old_name;
-+}
-+
-+static inline void inotify_oldname_free(const char *old_name)
-+{
-+	kfree(old_name);
-+}
 +
 +#else
 +
@@ -1695,21 +1919,7 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 +{
 +}
 +
-+static inline char * inotify_oldname_init(struct dentry *old_dentry)
-+{
-+	return NULL;
-+}
-+
 +static inline __u32 inotify_get_cookie(void)
-+{
-+	return 0;
-+}
-+
-+static inline void inotify_oldname_free(const char *old_name)
-+{
-+}
-+
-+static inline int setattr_mask_inotify(unsigned int ia_mask)
 +{
 +	return 0;
 +}
