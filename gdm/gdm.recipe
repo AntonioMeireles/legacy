@@ -1,0 +1,51 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+
+loadRecipe('gnomepackage.recipe')
+class Gdm(GnomePackageRecipe):
+
+    buildRequires = GnomePackageRecipe.buildRequires
+    buildRequires.extend([ 'libglade:devel', 'pango:devel', 'gtk:devel',
+                           'libgnomeui:devel', 'libgnomecanvas:devel',
+                           'librsvg:devel', 'libxml2:devel',
+                           'fontconfig:devel', 'libgsf:devel',
+                           'libcroco:devel', 'attr:devel',
+                           'scrollkeeper:runtime' ])
+                   
+    extraConfig = GnomePackageRecipe.extraConfig
+    if Use.pam:
+        buildRequires.append('pam:devel')
+        extraConfig += ' --with-pam --with-pam-prefix=%(sysconfdir)s'
+    else:
+        extraConfig += ' --without-pam'
+        
+    if Use.selinux:
+        buildRequires.append('libselinux:devel')
+        extraConfig += ' --with-selinux'
+    else:
+        extraConfig += ' --without-selinux'
+        
+    extraConfig += ' --enable-console-helper'
+        
+    name = 'gdm'
+    version = '2.6.0.5'
+    
+    docs = GnomePackageRecipe.docs
+    docs.append('TODO')
+
+    def build(r):
+	# evaluate extraConfig's sysconfdir before setting new value
+	r.extraConfig = r.extraConfig % r.macros
+	r.macros.sysconfdir= '%(sysconfdir)s/X11'
+	GnomePackageRecipe.build(r)
+
+    def install(r):
+	GnomePackageRecipe.install(r)
+
+	r.ExcludeDirectories(exceptions=['%(localstatedir)s/log/gdm'])
+	r.SetModes('%(localstatedir)s/gdm', 01770)
+	r.Ownership('root', 'gdm', '%(localstatedir)s/gdm')
+        r.User('gdm', 42, homedir='/var/gdm')
+        r.Requires('/usr/bin/consolehelper', '%(bindir)s/gdmsetup')
