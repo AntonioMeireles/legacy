@@ -8,6 +8,8 @@ if [ -f /etc/sysconfig/oversite ]; then
         . /etc/sysconfig/oversite
 fi
 
+hostname=`hostname`
+
 if [ -z $LOGFILE ]; then
 	LOGFILE=/var/log/oversite
 fi
@@ -21,7 +23,7 @@ if [ -z $DISTID ]; then
 fi
 
 if [ -z $SYSID ]; then
-	wget http://oversite.foresightlinux.com/register.php?distid=$DISTID -O /tmp/sysid
+	wget "http://oversite.foresightlinux.com/register.php?distid=$DISTID&hostname=$hostname" -O /tmp/sysid
 	. /tmp/sysid
 	cat /tmp/sysid >> /etc/sysconfig/oversite
 	#rm /tmp/sysid
