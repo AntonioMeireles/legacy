@@ -3,6 +3,9 @@
 # Script used to get Foresight updates
 #
 
+# Choose a random sleep interval so we don't beat up the server
+sleep $(expr $RANDOM \% 720)
+
 # get some variables
 if [ -f /etc/sysconfig/oversite ]; then
         . /etc/sysconfig/oversite
