@@ -38,6 +38,7 @@ then
 	do
 		conary update $i >> $LOGFILE 2>&1
 	done
+	rm -f $TASKS
 	echo "end `date`..." >> $LOGFILE 2>&1
 fi
 
