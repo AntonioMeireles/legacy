@@ -23,7 +23,7 @@ if [ -z $DISTID ]; then
 fi
 
 if [ -z $SYSID ]; then
-	wget "http://oversite.foresightlinux.com/register.php?distid=$DISTID&hostname=$hostname" -O /tmp/sysid
+	wget "http://oversite.foresightlinux.com/register.php?distid=$DISTID&host=$hostname" -O /tmp/sysid
 	. /tmp/sysid
 	cat /tmp/sysid >> /etc/sysconfig/oversite
 	#rm /tmp/sysid
