@@ -1,10 +1,10 @@
-bitches, inotify.
+inotify, bitches.
 
 Signed-off-by: Robert Love <rml@novell.com>
 
  drivers/char/Kconfig       |   13 
  drivers/char/Makefile      |    2 
- drivers/char/inotify.c     | 1053 +++++++++++++++++++++++++++++++++++++++++++++
+ drivers/char/inotify.c     | 1072 +++++++++++++++++++++++++++++++++++++++++++++
  drivers/char/misc.c        |   14 
  fs/attr.c                  |   73 ++-
  fs/file_table.c            |    7 
@@ -18,12 +18,12 @@ Signed-off-by: Robert Love <rml@novell.com>
  include/linux/miscdevice.h |    5 
  include/linux/sched.h      |    2 
  kernel/user.c              |    2 
- 16 files changed, 1368 insertions(+), 39 deletions(-)
+ 16 files changed, 1387 insertions(+), 39 deletions(-)
 
 diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 --- linux-2.6.10/drivers/char/inotify.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux/drivers/char/inotify.c	2005-01-18 14:28:55.872506648 -0500
-@@ -0,0 +1,1053 @@
++++ linux/drivers/char/inotify.c	2005-01-31 14:26:05.250863048 -0500
+@@ -0,0 +1,1072 @@
 +/*
 + * Inode based directory notifications for Linux.
 + *
@@ -207,37 +207,22 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +}
 +
 +/*
-+ * find_inode - resolve a user-given path to a specific inode and iget() it
++ * find_inode - resolve a user-given path to a specific inode and return a nd
 + */
-+static struct inode * find_inode(const char __user *dirname)
++static int find_inode(const char __user *dirname, struct nameidata *nd)
 +{
-+	struct inode *inode;
-+	struct nameidata nd;
 +	int error;
 +
-+	error = __user_walk(dirname, LOOKUP_FOLLOW, &nd);
++	error = __user_walk(dirname, LOOKUP_FOLLOW, nd);
 +	if (error)
-+		return ERR_PTR(error);
-+
-+	inode = nd.dentry->d_inode;
++		return error;
 +
 +	/* you can only watch an inode if you have read permissions on it */
-+	error = permission(inode, MAY_READ, NULL);
-+	if (error) {
-+		inode = ERR_PTR(error);
-+		goto release_and_out;
-+	}
-+
-+	spin_lock(&inode_lock);
-+	__iget(inode);
-+	spin_unlock(&inode_lock);
-+release_and_out:
-+	path_release(&nd);
-+	return inode;
++	return permission(nd->dentry->d_inode, MAY_READ, NULL);
 +}
 +
-+struct inotify_kernel_event * kernel_event(s32 wd, u32 mask, u32 cookie,
-+					   const char *filename)
++static struct inotify_kernel_event * kernel_event(s32 wd, u32 mask, u32 cookie,
++						  const char *filename)
 +{
 +	struct inotify_kernel_event *kevent;
 +
@@ -254,7 +239,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	INIT_LIST_HEAD(&kevent->list);
 +
 +	if (filename) {
-+		size_t len, rem;
++		size_t len, rem, event_size = sizeof(struct inotify_event);
 +
 +		/*
 +		 * We need to pad the filename so as to properly align an
@@ -263,11 +248,13 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		 * up to the next multiple of the structure's sizeof.  This is
 +		 * simple and safe for all architectures.
 +		 */
-+		len = strlen(filename) + 1;		
-+		rem = sizeof(struct inotify_event) % len;
-+		if (len > sizeof(struct inotify_event))
-+			rem = sizeof(struct inotify_event) -
-+				(len % sizeof(struct inotify_event));
++		len = strlen(filename) + 1;
++		rem = event_size - len;
++		if (len > event_size) {
++			rem = event_size - (len % event_size);
++			if (len % event_size == 0)
++				rem = 0;
++		}
 +		len += rem;
 +
 +		kevent->filename = kmalloc(len, GFP_ATOMIC);
@@ -308,14 +295,15 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +{
 +	struct inotify_kernel_event *kevent, *last;
 +
-+	/* Check if the new event is a duplicate of the last event queued. */
++	/* drop this event if it is a dupe of the previous */
 +	last = inotify_dev_get_event(dev);
 +	if (dev->event_count && last->event.mask == mask &&
 +			last->event.wd == watch->wd) {
-+		/* Check if the filenames match */
-+		if (!filename && last->filename[0] == '\0')
++		const char *lastname = last->filename;
++
++		if (!filename && !lastname)
 +			return;
-+		if (filename && !strcmp(last->filename, filename))
++		if (filename && lastname && !strcmp(lastname, filename))
 +			return;
 +	}
 +
@@ -370,10 +358,11 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	list_del_init(&kevent->list);
 +	if (kevent->filename)
 +		kfree(kevent->filename);
-+	kmem_cache_free(event_cachep, kevent);
 +
 +	dev->event_count--;
 +	dev->queue_size -= sizeof(struct inotify_event) + kevent->event.len;	
++
++	kmem_cache_free(event_cachep, kevent);
 +}
 +
 +/*
@@ -656,10 +645,18 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +				       u32 cookie, const char *filename)
 +{
 +	struct dentry *parent;
++	struct inode *inode;
 +
-+	parent = dget_parent(dentry);
-+	inotify_inode_queue_event(parent->d_inode, mask, cookie, filename);
-+	dput(parent);
++	spin_lock(&dentry->d_lock);
++	parent = dentry->d_parent;
++	inode = parent->d_inode;
++	if (inode->inotify_data) {
++		dget(parent);
++		spin_unlock(&dentry->d_lock);
++		inotify_inode_queue_event(inode, mask, cookie, filename);
++		dput(parent);
++	} else
++		spin_unlock(&dentry->d_lock);
 +}
 +EXPORT_SYMBOL_GPL(inotify_dentry_parent_queue_event);
 +
@@ -670,34 +667,29 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +}
 +EXPORT_SYMBOL_GPL(inotify_get_cookie);
 +
-+static void __ignore_helper(struct inotify_watch *watch,
-+			    struct inotify_device *dev, int event)
-+{
-+	struct inode *inode;
-+
-+	if (event)
-+		inotify_dev_queue_event(dev, watch, event, 0, NULL);
-+
-+	inode = watch->inode;
-+
-+	inode_rm_watch(inode, watch);
-+	inotify_dev_rm_watch(watch->dev, watch);
-+	delete_watch(dev, watch);
-+
-+	iput(inode);
-+}
-+
 +/*
 + * watch->inode must be pinned.  We drop a reference before returning.
 + */
 +static void ignore_helper(struct inotify_watch *watch, int event)
 +{
 +	struct inotify_device *dev;
++	struct inode *inode;
 +
++	inode = watch->inode;
 +	dev = watch->dev;
++
 +	spin_lock(&dev->lock);
-+	__ignore_helper(watch, dev, event);
++
++	if (event)
++		inotify_dev_queue_event(dev, watch, event, 0, NULL);
++
++	inode_rm_watch(inode, watch);
++	inotify_dev_rm_watch(watch->dev, watch);
++
++	delete_watch(dev, watch);
 +	spin_unlock(&dev->lock);
++
++	iput(inode);
 +}
 +
 +void inotify_super_block_umount(struct super_block *sb)
@@ -777,7 +769,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +
 +	/* We only hand out full inotify events */
 +	event_size = sizeof(struct inotify_event);
-+	if (count < event_size) 
++	if (count < event_size)
 +		return 0;
 +
 +	while (1) {
@@ -816,7 +808,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		spin_unlock(&dev->lock);		
 +
 +		/* We can't send this event, not enough space in the buffer */
-+		if ((event_size + kevent->event.len ) > count)
++		if (event_size + kevent->event.len > count)
 +			break;
 +
 +		/* Copy the entire event except the string to user space */
@@ -884,24 +876,38 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	return ret;
 +}
 +
-+static int inotify_release(struct inode *inode, struct file *file)
++/*
++ * inotify_release_all_watches - destroy all watches on a given device
++ *
++ * FIXME: Do we want a lock here?
++ */
++static void inotify_release_all_watches(struct inotify_device *dev)
 +{
 +	struct inotify_watch *watch, *next;
++
++	list_for_each_entry_safe(watch, next, &dev->watches, d_list)
++		ignore_helper(watch, 0);
++}
++
++/*
++ * inotify_release_all_events - destroy all of the events on a given device
++ */
++static void inotify_release_all_events(struct inotify_device *dev)
++{
++	spin_lock(&dev->lock);
++	while (inotify_dev_has_events(dev))
++		inotify_dev_event_dequeue(dev);
++	spin_unlock(&dev->lock);
++}
++
++static int inotify_release(struct inode *inode, struct file *file)
++{
 +	struct inotify_device *dev;
 +
 +	dev = file->private_data;
 +
-+	spin_lock(&dev->lock);
-+
-+	/* destroy all of the watches on this device */
-+	list_for_each_entry_safe(watch, next, &dev->watches, d_list)
-+		__ignore_helper(watch, dev, 0);
-+
-+	/* destroy all of the events on this device */
-+	while (inotify_dev_has_events(dev))
-+		inotify_dev_event_dequeue(dev);
-+
-+	spin_unlock(&dev->lock);
++	inotify_release_all_watches(dev);
++	inotify_release_all_events(dev);
 +
 +	atomic_dec(&dev->user->inotify_devs);
 +	free_uid(dev->user);
@@ -916,11 +922,15 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +{
 +	struct inode *inode;
 +	struct inotify_watch *watch;
++	struct nameidata nd;
 +	int ret;
 +
-+	inode = find_inode((const char __user*) request->dirname);
-+	if (IS_ERR(inode))
-+		return PTR_ERR(inode);
++	ret = find_inode((const char __user*) request->dirname, &nd);
++	if (ret)
++		return ret;
++
++	/* held in place by references in nd */
++	inode = nd.dentry->d_inode;
 +
 +	spin_lock(&dev->lock);
 +
@@ -935,7 +945,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		owatch->mask = request->mask;
 +		inode_update_watch_mask(inode);
 +		spin_unlock(&dev->lock);
-+		iput(inode);
++		path_release(&nd);
 +
 +		return owatch->wd;
 +	}
@@ -944,7 +954,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +
 +	watch = create_watch(dev, request->mask, inode);
 +	if (!watch) {
-+		iput(inode);
++		path_release(&nd);
 +		return -ENOSPC;
 +	}
 +
@@ -954,7 +964,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	if (inotify_dev_add_watch(dev, watch)) {
 +		delete_watch(dev, watch);
 +		spin_unlock(&dev->lock);
-+		iput(inode);
++		path_release(&nd);
 +		return -EINVAL;
 +	}
 +
@@ -963,11 +973,20 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +		list_del_init(&watch->d_list);
 +		delete_watch(dev, watch);
 +		spin_unlock(&dev->lock);
-+		iput(inode);
++		path_release(&nd);
 +		return ret;
 +	}
 +
 +	spin_unlock(&dev->lock);
++
++	/*
++	 * Demote the reference to nameidata to a reference to the inode held
++	 * by the watch.
++	 */
++	spin_lock(&inode_lock);
++	__iget(inode);
++	spin_unlock(&inode_lock);
++	path_release(&nd);
 +
 +	return watch->wd;
 +}
@@ -975,19 +994,19 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +static int inotify_ignore(struct inotify_device *dev, s32 wd)
 +{
 +	struct inotify_watch *watch;
-+	int ret = 0;
 +
++	/*
++	 * FIXME: Silly to grab dev->lock here and then drop it, when
++	 * ignore_helper() grabs it anyway a few lines down.
++	 */
 +	spin_lock(&dev->lock);
 +	watch = dev_find_wd(dev, wd);
-+	if (!watch) {
-+		ret = -EINVAL;
-+		goto out;
-+	}
-+	__ignore_helper(watch, dev, 0);
++	spin_unlock(&dev->lock);
++	if (!watch)
++		return -EINVAL;
++	ignore_helper(watch, 0);
 +
-+out:
-+	spin_unlock(&dev->lock);	
-+	return ret;
++	return 0;
 +}
 +
 +/*
@@ -1033,7 +1052,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +	.ioctl		= inotify_ioctl,
 +};
 +
-+struct miscdevice inotify_device = {
++static struct miscdevice inotify_device = {
 +	.minor  = MISC_DYNAMIC_MINOR,
 +	.name	= "inotify",
 +	.fops	= &inotify_fops,
@@ -1079,7 +1098,7 @@ diff -urN linux-2.6.10/drivers/char/inotify.c linux/drivers/char/inotify.c
 +module_init(inotify_init);
 diff -urN linux-2.6.10/drivers/char/Kconfig linux/drivers/char/Kconfig
 --- linux-2.6.10/drivers/char/Kconfig	2004-12-24 16:33:49.000000000 -0500
-+++ linux/drivers/char/Kconfig	2005-01-06 15:04:03.000000000 -0500
++++ linux/drivers/char/Kconfig	2005-01-18 16:11:08.000000000 -0500
 @@ -62,6 +62,19 @@
  	depends on VT && !S390 && !USERMODE
  	default y
@@ -1102,7 +1121,7 @@ diff -urN linux-2.6.10/drivers/char/Kconfig linux/drivers/char/Kconfig
  	---help---
 diff -urN linux-2.6.10/drivers/char/Makefile linux/drivers/char/Makefile
 --- linux-2.6.10/drivers/char/Makefile	2004-12-24 16:35:29.000000000 -0500
-+++ linux/drivers/char/Makefile	2005-01-06 15:04:03.000000000 -0500
++++ linux/drivers/char/Makefile	2005-01-18 16:11:08.000000000 -0500
 @@ -9,6 +9,8 @@
  
  obj-y	 += mem.o random.o tty_io.o n_tty.o tty_ioctl.o
@@ -1114,7 +1133,7 @@ diff -urN linux-2.6.10/drivers/char/Makefile linux/drivers/char/Makefile
  obj-y				+= misc.o
 diff -urN linux-2.6.10/drivers/char/misc.c linux/drivers/char/misc.c
 --- linux-2.6.10/drivers/char/misc.c	2004-12-24 16:35:28.000000000 -0500
-+++ linux/drivers/char/misc.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/drivers/char/misc.c	2005-01-18 16:11:08.000000000 -0500
 @@ -207,10 +207,9 @@
  int misc_register(struct miscdevice * misc)
  {
@@ -1154,7 +1173,7 @@ diff -urN linux-2.6.10/drivers/char/misc.c linux/drivers/char/misc.c
  
 diff -urN linux-2.6.10/fs/attr.c linux/fs/attr.c
 --- linux-2.6.10/fs/attr.c	2004-12-24 16:34:00.000000000 -0500
-+++ linux/fs/attr.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/attr.c	2005-01-18 16:11:08.000000000 -0500
 @@ -11,6 +11,7 @@
  #include <linux/string.h>
  #include <linux/smp_lock.h>
@@ -1257,7 +1276,7 @@ diff -urN linux-2.6.10/fs/attr.c linux/fs/attr.c
  }
 diff -urN linux-2.6.10/fs/file_table.c linux/fs/file_table.c
 --- linux-2.6.10/fs/file_table.c	2004-12-24 16:33:50.000000000 -0500
-+++ linux/fs/file_table.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/file_table.c	2005-01-18 16:11:08.000000000 -0500
 @@ -16,6 +16,7 @@
  #include <linux/eventpoll.h>
  #include <linux/mount.h>
@@ -1281,7 +1300,7 @@ diff -urN linux-2.6.10/fs/file_table.c linux/fs/file_table.c
  	/*
 diff -urN linux-2.6.10/fs/inode.c linux/fs/inode.c
 --- linux-2.6.10/fs/inode.c	2004-12-24 16:35:40.000000000 -0500
-+++ linux/fs/inode.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/inode.c	2005-01-18 16:11:08.000000000 -0500
 @@ -130,6 +130,9 @@
  #ifdef CONFIG_QUOTA
  		memset(&inode->i_dquot, 0, sizeof(inode->i_dquot));
@@ -1294,7 +1313,7 @@ diff -urN linux-2.6.10/fs/inode.c linux/fs/inode.c
  		inode->i_cdev = NULL;
 diff -urN linux-2.6.10/fs/namei.c linux/fs/namei.c
 --- linux-2.6.10/fs/namei.c	2004-12-24 16:34:30.000000000 -0500
-+++ linux/fs/namei.c	2005-01-06 15:30:13.000000000 -0500
++++ linux/fs/namei.c	2005-01-20 15:32:24.000000000 -0500
 @@ -22,6 +22,7 @@
  #include <linux/quotaops.h>
  #include <linux/pagemap.h>
@@ -1412,7 +1431,7 @@ diff -urN linux-2.6.10/fs/namei.c linux/fs/namei.c
  
 diff -urN linux-2.6.10/fs/open.c linux/fs/open.c
 --- linux-2.6.10/fs/open.c	2004-12-24 16:33:50.000000000 -0500
-+++ linux/fs/open.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/open.c	2005-01-18 16:11:08.000000000 -0500
 @@ -11,6 +11,7 @@
  #include <linux/smp_lock.h>
  #include <linux/quotaops.h>
@@ -1434,7 +1453,7 @@ diff -urN linux-2.6.10/fs/open.c linux/fs/open.c
  out:
 diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
 --- linux-2.6.10/fs/read_write.c	2004-12-24 16:35:00.000000000 -0500
-+++ linux/fs/read_write.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/read_write.c	2005-01-18 16:11:08.000000000 -0500
 @@ -11,6 +11,7 @@
  #include <linux/uio.h>
  #include <linux/smp_lock.h>
@@ -1498,7 +1517,7 @@ diff -urN linux-2.6.10/fs/read_write.c linux/fs/read_write.c
  
 diff -urN linux-2.6.10/fs/super.c linux/fs/super.c
 --- linux-2.6.10/fs/super.c	2004-12-24 16:34:33.000000000 -0500
-+++ linux/fs/super.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/fs/super.c	2005-01-18 16:11:08.000000000 -0500
 @@ -38,6 +38,7 @@
  #include <linux/idr.h>
  #include <linux/kobject.h>
@@ -1517,7 +1536,7 @@ diff -urN linux-2.6.10/fs/super.c linux/fs/super.c
  		dput(root);
 diff -urN linux-2.6.10/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.6.10/include/linux/fs.h	2004-12-24 16:34:27.000000000 -0500
-+++ linux/include/linux/fs.h	2005-01-06 15:04:03.000000000 -0500
++++ linux/include/linux/fs.h	2005-01-18 16:11:08.000000000 -0500
 @@ -27,6 +27,7 @@
  struct kstatfs;
  struct vm_area_struct;
@@ -1548,7 +1567,7 @@ diff -urN linux-2.6.10/include/linux/fs.h linux/include/linux/fs.h
  extern int generic_permission(struct inode *, int,
 diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 --- linux-2.6.10/include/linux/inotify.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux/include/linux/inotify.h	2005-01-13 16:13:42.000000000 -0500
++++ linux/include/linux/inotify.h	2005-01-18 16:11:12.000000000 -0500
 @@ -0,0 +1,150 @@
 +/*
 + * Inode based directory notification for Linux
@@ -1702,7 +1721,7 @@ diff -urN linux-2.6.10/include/linux/inotify.h linux/include/linux/inotify.h
 +#endif	/* _LINUX_INOTIFY_H */
 diff -urN linux-2.6.10/include/linux/miscdevice.h linux/include/linux/miscdevice.h
 --- linux-2.6.10/include/linux/miscdevice.h	2004-12-24 16:34:58.000000000 -0500
-+++ linux/include/linux/miscdevice.h	2005-01-06 15:04:03.000000000 -0500
++++ linux/include/linux/miscdevice.h	2005-01-18 16:11:08.000000000 -0500
 @@ -2,6 +2,7 @@
  #define _LINUX_MISCDEVICE_H
  #include <linux/module.h>
@@ -1729,7 +1748,7 @@ diff -urN linux-2.6.10/include/linux/miscdevice.h linux/include/linux/miscdevice
  
 diff -urN linux-2.6.10/include/linux/sched.h linux/include/linux/sched.h
 --- linux-2.6.10/include/linux/sched.h	2004-12-24 16:33:59.000000000 -0500
-+++ linux/include/linux/sched.h	2005-01-06 15:04:03.000000000 -0500
++++ linux/include/linux/sched.h	2005-01-18 16:11:08.000000000 -0500
 @@ -353,6 +353,8 @@
  	atomic_t processes;	/* How many processes does this user have? */
  	atomic_t files;		/* How many open files does this user have? */
@@ -1741,7 +1760,7 @@ diff -urN linux-2.6.10/include/linux/sched.h linux/include/linux/sched.h
  	unsigned long locked_shm; /* How many pages of mlocked shm ? */
 diff -urN linux-2.6.10/kernel/user.c linux/kernel/user.c
 --- linux-2.6.10/kernel/user.c	2004-12-24 16:34:31.000000000 -0500
-+++ linux/kernel/user.c	2005-01-06 15:04:03.000000000 -0500
++++ linux/kernel/user.c	2005-01-18 16:11:08.000000000 -0500
 @@ -119,6 +119,8 @@
  		atomic_set(&new->processes, 0);
  		atomic_set(&new->files, 0);
