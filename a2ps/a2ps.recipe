@@ -1,0 +1,75 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+
+class A2ps(PackageRecipe):
+
+    buildRequires = [ 'gperf:runtime', 'flex:runtime', 'libtool:runtime',
+		      'emacs:runtime' ]
+        
+    name = 'a2ps'
+    version = '4.13b'
+    
+    def setup(r):
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/a2ps-%(version)s-37.src.rpm'
+        r.mainDir('a2ps-4.13')
+        r.addArchive('ftp://ftp.enst.fr/pub/unix/a2ps/a2ps-%(version)s.tar.gz')
+        r.addArchive('ftp://ftp.enst.fr/pub/unix/a2ps/i18n-fonts-0.1.tar.gz',
+                               dir='%(maindir)s/')
+        r.addPatch('a2ps-4.13-conf.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-etc.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-flex.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-security.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-glibcpaper.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-varargs.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-eucjp.patch.bz2', rpm=srpm)
+        r.addPatch('a2ps-4.13-autoenc.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13b-attr.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13b-numeric.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13b-encoding.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13b-tilde.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13b-rm.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-euckr.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-gnusource.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-bison.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-hebrew.patch', rpm=srpm)
+        r.addPatch('a2ps-4.13-malloc.patch', rpm=srpm)
+
+        r.Run('sed -i -e "s,/usr/local/bin,%(bindir)s," contrib/emacs/a2ps.el')
+        r.Run('libtoolize --copy --force')
+
+        r.Configure('--with-medium=_glibc --enable-kanji')
+	if Use.builddocs:
+	    # Remove prebuilt info files to force regeneration
+	    r.Run('find . -name "*.info*" -exec rm -f {} \;')
+
+        # Force rebuild of scanners
+        r.Run('find src lib -name \'*.l\' -exec touch {} \;')
+        
+        # spec: these scanners use 'lineno' - incompatible with -CFe flex flags
+        r.Run('cd src; /bin/sh ../auxdir/ylwrap "flex" sheets-map.l lex.yy.c sheets-map.c --')
+        r.Run('cd src; /bin/sh ../auxdir/ylwrap "flex" lexssh.l lex.yy.c lexssh.c --')
+        r.Run('cd lib; /bin/sh ../auxdir/ylwrap "flex" lexppd.l lex.yy.c lexppd.c --')
+
+        r.Make()
+
+        r.MakeDirs('%(datadir)s/a2ps/{afm,fonts}')
+        r.MakeInstall()
+        r.Install('i18n-fonts-0.1/afm/*.afm', '%(datadir)s/a2ps/afm/')
+        r.Install('i18n-fonts-0.1/fonts/*.pfb', '%(datadir)s/a2ps/fonts/')
+        
+        r.Doc('AUTHORS', 'ChangeLog', 'COPYING', 'NEWS', 'README',
+	      'TODO', 'THANKS')
+	
+	r.addSource('a2psfontmetrics.tagdescription', macros=True)
+	r.addSource('a2psfontmetrics.taghandler', macros=True)
+	r.Install('a2psfontmetrics.tagdescription',
+		  '%(tagdescriptiondir)s/a2psfontmetrics')
+	r.Install('a2psfontmetrics.taghandler',
+	          '%(taghandlerdir)s/a2psfontmetrics', mode=0755)
+        # this should be a zero-length config file so that conary
+        # can verify the permissions without ever touching the contents
+        # the tag handler will fill this file in
+        r.Create('%(datadir)s/a2ps/afm/fonts.map')
+        r.Config('%(datadir)s/a2ps/afm/fonts.map')
