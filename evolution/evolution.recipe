@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+
+loadRecipe('gnomepackage.recipe')
+class Evolution(GnomePackageRecipe):
+    name = 'evolution'
+    version = '2.0.3'
+
+    extraConfig = GnomePackageRecipe.extraConfig + ' --enable-nss=yes'
+    # runtime requirements include gnome-spell:runtime
+
+    buildRequires = [ 'evolution-data-server:devel', 'gal:devel', 
+                      'libsoup:devel', 'gtkhtml:devel', 'mozilla-nss:devel', 
+                      'libbonobo:devel', 'libbonoboui:devel', 'gnome-vfs:devel',
+                      'libgnomecanvas:devel', 'libxml2:devel', 'GConf:devel', 
+                      'intltool', 'ORBit2:devel', 'flex', 'bison', 'byacc', 
+                      'libtool', 'gettext', 'pkgconfig', 'desktop-file-utils',
+                      'psmisc' ]
+
+    # add ldap support
+    if Use.ldap:
+        extraConfig += ' --with-openldap=yes'
+        buildRequires.append('openldap:devel')
+    else:
+        extraConfig += ' --without-openldap'
+
+    # add krb5 support
+    if Use.krb:
+        extraConfig += ' --with-krb5=/usr/kerberos'
+        buildRequires.append('krb5:devel')
+    else:
+        extraConfig += ' --without-krb5'
+
+    # add support for pilot
+    extraConfig += ' --enable-pilot-conduits=yes'
+    buildRequires.append('gnome-pilot:devel')
+    buildRequires.append('pilot-link:devel')
+
+    def unpack(r):
+        GnomePackageRecipe.unpack(r)
+        r.addPatch('servicedir.patch', macros=True,
+                   use=(r.macros.servicedir != '/var'))
+
+    def build(r):
+        r.Run('intltoolize -c -f')
+        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+                  'configure{.in}')
+        GnomePackageRecipe.build(r)
+
+    def install(r):
+        GnomePackageRecipe.install(r)
+        r.SharedLibrary(subtrees='%(libdir)s/evolution/%(majversion)s')
