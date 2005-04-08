@@ -1,3 +1,3 @@
 #!/bin/sh
 eval `dbus-launch --auto-syntax`
-beagled
+beagled -web-start
