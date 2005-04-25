@@ -1,81 +1,89 @@
-#! /bin/sh
+#!/bin/sh
 #
-# /etc/init.d/hula
-# hula        Startup script for the Hula Server
+# Startup script for hulamanager
 #
-# chkconfig: - 23 15
-# description: Hula collaboration system, visit: http://www.hula-project.com
-
+# chkconfig: 345 86 16
+# description: This is the initscript for the Hula project's hulamanager daemon 
 # processname: hulamanager
-# pidfile: /var/run/hula.pid
+
 
 # Source function library.
 . /etc/rc.d/init.d/functions
 
-if [ -f /etc/sysconfig/hula ]; then
-  . /etc/sysconfig/hula
-else
-  OPTIONS=
-fi
-
-HULA_BIN=/usr/sbin
-HULA_NAME=hulamanager
-HULA_SETUP=hulasetup
-HULA_LIST="hulamanager huladmc hulanmap hulasmtp hulawebadmin hulaimap hulamodweb hulapop3 hulaantispam hulaavirus hulacalagent hulageneric hulamailprox"
-HULA_DATA=/srv/hula/mdb
+DAEMON_DIR=/usr/sbin
+DAEMON_NAME=hulamanager
+DAEMON_SETUP=hulasetup
+DAEMON_LIST="hulamanager huladmc hulanmap hulasmtp hulawebadmin hulaimap hulamodweb hulapop3"
+DATADIR=/srv/mdb
+SPOOLDIR=/srv/netmail
 OPTIONS=
-test -x $HULA_BIN/$HULA_NAME || exit 5
-RETVAL=0
 
-case "$1" in
-    start)
- 	if [ ! -d $HULA_DATA ] ; then
+[ -f /etc/sysconfig/$DAEMON_NAME ] && . /etc/sysconfig/$DAEMON_NAME
+
+start() {
+        if [ ! -d $DATADIR ] ; then
+		mkdir -m700 $DATADIR
+		chown mail:root $DATADIR
+		mkdir -m700 $SPOOLDIR
+		chown mail:root $SPOOLDIR
 		HOSTNAME=`/bin/hostname`
-		DNS_SERVER=`sed -e 's/nameserver//' -e '2,$d' -e 's/ //' < /etc/resolv.conf`
-		echo -n "Initializing hula: /srv/hula"
-		$HULA_BIN/$HULA_SETUP --domain=$HOSTNAME --dns=$DNS_SERVER
+		action $"Initializing hula: " $DAEMON_DIR/$DAEMON_SETUP --domain=$HOSTNAME
 		RETVAL=$?
-		sleep 5
+                if [ $RETVAL -ne 0 ] ; then
+	                return $RETVAL
+	        fi
 	fi
-	echo -n "Starting Hula Daemon:"
-	$HULA_BIN/$HULA_NAME $OPTIONS
-	RETVAL=$?
+        # unconditionally chown to make updates work from old versions that ran as root
+	chown mail:root $DATADIR
+	chown mail:root $SPOOLDIR
+	$DAEMON_DIR/$DAEMON_NAME $OPTIONS >>/var/log/hulaconsole 2>&1 & 
+        RETVAL=$?
+        if [ $RETVAL -eq 0 ]; then
+		action $"Starting hula: " /bin/true
+        else
+                action $"Starting hula: " /bin/false
+        fi
+        [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$DAEMON_NAME
+	return $RETVAL
+}
 
-        # Remember status and be verbose
-        ;;
-    stop)
-        echo -n "Shutting down Hula Daemon"
+stop() {
 	RETVAL=$?
 	# Try to play nice first
-	$HULA_BIN/$HULA_NAME -s >/dev/null 2>&1 &
+	$DAEMON_DIR/$DAEMON_NAME -s >/dev/null 2>&1 &
 	sleep 15
 	
 	# Now force all procs down
-	for foo in $HULA_LIST;
+	for foo in $DAEMON_LIST;
 	do
 		killproc $foo >/dev/null 2>&1
 	done
-	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/$HULA_NAME
+        if [ $RETVAL -eq 0 ]; then
+                action $"Shutting down hula: " /bin/true
+        else
+                action $"Shutting down hula: " /bin/false
+        fi
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/$DAEMON_NAME
+	return $RETVAL
+}
 
-        # Remember status and be verbose
-	RETVAL=$?
+case "$1" in
+  start)
+  	start
+	;;
+  stop)
+	stop
+	;;
+  status)
+        status $DAEMON_NAME
         ;;
-    restart)
-        ## Stop the service and regardless of whether it was
-        ## running or not, start it again.
-        stop
-        start
+  reload|restart)
+        $0 stop
+        $0 start
         ;;
-    status)
-        echo -n "Checking for Hula Daemon: "
-        status $HULA_NAME
-        RETVAL=$?
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|status|restart}"
+  *)
+        gprintf "Usage: %s {start|stop|restart|reload|status}\n" "$0"
         exit 1
-        ;;
 esac
 
-exit $RETVAL
-
+exit 0
