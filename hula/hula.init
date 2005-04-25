@@ -1,0 +1,81 @@
+#! /bin/sh
+#
+# /etc/init.d/hula
+# hula        Startup script for the Hula Server
+#
+# chkconfig: - 23 15
+# description: Hula collaboration system, visit: http://www.hula-project.com
+
+# processname: hulamanager
+# pidfile: /var/run/hula.pid
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+if [ -f /etc/sysconfig/hula ]; then
+  . /etc/sysconfig/hula
+else
+  OPTIONS=
+fi
+
+HULA_BIN=/usr/sbin
+HULA_NAME=hulamanager
+HULA_SETUP=hulasetup
+HULA_LIST="hulamanager huladmc hulanmap hulasmtp hulawebadmin hulaimap hulamodweb hulapop3 hulaantispam hulaavirus hulacalagent hulageneric hulamailprox"
+HULA_DATA=/srv/hula/mdb
+OPTIONS=
+test -x $HULA_BIN/$HULA_NAME || exit 5
+RETVAL=0
+
+case "$1" in
+    start)
+ 	if [ ! -d $HULA_DATA ] ; then
+		HOSTNAME=`/bin/hostname`
+		DNS_SERVER=`sed -e 's/nameserver//' -e '2,$d' -e 's/ //' < /etc/resolv.conf`
+		echo -n "Initializing hula: /srv/hula"
+		$HULA_BIN/$HULA_SETUP --domain=$HOSTNAME --dns=$DNS_SERVER
+		RETVAL=$?
+		sleep 5
+	fi
+	echo -n "Starting Hula Daemon:"
+	$HULA_BIN/$HULA_NAME $OPTIONS
+	RETVAL=$?
+
+        # Remember status and be verbose
+        ;;
+    stop)
+        echo -n "Shutting down Hula Daemon"
+	RETVAL=$?
+	# Try to play nice first
+	$HULA_BIN/$HULA_NAME -s >/dev/null 2>&1 &
+	sleep 15
+	
+	# Now force all procs down
+	for foo in $HULA_LIST;
+	do
+		killproc $foo >/dev/null 2>&1
+	done
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/$HULA_NAME
+
+        # Remember status and be verbose
+	RETVAL=$?
+        ;;
+    restart)
+        ## Stop the service and regardless of whether it was
+        ## running or not, start it again.
+        stop
+        start
+        ;;
+    status)
+        echo -n "Checking for Hula Daemon: "
+        status $HULA_NAME
+        RETVAL=$?
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
+
+exit $RETVAL
+
