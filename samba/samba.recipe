@@ -1,0 +1,121 @@
+#
+# Copyright (c) 2004 Specifix, Inc.
+# All rights reserved
+#
+
+class Samba(PackageRecipe):
+    buildRequires = [ 'readline:devel', 'ncurses:devel',
+                      'coreutils:runtime', 'acl:devel', 'krb5:devel',
+                      'libtool:runtime', 'automake:runtime', 'autoconf:runtime',
+                      'desktop-file-utils:runtime' ]
+    if Use.pam:
+        buildRequires.append('pam:devel')
+
+    name = 'samba'
+    version = '3.0.11'
+    
+    def setup(r):
+    
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/3/SRPMS/samba-3.0.8-0.pre1.3.src.rpm'
+        r.addArchive('http://hostopia.samba.org/samba/ftp/samba-%(version)s.tar.gz')
+        r.addSource('samba.log', rpm=srpm,
+                    dest='%(sysconfdir)s/logrotate.d/samba')
+        r.addSource('samba.xinetd', rpm=srpm,
+	            dest='%(sysconfdir)s/xinetd.d/swat')
+        r.addSource('swat.desktop', rpm=srpm)
+        r.addSource('samba.sysconfig', rpm=srpm,
+	            dest='%(sysconfdir)s/sysconfig/samba')
+        r.addSource('smb.init', rpm=srpm, dest='%(initdir)s/smb', mode=0755)
+        r.addSource('smbprint', rpm=srpm, dest='%(bindir)s/', mode=0755)
+        r.addSource('winbind.init', rpm=srpm, dest='%(initdir)s/winbind',
+                    mode=0755)
+
+        r.addPatch('samba-2.2.0-smbw.patch', rpm=srpm)
+        r.addPatch('samba-3.0.0beta1-pipedir.patch', rpm=srpm)
+        r.addPatch('samba-3.0.8pre1-pie.patch', rpm=srpm, use=Use.pie)
+        r.addPatch('samba-3.0.0rc3-nmbd-netbiosname.patch', rpm=srpm)
+        r.addPatch('samba-3.0.4-smb.conf.patch', rpm=srpm)
+        r.addPatch('samba-3.0.4-man.patch', rpm=srpm)
+        r.addPatch('samba-3.0.4-warning.patch', rpm=srpm)
+        r.addPatch('samba-3.0.5rc1-passwd.patch', rpm=srpm)
+        r.addPatch('samba-3.0.5rc1-64bit-timestamps.patch', rpm=srpm)
+
+        r.Run('cd source; script/mkversion.sh')
+
+	extraConfig = ''
+	if Use.pam:
+	    extraConfig += ' --with-pam --with-pam_smbpass' 
+
+	r.Configure('--with-acl-support --with-automount --with-libsmbclient '
+	            '--with-mmap --with-quotas --with-smbmount --with-syslog '
+		    '--with-utmp --with-vfs --without-smbwrapper '
+		    '--with-lockdir=%(localstatedir)s/cache/samba '
+                    '--with-piddir=%(localstatedir)s/run '
+	            '--with-mandir=%(mandir)s '
+	            '--with-privatedir=%(sysconfdir)s/samba '
+	            '--with-logfilebase=%(localstatedir)s/log/samba '
+                    '--with-libdir=%(libdir)s/samba '
+	            '--with-configdir=%(sysconfdir)s/samba '
+         	    '--with-swatdir=%(datadir)s/swat ', subDir='source/')
+
+	r.Make('proto', subDir='source/')
+	r.Make('all nsswitch/libnss_wins.so nsswitch modules', subDir='source/')
+	if Use.pam:
+	    r.Make('pam_smbpass', subDir='source/')
+	r.Make('debug2html', subDir='source/')
+	r.Make('smbfilter', subDir='source/')
+
+	r.Run('cd source/client ; gcc -o mount.cifs $RPM_OPT_FLAGS -Wall -O -D_GNU_SOURCE -D_LARGEFILE64_SOURCE mount.cifs.c')
+
+	r.MakePathsInstall('BINDIR=%(destdir)s/%(bindir)s '
+		      'BASEDIR=%(destdir)s/%(prefix)s '
+	              'SBINDIR=%(destdir)s/%(sbindir)s '
+		      'DATADIR=%(destdir)s/%(datadir)s '
+		      'LOCKDIR=%(destdir)s/%(localstatedir)s/cache/samba '        
+		      'PRIVATEDIR=%(destdir)s/%(sysconfdir)s/samba '
+                      'LIBDIR=%(destdir)s/%(libdir)s/samba '
+	              'CONFIGDIR=%(destdir)s/%(sysconfdir)s/samba '        
+                      'MANDIR=%(destdir)s/%(mandir)s '
+        	      'VARDIR=%(destdir)s/%(datadir)s/log/samba '
+        	      'CODEPAGEDIR=%(destdir)s/%(datadir)s/samba/codepages '
+        	      'SWATDIR=%(destdir)s/%(datadir)s/swat '
+		      'SAMBABOOK=%(destdir)s/%(datadir)s/swat/using_samba '
+        	      'PIDDIR=%(destdir)s/%(localstatedir)s/run',
+	              subDir='source/')
+
+	r.Install('packaging/RedHat/smb.conf', '%(sysconfdir)s/samba/')
+	r.Install('source/script/mksmbpasswd.sh', '%(bindir)s/', mode=0755)
+	r.Install('packaging/RedHat/smbusers', '%(sysconfdir)s/samba/')
+	r.Install('packaging/RedHat/samba.pamd.stack', '%(sysconfdir)s/pam.d/samba')
+	r.Symlink('%(bindir)s/smbmount', '%(essentialsbindir)s/mount.smb')
+	r.Symlink('%(bindir)s/smbmount', '%(essentialsbindir)s/mount.smbfs')
+
+	r.Create('%(sysconfdir)s/samba/lmhosts', contents='127.0.0.1 localhost')
+	r.MakeDirs('%(localstatedir)s/log/samba', mode=0700)
+
+	if Use.pam:
+	    r.Install('source/bin/pam_smbpass.so', '%(essentiallibdir)s/security/')
+	    r.Install('source/nsswitch/pam_winbind.so', '%(essentiallibdir)s/security/')
+	r.Install('source/nsswitch/libnss_winbind.so', '%(essentiallibdir)s/libnss_winbind.so.2')
+	r.Symlink('%(essentiallibdir)s/libnss_winbind.so.2', '%(essentiallibdir)s/libnss_winbind.so')
+	r.Install('source/nsswitch/libnss_wins.so', '%(essentiallibdir)s/libnss_wins.so.2')
+	r.Symlink('%(essentiallibdir)s/libnss_wins.so.2', '%(essentiallibdir)s/libnss_wins.so')
+	
+	r.Install('source/client/mount.cifs', '%(essentialsbindir)s/')
+
+        r.Desktopfile('swat.desktop')
+
+        # make install puts libsmbclient in the wrong place (as of 3.0.7)
+        r.Move('%(libdir)s/samba/libsmbclient.*', '%(libdir)s')
+
+	r.ComponentSpec('runtime', '%(libdir)s/samba/')
+	r.Provides(exceptions='%(libdir)s/samba/')
+	r.PackageSpec('samba-swat',
+		      '%(datadir)s/swat/.*',
+                      r'%(datadir)s/applications/.*swat\.desktop',
+		      '%(sbindir)s/swat',
+                      r'%(sysconfdir)s/xinetd\.d/swat',
+		      r'%(mandir)s/man8/swat\.8.*')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/') 
