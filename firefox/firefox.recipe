@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2005 rpath, Inc.
+# All rights reserved
+#
+
+class FireFox(PackageRecipe):
+
+    buildRequires = [ 'libpng:devel', 'libjpeg:devel', 'zlib:devel', 
+			'zip:runtime', 'perl:runtime', 'libIDL:devel', 
+			'glib:devel', 'gtk:devel', 
+                        'autoconf:runtime=:autoconf213',
+                        'desktop-file-utils:runtime' ] 
+
+    name = 'firefox'
+    version = '1.0.4'
+
+    def setup(r):
+	r.disableParallelMake()
+	r.mainDir('mozilla')
+	r.macros.fflib = '%(libdir)s/firefox/'
+	r.macros.ffinc = '%(includedir)s/firefox/'
+
+        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/%(version)s/source/%(name)s-%(version)s-source.tar.bz2')
+
+	r.addSource('dot_mozconfig', dest='.mozconfig')
+        r.addSource('firefox.desktop')
+        r.addSource('firefox.sh')
+        r.addAction("sed -i 's|/usr/local/lib|%(libdir)s|g' firefox.sh")
+        r.addSource('firefox.png')
+	r.Environment('MOZ_APP_NAME', 'firefox')
+	r.Environment('MOZ_PHOENIX', '1')
+
+	r.Make('-f client.mk depend')
+	r.Make('-f client.mk build')
+	r.MakeDirs('%(libdir)s')
+	r.Make('-C xpinstall/packager/ MOZ_PKG_APPNAME="firefox" ')
+        r.Install('firefox.sh', '%(bindir)s/firefox', mode=0755)
+	# we've created firefox all bundled up!
+	r.Run('tar -xz -C %(destdir)s/%(libdir)s -f dist/firefox-*-linux-gnu.tar.gz')
+        r.Desktopfile('firefox.desktop')
+        r.Install('firefox.png', '%(datadir)s/pixmaps/firefox.png')
+        # not sure why this is installed
+        r.Remove('%(libdir)s/firefox/TestGtkEmbed')
+        r.Move('%(libdir)s/firefox/{README.txt,LICENSE}', '%(thisdocdir)s/')
