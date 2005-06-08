@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2005 Specifix, Inc.
+# Copyright (c) 2004-2005 rpath, Inc.
 # All rights reserved
 #
 # bootsplash testing lines - search for GIL
@@ -8,9 +8,9 @@ class Kernel(PackageRecipe):
     buildRequires = [ 'perl:runtime', 'module-init-tools:runtime' ]
 
     name = 'kernel'
-    version = '2.6.11.7'
+    version = '2.6.11.11'
     # GIL - new serial for bootsplash edition
-    serial = '3'
+    serial = 'fdl.1'
     # Every change that is expected to change interfaces requires
     # a change in serial string.  No two kernels of the same flavor
     # and serial can be installed at once due to path conflicts.
@@ -20,7 +20,7 @@ class Kernel(PackageRecipe):
     # it only differentiates kernels with the same %(version)s
     # within a branch or set of related branches.
     #
-    # Pure integer serial strings are reserved for specifix.com
+    # Pure integer serial strings are reserved for rpath.com
     # Inheriting repositories should use some other rule (decimal
     # numbers, letters, etc.) than all repositories above them in
     # their inheritance tree; especially a different rule from their
@@ -33,13 +33,14 @@ class Kernel(PackageRecipe):
     # compilation flags, and changes in configuration can all make
     # changes to binary interfaces within the kernel.
 
-    Flags = PackageRecipe.Flags
     Flags.debug = False
     Flags.debug.setShortDoc('Enable kernel debugging options')
     Flags.smp = True
     Flags.smp.setShortDoc('Enable SMP support')
     Flags.numa = False
     Flags.numa.setShortDoc('Enable NUMA support')
+    Flags.debugdata = False
+    Flags.debugdata.setShortDoc('Enable saving debug data in :debuginfo')
 
     configs = (
         # list of (basearch, flaglist, dictlist) tuples:
@@ -98,6 +99,9 @@ class Kernel(PackageRecipe):
         r.macros.buildrep = buildrep[-64:]
         r.macros.branchname = branchname[-64:]
 
+        if not r.Flags.debugdata:
+            r.Strip(debuginfo=False)
+
         r.addArchive(
             'http://ftp.kernel.org/pub/linux/kernel/v%(majorversion)s/linux-%(version)s.tar.bz2',
             keyid='517D0F0E'
@@ -109,11 +113,20 @@ class Kernel(PackageRecipe):
             s/ ."`domainname | $UTS_TRUNCATE`."//
             ' scripts/mkcompile_h""")
 
-	# Inotify patch
-	r.addPatch('inotify-0.21-rml-2.6.11-2.patch')
+        # Inotify patch
+        r.addPatch('inotify-0.21-rml-2.6.11-2.patch')
 
         # GIL - bootsplash patch
         r.addPatch('bootsplash-3.1.4-2.6.11.diff')
+
+        # Synaptic driver patches: http://web.telia.com/~u89404340/touchpad/
+        r.addPatch('p00001_alps-hwtaps.patch')
+        r.addPatch('p00002_alps-glidepoint-has-no-stick.patch')
+        r.addPatch('p00003_synaptics-scroll-wheel.patch')
+        r.addPatch('p00004_mousedev-roundoff.patch')
+        r.addPatch('p00005_alps-version-info2.patch')
+        r.addPatch('p00006_alps-abs-range-fix.patch')
+        r.addPatch('p00007_alps-more-protocols.patch')
 
         # Red Hat's nonint_oldconfig to avoid requests for interactive response
         r.addPatch('linux-2.4.0-nonintconfig.patch')
@@ -129,7 +142,7 @@ class Kernel(PackageRecipe):
         r.extraSource(addConfigs(r))
 
     def build(r):
-        r.Create('localversion.spx', contents='%(localversion)s')
+        r.Create('localversion.rpl', contents='%(localversion)s')
         r.Make('nonint_oldconfig 2>oc.err || { cat oc.err; diff -u .config.old .config > config.changes ; exit 1; }')
         # if we get here, this file is empty, remove it
         r.Run('rm oc.err')
@@ -163,9 +176,13 @@ class Kernel(PackageRecipe):
         if Arch.x86:
             r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
         if Arch.x86_64:
+            r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
             r.Provides('abi: ELF64(SysV x86_64)', '/boot/vmlinu.*')
         r.Provides('soname: libkconfig.so',
                    '/lib/modules/.*/build/scripts/kconfig/libkconfig.so')
+        r.Requires('mkinitrd:runtime',
+                   r'/lib/modules/%(kver)s/.*\.ko$')
+        r.ComponentProvides('%(kver)s')
 
 
 
