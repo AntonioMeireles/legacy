@@ -1,0 +1,99 @@
+diff -ruN gnome-volume-manager-1.3.1-old/src/gvm.h gnome-volume-manager-1.3.1/src/gvm.h
+--- gnome-volume-manager-1.3.1-old/src/gvm.h	2004-08-13 19:11:56.000000000 +0200
++++ gnome-volume-manager-1.3.1/src/gvm.h	2005-05-13 14:31:12.000000000 +0200
+@@ -32,6 +32,12 @@
+ 
+ #define CLIPBOARD_NAME		"GVM_SELECTION"
+ 
++/* override BIN_MOUNT and BIN_UMOUNT from autoconf to pmount */
++#undef BIN_MOUNT
++#undef BIN_UMOUNT
++#define BIN_MOUNT "/usr/bin/pmount-hal"
++#define BIN_UMOUNT "/usr/bin/pumount"
++
+ extern gboolean gvm_get_clipboard (void);
+ 
+ #endif	/* _GVM_H */
+diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.1/src/manager.c
+--- gnome-volume-manager-1.3.1-old/src/manager.c	2005-05-13 14:30:49.000000000 +0200
++++ gnome-volume-manager-1.3.1/src/manager.c	2005-05-13 14:30:49.000000000 +0200
+@@ -485,22 +485,19 @@
+ }
+ 
+ /*
+- * gvm_device_mount - use BIN_MOUNT to mount the given device node.
+- *
+- * Note that this requires that the given device node is in /etc/fstab.  This
+- * is intentional.
++ * gvm_device_mount - use BIN_MOUNT to mount the given device.
+  *
+  * @return TRUE iff the mount was succesful
+  */
+ static gboolean
+-gvm_device_mount (char *device)
++gvm_device_mount (const char *udi)
+ {
+ 	char *argv[3];
+ 	GError *error = NULL;
+ 	gint exit_status;
+ 
+ 	argv[0] = BIN_MOUNT;
+-	argv[1] = device;
++	argv[1] = udi;
+ 	argv[2] = NULL;
+ 
+ 	if (!g_spawn_sync (g_get_home_dir (), argv, NULL, 0, NULL,
+@@ -533,7 +530,7 @@
+ 
+ 	if (!g_spawn_sync (g_get_home_dir (), argv, NULL, 0, NULL,
+ 			   NULL, NULL, NULL, &exit_status, &error)) {
+-		warn ("failed to exec " BIN_MOUNT ": %s\n", error->message);
++		warn ("failed to exec " BIN_UMOUNT ": %s\n", error->message);
+ 		return FALSE;
+ 	}
+ 
+@@ -606,7 +603,7 @@
+ 
+ 	switch (action) {
+ 	case MOUNT:
+-		gvm_device_mount (device);
++		gvm_device_mount (udi);
+ 		mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		break;
+ 	case PLAY:
+@@ -709,7 +706,7 @@
+ 		gvm_ask_mixed (udi);
+ 	} else if (has_data) {
+ 		if (config.automount_media) {
+-			gvm_device_mount (device);
++			gvm_device_mount (udi);
+ 			mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		}
+ 	} else if (is_blank) {
+@@ -776,7 +773,7 @@
+ 		dbg ("Added: %s\n", device);
+ 		
+ 		if (config.automount_drives) {
+-			gvm_device_mount (device);
++			gvm_device_mount (udi);
+ 			mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		}
+ 	}
+@@ -845,7 +842,7 @@
+ 	dbg ("Added: %s\n", device);
+ 	
+ 	if (config.automount_drives) {
+-		gvm_device_mount (device);
++		gvm_device_mount (udi);
+ 		mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 	}
+ 	
+@@ -1131,7 +1128,7 @@
+ 
+ 			dbg ("mount_all: mounting %s\n", device_file);
+ 
+-			gvm_device_mount (device_file);
++			gvm_device_mount (udi);
+ 
+ 			libhal_free_string (device_file);
+ 		} else {

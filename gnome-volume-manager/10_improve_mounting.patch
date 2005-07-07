@@ -1,0 +1,162 @@
+diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.1/src/manager.c
+--- gnome-volume-manager-1.3.1-old/src/manager.c	2005-06-22 15:33:28.000000000 +0200
++++ gnome-volume-manager-1.3.1/src/manager.c	2005-06-22 15:42:37.000000000 +0200
+@@ -488,6 +488,30 @@
+ 	libhal_free_string (mount_point);
+ }
+ 
++/* Returns true if the storage policy indicates this should be manually 
++ * mounted */
++static gboolean
++gvm_is_manual_mount(LibHalContext *ctx, const char *udi) {
++	gchar *parent;
++	gboolean ret = FALSE;
++
++	parent = libhal_device_get_property_string(ctx, udi, "info.parent", NULL);
++	if (libhal_device_property_exists (hal_ctx, parent, 
++			"storage.automount_enabled_hint", NULL)) {
++		ret = 
++			!libhal_device_get_property_bool (hal_ctx, parent, 
++				"storage.automount_enabled_hint", NULL);
++	}
++	if (libhal_device_property_exists (hal_ctx, udi, 
++                                  "storage.automount_enabled_hint", NULL)) {
++		ret = 
++			!libhal_device_get_property_bool (hal_ctx, udi,
++				"storage.automount_enabled_hint", NULL);
++  }
++  libhal_free_string(parent);
++  return ret;
++}
++
+ /*
+  * gvm_device_mount_finished - called back when mount finished.
+  *
+@@ -627,25 +651,49 @@
+  * @return TRUE iff the mount was succesful
+  */
+ static gboolean
+-gvm_device_mount (const char *udi)
++gvm_device_mount (const char *udi, gboolean run_policy)
+ {
+ 	char *argv[3];
+ 	GError *error = NULL;
+ 	gint exit_status;
+ 	gchar *fsusage = NULL;
++	gboolean ret = FALSE;
++
++	/* don't attempt to mount if the automount_hint is false */
++	if (gvm_is_manual_mount(hal_ctx, udi)) {
++		dbg("%s has storage.automount_enabled_hint == false, not mounting\n", udi);
++		return FALSE;
++	}
++	/* don't attempt to mount already mounted volumes */
++	if (!libhal_device_property_exists (hal_ctx, udi, "volume.is_mounted", NULL)||
++			libhal_device_get_property_bool (hal_ctx, udi, "volume.is_mounted", NULL)) {
++		dbg("%s already mounted, not mounting again\n", udi);
++		return FALSE;
++	}
+ 
+ 	if (libhal_device_property_exists (hal_ctx, udi, "volume.fsusage", NULL)) {
+ 		fsusage = 
+ 			libhal_device_get_property_string (hal_ctx, udi, "volume.fsusage", NULL);
++	} else {
++		return FALSE;
+ 	}
+ 
+ 	/* Check for encrypted device */
+-	if (fsusage && !g_strcasecmp(fsusage, "crypto")) {
++	if (!g_strcasecmp(fsusage, "crypto")) {
+ 		dbg ("encrypted volume found\n");
+ 		gvm_device_mount_encrypted (udi);
++		if (run_policy) {
++			mounted_volumes_policy_queue =
++				g_slist_append (mounted_volumes_policy_queue, g_strdup(udi));
++		}
+ 		libhal_free_string(fsusage);
+ 		return TRUE;
+ 	}
++	if (g_strcasecmp(fsusage, "filesystem")) {
++		dbg("%s isn't a filesystem\n", udi);
++		libhal_free_string(fsusage);
++		return FALSE;
++	}
+ 	libhal_free_string(fsusage);
+ 
+ 	argv[0] = BIN_MOUNT;
+@@ -657,8 +705,16 @@
+ 		warn ("failed to exec " BIN_MOUNT ": %s\n", error->message);
+ 		return FALSE;
+ 	}
+-
+-	return (exit_status == 0);
++	if (exit_status == 0) {
++		ret = TRUE;
++		/* add to list of all volumes mounted during lifetime */
++		all_mounted_volumes = g_slist_append (all_mounted_volumes, g_strdup (udi));
++		if (run_policy) {
++			mounted_volumes_policy_queue = 
++				g_slist_append (mounted_volumes_policy_queue, g_strdup(udi));
++		}
++	}
++	return ret;
+ }
+ 
+ /*
+@@ -755,7 +811,7 @@
+ 
+ 	switch (action) {
+ 	case MOUNT:
+-		gvm_device_mount (udi);
++		gvm_device_mount (udi, TRUE);
+ 		mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		break;
+ 	case PLAY:
+@@ -858,7 +914,7 @@
+ 		gvm_ask_mixed (udi);
+ 	} else if (has_data) {
+ 		if (config.automount_media) {
+-			gvm_device_mount (udi);
++			gvm_device_mount (udi, TRUE);
+ 			mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		}
+ 	} else if (is_blank) {
+@@ -925,7 +981,7 @@
+ 		dbg ("Added: %s\n", device);
+ 		
+ 		if (config.automount_drives) {
+-			gvm_device_mount (udi);
++			gvm_device_mount (udi, TRUE);
+ 			mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
+ 		}
+ 	}
+@@ -994,8 +1050,7 @@
+ 	dbg ("Added: %s\n", device);
+ 	
+ 	if (config.automount_drives) {
+-		gvm_device_mount (udi);
+-		mounted_volumes_policy_queue = g_slist_append (mounted_volumes_policy_queue, g_strdup (udi));
++		gvm_device_mount (udi, TRUE);
+ 	}
+ 	
+ out:
+@@ -1072,10 +1127,6 @@
+ 
+ 		dbg ("Mounted: %s\n", udi);
+ 
+-		/* add to list of all volumes mounted during lifetime */
+-		all_mounted_volumes = g_slist_append (all_mounted_volumes,
+-						      g_strdup (udi));
+-
+ 		policy_udi = g_slist_find_custom (mounted_volumes_policy_queue, 
+ 						  udi, 
+ 						  g_ascii_strcasecmp);
+@@ -1368,7 +1419,7 @@
+ 
+ 			dbg ("mount_all: mounting %s\n", device_file);
+ 
+-			gvm_device_mount (udi);
++			gvm_device_mount (udi, FALSE);
+ 
+ 			libhal_free_string (device_file);
+ 		} else {

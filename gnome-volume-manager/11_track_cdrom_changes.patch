@@ -1,0 +1,55 @@
+diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.1/src/manager.c
+--- gnome-volume-manager-1.3.1-old/src/manager.c	2005-06-22 13:59:04.000000000 +0200
++++ gnome-volume-manager-1.3.1/src/manager.c	2005-06-22 14:08:15.000000000 +0200
+@@ -873,6 +873,7 @@
+ 	dbus_bool_t has_data;
+ 	dbus_bool_t is_blank;
+ 	DBusError error;
++	GSList *i;
+ 
+ 	dbus_error_init (&error);
+ 	has_audio = libhal_device_get_property_bool (hal_ctx, udi,
+@@ -898,10 +899,21 @@
+ 		warn ("cannot get block.device: %s\n", error.message);
+ 		if (dbus_error_is_set (&error))
+ 			dbus_error_free (&error);
+-
+ 		goto out;
+ 	}
+ 
++	/* check whether we already saw the insertion/change of this device
++	 * without a removal; this happens on HAL restarts */
++	for (i=all_mounted_volumes; i != NULL; i = g_slist_next (i)) {
++		if (strcmp (udi, (const char *)i->data) == 0) {
++				dbg ("Detected change event on already handled device, probably due to a hald restart\n");
++				goto out;
++		}
++	}
++
++	/* add to the list of mounted volumes */
++	all_mounted_volumes = g_slist_append (all_mounted_volumes, g_strdup (udi));
++
+ 	if (has_audio && (!has_data)) {
+ 		gvm_run_cdplayer (device, device, udi);
+ 	} else if (has_audio && has_data) {
+@@ -1064,7 +1076,20 @@
+ hal_device_removed (LibHalContext *ctx __attribute__((__unused__)), 
+ 		    const char *udi)
+ {
++	GSList *i;
++	GSList *next;
++
+ 	dbg ("Device removed: %s\n", udi);
++	/* remove from list of all volumes mounted during lifetime */
++
++	for (i=all_mounted_volumes; i != NULL; i = next) {
++		next = g_slist_next (i);
++		if (strcmp (udi, (const char *)i->data) == 0) {
++			g_free (i->data);
++			all_mounted_volumes = g_slist_delete_link ( all_mounted_volumes, i);
++			break;
++		}
++	}
+ }
+ 
+ /** Invoked when device in the Global Device List acquires a new capability.
