@@ -1,7 +1,7 @@
-diff -ruN gnome-volume-manager-1.3.1-old/configure.in gnome-volume-manager-1.3.1/configure.in
---- gnome-volume-manager-1.3.1-old/configure.in	2005-03-31 18:27:06.000000000 +0200
-+++ gnome-volume-manager-1.3.1/configure.in	2005-06-22 15:20:29.000000000 +0200
-@@ -82,7 +82,7 @@
+diff -ruN gnome-volume-manager-1.3.2-old/configure.in gnome-volume-manager-1.3.2/configure.in
+--- gnome-volume-manager-1.3.2-old/configure.in	2005-06-30 22:12:28.000000000 +0200
++++ gnome-volume-manager-1.3.2/configure.in	2005-07-04 17:22:41.991965136 +0200
+@@ -90,7 +90,7 @@
  AC_PROG_INTLTOOL([0.27.2])
  AM_GLIB_GNU_GETTEXT
  
@@ -10,22 +10,23 @@ diff -ruN gnome-volume-manager-1.3.1-old/configure.in gnome-volume-manager-1.3.1
  AC_SUBST(GVM_CFLAGS)
  AC_SUBST(GVM_LIBS)
  
-diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.1/src/manager.c
---- gnome-volume-manager-1.3.1-old/src/manager.c	2005-06-22 15:20:29.000000000 +0200
-+++ gnome-volume-manager-1.3.1/src/manager.c	2005-06-22 15:32:46.000000000 +0200
-@@ -22,6 +22,8 @@
+diff -ruN gnome-volume-manager-1.3.2-old/src/manager.c gnome-volume-manager-1.3.2/src/manager.c
+--- gnome-volume-manager-1.3.2-old/src/manager.c	2005-07-04 17:22:12.281481000 +0200
++++ gnome-volume-manager-1.3.2/src/manager.c	2005-07-04 17:24:48.821684088 +0200
+@@ -33,6 +33,8 @@
  #include <dbus/dbus-glib.h>
+ #include <dbus/dbus-glib-lowlevel.h>
  #include <libhal.h>
- #include <signal.h>
 +#include <libgksuui1.0/gksuui.h>
 +#include <sys/wait.h>
  
  #include "gvm.h"
  
-@@ -486,6 +488,139 @@
+@@ -882,6 +884,139 @@
+ 	libhal_free_string (device);
  }
  
- /*
++/*
 + * gvm_device_mount_finished - called back when mount finished.
 + *
 + * This needs to close the pid, remove the FIFO (if given, that applies to
@@ -43,7 +44,7 @@ diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.
 +        unlink (fifoname);
 +
 +    if (!WIFEXITED(status)) {
-+        warn (BIN_MOUNT " did not exit normally\n");
++        warn ("pmount did not exit normally\n");
 +        return;
 +    }
 +
@@ -63,14 +64,14 @@ diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.
 +
 +/*
 + * gvm_device_mount_encrypted_pwd_callback - Called from
-+ * gvm_device_mount_encrypted after the password dialog finished. Use BIN_MOUNT
++ * gvm_device_mount_encrypted after the password dialog finished. Use pmount
 + * to mount an encrypted given device.
 + */
 +static void
 +gvm_device_mount_encrypted_pwd_callback (GksuuiDialog* dialog, gint response,
 +        char *udi)
 +{
-+    char *argv[5] = {BIN_MOUNT, udi, "--passphrase", NULL, NULL};
++    char *argv[5] = {"/usr/bin/pmount-hal", udi, "--passphrase", NULL, NULL};
 +    GError *error = NULL;
 +    char* fifoname = NULL;
 +    FILE* fifo = NULL;
@@ -115,7 +116,7 @@ diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.
 +    /* Call the mount process asynchronously */
 +    if (!g_spawn_async (NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL,
 +                NULL, &mount_pid, &error)) {
-+        warn ("gvm_device_mount_encrypted: could not execute " BIN_MOUNT ": %s\n",
++        warn ("gvm_device_mount_encrypted: could not execute pmount: %s\n",
 +                error->message);
 +        return;
 +    }
@@ -158,54 +159,46 @@ diff -ruN gnome-volume-manager-1.3.1-old/src/manager.c gnome-volume-manager-1.3.
 +    gtk_widget_show_all (GTK_WIDGET(dialog));
 +}
 +
-+/*
-  * gvm_device_mount - use BIN_MOUNT to mount the given device.
-  *
-  * @return TRUE iff the mount was succesful
-@@ -496,6 +631,21 @@
- 	char *argv[3];
- 	GError *error = NULL;
- 	gint exit_status;
-+	gchar *fsusage = NULL;
-+
-+	if (libhal_device_property_exists (hal_ctx, udi, "volume.fsusage", NULL)) {
-+		fsusage = 
-+			libhal_device_get_property_string (hal_ctx, udi, "volume.fsusage", NULL);
-+	}
-+
-+	/* Check for encrypted device */
-+	if (fsusage && !g_strcasecmp(fsusage, "crypto")) {
-+		dbg ("encrypted volume found\n");
-+		gvm_device_mount_encrypted (udi);
-+		libhal_free_string(fsusage);
-+		return TRUE;
-+	}
-+	libhal_free_string(fsusage);
- 
- 	argv[0] = BIN_MOUNT;
- 	argv[1] = udi;
-@@ -1182,14 +1332,17 @@
- 			continue;
- 
- 		/* only mount if the block device got a sensible filesystem */
--		if (!libhal_device_property_exists (ctx, udi, 
--						    "volume.fsusage",
--						    NULL) ||
--		    strcmp (libhal_device_get_property_string (ctx, udi, 
--							       "volume.fsusage",
--							       NULL), 
--			    "filesystem") != 0) 
-+		if (libhal_device_property_exists (ctx, udi, "volume.fsusage", NULL)) {
-+			gchar *fsusage = 
-+				libhal_device_get_property_string (ctx, udi, "volume.fsusage", NULL);
-+			if(strcmp(fsusage, "filesystem") && strcmp(fsusage, "crypto")) {
-+				libhal_free_string(fsusage);
-+				continue;
+ #ifndef ASSUME_SUBMOUNT
+ /*
+  * gvm_device_mount - mount the given device.
+@@ -1165,6 +1300,14 @@
+ 		if (mountable) {
+ 			/* only mount if the block device has a sensible filesystem */
+ 			fsusage = libhal_device_get_property_string (ctx, udi, "volume.fsusage", &error);
++			/* check for encrypted device */
++			if (fsusage && !g_strcasecmp(fsusage, "crypto")) {
++			    dbg ("encrypted volume found on %s\n", udi);
++			    if (config.automount_drives)
++				gvm_device_mount_encrypted (udi);
++			    goto out;
 +			}
-+			libhal_free_string(fsusage);
-+		} else {
++
+ 			if (!fsusage || strcmp (fsusage, "filesystem") != 0) {
+ 				dbg ("no sensible filesystem for %s\n", udi);
+ 				mountable = FALSE;
+@@ -1528,10 +1671,11 @@
+ 		if (!libhal_device_property_exists (ctx, udi, "volume.fsusage", NULL))
  			continue;
-+		}
- 		drive_udi = libhal_device_get_property_string(ctx, udi, "info.parent", NULL);
-   
- 		do_mount = TRUE;
+ 		prop = libhal_device_get_property_string (ctx, udi, "volume.fsusage", NULL);
+-		if (!prop || strcmp (prop, "filesystem") != 0) {
++		if (!prop || (strcmp (prop, "filesystem") != 0 && strcmp(prop, "crypto") != 0)) {
+ 			libhal_free_string (prop);
+ 			continue;
+ 		}
++		gboolean is_encrypted = (prop[0] == 'c');
+ 		libhal_free_string (prop);
+  
+ 		/* Check if configured policy disables mounting */
+@@ -1551,7 +1695,10 @@
+ 		/* mount the device */
+ 		if (!(dev = libhal_device_get_property_string (ctx, udi, "block.device", &error))) {
+ 			dbg ("mount_all: mounting %s\n", dev);
+-			gvm_device_mount (udi, dev, NULL);
++			if (is_encrypted)
++			    gvm_device_mount_encrypted (udi);
++			else
++			    gvm_device_mount (udi, dev, NULL);
+ 			libhal_free_string (dev);
+ 		} else {
+ 			warn ("mount_all: no device for udi=%s: %s", udi, error.message);
