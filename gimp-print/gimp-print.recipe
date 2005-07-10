@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2004-2005 rpath, Inc.
+# All rights reserved
+#
+
+class GimpPrint(PackageRecipe):
+    name = 'gimp-print'
+    version = '4.2.6'
+
+    buildRequires = [ 'cups:devel', 'autoconf:runtime',
+                      'libtool:runtime', 'foomatic:runtime' ]
+
+    gimp_plugins = False
+
+    def setup(r):
+        r.disableParallelMake()
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/gimp-print-4.2.6-11.src.rpm'
+        r.addArchive('gimp-print-%(version)s.tar.gz', rpm=srpm)
+        r.addPatch('gimp-print-4.2.1-no-kitload.patch', rpm=srpm)
+        r.addPatch('gimp-print-C8x.patch', rpm=srpm)
+        r.addPatch('gimp-print-4.2.1-print.patch', rpm=srpm)
+        r.addPatch('gimp-print-m4warning.patch', rpm=srpm)
+        r.addPatch('gimp-print-4.2.6-gimp2.patch', rpm=srpm, use=r.gimp_plugins)
+        r.addPatch('gimp-print-4.2.6-mkinstalldirs.patch', rpm=srpm)
+        r.addPatch('gimp-print-fix-regexp.patch')
+
+        extraConfig = ''
+        if r.gimp_plugins:
+            r.Run('libtoolize --copy --force && aclocal && autoconf')
+        else:
+            extraConfig += ' --without-gimp'
+        r.Configure('--with-foomatic --with-cups --without-ghost' + extraConfig)
+        # use the system version of libtool, the current version used
+        # by gimp-print does not handle multilib
+        r.Make('LIBTOOL=%(bindir)s/libtool')
+        r.MakePathsInstall('LIBTOOL=%(bindir)s/libtool '
+                           'cups_prefix=%(destdir)s/%(prefix)s '
+                           'cups_exec_prefix=%(destdir)s/%(exec_prefix)s '
+                           'cups_bindir=%(destdir)s/%(bindir)s '
+                           'cups_conf_datadir=%(destdir)s/%(datadir)s/cups '
+                           'cups_conf_serverbin=%(destdir)s/%(libdir)s/cups '
+                           'cups_conf_serverroot=%(destdir)s/%(sysconfdir)s/cups ')
+
+        r.Move('%(datadir)s/%(name)s/doc/*', '%(thisdocdir)s/')
+
+        if not r.gimp_plugins:
+            # don't package gimp plugin docs
+            r.Remove('%(thisdocdir)s/manual-html/', recursive=True)
