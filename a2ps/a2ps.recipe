@@ -1,19 +1,19 @@
 #
-# Copyright (c) 2004 Specifix, Inc.
+# Copyright (c) 2004-2005 rpath, Inc.
 # All rights reserved
 #
 
 class A2ps(PackageRecipe):
-
-    buildRequires = [ 'gperf:runtime', 'flex:runtime', 'libtool:runtime',
-			'automake:runtime', 'autoconf:runtime' ]
-        
     name = 'a2ps'
     version = '4.13b'
-    
+ 
+    buildRequires = [ 'gperf:runtime', 'flex:runtime', 'flex:devel', 
+                      'libtool:runtime', 'emacs:runtime', 'autoconf:runtime',
+                      'gettext:runtime', 'automake:runtime', 'bison:runtime',
+                      'bison:devellib' ]
+        
     def setup(r):
-        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/a2ps-%(version)s-37.src.rpm'
-        r.mainDir('a2ps-4.13')
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/4/i386/os/SRPMS/a2ps-%(version)s-46.src.rpm'
         r.addArchive('ftp://ftp.enst.fr/pub/unix/a2ps/a2ps-%(version)s.tar.gz')
         r.addArchive('ftp://ftp.enst.fr/pub/unix/a2ps/i18n-fonts-0.1.tar.gz',
                                dir='%(maindir)s/')
@@ -35,14 +35,25 @@ class A2ps(PackageRecipe):
         r.addPatch('a2ps-4.13-bison.patch', rpm=srpm)
         r.addPatch('a2ps-4.13-hebrew.patch', rpm=srpm)
         r.addPatch('a2ps-4.13-malloc.patch', rpm=srpm)
+        r.addPatch('a2ps-underquoted.patch', rpm=srpm)
+        r.addPatch('a2ps-autoconf.patch', rpm=srpm)
 
         r.Run('sed -i -e "s,/usr/local/bin,%(bindir)s," contrib/emacs/a2ps.el')
         r.Run('libtoolize --copy --force')
+        r.Run('cp %(datadir)s/aclocal/libtool.m4 m4/')
+        r.Run('aclocal -I m4')
+        r.Run('autoconf')
+        # go through some hoops to ensure that automake isn't run
+        # by config.status because timestamps are off -- a2ps has 
+        # a pretty broken automake configuration.
+        r.Run('find . -name Makefile.am | xargs touch')
+        r.Run('find . -name Makefile.in | xargs touch')
 
+        r.Environment('PERL', '%(bindir)s/perl')
         r.Configure('--with-medium=_glibc --enable-kanji')
-	if Use.builddocs:
-	    # Remove prebuilt info files to force regeneration
-	    r.Run('find . -name "*.info*" -exec rm -f {} \;')
+        if Use.builddocs:
+            # Remove prebuilt info files to force regeneration
+            r.Run('find . -name "*.info*" -exec rm -f {} \;')
 
         # Force rebuild of scanners
         r.Run('find src lib -name \'*.l\' -exec touch {} \;')
@@ -59,15 +70,12 @@ class A2ps(PackageRecipe):
         r.Install('i18n-fonts-0.1/afm/*.afm', '%(datadir)s/a2ps/afm/')
         r.Install('i18n-fonts-0.1/fonts/*.pfb', '%(datadir)s/a2ps/fonts/')
         
-        r.Doc('AUTHORS', 'ChangeLog', 'COPYING', 'NEWS', 'README',
-	      'TODO', 'THANKS')
-	
-	r.addSource('a2psfontmetrics.tagdescription', macros=True)
-	r.addSource('a2psfontmetrics.taghandler', macros=True)
-	r.Install('a2psfontmetrics.tagdescription',
-		  '%(tagdescriptiondir)s/a2psfontmetrics')
-	r.Install('a2psfontmetrics.taghandler',
-	          '%(taghandlerdir)s/a2psfontmetrics', mode=0755)
+        r.addSource('a2psfontmetrics.tagdescription', macros=True)
+        r.addSource('a2psfontmetrics.taghandler', macros=True)
+        r.Install('a2psfontmetrics.tagdescription',
+                  '%(tagdescriptiondir)s/a2psfontmetrics')
+        r.Install('a2psfontmetrics.taghandler',
+                  '%(taghandlerdir)s/a2psfontmetrics', mode=0755)
         # this should be a zero-length config file so that conary
         # can verify the permissions without ever touching the contents
         # the tag handler will fill this file in
