@@ -1,0 +1,58 @@
+--- modules/file-method.c.orig	2005-06-17 21:40:17.409653040 +0200
++++ modules/file-method.c	2005-06-17 21:51:05.861073440 +0200
+@@ -52,11 +52,14 @@
+ #include <unistd.h>
+ #include <utime.h>
+ #include <string.h>
++#include <sys/utsname.h>
+ #ifdef HAVE_FAM
+ #include <fam.h>
+ #include <glib/giochannel.h>
+ #endif
+ 
++static int safe_fadvise = 0;
++
+ #ifdef HAVE_FAM
+ static FAMConnection *fam_connection = NULL;
+ static gint fam_watch_id = 0;
+@@ -213,7 +216,7 @@
+ 		return gnome_vfs_result_from_errno ();
+ 
+ #ifdef HAVE_POSIX_FADVISE
+-	if (! (mode & GNOME_VFS_OPEN_RANDOM)) {
++	if (safe_fadvise && !(mode & GNOME_VFS_OPEN_RANDOM)) {
+ 		posix_fadvise (fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+ 	}
+ #endif
+@@ -326,7 +329,9 @@
+ 	file_handle = (FileHandle *) method_handle;
+ 
+ #ifdef HAVE_POSIX_FADVISE
+-	posix_fadvise (file_handle->fd, offset, size, POSIX_FADV_DONTNEED);
++	if (safe_fadvise) {
++		posix_fadvise (file_handle->fd, offset, size, POSIX_FADV_DONTNEED);
++	}
+ #endif
+ 	
+ 	return GNOME_VFS_OK;
+@@ -2361,9 +2366,20 @@
+ 	do_forget_cache
+ };
+ 
++static int
++is_fadvise_safe ()
++{
++	struct utsname toto;
++	uname (&toto);
++	if (strcmp (toto.sysname, "Linux") == 0 && !strncmp (toto.release, "2.6", 3))
++		return 1;
++	return 0;
++}
++
+ GnomeVFSMethod *
+ vfs_module_init (const char *method_name, const char *args)
+ {
++	safe_fadvise = is_fadvise_safe ();
+ 	return &method;
+ }
+ 
