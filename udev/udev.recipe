@@ -8,21 +8,20 @@ class Udev(PackageRecipe):
                       'bison:runtime', 'pam:devel' ]
 
     name = 'udev'
-    version = '064'
+    version = '063'
     
     def setup(r):
-	srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/udev-058-1.src.rpm'
+	srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/udev-063-3.src.rpm'
 
 	r.addArchive('ftp://ftp.kernel.org/pub/linux/utils/kernel/hotplug/%(name)s-%(version)s.tar.bz2')
 	
 	# addons and extra features
+#XXX verify
 	r.addSource('udev.rules', rpm=srpm)
-        r.addSource('pam_console.dev', rpm=srpm)
 	r.addSource('udev.conf', rpm=srpm)
-	r.addSource('ata_identify.c', rpm=srpm,
-	    dir='ata_identify/')
-	r.addSource('ata_identify-Makefile', rpm=srpm,
-	    dir='ata_identify/', dest='Makefile')
+        r.addSource('pam_console.dev', rpm=srpm)
+	r.addSource('MAKEDEV.dev', rpm=srpm)
+	r.addSource('hotplug.rules', rpm=srpm)
 	r.addSource('udev.get_persistent_device_name.sh', rpm=srpm)
 	r.addSource('udev.get_unique_hardware_path.sh', rpm=srpm)
 	r.addSource('udev.get_unique_drive_id.sh', rpm=srpm)
@@ -31,24 +30,28 @@ class Udev(PackageRecipe):
         r.addSource('ide-media.sh', rpm=srpm)
         r.addSource('dvb.sh', rpm=srpm)
 	r.addSource('start_udev', rpm=srpm)
+	r.addSource('udev.html', rpm=srpm)
 	r.addSource('udev.nodes', rpm=srpm)
 	r.addSource('udevpermconv.sh', rpm=srpm)
-	r.addSource('MAKEDEV.dev', rpm=srpm)
+        r.addSource('firmware_helper.c', rpm=srpm)
 
+        r.addPatch('udev-062-build.patch', rpm=srpm)
         r.addPatch('udev-039-scsi_id-tmp_dir.patch', rpm=srpm)
 
 	r.Replace('MAKEDEV -x', 'MAKEDEV', 'start_udev')
 
-	r.Make('USE_KLIBC=false udevdir="/dev"')
+	r.Make('USE_KLIBC=false udevdir="/dev" EXTRAS="extras/scsi_id '
+               'extras/chassis_id extras/ata_id extras/usb_id '
+               'extras/run_directory" all')
 	r.MakeInstall()
-
-	r.Make(subDir='ata_identify')
-	r.MakeInstall(subDir='ata_identify')
 
         r.Make("LIBDIR=%(libdir)s", subDir='pam_console_setowner')
 
-	r.Install('udev.conf', '%(sysconfdir)s/udev/')
+        r.Run('%(cc)s %(cflags)s -o firmware_helper firmware_helper.c')
+
 	r.Install('udev.rules', '%(sysconfdir)s/udev/rules.d/50-udev.rules')
+	r.Install('hotplug.rules', '%(sysconfdir)s/udev/rules.d/hotplug.rules')
+	r.Install('udev.conf', '%(sysconfdir)s/udev/')
 	r.Install('udev.get_persistent_device_name.sh', '%(essentialsbindir)s/', mode=0755)
 	r.Install('udev.get_unique_hardware_path.sh', '%(essentialsbindir)s/', mode=0755)
 	r.Install('udev.get_unique_drive_id.sh', '%(essentialsbindir)s/', mode=0755)
@@ -63,10 +66,7 @@ class Udev(PackageRecipe):
 
         r.Install('pam_console.dev', '%(sysconfdir)s/udev/scripts/pam_console.dev', mode=0755)
         r.Symlink('%(sysconfdir)s/udev/scripts/pam_console.dev', '%(sysconfdir)s/dev.d/default/05-pam_console.dev')
-
-        r.Move('etc/dev.d/net/hotplug.dev', '%(sysconfdir)s/udev/scripts/')
-        r.Symlink('%(sysconfdir)s/udev/scripts/hotplug.dev', '%(sysconfdir)s/dev.d/net/')
-
+        r.Install('firmware_helper', '%(essentialbindir)s/')
         r.Install('check-cdrom.sh', '%(sysconfdir)s/udev/scripts/check-cdrom.sh', mode=0755)
         r.Install('ide-media.sh', '%(sysconfdir)s/udev/scripts/ide-media.sh', mode=0755)
         r.Install('MAKEDEV.dev', '%(sysconfdir)s/udev/scripts/MAKEDEV.dev', mode=0755)
