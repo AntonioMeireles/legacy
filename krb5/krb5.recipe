@@ -1,0 +1,202 @@
+#
+# Copyright (c) 2004-2005 rpath, Inc.
+# All rights reserved
+#
+
+class Krb5(PackageRecipe):
+    name = 'krb5' 
+    version = '1.4.1'
+    
+    buildRequires = [
+        'bison:runtime', 'e2fsprogs:devel', 'flex:runtime', 'gzip:runtime',
+        'libtermcap:devel', 'rsh:runtime', 'texinfo:runtime', 'tar:runtime',
+        'libtool:runtime', 'autoconf:runtime'
+    ]
+
+    def setup(r):
+        if not Use.krb:
+            return
+        r.disableParallelMake()
+
+        # kerberos has its own prefix, except for some system bits -- save those
+        # It is easier to do this by modifying macros than by passing in lots
+        # of overrides to r.Configure later
+        infodir = r.macros.infodir
+        docdir = r.macros.docdir
+        thisdocdir = r.macros.thisdocdir
+
+        # expand krbprefix before setting anything else, so that it does not
+        # change.  No, this is not a NOOP.
+        r.macros.krbprefix = r.macros.krbprefix
+        r.macros.exec_prefix = r.macros.krbprefix
+        r.macros.prefix = r.macros.krbprefix
+
+        r.macros.mandir = r.macros.krbprefix+'/man'
+        r.macros.infodir = infodir
+        r.macros.docdir = docdir
+        r.macros.thisdocdir = thisdocdir
+
+        # Avoid errors on some other packages...
+        r.macros.cflags += " -fPIC"
+
+        # krb5 is distributed as an archive in an archive...
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/krb5-1.4.1-6.src.rpm'
+        r.addArchive('http://web.mit.edu/kerberos/dist/krb5/1.4/krb5-%(version)s-signed.tar')
+        r.addAction('tar -C .. -zxf ../krb5-%(version)s.tar.gz')
+
+        r.addPatch('krb5-1.3-info-dir.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-manpage-paths.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-netkit-rsh.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-rlogind-environ.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-ksu-access.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-ksu-path.patch', rpm=srpm)
+        r.addPatch('krb5-1.1.1-brokenrev.patch', rpm=srpm)
+        r.addPatch('krb5-1.2.1-passive.patch', rpm=srpm)
+        r.addPatch('krb5-1.4-ktany.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-large-file.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-ftp-glob.patch', rpm=srpm)
+        r.addPatch('krb5-1.3-check.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.3-no-rpath.patch', rpm=srpm)
+        r.addPatch('krb5-1.2.7-reject-bad-transited.patch', rpm=srpm)
+        r.addPatch('krb5-selinux.patch', rpm=srpm, use=Use.selinux)
+        r.addPatch('krb5-1.3.1-dns.patch', rpm=srpm)
+        r.addPatch('krb5-1.4-server-sort.patch', rpm=srpm)
+        r.addPatch('krb5-1.4-null.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.3-rcp-sendlarge.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.5-gethostbyname_r.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.5-kprop-mktemp.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.4-send-pr-tempfile.patch', rpm=srpm)
+        r.addPatch('krb5-1.4-ncurses.patch', rpm=srpm)
+        r.addPatch('krb5-1.3.4-deadlock.patch', rpm=srpm)
+        r.addPatch('krb5-krshd-lehman.patch', rpm=srpm, level=0)
+       
+        for source in (
+            'kpropd.init', 'krb524d.init', 'kadmind.init', 'krb5kdc.init',
+            'krb5.conf', 'krb5.sh', 'krb5.csh', 'kdc.conf',
+            'kadm5.acl', 'krsh', 'krlogin', 'eklogin.xinetd', 'klogin.xinetd',
+            'kshell.xinetd', 'krb5-telnet.xinetd', 'gssftp.xinetd'):
+            r.addSource(source, rpm=srpm)
+        
+        r.addAction('cp src/krb524/README README.krb524')
+
+        r.Run("""
+            cd src
+            top=`pwd`
+            for configurefile in `find -name configure.in -type f`; do
+                cd `dirname $configurefile`
+                autoconf -I "$top"
+                cd -
+            done """)
+                
+        # 32-bit arches need explicit LFS support
+        lfs = ''
+        if Arch.bits32:
+            lfs = '-D_FILE_OFFSET_BITS=64'
+        r.Environment('RESOLV_LIB', '-lresolv')
+        r.Configure(
+            '--with-cc=%(cc)s --with-ccopts="%(cflags)s '+lfs+' -fPIC"'
+            ' --enable-shared --enable-static'
+            ' --localstatedir=%(localstatedir)s/kerberos'
+            ' --with-krb4 --with-netlib=$RESOLV_LIB --without-tcl --enable-dns '
+            ' %(target)s', subDir='src')
+        
+        # Override the CC_LINK variable to exclude the rpath, and override
+        # LDCOMBINE to use gcc instead of ld to build shared libraries.
+        r.Make("CC_LINK='$(CC) $(PROG_LIBPATH)'"
+                  " LDCOMBINE='%(cc)s -shared -Wl,-soname=lib$(LIB)$(SHLIBSEXT) $(CFLAGS)'",
+                  subDir='src')
+
+        # packages are krb5-config, krb5-server, krb5-services, krb5-test,
+        # krb5-workstation, and just plain krb5
+        r.Install('krsh', 'krlogin', '%(bindir)s/', mode=0755)
+        r.Install('doc/*.info*', '%(infodir)s/', mode=0644)
+        r.Install('kdc.conf', 'kadm5.acl',
+                  '%(localstatedir)s/kerberos/krb5kdc/', mode=0644)
+        r.Install('krb5.conf', '%(sysconfdir)s/',
+                  mode=0644, component=':data')
+        r.Requires('krb5:data', r'%(prefix)s/%(lib)s/libkrb5\.so\.*')
+        r.Install('krb5.{,c}sh', '%(sysconfdir)s/profile.d/',
+                  mode=0755)
+        for server in ('krb5kdc', 'kadmind', 'kpropd', 'krb524d'):
+            r.Install(server+'.init', '%(initdir)s/'+server,
+                      mode=0755, component='krb5-server:')
+        for xinetd in ('eklogin', 'klogin', 'kshell', 'krb5-telnet', 'gssftp'):
+            r.Install(xinetd+'.xinetd',
+                      '%(sysconfdir)s/xinetd.d/'+xinetd,
+                      mode=0644, component='krb5-services:')
+        r.MakeInstall(subDir='src')
+        r.Run('find %(destdir)s/%(includedir)s -type d | xargs chmod 755')
+        r.Run('find %(destdir)s/%(includedir)s -type f | xargs chmod 644')
+        r.Run("""sed -i "s|^CC_LINK=.*|CC_LINK='\$(CC) \$(PROG_LIBPATH)'|g" src/krb5-config""")
+        r.Install('src/krb5-config', '%(bindir)s/',
+                  mode=0755, component=':devel')
+
+        # These should be setuid only if someone wants them that way on
+        # their system, as part of local configuration
+        r.SetModes('%(krbprefix)s/bin/{ksu,v4rcp}', 0755)
+
+        # workstation docs
+        r.Doc('doc/user*.html', 'doc/user*.ps.gz',
+              'src/config-files/services.append',
+              component='krb5-workstation:')
+        r.Doc('src/config-files/convert-config-files',
+              mode=0755, component='krb5-workstation:')
+        # server docs
+        r.Doc('doc/admin*.ps.gz', 'doc/admin*.html',
+              'doc/krb425*.ps.gz', 'doc/krb425*.html', 'doc/install*.ps.gz',
+              'doc/install*.html', 'README.krb524', component='krb5-server:')
+        # devel docs
+        r.Doc('doc/api', 'doc/implement', 'doc/kadm5', 'doc/kadmin',
+              'doc/krb5-protocol', 'doc/rpc', component=':devel')
+
+
+        # owned by rsh, ftp, telnet packages
+        r.Remove('%(mandir)s/{rcp,rlogin,rsh,ftp,telnet}.*')
+
+        r.TagSpec('initscript', '%(initdir)s/') 
+        # classifying the files installed by make install
+        r.PackageSpec('krb5-workstation',
+            '%(infodir)s/krb5-user\.info*',
+            '%(bindir)s/(ftp|gss-client|sim-client|telnet|uuclient|v4rcp|v5passwd)',
+            '%(bindir)s/(k|)(rsh|rlogin)',
+            '%(bindir)s/k(destroy|init|list|passwd|rb534init|su|vno)',
+            '%(mandir)s/man1/(v4rcp|v5passwd)\.1.*',
+            '%(mandir)s/k(destroy|erberos|init|list|passwd|rb5-send-pr|su|vno)\.1.*',
+        )
+        r.PackageSpec('krb5-services',
+            '%(sbindir)s/(ftpd|gss-server|login.krb5|telnetd|uuserver)',
+            '%(sbindir)s/k(admin|logind|rb5-send-pr|rshd|tutil)',
+            '%(mandir)s/man1/krb5-send-pr\.1.*',
+            '%(mandir)s/man5/(.k5login|krb5.conf)\.5.*',
+            '%(mandir)s/man8/(ftpd|login.krb5|telnetd)\.8.*',
+            '%(mandir)s/man8/k(admin|logind|shd|tutil)\.8.*',
+        )
+        r.PackageSpec('krb5-server',
+            '%(infodir)s/krb5-(admin|install)\.info*',
+            '%(infodir)s/krb425\.info*',
+            '%(localstatedir)s/kerberos/krb5kdc/(kdc.conf|kadm5.acl)',
+            '%(sbindir)s/k(admin(.local|d4?)|db5_util|propd?|rb5(d4d|kdc))',
+            '%(sbindir)s/(sim_server|v5passwdd)',
+            '%(mandir)s/man5/kdc5.conf\.5.*',
+            '%(mandir)s/man8/k(admin(d|.local)|db5_util|propd?|rb5kdc)\.8.*',
+        )
+        r.PackageSpec('krb5-test',
+            '%(bindir)s/sclient',
+            '%(mandir)s/man1/sclient\.1.*',
+            '%(sbindir)s/sserver',
+            '%(mandir)s/man8/sserver\.8.*',
+        )
+        
+        r.ComponentSpec('doc', '%(docdir)s/.*')
+        r.ComponentSpec('doc', '%(mandir)s/man1/.*')
+        r.ComponentSpec('doc', '%(mandir)s/man5/.*')
+        r.ComponentSpec('doc', '%(mandir)s/man8/.*')
+        r.ComponentSpec('doc', '%(infodir)s/.*')
+
+        r.InitialContents('/etc/krb5.conf') 
+        
+        # Disable the inclusion of the changelogs, as there
+        # are quiet a few...
+        r.AutoDoc(exceptions='.*ChangeLog.*')
+        
+        r.Requires('krb5-services:doc', '%(mandir)s/man8/kadmin.local.8.gz')
