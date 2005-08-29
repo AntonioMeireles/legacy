@@ -1,0 +1,131 @@
+--- mkinitrd-4.2.15/mkinitrd	2005-05-17 23:52:38.000000000 +0200
++++ bla/mkinitrd	2005-08-29 07:42:43.775053311 +0200
+@@ -17,27 +17,30 @@
+ #	Keith Owens <kaos@ocs.com.au>
+ #	Bernhard Rosenkraenzer <bero@redhat.com>
+ #	Matt Wilson <msw@redhat.com>
+ #       Trond Eivind Glomsrød <teg@redhat.com>
+ #       Jeremy Katz <katzj@redhat.com>
+ #       Preston Brown <pbrown@redhat.com>
+ #	Bill Nottingham <notting@redhat.com>
+ #       Guillaume Cottenceau <gc@mandrakesoft.com>
+ #	Peter Jones <pjones@redhat.com>
+ 
++#added bootsplash
++
+ umask 0022
+ 
+ PATH=/sbin:/usr/sbin:/bin:/usr/bin:$PATH
+ export PATH
+ 
+-VERSION=4.2.15
++VERSION=4.2.16
+ 
++bootsplash_theme="FDL" #set it to the bootplsashtheme name when you want bootplash
+ compress=1
+ allowmissing=""
+ target=""
+ kernel=""
+ force=""
+ verbose=""
+ MODULES=""
+ img_vers=""
+ builtins=""
+ pivot=1
+@@ -306,24 +309,24 @@
+     echo "mkinitrd must be run as root"
+     exit 1
+ fi
+ 
+ kernelmajor=`echo $kernel | cut -d . -f 1,2`
+ 
+ if [ "$kernelmajor" == "2.4" ]; then
+     if [ -n "$verbose" ]; then echo "Creating old-style initrd"; fi
+     USE_UDEV=
+ else
+-    if [ -n "$verbose" ]; then echo "Creating initramfs"; fi
++    if [ -n "$verbose" ]; then echo "Creating initramfs;err initramfs not working, so creating oldstyle "; fi
+     modulefile=/etc/modprobe.conf
+-    initramfs=1
+-    pivot=""
++    initramfs="" ## diactivating was initramfs=1
++    pivot=1 #was pivot = 0
+ fi
+ 
+ # if we're not using udev, don't set any of the other bits
+ [ -z "$USE_UDEV" ] && UDEV_TMPFS= && UDEV_KEEP_DEV=
+ 
+ # find a temporary directory which doesn't use tmpfs
+ TMPDIR=""
+ for t in /tmp /var/tmp /root ${PWD}; do
+     if [ ! -d $t ]; then continue; fi
+     if ! echo access -w $t | /sbin/nash --quiet; then continue; fi
+@@ -527,20 +530,21 @@
+     echo "Using modules: $MODULES"
+ fi
+ 
+ 
+ MNTIMAGE=`mktemp -d ${TMPDIR}/initrd.XXXXXX`
+ IMAGE=`mktemp ${TMPDIR}/initrd.img.XXXXXX`
+ if [ -z "$initramfs" ]; then
+     MNTPOINT=`mktemp -d ${TMPDIR}/initrd.mnt.XXXXXX`
+     RCFILE=$MNTIMAGE/linuxrc
+ else
++    echo initramfs????
+     RCFILE=$MNTIMAGE/init
+ fi
+ 
+ if [ -z "$MNTIMAGE" -o -z "$IMAGE" ]; then
+     echo "Error creating temporaries.  Try again" >&2
+     exit 1
+ fi
+ 
+ if [ -z "$initramfs" ]; then
+   dd if=/dev/zero of=$IMAGE bs=1k count=$IMAGESIZE 2> /dev/null || exit 1
+@@ -744,43 +748,44 @@
+ echo "echo Creating root device" >> $RCFILE
+ echo "mkrootdev /dev/root" >> $RCFILE
+ rootdev=/dev/root
+ 
+ if [ -n "$initramfs" ]; then
+   echo "echo Mounting root filesystem" >> $RCFILE
+   echo "mount -o $rootopts --ro -t $rootfs $rootdev /sysroot" >> $RCFILE
+ 
+   echo "echo Switching to new root" >> $RCFILE
+   if [ -n "$UDEV_KEEP_DEV" ]; then
+-    echo "switchroot --movedev /sysroot" >> $RCFILE
++    echo "switchroot --movedev /sysroot " >> $RCFILE
+   else
+-    echo "switchroot /sysroot" >> $RCFILE
++    echo "switchroot /sysroot " >> $RCFILE
+   fi
+ else 
+   if [ "$kernelmajor" != "2.4" ]; then
+     echo "umount /sys" >> $RCFILE
+   fi
+ 
+   if [ -n "$pivot" ]; then
+     echo "echo 0x0100 > /proc/sys/kernel/real-root-dev" >> $RCFILE
+ 
+     echo "echo Mounting root filesystem" >> $RCFILE
+     echo "mount -o $rootopts --ro -t $rootfs $rootdev /sysroot" >> $RCFILE
+ 
+     echo "pivot_root /sysroot /sysroot/initrd" >> $RCFILE
+     echo "umount /initrd/proc" >> $RCFILE
+   else
+     echo "umount /proc" >> $RCFILE
+   fi
+ 
+   [ -n "$UDEV_TMPFS" ] && echo "umount /initrd/dev" >> $RCFILE
+ fi
++
+ chmod +x $RCFILE
+ 
+ if [ -z "$initramfs" ]; then
+   (cd $MNTIMAGE; tar cf - .) | (cd $MNTPOINT; tar xf -) || exit 1
+ 
+   umount $MNTPOINT
+   losetup -d $LODEV
+ else
+   (cd $MNTIMAGE; find . | cpio --quiet -c -o) >| $IMAGE || exit 1
+ fi
