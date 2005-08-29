@@ -4,11 +4,11 @@
 #and then remove the install-epiphany trove
 #
 (
-        echo "33" ; sleep 1
+        echo "33"
         conary update epiphany
-        echo "66" ; sleep 1
+        echo "66"
         conary erase install-epiphany
-        echo "100" ; sleep 1
+        echo "100"
         ) |
         zenity --progress \
           --title="Please Wait" \
