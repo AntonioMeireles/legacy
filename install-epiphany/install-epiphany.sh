@@ -5,7 +5,7 @@
 #
 (
         echo "33" ; sleep 1
-        conary update eiphany
+        conary update epiphany
         echo "66" ; sleep 1
         conary erase install-epiphany
         echo "100" ; sleep 1
@@ -17,3 +17,4 @@
           --percentage=0
 
 zenity --info --text="Epiphany has been installed and can be found underneath your Applications/Internet menu."
+
