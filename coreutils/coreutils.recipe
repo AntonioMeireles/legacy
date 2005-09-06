@@ -1,0 +1,99 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# All rights reserved
+#
+
+class Coreutils(PackageRecipe):
+    name = "coreutils"
+    version = "5.2.1"
+
+    buildRequires = [ 'libtermcap:devel' ] 
+    if Use.bootstrap:
+	buildRequires.extend([ 'cross-gcc:runtime', 'glibc:devel' ])
+    else:
+        buildRequires.extend([ 'automake:runtime', 
+                               'autoconf:runtime', 'texinfo:runtime', 
+                               'gettext:runtime', 'libtool:runtime' ])
+
+    extraConfig = '--enable-largefile' 
+    extraMake = ''
+    if Use.pam:
+	extraConfig += " --enable-pam"
+        extraMake += ' su_LDFLAGS="-lpam -lpam_misc"'
+        buildRequires.append('pam:devel')
+    if Use.selinux:
+	extraConfig += " --enable-selinux"
+    
+    def setup(r):
+        # programs which should be in /bin, not /usr/bin
+        r.macros.binprogs = (
+            'basename,cat,chgrp,chmod,chown,cp,cut,date,dd,df,echo,env,'
+            'false,link,ln,ls,mkdir,mknod,mv,nice,pwd,rm,rmdir,sleep,sort,'
+            'stty,sync,touch,true,uname,unlink')
+
+        # We base on FC coreutils because some other system components like
+        # our initscripts assume bits specific to FC coreutils
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/coreutils-5.2.1-52.src.rpm'
+
+        if Use.pam:
+            r.macros.cppflags += ' -DUSE_PAM'
+        
+	r.addArchive("http://ftp.gnu.org/gnu/coreutils/coreutils-%(version)s.tar.bz2", keyid='D333CBA1')
+	r.addSource('DIR_COLORS', dest='%(sysconfdir)s/', mode=0644)
+	r.addSource('DIR_COLORS.xterm', dest='%(sysconfdir)s/', mode=0644)
+	r.addSource('colorls.sh', dest='%(sysconfdir)s/profile.d/', mode=0755)
+	r.addSource('colorls.csh', dest='%(sysconfdir)s/profile.d/', mode=0755)
+	r.addSource('su.pamd', dest='%(sysconfdir)s/pam.d/su', mode=0644,
+                    use=Use.pam)
+
+        r.addPatch('fileutils-4.1.10-timestyle.patch', rpm=srpm)
+        r.addPatch('fileutils-4.1.5-afs.patch', rpm=srpm)
+        r.addPatch('fileutils-4.1-dircolors_c.patch', rpm=srpm)
+        r.addPatch('fileutils-4.1.10-utmp.patch', rpm=srpm)
+        r.addPatch('coreutils-acl.patch', rpm=srpm)
+        r.addPatch('sh-utils-2.0.11-dateman.patch', rpm=srpm)
+        r.addPatch('sh-utils-1.16-paths.patch', rpm=srpm)
+        # RMS's Twenex experience doesn't apply to us
+        r.addPatch('coreutils-pam.patch', rpm=srpm)
+        r.addPatch('coreutils-4.5.3-langinfo.patch', rpm=srpm)
+        r.addPatch('coreutils-4.5.3-printf-ll.patch', rpm=srpm)
+        r.addPatch('coreutils-4.5.3-sysinfo.patch', rpm=srpm)
+        r.addPatch('coreutils-i18n.patch', rpm=srpm)
+        r.addPatch('coreutils-5.0-allow_old_options.patch', rpm=srpm)
+        r.addPatch('coreutils-jday.patch', rpm=srpm)
+        r.addPatch('coreutils-fchown.patch', rpm=srpm)
+        r.addPatch('coreutils-getgrouplist.patch', rpm=srpm)
+        r.addPatch('coreutils-brokentest.patch', rpm=srpm)
+        r.addPatch('coreutils-overflow.patch', rpm=srpm)
+        # upstream patches that should go away on next upstream revision
+        r.addPatch('coreutils-dateseconds.patch', rpm=srpm)
+        r.addPatch('coreutils-chown.patch', rpm=srpm)
+        r.addPatch('coreutils-rmaccess.patch', rpm=srpm)
+        r.addPatch('coreutils-copy.patch', rpm=srpm)
+        r.addPatch('coreutils-stale-utmp.patch', rpm=srpm)
+        r.addPatch('coreutils-no-sign-extend.patch', rpm=srpm)
+        r.addPatch('coreutils-selinux.patch', rpm=srpm, use=Use.selinux)
+
+	r.Run("sed -i 's/basic-1//g' tests/stty/Makefile*")
+        r.Configure(r.extraConfig)
+        r.Make(r.extraMake)
+	r.Run("sed -i -e 's,/etc/utmp,/var/run/utmp,g'"
+	            " -e 's,/etc/wtmp,/var/run/wtmp,g'"
+		    " doc/coreutils.texi")
+	r.MakeInstall()
+
+	r.Install("src/su", "%(essentialbindir)s/", mode=04755)
+        # if/when runuser makes it into upstream coreutils, change this symlink
+        r.Symlink('%(essentialbindir)s/su', '%(essentialsbindir)s/runuser')
+        r.Move('%(bindir)s/{%(binprogs)s}', '%(essentialbindir)s/')
+        r.Move('%(bindir)s/chroot', '%(sbindir)s/chroot')
+        r.Symlink("%(essentialbindir)s/cut", "%(bindir)s/cut")
+        r.Symlink("%(essentialbindir)s/env", "%(bindir)s/env")
+	r.Remove('%(bindir)s/uptime', '%(mandir)s/man1/uptime.1*')
+	r.Symlink("test", "%(bindir)s/[")
+        r.TagSpec('info-file', '%(infodir)s/coreutils.info.gz')
+
+        r.Provides('file', '(%(bindir)s|%(essentialbindir)s)/env')
+        r.Provides('file', '%(essentialsbindir)s/runuser')
+
+	r.TestSuite('tests', 'make check-TESTS', recursive=True, ignore=None)
