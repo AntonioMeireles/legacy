@@ -4,42 +4,87 @@
 #
 
 class Gtk2(PackageRecipe):
-
-    buildRequires = [ 'atk:devel', 'pango:devel', 'glib:devel',
-		      'libtiff:devel', 'libjpeg:devel', 'libpng:devel',
-		      'automake:runtime' ]
-    if Use.builddocs:
-	buildRequires.append('gtk-doc:runtime')
     name = 'gtk'
     version = '2.8.3'
 
+    buildRequires = [ 'atk:devel', 'pango:devel', 'glib:devel',
+                      'libtiff:devel', 'libjpeg:devel', 'libpng:devel',
+                      'automake:runtime', 'pkgconfig:devel', 'xorg-x11:devel',
+                      'freetype:devel', 'fontconfig:devel', 'zlib:devel',
+                      'gtk-doc:devel' # we need gtk-doc:devel even if not   
+                                      # Use.builddocs because we are running 
+                                      # automake - 
+                    ]
+
+    if Use.builddocs:
+        buildRequires.append('gtk-doc:runtime')
+
     def setup(r):
+        # setup some macros to make the taghandler work properly
+        r.macros.fieldnum = str(len(r.macros.datadir.split('/'))+2)
+    
         r.addArchive('http://ftp.gnome.org/pub/GNOME/sources/gtk+/2.8/gtk+-%(version)s.tar.bz2')
 
-	r.addSource('gtk-input-method.tagdescription', macros=True)
-	r.addSource('gtk-input-method.taghandler', macros=True)
-	r.addSource('gdk-pixbuf-loader.tagdescription', macros=True)
-	r.addSource('gdk-pixbuf-loader.taghandler', macros=True)
+        # Better support multilib.
+        r.addPatch('gtk+-2.4.1-lib64.patch')
+       
+        r.addSource('gtk-input-method.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gtk-input-method')
+        r.addSource('gtk-input-method.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gtk-input-method', mode=0755)
+        r.addSource('gdk-pixbuf-loader.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gdk-pixbuf-loader')
+        r.addSource('gdk-pixbuf-loader.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gdk-pixbuf-loader', mode=0755)
+        r.addSource('gtk-update-icon-cache.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gtk-update-icon-cache')
+        r.addSource('gtk-update-icon-cache.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gtk-update-icon-cache', mode=0755)
 
-	extraConfigure = ''
-	if not Use.builddocs:
-	    extraConfigure += ' --disable-gtk-doc'
-	r.Configure('--with-xinput=xfree' + extraConfigure)
-	r.Make()
+        
+        # lib64 patch touches Makefile.am
+        r.Run('libtoolize --force')
+        r.Run('aclocal')
+        r.Run('automake')
+        extraConfigure = '--build=%(host)s --host=%(host)s'
+        if not Use.builddocs:
+            extraConfigure += ' --disable-gtk-doc'
+        r.Configure('--with-xinput=xfree' + extraConfigure)
+        r.Make()
 
-	r.MakeInstall('RUN_QUERY_IMMODULES_TEST=false'
-		      ' RUN_QUERY_LOADER_TEST=false')
-	r.MakeDirs('%(sysconfdir)s/gtk-2.0')
+        r.MakeInstall('RUN_QUERY_IMMODULES_TEST=false'
+                      ' RUN_QUERY_LOADER_TEST=false')
+        r.MakeDirs('%(sysconfdir)s/gtk-2.0')
 
-	r.Install('gtk-input-method.tagdescription',
-	          '%(tagdescriptiondir)s/gtk-input-method')
-	r.Install('gdk-pixbuf-loader.tagdescription',
-		  '%(tagdescriptiondir)s/gdk-pixbuf-loader')
+        # set up HOST definition for gtk.modules location
+        r.macros.host = r.macros.target
+        if r.macros.target.endswith("linux"):
+            # autotools appends -gnu to -linux
+            r.macros.host += '-gnu'
 
-	r.Install('gtk-input-method.taghandler',
-	          '%(taghandlerdir)s/gtk-input-method', mode=0755)
-	r.Install('gdk-pixbuf-loader.taghandler',
-		  '%(taghandlerdir)s/gdk-pixbuf-loader', mode=0755)
+        r.macros.queryloaders = '%(bindir)s/gdk-pixbuf-query-loaders-%(host)s'
+        r.macros.loadersfile = '%(sysconfdir)s/gtk-2.0/%(host)s/gdk-pixbuf.loaders'
 
-	r.Doc('AUTHORS', 'COPYING', 'ChangeLog', 'NEWS', 'README',
-	      'docs/tutorial', 'docs/faq', 'examples')
+        r.macros.queryimmodules = '%(bindir)s/gtk-query-immodules-2.0-%(host)s'
+        r.macros.immodulesfile = '%(sysconfdir)s/gtk-2.0/%(host)s/gtk.immodules'
+
+        # separate query modules for multilib installation
+        r.Move('%(bindir)s/gdk-pixbuf-query-loaders', '%(queryloaders)s')
+        r.Move('%(bindir)s/gtk-query-immodules-2.0', '%(queryimmodules)s')
+
+        r.Remove('%(sysconfdir)s/gtk-2.0/gdk-pixbuf.loaders')
+        r.Remove('%(sysconfdir)s/gtk-2.0/gtk.immodules')
+        
+        # zero-length config files
+        r.Create('%(loadersfile)s')
+        r.Create('%(immodulesfile)s')
+        
+        r.Doc('docs/tutorial', 'docs/faq', 'examples')
+        r.ComponentSpec('devel', '%(bindir)s/gdk-pixbuf-csource')
+        
+        
+        # these pkg-config files have Requires: statements
+        r.Requires('atk:devel', '%(libdir)s/pkgconfig/gtk.*pc')
+        r.Requires('glib:devel', '%(libdir)s/pkgconfig/gdk-pixbuf-xlib.*pc')
+        r.Requires('pango:devel', '%(libdir)s/pkgconfig/gdk-x11.*pc',
+	                          '%(libdir)s/pkgconfig/gdk-2.0.pc')
