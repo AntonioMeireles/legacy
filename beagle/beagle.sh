@@ -1,2 +1,2 @@
 #!/bin/sh
-beagled --web-start
+beagled --web-disable
