@@ -1,12 +1,13 @@
 #
-# Copyright (c) 2004-2005 rpath, Inc.
+# Copyright (c) 2004-2005 rPath, Inc.
 # All rights reserved
 #
 
-class Cups(PackageRecipe):
+class Cups(CPackageRecipe):
 
     buildRequires = [ 'pam:devel', 'xorg-x11:devel', 'openssl:devel', 
-                      'pkgconfig:devel', 'dbus:devel'] 
+                      'pkgconfig:devel', 'dbus:devel', 'libjpeg:devel',
+                      'libpng:devel', 'libtiff:devel', 'zlib:devel'] 
     
     name = 'cups'
     version = '1.1.23'
@@ -23,8 +24,10 @@ class Cups(PackageRecipe):
         r.addSource('postscript.ppd.gz' , rpm=srpm)  
         r.addSource('cups.logrotate' , rpm=srpm)  
         r.addSource('ncp.backend' , rpm=srpm) 
-        r.addSource('cups.conf' , rpm=srpm)  
         r.addSource('cups.cron' , rpm=srpm)  
+
+        # Use local cups.conf to work with upstream dbus namespace
+        r.addSource('cups.conf')  
 
         for patch in ('cups-1.1.15-initscript.patch',
                       'cups-1.1.14-doclink.patch',
@@ -48,14 +51,14 @@ class Cups(PackageRecipe):
                       'cups-maxlogsize.patch',
                       'cups-enabledisable.patch',
                       'cups-no-propagate-ipp-port.patch',
-                      'cups-session-printing.patch',
                       'cups-pid.patch',
-                      'cups-CAN-2004-0888.patch',
-                      'cups-dbus.patch'):
+                      'cups-CAN-2004-0888.patch'):
             r.addPatch(patch, rpm=srpm)
 
         # This patch is required for x86_64
         r.addPatch('cups-1.1.20-pic.patch')
+        # Patch from upstream dbus namespace
+        r.addPatch('cups-dbus.patch')
 
         r.Replace((r'^#(Printcap\s+/etc/printcap)', r'\1',),
                   (r'^#(MaxLogSize\s+0)', r'\1'),
@@ -63,8 +66,6 @@ class Cups(PackageRecipe):
         r.Copy('cups-lpd', 'cups-lpd.real')
         r.Replace(r'\@LIBDIR\@', '%(libdir)s', 'cups-lpd.real')
         r.Replace('^.SILENT:', '', 'Makedefs.in')
-        r.Replace('dbus_bus_acquire_service', 'dbus_bus_request_name',
-                  'berkeley/lpr.c')  #function name changed in new dbus API
 
         if Use.ssl:
             r.macros.cflags += ' `pkg-config --cflags openssl` -I%(krbprefix)s/include/ '
@@ -166,3 +167,5 @@ If your browser does not support redirection, please use
                                          '%(localstatedir)s/log/cups'])
         r.TagSpec('initscript', '%(initdir)s/') 
         r.Requires('espgs:runtime', '%(libdir)s/cups/filter/pstoraster')
+        # put filters/backend progs in :runtime
+        r.ComponentSpec('cups:runtime', '%(libdir)s/cups/')
