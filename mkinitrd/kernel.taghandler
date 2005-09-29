@@ -14,6 +14,7 @@ shift
 run ()
 {
     #echo "$@"
+    #return 0
     "$@"
     return $?
 }
@@ -70,6 +71,7 @@ run_grubby ()
 
 	    # XXX bootargs= for stuff like lilo arguments
 	    run /sbin/grubby $bootloader --add-kernel=${pre}vmlinuz-$version \
+		--bad-image-okay \
 		--initrd=$initrd \
 		--title="$title" --copy-default --make-default \
 		--args="root=$rootdev" \
@@ -86,30 +88,48 @@ run_grubby ()
 
 case $type in 
     files)
-	# pick version list from stdin
-	versionlist=$(sed 's,^/lib/modules/\([^/]*\)/.*,\1,g
-	                   s,^/boot/vmlinuz-,,g' | sort -u)
+	# parse version list from stdin; separate module and kernel versions
+	# in case they're all mixed up. a multitag handler w/ separate kernel
+	# and kernel-module tags could be used here, but why bother when 
+	# this works just fine
+	itemlist=$(sed 's,^/lib/modules/\([^/]*\)/.*,kernel-\1,g
+	                   s,^/boot/vmlinuz-,module-,g' | sort -u)
+	kernelversionlist=$(echo $itemlist | sed 's,kernel-,,g
+						  s,module-[^ ]*,,g')
+	moduleversionlist=$(echo $itemlist | sed 's,module-,,g
+						  s,kernel-[^ ]*,,g')
 
 	case $action in
 	    update)
-		for version in $versionlist; do
+                for version in $moduleversionlist; do
 		    pre=$(bootPrefix $version)
-		    if [ -d /lib/modules/$version ] ; then
-			run /sbin/depmod -ae -F "/boot/System.map-$version" "$version"
-			initrd=${pre}initrd-${version}.img
-			if run /sbin/mkinitrd -f $initrd $version ; then
-			    run_grubby --add $version $pre $initrd
-			    /sbin/splash -s -f  /usr/share/bootsplash/themes/FDL/config/bootsplash-1024x768.cfg >> $initrd
-			fi
-		    else
-			# no modules, no initrd
-			run_grubby --add $version $pre ""
+                    run /sbin/depmod -ae -F "/boot/System.map-$version" \
+                                     "$version"
+                    initrd=${pre}initrd-${version}.img
+                    run /sbin/mkinitrd -f $initrd $version
+                done
+
+		for version in $kernelversionlist; do
+		    pre=$(bootPrefix $version)
+                    initrd=${pre}initrd-${version}.img
+                    if [ ! -f $initrd ]; then
+                        initrd=""
 		    fi
+                        
+                    run_grubby --add $version $pre $initrd
+		    /sbin/splash -s -f  /usr/share/bootsplash/themes/FDL/config/bootsplash-1024x768.cfg >> $initrd
 		done
 		;;
 	    preremove)
-		/sbin/modprobe loop >& /dev/null
-		for version in $versionlist; do
+                if [ -n "$kernelversionlist" ]; then
+                    # a kernel is being removed; make sure loop.ko is
+                    # installed so we can generate a new mkinitrd later
+                    # if the need arises
+                    /sbin/modprobe loop >& /dev/null
+                fi 
+		;;
+	    remove)
+		for version in $kernelversionlist; do
 		    pre=$(bootPrefix $version)
 		    if [ -d /lib/modules/$version ] ; then
 			run rm -f /lib/modules/$version/modules.*
