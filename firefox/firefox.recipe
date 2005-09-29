@@ -1,68 +1,76 @@
 #
-# Copyright (c) 2004-2005 rpath, Inc.
+# Copyright (c) 2004-2005 rPath, Inc.
 # All rights reserved
 #
 
-class FireFox(PackageRecipe):
-
-    buildRequires = [ 'libpng:devel', 'libjpeg:devel', 'zlib:devel', 
-			'zip:runtime', 'perl:runtime', 'libIDL:devel', 
-			'glib:devel', 'gtk:devel', 
-                        'autoconf:runtime=:autoconf213',
-                        'desktop-file-utils:runtime' ] 
-
+class FireFox(CPackageRecipe):
     name = 'firefox'
     version = '1.0.7'
 
+    buildRequires = ['atk:devel', 'autoconf:runtime=:autoconf213',
+        'desktop-file-utils:runtime', 'fontconfig:devel', 'freetype:devel',
+        'gcc:devel', 'glib:devel', 'gtk:devel', 'libIDL:devel', 'libjpeg:devel',
+        'libpng:devel', 'pango:devel', 'perl:runtime', 'pkgconfig:devel',
+        'xorg-x11:devel', 'zip:runtime', 'zlib:devel']
+
+    if Use.gnome:
+        buildRequires.extend(['GConf:devel', 'ORBit2:devel', 'gnome-vfs:devel',
+            'libbonobo:devel', 'libgnome:devel', 'popt:devel'])
+
+    if Use.krb:
+        buildRequires.append('krb5:devel')
+
     def setup(r):
-	r.disableParallelMake()
-	r.mainDir('mozilla')
-	r.macros.fflib = '%(libdir)s/firefox/'
-	r.macros.ffinc = '%(includedir)s/firefox/'
+        r.disableParallelMake()
+        r.mainDir('mozilla')
+        r.macros.fflib = '%(libdir)s/firefox/'
+        r.macros.ffinc = '%(includedir)s/firefox/'
 
-        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/%(version)s/source/%(name)s-%(version)s-source.tar.bz2')
+        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/%(version)s/source/%(name)s-%(version)s-source.tar.bz2', keyid='6D1ECD07')
+        r.Replace(('%%MOZAPPDIR%%', '%(libdir)s/firefox'),
+                  ('%%MREDIR%%', '%(libdir)s/mre/mre'),
+                  'browser/app/mozilla.in')
 
-	r.addSource('dot_mozconfig', dest='.mozconfig')
+        r.addSource('dot_mozconfig', dest='.mozconfig')
+
+        if not Use.gnome:
+            r.Replace('gnomevfs', '', 'browser/config/mozconfig')
+            r.Run('echo "ac_add_options --disable-gnomevfs" >> .mozconfig')
+            r.Run('echo "ac_add_options --disable-gnomeui" >> .mozconfig')
+
+        if not Use.krb:
+            r.Replace('negotiateauth', '', 'browser/config/mozconfig')
+
+        r.addSource('firefox.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/firefox', mode=0755)
+        for descr in ('extension', 'xpt-component', 'chrome'):
+            r.addSource('firefox-%s.tagdescription' %descr, macros=True,
+                        dest='%(tagdescriptiondir)s/firefox-' + descr)
         r.addSource('firefox.desktop')
-        r.addSource('firefox.sh')
-        r.addAction("sed -i 's|/usr/local/lib|%(libdir)s|g' firefox.sh")
-        r.addSource('firefox.png')
+        r.Desktopfile('firefox.desktop')
+        r.addSource('firefox.png', dest='%(datadir)s/pixmaps/firefox.png',
+                    mode=0644)
 
-	# Foresight custom
-	r.addSource('firefox-foresight-default-bookmarks.html')
-	r.addSource('firefox-foresight-default-prefs.js')
+        # Custom patches
 
-	r.Environment('MOZ_APP_NAME', 'firefox')
-	r.Environment('MOZ_PHOENIX', '1')
-
-	# From Fedora
-	r.addPatch('firefox-1.0-download-to-desktop.patch', level=0)
-	r.addPatch('firefox-1.0-gtk-system-colors.patch', level=0)
+        r.addPatch('firefox-1.0-gtk-system-colors.patch', level=0)
         r.addPatch('firefox-PR1-gtk-file-chooser-morefixes.patch', level=0)
-
-        # These patches added to attempt to fix compile errors with 1.0.7
-
-        r.addPatch('mozilla-1.7.3-pango-render.patch', level=1)
-	r.addPatch('firefox-1.0-pango-selection.patch', level=1)
-        r.addPatch('firefox-1.0-pango-space-width.patch', level=1)
-        r.addPatch('firefox-1.0-pango-rounding.patch', level=1)
-	r.addPatch('firefox-1.0-pango-direction.patch', level=1)
-        r.addPatch('firefox-1.0-pango-bidi-justify.patch', level=0)
         r.addPatch('firefox-1.0-g-application-name.patch', level=0)
 
-	r.Make('-f client.mk depend')
-	r.Make('-f client.mk build')
-	r.MakeDirs('%(libdir)s')
-	r.Make('-C xpinstall/packager/ MOZ_PKG_APPNAME="firefox" ')
-        r.Install('firefox.sh', '%(bindir)s/firefox', mode=0755)
-	# we've created firefox all bundled up!
-	r.Run('tar -xz -C %(destdir)s/%(libdir)s -f dist/firefox-*-linux-gnu.tar.gz')
-        r.Desktopfile('firefox.desktop')
-        r.Install('firefox.png', '%(datadir)s/pixmaps/firefox.png')
-        # not sure why this is installed
-        r.Remove('%(libdir)s/firefox/TestGtkEmbed')
+        r.Make('-f client.mk build')
+        # disable stripping while we're creating the tarball so that
+        # we will get debuginfo
+        r.Make('-C browser/installer/ STRIP=/bin/true')
+        # now extract the tar archive in firefox's home
+        r.MakeDirs('%(libdir)s')
+        r.Run('tar -xz -C %(destdir)s/%(libdir)s -f dist/firefox-*.tar.gz')
+        # this should not be included
         r.Move('%(libdir)s/firefox/{README.txt,LICENSE}', '%(thisdocdir)s/')
+        # add a link into %(bindir)s for the firefox executable
+        r.Symlink('%(libdir)s/firefox/firefox', '%(bindir)s/')
 
-	# Install Foresight custom bookmarks and prefs
+        # Install Foresight custom bookmarks and prefs
+        r.addSource('firefox-foresight-default-bookmarks.html')
+	r.addSource('firefox-foresight-default-prefs.js')
 	r.Install('firefox-foresight-default-prefs.js','%(libdir)s/firefox/defaults/profile/prefs.js')
 	r.Install('firefox-foresight-default-bookmarks.html','%(libdir)s/firefox/defaults/profile/bookmarks.html')
