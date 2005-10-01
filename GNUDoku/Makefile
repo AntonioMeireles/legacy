@@ -1,5 +1,5 @@
 
-PREFIX=/usr/
+PREFIX=/usr
 BINDIR=$(PREFIX)/bin
 
 VERSION=\"0.92\"
