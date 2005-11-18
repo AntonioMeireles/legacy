@@ -3,9 +3,26 @@ class Dist(GroupRecipe):
     version = '0.9.1'
     depCheck = True
     autoResolve = True
+    checkOnlyByDefaultDeps = True
+
+    def startGroup(r, name, parentGroup, depCheck=False, byDefault=True):
+        # creates group named "name", adds it to the toplevel group,
+        # and sets the current group to that name.  calls to r.add()
+        # will use the current group by default.
+
+        # note: byDefault applies to whether the group is included by
+        # default in its parent group, not whether the troves in
+        # the group are added by default. (use the setByDefault() command
+        # to get that)
+
+        r.createGroup(name, autoResolve=False, depCheck=depCheck)
+        r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
+        r.setDefaultGroup(name)
 
     def setup(r):
         r.setLabelPath('foresight.rpath.org@fl:desktop', 'drivers.rpath.org@fl:desktop','conary.rpath.com@rpl:1', 'contrib.rpath.org@rpl:devel')
+	compatLabel='conary.rpath.com@rpl:1-compat'
+
         r.addTrove("a2ps")
         r.addTrove("acl")
         r.addTrove("acpid")
@@ -22,14 +39,10 @@ class Dist(GroupRecipe):
         r.addTrove("attr")
         r.addTrove("authconfig")
         r.addTrove("authconfig-gtk")
-        r.addTrove("autoconf")   
-        r.addTrove("autoconf", "conary.rpath.com@rpl:autoconf213")
         r.addTrove("autofs")
-        r.addTrove("automake")
-        # currently unneeded but can be added back if we ever need them
-        #r.addTrove("automake", "conary.rpath.com@rpl:automake16")
-        #r.addTrove("automake", "conary.rpath.com@rpl:automake15")
-        r.addTrove("automake", "conary.rpath.com@rpl:automake14")
+        r.addTrove('autoconf', compatLabel)
+        r.addTrove('automake', compatLabel)
+
         r.addTrove("bash")
         r.addTrove("bc")
         r.addTrove("bind")
@@ -63,6 +76,7 @@ class Dist(GroupRecipe):
         r.addTrove("cyrus-sasl")
         r.addTrove("cyrus-sasl", "conary.rpath.com@rpl:cyrus-sasl1")
         r.addTrove("db")
+        r.addTrove('db:lib', compatLabel)
         r.addTrove("debugedit")
         r.addTrove("dejagnu")
         r.addTrove("desktop-printing")
@@ -131,15 +145,37 @@ class Dist(GroupRecipe):
         r.addTrove("gawk")
         r.addTrove("gc")
 	
-	# Stuff to make gcc 3.4.4 work
-	r.add('gcc')
-       	r.add('gcc-c++', source='gcc')
-      	r.add('gcc-f77', source='gcc')
-       	r.add('gcc-java', source='gcc')
-       	#r.add('gcc-objc', source='gcc')
-       	r.add('libgcc', source='gcc')
-       	r.add('libstdc++', source='gcc')
-	r.add('libstdc++:lib', ':gcc33', source='gcc')
+        if Arch.x86_64:
+            r.add('gcc', flavor='is: x86 x86_64')
+            r.add('gcc-c++', flavor='is: x86 x86_64', source='gcc')
+            r.add('gcc-f77', flavor='is: x86 x86_64', source='gcc')
+            r.add('gcc-java', flavor='is: x86 x86_64', source='gcc')
+            r.add('gcc-objc', flavor='is: x86 x86_64', source='gcc')
+            r.add('libgcc', flavor='is: x86 x86_64', source='gcc')
+            r.add('libstdc++', flavor='is: x86 x86_64', source='gcc')
+        else:
+            r.add('gcc')
+            r.add('gcc-c++', source='gcc')
+            r.add('gcc-f77', source='gcc')
+            r.add('gcc-java', source='gcc')
+            r.add('gcc-objc', source='gcc')
+            r.add('libgcc', source='gcc')
+            r.add('libstdc++', source='gcc')
+
+        if Arch.x86_64:
+            r.add('libstdc++:lib', compatLabel, flavor='is: x86 x86_64', source='gcc')
+        else:
+            r.add('libstdc++:lib', compatLabel, source='gcc')
+
+        if Arch.x86:
+            glibcFlavor = 'is: x86(i486,i586,i686)'
+        else:
+            glibcFlavor = None
+        r.add('glibc:runtime', flavor=glibcFlavor)
+        r.add('glibc:lib', flavor=glibcFlavor)
+        r.add('glibc:devel', flavor=glibcFlavor)
+        r.add('glibc:devellib', flavor=glibcFlavor)
+
 
         r.addTrove("gd")
         r.addTrove("gdb")
@@ -155,10 +191,24 @@ class Dist(GroupRecipe):
 	r.addTrove("gimp-metadata")
 	r.addTrove("gimp-redeye")
         r.addTrove("gksu")
-        if Arch.x86:
-            r.addTrove("glibc", flavor='is: x86(i486,i586,i686)')
+
+	if Arch.x86:
+            glibcFlavor = 'is: x86(i486,i586,i686)'
         else:
-            r.addTrove("glibc")
+            glibcFlavor = None
+
+        if Arch.x86:
+            glibcFlavor = 'is: x86(i486,i586,i686)'
+        else:
+            glibcFlavor = None
+        r.add('glibc:runtime', flavor=glibcFlavor)
+        r.add('glibc:lib', flavor=glibcFlavor)
+        r.add('glibc:devel', flavor=glibcFlavor)
+        r.add('glibc:devellib', flavor=glibcFlavor)
+        if Arch.x86_64:
+            r.add('glibc:lib', flavor='is: x86(i486,i586,i686)')
+            r.add('glibc:devellib', flavor='is: x86(i486,i586,i686)')
+
         r.addTrove("gmime")
         r.addTrove("gmp")
         r.addTrove("gnomebaker")
@@ -308,6 +358,7 @@ class Dist(GroupRecipe):
         r.addTrove("openssh-client", source='openssh' )
         r.addTrove("openssh-server", source='openssh')
         r.addTrove("openssl", flavor='~!krb')
+        r.addTrove('openssl:lib', compatLabel)
         r.addTrove("pam")
         r.addTrove("pam_krb5")
         r.addTrove("pam_smb")
@@ -346,6 +397,7 @@ class Dist(GroupRecipe):
         r.addTrove("rdate")
         r.addTrove("rdist")
         r.addTrove("readline")
+        r.addTrove('readline:lib', compatLabel)
         r.addTrove("reiserfsprogs")
         r.addTrove("rexml")
         r.addTrove("rhpl")
@@ -527,3 +579,67 @@ class Dist(GroupRecipe):
         r.addTrove('info-wheel')
         r.addTrove('info-wnn')
         r.addTrove('info-xfs')
+
+        if Arch.x86_64:
+            r.startGroup('group-compat32', parentGroup='group-dist')
+            r.add('glibc:lib', flavor='is: x86(i486,i586,i686)')
+            r.add('glibc:devellib', flavor='is: x86(i486,i586,i686)')
+            r.add('acl:lib', flavor='is: x86')
+            r.add('alsa-lib:lib', flavor='is: x86')
+            r.add('atk:lib', flavor='is: x86')
+            r.add('attr:lib', flavor='is: x86')
+            r.add('audiofile:lib', flavor='is: x86')
+            r.add('bzip2:lib', flavor='is: x86')
+            r.add('cairo:lib', flavor='is: x86')
+            r.add('cdparanoia:lib', flavor='is: x86')
+            r.add('cracklib:lib', flavor='is: x86')
+            r.add('cups:lib', flavor='is: x86')
+            r.add('curl:lib', flavor='is: x86')
+            r.add('cyrus-sasl:lib', flavor='is: x86')
+            r.add('db:lib', flavor='is: x86')
+            r.add('e2fsprogs:lib', flavor='is: x86')
+            r.add('expat:lib', flavor='is: x86')
+            r.add('esound:lib', flavor='is: x86')
+            r.add('firefox', flavor='is: x86')
+            r.add('firefox-rBuilder-search', flavor='is: x86')
+            r.add('fontconfig:lib', flavor='is: x86')
+            r.add('freetype:lib', flavor='is: x86')
+            r.add('GConf:lib', flavor='is: x86')
+            r.add('gamin:lib', flavor='is: x86')
+            r.add('gdbm:lib', flavor='is: x86')
+            r.add('glib:lib', flavor='is: x86')
+            r.add('gnome-vfs:lib', flavor='is: x86')
+            r.add('gmp:lib', flavor='is: x86')
+            r.add('gpm:lib', flavor='is: x86')
+            r.add('gtk:lib', flavor='is: x86')
+            r.add('howl:lib', flavor='is: x86')
+            r.add('krb5:lib', flavor='is: x86')
+            r.add('krbafs:lib', flavor='is: x86')
+            r.add('libart_lgpl:lib', flavor='is: x86')
+            r.add('libbonobo:lib', flavor='is: x86')
+            r.add('libgnomecups:lib', flavor='is: x86')
+            r.add('libgnome:lib', flavor='is: x86')
+            r.add('libIDL:lib', flavor='is: x86')
+            r.add('libjpeg:lib', flavor='is: x86')
+            r.add('libpng:lib', flavor='is: x86')
+            r.add('libtiff:lib', flavor='is: x86')
+            r.add('libxml2:lib', flavor='is: x86')
+            r.add('ncurses:lib', flavor='is: x86')
+            r.add('nss_ldap:lib', flavor='is: x86')
+            r.add('openldap:lib', flavor='is: x86')
+            r.add('openoffice.org', flavor='is: x86')
+            r.add('openssl:lib', flavor='is: x86')
+            r.add('ORBit2:lib', flavor='is: x86')
+            r.add('pam_krb5:lib', flavor='is: x86')
+            r.add('pam_smb:lib', flavor='is: x86')
+            r.add('pam:lib', flavor='is: x86')
+            r.add('pango:lib', flavor='is: x86')
+            r.add('popt:lib', flavor='is: x86')
+            r.add('readline:lib', flavor='is: x86')
+            r.add('samba:lib', flavor='is: x86')
+            r.add('startup-notification:lib', flavor='is: x86')
+            r.add('tcl:lib', flavor='is: x86')
+            r.add('tk:lib', flavor='is: x86')
+            r.add('xorg-x11:lib', flavor='is: x86')
+            r.add('x86info', flavor='is: x86')
+            r.add('zlib:lib', flavor='is: x86')
