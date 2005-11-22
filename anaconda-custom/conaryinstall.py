@@ -27,12 +27,13 @@ import time
 import os
 
 import conarymethods
-import conaryclient, conarycfg
-from repository import changeset, netclient, repository
-from callbacks import UpdateCallback, ChangesetCallback
-from lib import util
 
-import sys
+from conary import conaryclient, conarycfg
+from conary.repository import changeset, netclient, repository, trovesource
+from conary.callbacks import UpdateCallback, ChangesetCallback
+from conary.lib import util
+from conary.local import database
+from conary.deps import deps
 
 class ProgressHeader:
     # this is an awful thunk so we can get progress updates.  The data
@@ -104,6 +105,8 @@ class InstallCallback(UpdateCallback, ChangesetCallback):
         self.progress.setPackageScale(0, 1)
 
     def __init__(self, progress, timer):
+        UpdateCallback.__init__(self)
+        ChangesetCallback.__init__(self)
         self.timer = timer
         self.progress = progress
         self.restored = 0
@@ -215,6 +218,8 @@ def doConaryRepositoryInstall(method, id, intf, instPath):
     method.filesDone()
 
 def _collapseJobs(l):
+    # take all the jobs in the job list, collect up all the job
+    # entries that use one changeset file and batch them up
     jobList = []
     lastCsfile = None
 
@@ -290,13 +295,17 @@ def doConaryInstall(method, id, intf, instPath):
         # pick the pakcage in the the jobList (if any)
         h = jobList[0]
         for j in jobList:
+            flavorStr = deps.formatFlavor(h.nvf[2])
+            if flavorStr:
+                flavorStr = '[%s]' %flavorStr
+            instLog.write('installing %s=%s%s\n'
+                          %(h.nvf[0],
+                            h.nvf[1].asString(),
+                            flavorStr))
             if ':' in j.nvf[0]:
                 continue
             h = j
 
-        instLog.write('installing %s %s-%s.\n' %(h['name'],
-                                                 h['version'],
-                                                 h['release']))
         instLog.flush()
         # add in any sub-component sizes
         size = 0
@@ -327,18 +336,21 @@ def doConaryInstall(method, id, intf, instPath):
                                                          h['release']))
 
         cs = changeset.ChangeSetFromFile(fn)
-        # do not recurse if we're installing a group
-        recurse = not h['name'].startswith('group-')
         callback = InstallCallback(id.instProgress, pkgTimer)
         job = []
         for hdr in jobList:
             job.append((hdr.nvf[0], (None, None),
                                     (hdr.nvf[1], hdr.nvf[2]), False))
-        updJob = client.updateChangeSet(job, resolveDeps = False,
-                                        callback = callback,
-                                        recurse = recurse,
-                                        fromChangesets = [cs])[0]
-        client.applyUpdate(updJob, replaceFiles = True,
+
+        # set up an update job by hand (this skips dep resolution)
+        uJob = database.UpdateJob(client.db)
+        csSource = trovesource.ChangesetFilesTroveSource(client.db)
+        csSource.addChangeSet(cs, includesFileContents = True)
+        uJob.getTroveSource().addChangeSet(cs, includesFileContents = True)
+        uJob.setSearchSource(csSource)
+        uJob.addJob(job)
+
+        client.applyUpdate(uJob, replaceFiles = True,
                            tagScript = instPath + '/root/conary-tag-script',
                            localRollbacks = cfg.localRollbacks,
                            callback = callback)
@@ -349,7 +361,8 @@ def doConaryInstall(method, id, intf, instPath):
         # explicitly delete the changeset so that the underlying file
         # will be closed.
         del cs
-        del updJob
+        del uJob
+        del csSource
 
     id.instProgress = None
     conaryInstallPost(id, intf, instPath)
