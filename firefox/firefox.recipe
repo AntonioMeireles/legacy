@@ -1,47 +1,36 @@
 #
 # Copyright (c) 2004-2005 rPath, Inc.
-# All rights reserved
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class FireFox(CPackageRecipe):
     name = 'firefox'
-    version = '1.0.7'
+    version = '1.5'
 
-    buildRequires = ['atk:devel', 'autoconf:runtime=:autoconf213',
-        'desktop-file-utils:runtime', 'fontconfig:devel', 'freetype:devel',
-        'gcc:devel', 'glib:devel', 'gtk:devel', 'libIDL:devel', 'libjpeg:devel',
-        'libpng:devel', 'pango:devel', 'perl:runtime', 'pkgconfig:devel',
-        'xorg-x11:devel', 'zip:runtime', 'zlib:devel', 'cairo:devel']
+    buildRequires = ['atk:devel', 'autoconf:runtime',
+        'cairo:devel', 'desktop-file-utils:runtime', 'fontconfig:devel',
+        'freetype:devel', 'gcc:devel', 'glib:devel', 'gtk:devel',
+        'libIDL:devel', 'libjpeg:devel', 'libpng:devel', 'pango:devel',
+        'perl:runtime', 'pkgconfig:devel', 'xorg-x11:devel', 'zip:runtime',
+        'zlib:devel', 'libstdc++:devel', 'libgcc:devellib' ]
 
     if Use.gnome:
         buildRequires.extend(['GConf:devel', 'ORBit2:devel', 'gnome-vfs:devel',
-            'libbonobo:devel', 'libgnome:devel', 'popt:devel'])
+            'libbonobo:devel', 'libgnome:devel', 'popt:devel',
+            'gnome-keyring:devel', 'libart_lgpl:devel', 'libbonoboui:devel',
+            'libgnomecanvas:devel', 'libgnomeui:devel', 'libxml2:devel' ])
 
     if Use.krb:
         buildRequires.append('krb5:devel')
 
     def setup(r):
-        r.disableParallelMake()
-        r.macros.optflags = '-g -Os' 
-        r.mainDir('mozilla')
+        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/%(version)s/source/%(name)s-%(version)s-source.tar.bz2')
+
         r.macros.fflib = '%(libdir)s/firefox/'
         r.macros.ffinc = '%(includedir)s/firefox/'
 
-        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/%(version)s/source/%(name)s-%(version)s-source.tar.bz2')
-        r.Replace(('%%MOZAPPDIR%%', '%(libdir)s/firefox'),
-                  ('%%MREDIR%%', '%(libdir)s/mre/mre'),
-                  'browser/app/mozilla.in')
-
         r.addSource('dot_mozconfig', dest='.mozconfig')
-
-        if not Use.gnome:
-            r.Replace('gnomevfs', '', 'browser/config/mozconfig')
-            r.Run('echo "ac_add_options --disable-gnomevfs" >> .mozconfig')
-            r.Run('echo "ac_add_options --disable-gnomeui" >> .mozconfig')
-
-        if not Use.krb:
-            r.Replace('negotiateauth', '', 'browser/config/mozconfig')
-
         r.addSource('firefox.taghandler', macros=True,
                     dest='%(taghandlerdir)s/firefox', mode=0755)
         for descr in ('extension', 'xpt-component', 'chrome'):
@@ -52,21 +41,23 @@ class FireFox(CPackageRecipe):
         r.addSource('firefox.png', dest='%(datadir)s/pixmaps/firefox.png',
                     mode=0644)
 
-        # Custom patches
+	#Add the foresight home page
+        r.addPatch('foresight-homepage.patch')
 
-        r.addPatch('foresight-homepage.patch', level=0)
-        r.addPatch('firefox-1.0-gtk-system-colors.patch', level=0)
-        r.addPatch('firefox-PR1-gtk-file-chooser-morefixes.patch', level=0)
-        r.addPatch('firefox-1.0-g-application-name.patch', level=0)
-        r.addPatch('firefox-1.0.7-corrected-makefilein-for-firefox-bin-added-xft-flags-checks.patch')
-        r.addPatch('firefox-1.0.7-corrected-makefilein-for-embeding_tests-added-xft-flags-checks.patch')
-        r.addPatch('firefox-0.7.3-freetype-compile.patch', level=0)
-        r.addPatch('mozilla-1.7.3-pango-render.patch', level=1)
-        r.addPatch('firefox-1.0-pango-selection.patch', level=1)
-        r.addPatch('firefox-1.0-pango-space-width.patch', level=1)
-        r.addPatch('firefox-1.0-pango-rounding.patch', level=1)
-        r.addPatch('firefox-1.0-pango-direction.patch', level=1)
-        r.addPatch('firefox-1.0-pango-bidi-justify.patch', level=0)
+        r.addPatch('firefox-use-running.patch')
+        #r.addPatch('firefox-1.0.7-corrected-makefilein-for-embeding_tests-added-xft-flags-checks.patch')
+        #r.addPatch('firefox-1.0.7-corrected-makefilein-for-firefox-bin-added-xft-flags-checks.patch')
+        #r.addPatch('034_all_mozilla-1.7-pango-direction.patch')
+        r.addPatch('firefox-nopangoxft.patch')
+
+        r.disableParallelMake()
+        r.Replace(('%%MOZAPPDIR%%', '%(libdir)s/firefox'),
+                  ('%%MREDIR%%', '%(libdir)s/mre/mre'),
+                  'browser/app/mozilla.in')
+
+        if not Use.gnome:
+            r.Run('echo "ac_add_options --disable-gnomevfs" >> .mozconfig')
+            r.Run('echo "ac_add_options --disable-gnomeui" >> .mozconfig')
 
         r.Make('-f client.mk build')
         # disable stripping while we're creating the tarball so that
@@ -79,9 +70,3 @@ class FireFox(CPackageRecipe):
         r.Move('%(libdir)s/firefox/{README.txt,LICENSE}', '%(thisdocdir)s/')
         # add a link into %(bindir)s for the firefox executable
         r.Symlink('%(libdir)s/firefox/firefox', '%(bindir)s/')
-
-        # Install Foresight custom bookmarks and prefs
-        r.addSource('firefox-foresight-default-bookmarks.html')
-	r.addSource('firefox-foresight-default-prefs.js')
-	r.Install('firefox-foresight-default-prefs.js','%(libdir)s/firefox/defaults/profile/prefs.js')
-	r.Install('firefox-foresight-default-bookmarks.html','%(libdir)s/firefox/defaults/profile/bookmarks.html')
