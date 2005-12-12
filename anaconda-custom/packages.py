@@ -799,7 +799,7 @@ def doPreInstall(method, id, intf, instPath, dir):
         # we need to have a /dev during install and now that udev is
         # handling /dev, it gets to be more fun.  so just bind mount the
         # installer /dev
-        if not id.grpset.hdrlist.has_key("dev"):
+	if 1 or not id.grpset.hdrlist.has_key("dev"):
             log("no dev package, going to bind mount /dev")
             isys.mount("/dev", "/mnt/sysimage/dev", bindMount = 1)
 
