@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Kudzu(CPackageRecipe):
+    buildRequires = [ 'newt:devel', 'gettext:runtime', 'pciutils:devel',
+                      'python:devel', 'popt:devel' ]
+    if Arch.x86:
+        buildRequires.extend([ 'dietlibc:runtime', 'dietlibc:devel' ])
+
+    name = 'kudzu'
+    version = '1.1.116.2'
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/kudzu-1.1.116.2-2.src.rpm'
+
+        r.addArchive('kudzu-%(version)s.tar.gz', rpm=srpm)
+
+        r.addPatch('kudzu-python-version.patch')
+        # r.addPatch('kudzu-1.1.62-fast.patch')
+        # r.addPatch('kudzu-1.1.62-types.patch')
+        r.addAction("sed -i '/# chkconfig:/s/ 05/ 03/g' kudzu.init")
+
+
+        # hack: do not start kudzu on s390/s390x on bootup
+        if Arch.s390:
+            r.Run('sed -i "s/345/-/g" kudzu.init')
+
+        r.Run('ln -s `pwd` kudzu')
+        r.Make('RPM_OPT_FLAGS="%(cflags)s -I." all kudzu')
+        r.MakeInstall('install-program libdir=%(destdir)s/%(libdir)s')
+        if r.macros.initdir != '/etc/rc.d/init.d':
+            r.Move('/etc/rc.d/init.d/kudzu', '%(initdir)s/')
+            r.Remove('/etc/rc.d', recursive=True)
+        r.TagSpec('initscript', '%(initdir)s/')
