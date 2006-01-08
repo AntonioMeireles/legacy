@@ -2538,9 +2538,9 @@ diff -urN linux-2.6.13/drivers/video/console/bitblit.c linux-2.6.13-bootsplash/d
 +	    return;
 +	}
 +#endif
- 	info->fbops->fb_cursor(info, &cursor);
+ 	if (info->fbops->fb_cursor)
+ 		err = info->fbops->fb_cursor(info, &cursor);
  
- 	ops->cursor_reset = 0;
 diff -urN linux-2.6.13/drivers/video/console/fbcon.c linux-2.6.13-bootsplash/drivers/video/console/fbcon.c
 --- linux-2.6.13/drivers/video/console/fbcon.c	2005-08-29 01:41:01.000000000 +0200
 +++ linux-2.6.13-bootsplash/drivers/video/console/fbcon.c	2005-08-30 10:27:17.000000000 +0200
@@ -2555,9 +2555,9 @@ diff -urN linux-2.6.13/drivers/video/console/fbcon.c linux-2.6.13-bootsplash/dri
  #ifdef FBCONDEBUG
  #  define DPRINTK(fmt, args...) printk(KERN_DEBUG "%s: " fmt, __FUNCTION__ , ## args)
 @@ -107,7 +110,7 @@
- };
  
- struct display fb_display[MAX_NR_CONSOLES];
+ static struct display fb_display[MAX_NR_CONSOLES];
+
 -static signed char con2fb_map[MAX_NR_CONSOLES];
 +signed char con2fb_map[MAX_NR_CONSOLES];
  static signed char con2fb_map_boot[MAX_NR_CONSOLES];
@@ -2575,9 +2575,9 @@ diff -urN linux-2.6.13/drivers/video/console/fbcon.c linux-2.6.13-bootsplash/dri
  				fbcon_is_default);
  	if (err) {
 @@ -949,6 +956,16 @@
- 	rows = vc->vc_rows;
- 	new_cols = info->var.xres / vc->vc_font.width;
- 	new_rows = info->var.yres / vc->vc_font.height;
+ 	new_rows = FBCON_SWAP(ops->rotate, info->var.yres, info->var.xres);
+ 	new_cols /= vc->vc_font.width;
+ 	new_rows /= vc->vc_font.height;
 +
 +#ifdef CONFIG_BOOTSPLASH
 +        if (vc->vc_splash_data && vc->vc_splash_data->splash_state) {
@@ -2590,7 +2590,7 @@ diff -urN linux-2.6.13/drivers/video/console/fbcon.c linux-2.6.13-bootsplash/dri
 +
  	vc_resize(vc, new_cols, new_rows);
  
- 	ops = info->fbcon_par;
+ 	/*
 @@ -1578,6 +1595,10 @@
  			fbcon_softback_note(vc, t, count);
  		if (logo_shown >= 0)
@@ -2652,22 +2652,22 @@ diff -urN linux-2.6.13/drivers/video/console/fbcon.c linux-2.6.13-bootsplash/dri
  	if (blank) {
  		unsigned short charmask = vc->vc_hi_font_mask ?
  			0x1ff : 0xff;
-@@ -2197,8 +2240,15 @@
- 	}
- 
- 	if (resize) {
-+                u32 xres = info->var.xres, yres = info->var.yres;
- 		/* reset wrap/pan */
- 		info->var.xoffset = info->var.yoffset = p->yscroll = 0;
-+#ifdef CONFIG_BOOTSPLASH
-+                if (info->splash_data) {
-+                        xres = info->splash_data->splash_text_wi;
-+                        yres = info->splash_data->splash_text_he;
-+                }
-+#endif
- 		vc_resize(vc, info->var.xres / w, info->var.yres / h);
- 		if (CON_IS_VISIBLE(vc) && softback_buf) {
- 			int l = fbcon_softback_size / vc->vc_size_row;
+#@@ -2197,8 +2240,15 @@
+# 	}
+# 
+# 	if (resize) {
+#+                u32 xres = info->var.xres, yres = info->var.yres;
+# 		/* reset wrap/pan */
+# 		info->var.xoffset = info->var.yoffset = p->yscroll = 0;
+#+#ifdef CONFIG_BOOTSPLASH
+#+                if (info->splash_data) {
+#+                        xres = info->splash_data->splash_text_wi;
+#+                        yres = info->splash_data->splash_text_he;
+#+                }
+#+#endif
+# 		vc_resize(vc, info->var.xres / w, info->var.yres / h);
+# 		if (CON_IS_VISIBLE(vc) && softback_buf) {
+# 			int l = fbcon_softback_size / vc->vc_size_row;
 diff -urN linux-2.6.13/drivers/video/console/fbcon.h linux-2.6.13-bootsplash/drivers/video/console/fbcon.h
 --- linux-2.6.13/drivers/video/console/fbcon.h	2005-08-29 01:41:01.000000000 +0200
 +++ linux-2.6.13-bootsplash/drivers/video/console/fbcon.h	2005-08-30 10:27:17.000000000 +0200
