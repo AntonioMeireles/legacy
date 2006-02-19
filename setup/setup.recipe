@@ -1,33 +1,47 @@
 #
-# Copyright (c) 2004 Specifix, Inc.
-# All rights reserved
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Setup(PackageRecipe):
-    buildRequires = [ ]
+    name = 'setup'
+    version = '2.5.47'
 
-    name = "setup"
-    version = "2.5.27"
-    
+    if Use.bootstrap:
+        clearBuildReqs()
+
     def setup(r):
-        r.macros.rpmrevision = "1"
+        r.macros.rpmrevision = '1.1.1'
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/setup-%(version)s-%(rpmrevision)s.src.rpm'
+        r.addArchive('setup-%(version)s.tar.bz2', rpm=srpm)
+        r.addPatch('system-to-499.patch')
+        r.addPatch('avoid-bashrc-recursion.patch')
+        r.addSource("passwd")
+        r.addSource("group")
 
-        r.addArchive("setup-%(version)s.tar.bz2",
-	    rpm="ftp://ftp.redhat.com/pub/redhat/linux/enterprise/3/en/os/i386/SRPMS/setup-%(version)s-%(rpmrevision)s.src.rpm")
-	# our own versions with more uid/gid's
-	r.addPatch('profile.patch')
-	r.addSource("passwd")
-	r.addSource("group")
-
+        # do not depend on net-tools being installed for profile to work
+        r.Replace('^HOSTNAME.*',
+                  'HOSTNAME=`[ -x /bin/hostname ] && /bin/hostname || echo localhost.localdomain`',
+                  'profile')
         r.Install('*', '%(sysconfdir)s/')
+
+        # since conary has a method to add users and groups as packages
+        # need them, the version contained here in the setup package
+        # should just be considered an example.  Therefore we'll mark
+        # them as initialcontents since conary might have added some
+        # users and groups before setup gets installed for the first time
+        # and we don't want to cause a file conflict. printcap is marked
+        # initialcontents because cups generates a copy on its own
+        r.InitialContents('%(sysconfdir)s/(passwd|shadow|group|gshadow|printcap)')
         r.Remove('%(sysconfdir)s/shell.tag*')
         r.Create('%(sysconfdir)s/{shadow,gshadow}', mode=0400)
         r.Create('%(localstatedir)s/log/lastlog', mode=0400)
-        r.Remove('/etc/uidgid', '/etc/serviceslint',
+        r.Remove('/etc/uidgid', '/etc/serviceslint', '/etc/aliases',
                  '/etc/setup.spec', '/etc/Makefile')
-	r.Doc('uidgid')
+        r.Doc('uidgid')
 
-	r.addSource('shell.tagdescription', macros=True)
-	r.addSource('shell.taghandler', macros=True)
-	r.Install('shell.tagdescription', '%(tagdescriptiondir)s/shell')
-	r.Install('shell.taghandler', '%(taghandlerdir)s/shell', mode=0755)
+        r.addSource('shell.tagdescription', macros=True)
+        r.addSource('shell.taghandler', macros=True)
+        r.Install('shell.tagdescription', '%(tagdescriptiondir)s/shell')
+        r.Install('shell.taghandler', '%(taghandlerdir)s/shell', mode=0755)
