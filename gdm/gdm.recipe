@@ -1,6 +1,7 @@
 #
-# Copyright (c) 2004 Specifix, Inc.
-# All rights reserved
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 loadRecipe('gnomepackage.recipe', label='conary.rpath.com@rpl:devel')
@@ -31,7 +32,7 @@ class Gdm(GnomePackageRecipe):
     extraConfig += ' --enable-console-helper'
         
     name = 'gdm'
-    version = '2.8.0.5'
+    version = '2.13.0.9'
     
     docs = GnomePackageRecipe.docs
     docs.append('TODO')
@@ -39,22 +40,12 @@ class Gdm(GnomePackageRecipe):
     def unpack(r):
 	GnomePackageRecipe.unpack(r)
 	r.addArchive('Foresight-0.02.tar.bz2', dir='%(maindir)s/gui/greeter/themes/')
-        r.Replace('Exec=','Exec=gksudo ','gui/gdmsetup.desktop.in')
-        r.Replace('Categories=Application;System;SystemSetup;X-Red-Hat-Base;','Categories=Application;System;Settings','gui/gdmsetup.desktop.in')
-	r.Replace('#MinimalUID=100','MinimalUID=500','config/gdm.conf.in')
-	r.Replace('#DefaultFace','DefaultFace','config/gdm.conf.in')
-	r.Replace('nobody.png','login-photo.png','config/gdm.conf.in')
-	r.Replace('#GlobalFaceDir','GlobalFaceDir','config/gdm.conf.in')
+	r.addAction("sed -i 's/gui\/greeter\/themes\/happygnome\/Makefile/gui\/greeter\/themes\/Foresight\/Makefile gui\/greeter\/themes\/happygnome\/Makefile/' configure")
+        r.addAction("sed -i 's/SUBDIRS = circles/SUBDIRS = circles Foresight/' gui/greeter/themes/Makefile.{am,in}")
+	r.addSource('gdm.conf-custom')
+
 
     def build(r):
-	r.addAction("sed -i 's/#GraphicalTheme=circles/GraphicalTheme=Foresight/' config/gdm.conf.in")
-	r.addAction("sed -i 's/#UseCirclesInEntry=false/UseCirclesInEntry=true/' config/gdm.conf.in")
-	r.addAction("sed -i 's/#Greeter=@EXPANDED_LIBEXECDIR@\/gdmlogin/Greeter=@EXPANDED_LIBEXECDIR@\/gdmgreeter/' config/gdm.conf.in")
-	r.addAction("sed -i 's/#IncludeAll=false/IncludeAll=true/' config/gdm.conf.in")
-	r.addAction("sed -i 's/#BackgroundColor=#76848F/BackgroundColor=#e3e4e5/' config/gdm.conf.in")
-	r.addAction("sed -i 's/gui\/greeter\/themes\/happygnome\/Makefile/gui\/greeter\/themes\/Foresight\/Makefile gui\/greeter\/themes\/happygnome\/Makefile/' configure")
-	r.addAction("sed -i 's/SUBDIRS = circles/SUBDIRS = circles Foresight/' gui/greeter/themes/Makefile.{am,in}")
-	r.Replace('#GtkTheme=Default','GtkTheme=Clearlooks','config/gdm.conf.in')
 	# evaluate extraConfig's sysconfdir before setting new value
 	r.extraConfig = r.extraConfig % r.macros
 	r.macros.sysconfdir= '%(sysconfdir)s/X11'
@@ -62,9 +53,8 @@ class Gdm(GnomePackageRecipe):
 
     def install(r):
 	GnomePackageRecipe.install(r)
-
+	r.Install('gdm.conf-custom','%(sysconfdir)s/gdm/custom.conf')
 	r.ExcludeDirectories(exceptions=['%(localstatedir)s/log/gdm'])
 	r.SetModes('%(localstatedir)s/gdm', 01770)
 	r.Ownership('root', 'gdm', '%(localstatedir)s/gdm')
         r.User('gdm', 42, homedir='/var/gdm')
-        r.Requires('/usr/bin/consolehelper', '%(bindir)s/gdmsetup')
