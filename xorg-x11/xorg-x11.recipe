@@ -1,0 +1,458 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+# XXX host.def needs to be installed -- once it is fixed
+
+class XorgX11(CPackageRecipe):
+    name = 'xorg-x11'
+    version = '6.8.2'
+
+    Flags = PackageRecipe.Flags
+
+    Flags.xprint = False
+    Flags.sdk = True
+
+    # define a few shortcuts for the rest of the recipe
+    with_fastbuild                  = True
+    with_debuginfo                  = False
+    with_Xserver                    = not (Arch.s390 or Arch.ppc64)
+    with_DRI                        = (Arch.x86 or Arch.ia64 or Arch.x86_64
+                                   or Arch.alpha or Arch.ppc or Arch.ppc64)
+    with_sdk                        = with_Xserver and Flags.sdk
+
+    buildRequires = [ 'flex:runtime', 'flex:devel',
+                      'perl:runtime', 'ttmkfdir:runtime',
+                      'bison:runtime', 'zlib:devel', 'ncurses:devel',
+                      'utempter:runtime', 'expat:devel',
+                      'pam:devel', 'libpng:devel',
+                      'coreutils:runtime', 'fontconfig:devel',
+                      'fontconfig:runtime', 'freetype:devel',
+                      'libstdc++:devel'
+                    ]
+
+    def setup(r):
+        if not (Arch.x86 or Arch.alpha or Arch.ia64 or Arch.s390
+                or Arch.ppc or Arch.sparc or Arch.x86_64 or Arch.ppc64):
+            return
+
+        r.macros.x11dir = '%(prefix)s/X11R6'
+        r.macros.x11bindir = '%(x11dir)s/bin'
+        r.macros.x11datadir = '%(x11dir)s/lib'
+        r.macros.x11includedir = '%(x11dir)s/include'
+        r.macros.x11localedir = '%(x11datadir)s/X11/locale'
+        r.macros.x11libdir = '%(x11dir)s/%(lib)s'
+        r.macros.x11mandir = '%(x11dir)s/man'
+        r.macros.x11fontdir = '%(x11datadir)s/X11/fonts'
+
+        r.macros.x11icondir = '%(datadir)s/icons'
+
+        r.macros.glversion = '1.2'
+        r.macros.glmajversion = '1'
+
+        r.macros.vendorstring = 'rpath Linux'
+        r.macros.driverdir = 'xorg-x11-%(version)s/xc/programs/Xserver/hw/xfree86/drivers/'
+
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/xorg-x11-6.8.2-45.src.rpm'
+
+        r.addArchive("xorg-x11-%(version)s.tar.gz", rpm=srpm,
+                     dir='xorg-x11-%(version)s')
+
+        r.addSource('host.def', dir='xc/config/cf/', macros=True)
+        r.addSource('xserver.pamd', rpm=srpm,
+                    dest='%(sysconfdir)s/pam.d/xserver')
+        r.addSource('xdm.pamd', rpm=srpm,
+                    dest='%(sysconfdir)s/pam.d/xdm')
+        r.addSource('xfs.init', dest='%(initdir)s/xfs', mode=0755)
+        r.addSource('xfs.config', rpm=srpm,
+                    dest='%(sysconfdir)s/X11/fs/config', mode=0644)
+        r.addSource('xdm.init', dest='%(initdir)s/xdm', mode=0755)
+        r.addSource('mkxauth', rpm=srpm, dest='%(x11bindir)s/', mode=0755)
+        r.addSource('mkxauth.1x', rpm=srpm, dest='%(x11mandir)s/man1/')
+
+        r.addSource('x-font.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/x-font')
+        r.addSource('x-font.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/x-font', mode=0755)
+        # XXX addSource does not have a component parameter yet -- fix
+        # when it does
+        r.PackageSpec('xorg-x11-fonts',
+                      '%(tagdescriptiondir)s/x-font',
+                      '%(taghandlerdir)s/x-font')
+
+        r.addPatch('XFree86-4.3.0-makefile-fastbuild.patch',
+                   rpm=srpm, use=r.with_fastbuild, level=0)
+
+
+        r.addPatch('XFree86-4.3.0-radeon-ia64-preint10.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.3.0-radeon-disable-VideoRAM-option.patch',
+                   rpm=srpm, level=0)
+
+        # r.addPatch('xorg-x11-6.8.1-i810-update.patch', rpm=srpm, level=0)
+
+        r.addPatch('XFree86-4.1.0-agpgart-load.patch', rpm=srpm)
+
+        r.addPatch('xorg-Imake-make-icondir-configurable.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.2.99.4-IncludeSharedObjectInNormalLib.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.3.0-libfontenc-IncludeSharedObjectInNormalLib.patch',
+                   rpm=srpm, level=0)
+
+        r.addPatch('XFree86-4.2.99.901-dont-install-Xcms.txt.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.3.0-XRes-IncludeSharedObjectInNormalLib.patch',
+                   rpm=srpm, level=0)
+
+        r.addPatch('xorg-x11-6.8.0-Xserver-increase-max-pci-devices.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-x11.6.8.1.903-AMD64-override-default-driverlist.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.3.0-ia64-pci-infinite-loop.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.7.0-fix-BuildXFree86ConfigTools.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.7.0-libxf86config-monitor-freq-fix.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.0-Imake-add-BuildFontDevelUtils-macro.patch',
+                   rpm=srpm, level=0)
+
+        r.addPatch('xorg-x11-6.8.0-libXdmcp-build-with-PIC.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1-init-origins-fix.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1-nls-indic-locales.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1-battle-libc-wrapper.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1.902-ia64-hp-zx2-support-bug-119364.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1.902-lnxLib-tmpl-sharedlibreq-fixes.patch',
+                  rpm=srpm, level=0)
+        r.addPatch('xorg-x11-6.8.1-composite-gravity.patch',
+                  rpm=srpm, level=0)
+
+        r.addPatch('XFree86-4.2.99.2-redhat-custom-modelines.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-redhat-die-ugly-pattern-die-die-die.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('XFree86-4.3.0-redhat-nv-riva-videomem-autodetection-debugging.patch',
+                   rpm=srpm, level=0)
+        r.addPatch('xorg-redhat-embeddedbitmap.patch', rpm=srpm, level=0)
+        r.addPatch('XFree86-4.2.0-sessreg-highuid.patch', rpm=srpm, level=0)
+
+        r.addPatch('libdri-printf.patch')
+
+        r.Run('export LANG=C')
+        r.Run('find . -name CVS -type d | xargs rm -rf')
+
+        r.Run('cd xc/fonts/util; gcc -Wall -o ucs2any ucs2any.c')
+        r.Run('mkdir -p xc/exports/bin/')
+        r.Run('mv xc/fonts/util/ucs2any xc/exports/bin')
+
+        if r.with_debuginfo:
+            r.Run('makeg World -C xc WORLDOPTS= FAST=1')
+        else:
+            r.Make('World -C xc WORLDOPTS= FAST=1')
+
+        r.MakeInstall('-C xc')
+        r.MakeInstall('-C xc', installtarget='install.man')
+        if r.with_sdk:
+            r.MakeInstall('-C xc', installtarget='install.sdk')
+
+        r.SetModes('%(x11dir)s/bin/Xorg', 04611)
+        # for some reason these things are in the wrong place
+        r.Remove('%(x11dir)s/lib/X11/app-defaults')
+        r.Move('/etc/X11/app-defaults', '%(x11dir)s/lib/X11/app-defaults')
+
+        # xterm:runtime provides these
+        r.Remove('%(x11dir)s/lib/X11/app-defaults/*XTerm*')
+
+        r.MakeDirs('%(sysconfdir)s/security/console.apps/')
+        r.Run('touch %(destdir)s%(sysconfdir)s/security/console.apps/xserver')
+
+
+        # Explicitly create XDM authdir
+        r.MakeDirs('%(localstatedir)s/lib/xdm/authdir', mode=0700)
+
+        r.Symlink('%(x11includedir)s/X11', '%(includedir)s/X11')
+        r.Symlink('%(x11includedir)s/DPS', '%(includedir)s/DPS')
+
+        # Symlink shared libs
+        r.Run('''pushd %(destdir)s%(x11libdir)s
+            for lib in *.so.*; do ln -sf $lib ${lib%%.so*}.so ; done
+        popd''')
+
+        for lib in ('libGL.so', 'libGL.so.1', 'libGLU.so', 'libGLU.so.1'):
+            r.Symlink('%(x11libdir)s/' + lib, '%(libdir)s/' + lib)
+
+        for configfile in ('xorg.conf',):
+            r.Run('touch %(destdir)s%(sysconfdir)s/X11/' + configfile)
+
+        # Make empty fonts.alias files, mark as config
+        r.MakeDirs('%(x11fontdir)s/OTF')
+        r.Create('%(x11fontdir)s/{OTF,TTF}/fonts.alias')
+        r.Config('%(x11fontdir)s/(OTF|TTF)/fonts.alias')
+        # remove encoding.dir files that are regenerated
+        # zero out fonts.dir files and mark them as config files
+        for subdir in ('100dpi', '75dpi', 'CID', 'local', 'misc', 'Speedo', 'Type1', 'TTF', 'cyrillic'):
+            r.Remove('%%(x11fontdir)s/%s/{encodings,fonts}.dir' % subdir)
+            r.Create('%%(x11fontdir)s/%s/fonts.dir' % subdir)
+            r.SetModes('%%(x11fontdir)s/%s/fonts.dir' % subdir, 0644)
+            r.Config('%%(x11fontdir)s/%s/fonts.dir' % subdir)
+        r.Remove('%(x11fontdir)s/encodings/encodings.dir')
+        r.Remove('%(x11fontdir)s/encodings/large/encodings.dir')
+
+        # Make sure all manpage dirs exist
+        r.MakeDirs('%(x11mandir)s/man{1,2,3,4,5,6,7,8}')
+
+
+        # XXX font files in other font packages probably need to depend on
+        # the xorg-x11-fonts package
+        r.Requires('chkfontpath:runtime', '%(taghandlerdir)s/x-font')
+        r.Requires('ttmkfdir:runtime', '%(taghandlerdir)s/x-font')
+        # in a different (sub-)package, so we need to explicitly require it
+        r.Requires('xorg-x11:runtime', '%(taghandlerdir)s/x-font')
+
+        r.Move('%(x11libdir)s/pkgconfig/*', '%(libdir)s/pkgconfig/')
+        r.Remove('%(x11libdir)s/pkgconfig', recursive=True)
+
+        # xft.pc requires fontconfig.pc
+        r.Requires('fontconfig:devel', '%(libdir)s/pkgconfig/xft.pc')
+
+        r.Remove('%(sysconfdir)s/X11/xdm/{GiveConsole,TakeConsole,Xaccess,Xsession,Xsetup_0,xdm-config}',
+                 '%(sysconfdir)s/X11/xinit/xinitrc')
+        r.Remove('%(x11bindir)s/xterm')
+        r.Remove('%(x11datadir)s/app-defaults/*XTerm*')
+        # we still need the directory because of symlinks in the package
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/X11/xinit')
+
+        # we do not wish to package X's fontconfig; we have it built
+        # and packaged separately
+        r.Remove('%(sysconfdir)s/fonts',
+                 '%(x11includedir)s/fontconfig', recursive=True)
+        r.Remove('%(x11bindir)s/{fc-cache,fc-list}',
+                 '%(x11mandir)s/man1/{fc-cache,fc-list}.1*',
+                 '%(x11mandir)s/man3/fontconfig.3*',
+                 '%(x11libdir)s/libfontconfig.*')
+        r.Remove('%(libdir)s/pkgconfig/fontconfig.pc')
+
+        # remove some old programs
+        r.Remove('%(sysconfdir)s/X11/rstart', recursive=True)
+        r.Remove('%(x11datadir)s/X11/rstart',
+                 '%(x11bindir)s/rstart*',
+                 '%(x11mandir)s/man1/rstart*.1')
+        r.Remove('%(x11datadir)s/X11/xedit', recursive=True)
+        r.Remove('%(x11bindir)s/xedit', '%(x11mandir)s/man1/xedit.1*')
+        r.Remove('%(x11bindir)s/xman',
+                 '%(x11datadir)s/X11/xman.help',
+                 '%(x11mandir)s/man1/xman.1*')
+        r.Remove('%(x11bindir)s/xf86cfg',
+                 '%(x11mandir)s/man1/xf86cfg.1*')
+        r.Remove('%(x11bindir)s/xf86config',
+                 '%(x11mandir)s/man1/xf86config.1*')
+        r.Remove('%(x11bindir)s/xmh',
+                 '%(x11mandir)s/man1/xmh.1*')
+
+        # libxrx is "broadway" -- X as a browser plugin
+        # don't ship it
+        r.Remove('%(x11libdir)s/libxrx.*',
+                 '%(x11mandir)s/man1/libxrx.1*')
+
+        if not r.with_Xserver:
+            r.Remove('etc/X11/xorg.conf*',
+                     'etc/X11/XF86Config*')
+
+        if not r.Flags.xprint:
+            r.Remove('%(x11bindir)s/Xprt')
+            r.Remove('%(initdir)s/xprint')
+
+            # /etc/X11/xserver/ seems to contain only xprint files
+            r.Remove('%(sysconfdir)s/X11/xserver', recursive=True)
+            r.Remove('%(x11datadir)s/X11/xserver')
+
+        # Delete these because they're broken with add-in Xft/Xrender
+        r.Remove('%(libdir)s/pkgconfig/render.pc')
+        r.Remove('%(x11datadir)s/X11/XF86Config.{98,eg,indy}')
+        # The Cards database is part of the "hwdata" package
+        r.Remove('%(x11datadir)s/X11/Cards')
+        # Remove the XftConfig file, which is no longer used
+        r.Remove('%(sysconfdir)s/X11/XftConfig')
+        # Remove DRM sources from installed tree
+        r.Remove('%(x11dir)s/src', recursive=True)
+
+        # Remove %(lib)s/Server -- no need for driver sources
+        r.Remove('%(x11libdir)s/Server', recursive=True)
+
+        r.Remove('%(sysconfdir)s/X11/xdm/{GiveConsole,TakeConsole,Xaccess,Xsession,Xsetup_0}')
+        r.Remove('%(sysconfdir)s/X11/xinitrc')
+
+        # documentation
+        r.ComponentSpec('devel', '%(x11mandir)s/man3/')
+        r.ComponentSpec('doc',
+            '%(x11datadir)s/X11/doc/',
+            '%(x11libdir)s/X11/doc/',
+            '%(localstatedir)s/lib/xkb/README',
+            '%(x11mandir)s/')
+        r.Doc('xc/doc/hardcopy.*')
+
+        # put drivers and modules that would be matched as
+        # shared libraries into :runtime
+        r.ComponentSpec('runtime',
+            '%(x11libdir)s/modules/',
+            '%(x11libdir)s/Server/modules/')
+
+        r.PackageSpec('xorg-x11-tools',
+            '%(x11bindir)s/bdftopcf',
+            '%(x11mandir)s/man1/bdftopcf\..*',
+            '%(x11bindir)s/bdftruncate',
+            '%(x11mandir)s/man1/bdftruncate\..*',
+            '%(x11bindir)s/mkfontdir'
+            '%(x11mandir)s/man1/mkfontdir\..*'
+            '%(x11bindir)s/mkfontscale'
+            '%(x11mandir)s/man1/mkfontscale\..*',
+            '%(x11bindir)s/ucs2any',
+            '%(x11mandir)s/man1/ucs2any\..*',
+            '%(x11bindir)s/fc-cache',
+            '%(x11bindir)s/fc-list',
+            '%(x11mandir)s/man1/fc-cache\..*',
+            '%(x11mandir)s/man1/fc-list\..*',
+            '%(x11bindir)s/beforelight',
+            '%(x11bindir)s/glxinfo',
+            '%(x11bindir)s/glxgears',
+            '%(x11bindir)s/ico',
+            '%(x11bindir)s/listres',
+            '%(x11bindir)s/mkhtmlindex',
+            '%(x11bindir)s/oclock',
+            '%(x11bindir)s/showfont',
+            '%(x11bindir)s/viewres',
+            '%(x11bindir)s/x11perf',
+            '%(x11bindir)s/x11perfcomp',
+            '%(x11bindir)s/xbiff',
+            '%(x11bindir)s/xclipboard',
+            '%(x11bindir)s/xclock',
+            '%(x11bindir)s/xditview',
+            '%(x11bindir)s/xev',
+            '%(x11bindir)s/xeyes',
+            '%(x11bindir)s/xfd',
+            '%(x11bindir)s/xfontsel',
+            '%(x11bindir)s/xgc',
+            '%(x11bindir)s/xload',
+            '%(x11bindir)s/xmag',
+            '%(x11bindir)s/xmessage',
+            '%(x11bindir)s/xvinfo',
+            '%(x11bindir)s/xwininfo',
+            '%(x11bindir)s/xlogo',
+            '%(x11bindir)s/xkill',
+            '%(x11mandir)s/man1/beforelight\..*',
+            '%(x11mandir)s/man1/glxinfo\..*',
+            '%(x11mandir)s/man1/glxgears\..*',
+            '%(x11mandir)s/man1/ico\..*',
+            '%(x11mandir)s/man1/listres\..*',
+            '%(x11mandir)s/man1/mkhtmlindex\..*',
+            '%(x11mandir)s/man1/showfont\..*',
+            '%(x11mandir)s/man1/viewres\..*',
+            '%(x11mandir)s/man1/x11perf\..*',
+            '%(x11mandir)s/man1/x11perfcomp\..*',
+            '%(x11mandir)s/man1/xbiff\..*',
+            '%(x11mandir)s/man1/xclipboard\..*',
+            '%(x11mandir)s/man1/xclock\..*',
+            '%(x11mandir)s/man1/xditview\..*',
+            '%(x11mandir)s/man1/xev\..*',
+            '%(x11mandir)s/man1/xeyes\..*',
+            '%(x11mandir)s/man1/xfd\..*',
+            '%(x11mandir)s/man1/xfontsel\..*',
+            '%(x11mandir)s/man1/xgc\..*',
+            '%(x11mandir)s/man1/xload\..*',
+            '%(x11mandir)s/man1/xmag\..*',
+            '%(x11mandir)s/man1/xmessage\..*',
+            '%(x11mandir)s/man1/xvinfo\..*',
+            '%(x11mandir)s/man1/xwininfo\..*',
+            '%(x11bindir)s/xcalc',
+            '%(x11mandir)s/man1/xcalc\..*',
+            '%(x11bindir)s/xedit',
+            '%(x11datadir)s/X11/xedit/lisp.*\.lsp',
+            '%(x11datadir)s/X11/xedit/lisp/progmodes.*\.lsp',
+            '%(x11mandir)s/man1/xedit\..*',
+            '%(x11bindir)s/xman',
+            '%(x11datadir)s/X11/xman\.help',
+            '%(x11mandir)s/man1/xman\..*')
+
+        # twm goes in -tools
+        r.PackageSpec('xorg-x11-tools',
+            '%(sysconfdir)s/X11/twm/system\.twmrc',
+            '%(x11bindir)s/twm',
+            '%(x11datadir)s/X11/twm',
+            '%(x11mandir)s/man1/twm\..*')
+
+        # xf86cfg goes in -tools
+        r.PackageSpec('xorg-x11-tools',
+            '%(x11bindir)s/xf86cfg',
+            '%(x11mandir)s/man1/xf86cfg\.1.*',
+            '%(x11includedir)s/X11/pixmaps/.*')
+
+        # put xfs in separate package to run an xfs server without X installed
+        r.PackageSpec('xorg-x11-xfs',
+            '%(sysconfdir)s/X11/fs/config',
+            '%(sysconfdir)s/rc\.d/init\.d/xfs',
+            '%(sysconfdir)s/init\.d/xfs',
+            '%(x11bindir)s/xfsinfo',
+            '%(x11bindir)s/fslsfonts',
+            '%(x11bindir)s/fstobdf',
+            '%(x11bindir)s/xfs',
+            '%(x11datadir)s/X11/fs',
+            '%(x11mandir)s/man1/xfs\..*',
+            '%(x11mandir)s/man1/xfsinfo\..*',
+            '%(x11mandir)s/man1/fslsfonts\..*',
+            '%(x11mandir)s/man1/fstobdf\..*')
+
+        # XXX libs-data includes files which might be in :lib but
+        # which are moved here so that both x86 and x86_64 :lib
+        # components may be installed simultaneously.
+        r.ComponentSpec('data',
+            '%(x11localedir)s.*',
+            '%(localstatedir)s/lib/xdm/authdir',
+            '%(x11datadir)s/X11/')
+
+        # put architecture-specific locale libraries in :lib
+        r.ComponentSpec('lib',
+            '%(x11localedir)s/%(lib)s/')
+
+        # put font encodings in runtime
+        r.ComponentSpec('runtime', '%(x11fontdir)s/encodings/')
+
+        # everything else font-related in xorg-x11-fonts
+        r.PackageSpec('xorg-x11-fonts', '%(x11fontdir)s/')
+
+        # development tools
+        r.ComponentSpec('devel', '%(x11bindir)s/xmkmf')
+        r.ComponentSpec('devel', '%(x11bindir)s/imake')
+        r.ComponentSpec('devel', '%(x11bindir)s/lndir')
+        r.ComponentSpec('devel', '%(x11bindir)s/cleanlinks')
+        r.ComponentSpec('devel', '%(x11bindir)s/ccmakedep')
+        r.ComponentSpec('devel', '%(x11bindir)s/gccmakedep')
+        r.ComponentSpec('devel', '%(x11bindir)s/makedepend')
+        r.ComponentSpec('devel', '%(x11bindir)s/makeg')
+        r.ComponentSpec('devel', '%(x11bindir)s/makestrs')
+        r.ComponentSpec('devel', '%(x11bindir)s/mkdirhier')
+        r.ComponentSpec('devel', '%(x11bindir)s/rman')
+
+        r.Config(exceptions='/etc/X11/xserver/C/')
+        r.Config(exceptions='/etc/X11/xdm/chooser')
+        r.Config(exceptions='/etc/X11/xkb/xkbcomp')
+
+        # these cache files are automatically updated after install - we'll
+        # manage them so they're removed when we remove X11, but assume
+        # the file on the system is correct.
+        r.InitialContents('%(x11fontdir)s/.*/fonts.cache-1')
+        r.InitialContents('%(sysconfdir)s/X11/xorg.conf')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
+
+        # the init script calls which
+        r.Requires('which:runtime', '%(sysconfdir)s/init\.d/xdm')
+
