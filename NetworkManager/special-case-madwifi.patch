@@ -1,0 +1,34 @@
+? nl-route.patch
+? src/madwifi.diff
+? src/nm-coddle-madwifi.diff
+Index: src/nm-device-802-11-wireless.c
+===================================================================
+RCS file: /cvs/gnome/NetworkManager/src/nm-device-802-11-wireless.c,v
+retrieving revision 1.45
+diff -u -p -r1.45 nm-device-802-11-wireless.c
+--- src/nm-device-802-11-wireless.c	5 Feb 2006 23:54:47 -0000	1.45
++++ src/nm-device-802-11-wireless.c	6 Feb 2006 03:00:46 -0000
+@@ -2277,13 +2277,22 @@ supplicant_interface_init (NMDevice80211
+ 	const char *		iface = nm_device_get_iface (NM_DEVICE (self));
+ 	gboolean			success = FALSE;
+ 	int				tries = 0;
++	const char *		dev_driver;
++	char *			wpa_driver = "wext";
+ 
+ 	if (!(ctrl = wpa_ctrl_open (WPA_SUPPLICANT_GLOBAL_SOCKET, NM_RUN_DIR)))
+ 		goto exit;
+ 
++	/* Special-case madwifi for now.  madwifi needs to get their
++	 * act in gear and support WEXT too.
++	 */
++	dev_driver = nm_device_get_driver (NM_DEVICE (self));
++	if (dev_driver && !strcmp (dev_driver, "ath_pci"))
++		wpa_driver = "madwifi";
++
+ 	/* wpa_cli -g/var/run/wpa_supplicant-global interface_add eth1 "" wext /var/run/wpa_supplicant */
+ 	if (!nm_utils_supplicant_request_with_check (ctrl, "OK", __func__, NULL,
+-			"INTERFACE_ADD %s\t\twext\t" WPA_SUPPLICANT_CONTROL_SOCKET "\t", iface))
++			"INTERFACE_ADD %s\t\t%s\t" WPA_SUPPLICANT_CONTROL_SOCKET "\t", iface, wpa_driver))
+ 		goto exit;
+ 	wpa_ctrl_close (ctrl);
+ 
