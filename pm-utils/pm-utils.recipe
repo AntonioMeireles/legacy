@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2005-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class PMUtils(CPackageRecipe):
+    name = 'pm-utils'
+    version = '0.11'
+
+    buildRequires = [ 'hal:devel', 'pkgconfig:devel', 'pciutils:devel',
+                      'dbus:devel' ]
+
+    def setup(r):
+        r.macros.vbetooldir = 'vbetool-0.4'
+        r.macros.radeontooldir = 'radeontool-1.5'
+        r.macros.cppflags += ' -I/usr/include/hal/'
+
+        srpm = 'ftp://ftp.linux.ncsu.edu/pub/fedora/linux/core/development/SRPMS/%(name)s-%(version)s-1.src.rpm'
+
+        r.addArchive('%(name)s-%(version)s.tar.gz', rpm=srpm)
+        r.addArchive('vbetool_0.5-1.tar.gz', rpm=srpm, dir='%(maindir)s')
+        r.addArchive('radeontool-1.5.tar.gz', rpm=srpm, dir='%(maindir)s')
+
+        #r.addPatch('vbetool-0.3-fix-gcc4bug.patch', rpm=srpm)
+        r.addPatch('vbetool-0.3-libpci.patch', rpm=srpm, dir='%(vbetooldir)s')
+
+        if Arch.x86:
+            r.Configure(subDir='%(vbetooldir)s')
+            r.Make(subDir='%(vbetooldir)s')
+            r.MakeInstall(subDir='%(vbetooldir)s')
+
+        if Arch.x86 or Arch.x86_64:
+            r.Run("""cd %(radeontooldir)s
+                     %(cc)s %(cflags)s -o radeontool radeontool.c""")
+            r.MakeDirs('%(sbindir)s')
+            r.Install('%(radeontooldir)s/radeontool', '%(sbindir)s/', mode=0755)
+
+        r.Make()
+        r.MakeInstall()
+
+        r.DanglingSymlinks(exceptions='%(bindir)s/pm.*')
