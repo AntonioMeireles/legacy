@@ -1,24 +1,22 @@
 #
 # Copyright (c) 2004-2005 rPath, Inc.
-# All rights reserved
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Initscripts(PackageRecipe):
+loadSuperClass('rpmpackage.recipe')
+class Initscripts(RPMPackageRecipe, CPackageRecipe):
     name = 'initscripts'
-    version = '8.12'
- 
-    buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime', 
+    version = '8.33'
+
+    buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
                       'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel' ]
 
     def setup(r):
-        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/initscripts-8.12-3.src.rpm'
-
-        r.addArchive('initscripts-%(version)s.tar.bz2', rpm=srpm)
-        r.addPatch('initscripts-s390.patch', rpm=srpm, use=Arch.s390)
-
-        r.addPatch('initscripts-7.53-generic.patch')
+        r.unpack()
+        r.addPatch('initscripts-custom-distro-name.patch')
         r.addPatch('fastboot.patch', backup='.fast')
-        r.addPatch('initscripts-pidof.patch')
+        r.addSource('rplCopyDirs')
 
         # don't re-make initscripts.pot
         r.addAction("sed -i '/^all: /s/$(NLSPACKAGE).pot//' po/Makefile")
@@ -26,25 +24,18 @@ class Initscripts(PackageRecipe):
         r.addAction("echo >> rc.d/rc")
         r.addAction("sed -i '/# chkconfig:/s/ 10/ 06/g' rc.d/init.d/network")
         r.addAction("sed -i '/# chkconfig:/s/ 25/ 11/g' rc.d/init.d/netfs")
-        
-        # Make 5 the default runlevel
-        r.Replace('id:3:initdefault:','id:5:initdefault:','inittab')
+        r.addPatch('initscripts-with-livecd.patch')
 
         if not Use.pie:
             r.Replace('-fPIE', '', 'src/Makefile')
+            r.Replace('-pie', '', 'src/Makefile')
 
-        # LVM fails to load if you call --mknodes with a readonly / filesystem
-        r.Replace('--mknodes ', '', 'rc.d/rc.sysinit')
         r.Make()
         r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
                       ' mandir=%(mandir)s', rootVar='ROOT')
 
-        if not Arch.s390:
-            r.Remove('%(sysconfdir)s/sysconfig/network-scripts/ifup-{ctc,escon,iucv}')
-        else:
-            r.Remove('%(sysconfdir)s/sysconfig/init.s390')
-            r.Remove('%(sysconfdir)s/rc.d/rc.sysinit.s390init')
-
+        r.Remove('%(sysconfdir)s/sysconfig/init.s390')
+        r.Remove('%(sysconfdir)s/rc.d/rc.sysinit.s390init')
         # we use separate build trees rather than trying to unify them
         r.Remove('%(essentialsbindir)s/mkkerneldoth')
 
@@ -87,9 +78,9 @@ class Initscripts(PackageRecipe):
         # of its own "must use chkconfig" policy!
         r.RemoveNonPackageFiles(exceptions='%(sysconfdir)s.*/rc[0-6].d/[KS].*$')
 
-        # Tag most init scripts in case the initscript tag desc. is 
+        # Tag most init scripts in case the initscript tag desc. is
         # not installed, but exclude some special scripts
-        r.TagSpec('initscript', '%(initdir)s/') 
+        r.TagSpec('initscript', '%(initdir)s/')
         r.TagSpec('initscript', exceptions='%(initdir)s/killall')
         r.TagSpec('initscript', exceptions='%(initdir)s/halt')
         r.TagSpec('initscript', exceptions='%(initdir)s/single')
@@ -114,3 +105,11 @@ class Initscripts(PackageRecipe):
         r.Requires('sysvinit:runtime', '%(sysconfdir)s/inittab')
         #   /etc/init.d/functions calls /sbin/runuser
         r.Requires('%(essentialsbindir)s/runuser', '%(initdir)s/functions')
+        # networking scripts need the following:
+        r.Requires('iputils:runtime',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('psmisc:runtime',
+            '%(sysconfdir)s/init.d/(halt|netfs)')
+        # fedora default livecd doesn't set up all the necessary directories
+        r.Copy('rplCopyDirs', '%(sysconfdir)s/rwtab')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/rwtab.d')
