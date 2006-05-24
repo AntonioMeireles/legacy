@@ -1,115 +1,12 @@
 #
 # Copyright (c) 2004-2005 rPath, Inc.
-# This file is distributed under the terms of the MIT License.
-# A copy is available at http://www.rpath.com/permanent/mit-license.html
+# All rights reserved
 #
 
-loadSuperClass('rpmpackage.recipe')
-class Initscripts(RPMPackageRecipe, CPackageRecipe):
+class Initscripts(RedirectRecipe):
     name = 'initscripts'
-    version = '8.33'
-
-    buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
-                      'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel' ]
+    version = '0'
 
     def setup(r):
-        r.unpack()
-        r.addPatch('initscripts-custom-distro-name.patch')
-        r.addPatch('fastboot.patch', backup='.fast')
-        r.addSource('rplCopyDirs')
-
-        # don't re-make initscripts.pot
-        r.addAction("sed -i '/^all: /s/$(NLSPACKAGE).pot//' po/Makefile")
-        # add a newline to the end of rc.d/rc
-        r.addAction("echo >> rc.d/rc")
-        r.addAction("sed -i '/# chkconfig:/s/ 10/ 06/g' rc.d/init.d/network")
-        r.addAction("sed -i '/# chkconfig:/s/ 25/ 11/g' rc.d/init.d/netfs")
-        r.addPatch('initscripts-with-livecd.patch')
-
-        if not Use.pie:
-            r.Replace('-fPIE', '', 'src/Makefile')
-            r.Replace('-pie', '', 'src/Makefile')
-
-        r.Make()
-        r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
-                      ' mandir=%(mandir)s', rootVar='ROOT')
-
-        r.Remove('%(sysconfdir)s/sysconfig/init.s390')
-        r.Remove('%(sysconfdir)s/rc.d/rc.sysinit.s390init')
-        # we use separate build trees rather than trying to unify them
-        r.Remove('%(essentialsbindir)s/mkkerneldoth')
-
-        r.Doc('sysconfig.txt', 'sysvinitfiles', 'ChangeLog',
-              'static-routes-ipv6', 'ipv6-tunnel.howto', 'ipv6-6to4.howto',
-              'changes.ipv6')
-        r.SetModes('%(sbindir)s/usernetctl', 04755)
-        r.SetModes('%(essentialsbindir)s/netreport', 02755)
-        r.SetModes('%(localstatedir)s/run/netreport', 0775)
-
-        if r.macros.initdir != r.macros.sysconfdir+'/init.d':
-            # Using something other than FHS standard, add compat symlinks
-            r.Symlink('%(initdir)s', '%(sysconfdir)s/init.d')
-            # "rcdir = initdir - /init.d"
-            rcdir='/'.join(r.macros.initdir.split('/')[:-1])
-            for level in range(7):
-                r.Symlink('%s/rc%d.d' %(rcdir, level),
-                                     '/%%(sysconfdir)s/rc%d.d' %level)
-        else:
-            # we'll use the FHS init directories, with symlinks for old stuff
-            for dir in ('rc?.d', 'init.d'):
-                # remove the FHS compatibility symlinks
-                r.Remove('%(sysconfdir)s/'+dir)
-                # move directories to their new position
-                r.Move('%(sysconfdir)s/rc.d/'+dir, '%(sysconfdir)s/')
-                # Now install compatibility symlinks going the other way
-                r.Symlink('%(sysconfdir)s/'+dir, '%(sysconfdir)s/rc.d/')
-            for file in ('rc', 'rc.local', 'rc.sysinit'):
-                r.Remove('%(sysconfdir)s/'+file)
-                r.Move('%(sysconfdir)s/rc.d/'+file, '%(sysconfdir)s/')
-                r.Symlink('%(sysconfdir)s/'+file, '%(sysconfdir)s/rc.d/'+file)
-            r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
-                  " %(destdir)s/%(sysconfdir)s/inittab")
-
-        r.SetModes('%(localstatedir)s/{log/wtmp,run/utmp}', 0644)
-        r.Ownership('root', 'utmp', '%(localstatedir)s/log/wtmp',
-                                    '%(localstatedir)s/run/utmp')
-
-        # oddly enough, it's the initscripts package itself that has violations
-        # of its own "must use chkconfig" policy!
-        r.RemoveNonPackageFiles(exceptions='%(sysconfdir)s.*/rc[0-6].d/[KS].*$')
-
-        # Tag most init scripts in case the initscript tag desc. is
-        # not installed, but exclude some special scripts
-        r.TagSpec('initscript', '%(initdir)s/')
-        r.TagSpec('initscript', exceptions='%(initdir)s/killall')
-        r.TagSpec('initscript', exceptions='%(initdir)s/halt')
-        r.TagSpec('initscript', exceptions='%(initdir)s/single')
-        r.TagSpec('initscript', exceptions='%(initdir)s/functions')
-        r.RequireChkconfig(exceptions='%(initdir)s/killall')
-        r.RequireChkconfig(exceptions='%(initdir)s/halt')
-        r.RequireChkconfig(exceptions='%(initdir)s/single')
-        r.RequireChkconfig(exceptions='%(initdir)s/functions')
-
-        # add runtime requirements
-        #   sysvinit:runtime for pidof
-        r.Requires('sysvinit:runtime', '%(initdir)s/functions')
-        #   coreutils:runtime for rm, cp, etc
-        r.Requires('coreutils:runtime', '%(initdir)s/functions')
-        #   filesystem:runtime required for directories like
-        #     /var/lock/subsys
-        r.Requires('filesystem:runtime', '%(initdir)s/functions')
-        #   default inittab requires mingetty
-        r.Requires('mingetty:runtime', '%(sysconfdir)s/inittab')
-        #   inittab calls shutdown from sysvinit (and is also not
-        #   very useful without an init(8))
-        r.Requires('sysvinit:runtime', '%(sysconfdir)s/inittab')
-        #   /etc/init.d/functions calls /sbin/runuser
-        r.Requires('%(essentialsbindir)s/runuser', '%(initdir)s/functions')
-        # networking scripts need the following:
-        r.Requires('iputils:runtime',
-            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
-        r.Requires('psmisc:runtime',
-            '%(sysconfdir)s/init.d/(halt|netfs)')
-        # fedora default livecd doesn't set up all the necessary directories
-        r.Copy('rplCopyDirs', '%(sysconfdir)s/rwtab')
-        r.ExcludeDirectories(exceptions='%(sysconfdir)s/rwtab.d')
+        r.addRedirect('initscripts', 'conary.rpath.com@rpl:devel')
+ 
