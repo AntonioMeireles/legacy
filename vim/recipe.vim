@@ -1,11 +1,16 @@
 " Vim syntax file
 " Language:	Conary Recipe
 " Maintainer:	David Christian <http://www.rpath.com>
-" Updated:	2004-06-29
+" Updated:	2006-05-15
 "
 syntax clear
 runtime! syntax/python.vim
-syn keyword conarySFunction	mainDir addAction addSource addArchive addPatch 
+syn keyword conarySFunction	mainDir addAction addSource addArchive addPatch
+
+syn keyword conaryGFunction     add addAll addNewGroup addReference createGroup
+syn keyword conaryGFunction     addNewGroup startGroup remove removeComponents
+syn keyword conaryGFunction     replace setByDefault setDefaultGroup 
+syn keyword conaryGFunction     setLabelPath
 
 syn keyword conaryBFunction 	Run Automake Configure ManualConfigure 
 syn keyword conaryBFunction 	Make MakeParallelSubdir MakeInstall
@@ -15,10 +20,11 @@ syn keyword conaryBFunction 	Install Copy Move Symlink Link Remove Doc
 syn keyword conaryBFunction 	Create MakeDirs disableParallelMake
 syn keyword conaryBFunction 	ConsoleHelper Replace SGMLCatalogEntry
 syn keyword conaryBFunction 	XInetdService XMLCatalogEntry TestSuite
+syn keyword conaryBFunction     PythonSetup
 
 syn keyword conaryPFunction 	NonBinariesInBindirs FilesInMandir 
 syn keyword conaryPFunction 	ImproperlyShared CheckSonames CheckDestDir
-syn keyword conaryPFunction 	ComponentSpec PackageSpec EtcConfig
+syn keyword conaryPFunction 	ComponentSpec PackageSpec 
 syn keyword conaryPFunction 	Config InitScript GconfSchema SharedLibrary
 syn keyword conaryPFunction 	ParseManifest MakeDevices DanglingSymlinks
 syn keyword conaryPFunction 	AddModes WarnWriteable IgnoredSetuid
@@ -27,7 +33,7 @@ syn keyword conaryPFunction 	BadFilenames BadInterpreterPaths ByDefault
 syn keyword conaryPFunction 	ComponentProvides ComponentRequires Flavor
 syn keyword conaryPFunction 	EnforceConfigLogBuildRequirements Group
 syn keyword conaryPFunction 	EnforceSonameBuildRequirements InitialContents
-syn keyword conaryPFunction 	FilesForDirectories InstallBucket LinkCount
+syn keyword conaryPFunction 	FilesForDirectories LinkCount
 syn keyword conaryPFunction 	MakdeDevices NonMultilibComponent ObsoletePaths
 syn keyword conaryPFunction 	NonMultilibDirectories NonUTF8Filenames TagSpec
 syn keyword conaryPFunction 	Provides RequireChkconfig Requires TagHandler
@@ -44,7 +50,7 @@ syn match   conaryBadMacro	"%(\w*)[^sd]" contained " no final marker
 syn keyword conaryArches	contained x86 x86_64
 syn keyword conarySubArches	contained sse2 3dnow 3dnowext cmov i486 i586
 syn keyword conarySubArches	contained i686 mmx mmxext nx sse sse2
-syn keyword conaryBad		RPM_BUILD_ROOT
+syn keyword conaryBad		RPM_BUILD_ROOT EtcConfig InstallBucket
 syn cluster conaryArchFlags 	contains=conaryArches,conarySubArches
 syn match   conaryArch		"Arch\.[a-z0-9.]*" contains=conaryArches,conarySubArches
 syn match   conaryArch		"Arch\.[a-z0-9.]*" contains=conaryArches,conarySubArches
@@ -94,6 +100,7 @@ if version >= 508 || !exists("did_python_syn_inits")
   "HiLink pythonTodo		Todo
   HiLink conaryMacro		Special
   HiLink conaryBFunction	Function
+  HiLink conaryGFunction        Function
   HiLink conarySFunction	Operator
   HiLink conaryPFunction	Typedef
   HiLink conaryFlags		PreCondit
