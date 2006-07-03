@@ -1,0 +1,648 @@
+diff -u gnome-cups-manager-0.31/libgnomecups/gnome-cups-ui-connection.c gnome-cups-manager-0.31.new/libgnomecups/gnome-cups-ui-connection.c
+--- gnome-cups-manager-0.31/libgnomecups/gnome-cups-ui-connection.c	2004-09-13 22:04:58.000000000 +0200
++++ gnome-cups-manager-0.31.new/libgnomecups/gnome-cups-ui-connection.c	2006-04-19 19:04:23.000000000 +0200
+@@ -79,6 +79,18 @@
+ 	GCUPS_CONNECTION_UNKNOWN
+ } GCupsConnectionType;
+ 
++/* The baudrates. Keep in sync with the serial_baudrate menu */
++static const char *serial_baudrate_values[]=
++{"1200","2400","4800","9600","19200","38400","57600","76800","115200","153600","230400",NULL};
++
++/* The flowcontrol methods. Keep in sync with the serial_flowcontrol menu */
++static const char *serial_flowcontrol_values[]=
++{"dtrdsr","rtscts","xonxoff","none",NULL};
++
++/* The parity methods. Keep in sync with the serial_parity menu */
++static const char *serial_parity_values[]=
++{"even","odd","none","mark","space",NULL};
++
+ enum {
+ 	LOCAL_DETECTED_LABEL,
+ 	LOCAL_DETECTED_PRINTER,
+@@ -167,6 +179,123 @@
+ /* Local Printers */
+ 
+ static void
++do_set_combo (GladeXML *xml, const char *combo, const char **list, const char *val )
++{
++	int i;
++	GtkComboBox *c = GTK_COMBO_BOX (glade_xml_get_widget (xml, combo));
++	for (i=0; list[i]!=NULL ;++i) {
++		if (g_ascii_strcasecmp ( list[i], val)==0) {
++			gtk_combo_box_set_active (c,i);
++	     		return;
++		}
++	}
++	gtk_combo_box_set_active (c,0);   
++}
++
++static const char *
++do_get_combo (GladeXML *xml, const char *combo, const char **list )
++{
++	GtkComboBox *c = GTK_COMBO_BOX (glade_xml_get_widget (xml, combo));
++	int val = gtk_combo_box_get_active (c);
++	return list[val];
++}
++
++static void
++set_serial_parameters (GladeXML *xml, const char *baud, const char *flow,
++		       const char *parity, const char *bits, const char *stop)
++{
++	GtkComboBox *c;
++
++	if (baud == NULL) baud="1200";
++   	if (flow == NULL) flow="none";
++   	if (parity == NULL) parity="none";
++   	if (bits == NULL) bits="8";
++   	if (stop == NULL) stop="1";
++
++	if (g_ascii_strcasecmp( flow, "hard") == 0)
++		flow = "rtscts";
++	if (g_ascii_strcasecmp( flow, "soft") == 0)
++		flow = "xonxoff";
++	do_set_combo (xml, "serial_baudrate", serial_baudrate_values, baud);
++	do_set_combo (xml, "serial_flowcontrol", serial_flowcontrol_values, flow);
++	do_set_combo (xml, "serial_parity", serial_parity_values, parity);
++      	c = GTK_COMBO_BOX (glade_xml_get_widget (xml, "serial_databits"));
++	gtk_combo_box_set_active (c, (bits[0]=='8'));
++      	c = GTK_COMBO_BOX (glade_xml_get_widget (xml, "serial_stopbits"));
++	gtk_combo_box_set_active (c, (stop[0]=='2'));
++}
++
++static void
++get_serial_parameters (GladeXML *xml, const char **baud, const char **flow,
++		       const char **parity, const char **bits, 
++		       const char **stop)
++{
++	GtkComboBox *c;
++
++	*baud = do_get_combo (xml, "serial_baudrate", serial_baudrate_values);
++   	*flow = do_get_combo (xml, "serial_flowcontrol", serial_flowcontrol_values);
++   	*parity = do_get_combo (xml, "serial_parity", serial_parity_values);
++      	c = GTK_COMBO_BOX (glade_xml_get_widget (xml, "serial_databits"));
++   	*bits = gtk_combo_box_get_active (c) ? "8" : "7";
++	c = GTK_COMBO_BOX (glade_xml_get_widget (xml, "serial_stopbits"));
++   	*stop = gtk_combo_box_get_active (c) ? "2" : "1";
++}
++
++static gboolean 
++is_serial_uri (const char *uri)
++{
++	return g_ascii_strncasecmp (uri, "serial:", 7)==0;
++}
++
++static gboolean 
++serial_port_selected (GladeXML *xml)
++{
++	LocalPrinter const *lp = NULL;
++   
++  	if (combo_selected_get (xml, "local_ports", 1, &lp, -1)==FALSE) 
++		return FALSE;
++   	if (lp==NULL) 
++		return FALSE;
++        return is_serial_uri (lp->uri);
++}
++
++static void
++setup_serial_uri (GladeXML *xml, const char *uri)
++{
++	char *tmp = g_strdup (uri);
++   	char *baud = NULL;
++  	char *flow = NULL;
++   	char *parity = NULL;
++   	char *bits = NULL;
++   	char *stop = NULL;
++	char *start, *val, *end;
++   
++   	start = strchr( tmp, '?' );
++   	for( ; (start != NULL) ; ) {
++		++start;
++	   	val = strchr( start, '=' );
++	   	if (val==NULL) break;
++	   	++val;
++	   	end = strchr( val, '+' );
++	   	if (end) *end='\0';
++	   	if (g_ascii_strncasecmp (start, "baud=", 5)==0)
++	     		baud = val;
++	   	else if (g_ascii_strncasecmp (start, "bits=", 5)==0)
++	     		bits = val;
++	   	else if (g_ascii_strncasecmp (start, "stop=", 5)==0)
++	     		stop = val;
++	   	else if (g_ascii_strncasecmp (start, "flow=", 5)==0)
++			flow = val;
++	   	else if (g_ascii_strncasecmp (start, "parity=", 7)==0)
++	     		parity = val;
++	   	start = end;
++	}
++      	set_serial_parameters (xml, baud, flow, parity, bits, stop);
++
++   	g_free (tmp);
++}
++
++static void
+ local_port_init (GladeXML *xml, GSList *devices)
+ {
+ 	char *label;
+@@ -199,6 +328,9 @@
+         gtk_cell_layout_pack_start (GTK_CELL_LAYOUT (combo), renderer, TRUE);
+         gtk_cell_layout_set_attributes (GTK_CELL_LAYOUT (combo), renderer,
+ 		"text", 0, NULL);
++
++   	/* set default values */
++   	set_serial_parameters (xml, NULL, NULL, NULL, NULL, NULL );
+ }
+ 
+ static void
+@@ -206,16 +338,42 @@
+ {
+ 	GtkWidget *view = glade_xml_get_widget (xml, "local_detected_view");
+ 	GtkWidget *local_ports = glade_xml_get_widget (xml, "local_ports");
++      	GtkWidget *port_notebook = glade_xml_get_widget( xml, "port_notebook");
+ 
+ 	if (toggle_button_is_active (xml, "local_use_detected_radio")) {
+ 		gtk_widget_set_sensitive (view, TRUE);
+ 		gtk_widget_set_sensitive (local_ports, FALSE);
++		gtk_widget_set_sensitive (port_notebook, FALSE);
+ 	} else {
+ 		gtk_widget_set_sensitive (view, FALSE);
+ 		gtk_widget_set_sensitive (local_ports, TRUE);
++		gtk_widget_set_sensitive (port_notebook, TRUE);
+ 	}
+ }
+ 
++static void
++local_ports_changed ( GladeXML *xml )
++{
++   	GtkWidget *port_notebook = glade_xml_get_widget( xml, "port_notebook");
++ 	gtk_notebook_set_current_page (GTK_NOTEBOOK(port_notebook), 
++				       serial_port_selected( xml ) ? 1 : 0);
++}
++
++/* special strdup that strips the baudrate from serial:/ uri's... */
++
++static char *
++fix_serial_uri_strdup ( const char *uri)
++{
++   	char *res=g_strdup( uri );
++        char *tmp;
++	if (is_serial_uri(res)) {
++	   	tmp = strchr( res, '?' );
++	   	if (tmp)
++	     		*tmp = '\0';
++	}
++   	return res;
++}
++
+ static GSList *
+ get_local_devices (void)
+ {
+@@ -249,7 +407,7 @@
+ 				desc->label = g_strdup (attr->values[0].string.text);
+ 			} else if (!strcmp (attr->name, "device-uri")) {
+ 				g_free (desc->uri);
+-				desc->uri = g_strdup (attr->values[0].string.text);
++				desc->uri = fix_serial_uri_strdup (attr->values[0].string.text);
+ 			} else if (!strcmp (attr->name, "device-make-and-model") && strcmp (attr->values[0].string.text, "Unknown")) {
+ 				g_free (desc->vendor_and_model);
+ 				desc->vendor_and_model = g_strdup (attr->values[0].string.text);
+@@ -422,13 +580,23 @@
+ }
+ 
+ static char *
++get_uri_serial (GladeXML *xml, LocalPrinter const * lp )
++{
++   	const char *baud, *flow, *parity, *bits, *stop;
++   	get_serial_parameters (xml, &baud, &flow, &parity, &bits, &stop);
++   	return g_strdup_printf ( "%s?baud=%s+flow=%s+parity=%s+bits=%s+stop=%s", lp->uri,
++				 baud, flow, parity, bits, stop);
++}
++
++static char *
+ get_uri_local (GladeXML *xml)
+ {
+ 	LocalPrinter const *lp = get_current_local (xml);
+-	return (lp != NULL) ? g_strdup (lp->uri) : NULL;
++   	if (lp == NULL)
++     		return NULL;
++	return is_serial_uri (lp->uri) ? get_uri_serial (xml,lp) : g_strdup (lp->uri);
+ }
+ 
+-
+ static GHashTable *smb_servers;
+ static GSList *new_servers = NULL;
+ static GSList *new_printers = NULL;
+@@ -873,6 +1041,16 @@
+ 
+ 	watch_for_change (cs, "local_use_detected_radio");
+ 	watch_for_change (cs, "local_specify_port_radio");
++	g_signal_connect_swapped (glade_xml_get_widget (cs->xml, "local_ports"),
++		"changed",
++		G_CALLBACK (local_ports_changed), cs->xml);
++   	watch_for_change (cs, "local_ports" );
++   	watch_for_change (cs, "serial_baudrate" );
++   	watch_for_change (cs, "serial_flowcontrol" );
++   	watch_for_change (cs, "serial_databits" );
++   	watch_for_change (cs, "serial_stopbits" );
++   	watch_for_change (cs, "serial_parity" );
++
+ }
+ 
+ /**************************************************************************/
+@@ -1142,6 +1320,7 @@
+ {
+ 	char method[HTTP_MAX_URI], username[HTTP_MAX_URI], host[HTTP_MAX_URI], res_buf[HTTP_MAX_URI];
+ 	char *resource;
++   	const char *cmp_uri;
+ 	int  port = 0;
+ 	GSList *ptr;
+ 	GtkWidget *w;
+@@ -1157,12 +1336,19 @@
+ 
+ 	/* Check for local devices first */
+ 	ptr = g_object_get_data (G_OBJECT (cs->xml), "local-devices");
++   
++   	/* serial uri needs special treatment again */
++     	cmp_uri = is_serial_uri (uri) ? fix_serial_uri_strdup( uri ) : uri;
++   
+ 	for (; ptr != NULL ; ptr = ptr->next) {
+ 		desc = ptr->data;
+-		if (desc->uri != NULL && 0 == strcmp (uri, desc->uri))
++		if (desc->uri != NULL && 0 == strcmp (cmp_uri, desc->uri))
+ 			break;
+ 	}
+ 
++	if (cmp_uri != uri)
++     		g_free ((char *)cmp_uri);
++
+ 	if (ptr == NULL) {
+ 		httpSeparate (uri, method, username, host, &port, res_buf);
+ #if 1
+@@ -1195,6 +1381,9 @@
+ 					1, (gpointer)desc, &iter))
+ 				gtk_combo_box_set_active_iter (GTK_COMBO_BOX (w), &iter);
+ 			w = glade_xml_get_widget (cs->xml, "local_specify_port_radio");
++		   	if (is_serial_uri( uri )) {
++				setup_serial_uri (cs->xml, uri);
++			}
+ 		}
+ 		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (w), TRUE);
+ 	} else if (0 == g_ascii_strcasecmp (method, "smb")) {
+diff -u gnome-cups-manager-0.31/libgnomecups/gnome-cups-ui-connection.glade gnome-cups-manager-0.31.new/libgnomecups/gnome-cups-ui-connection.glade
+--- gnome-cups-manager-0.31/libgnomecups/gnome-cups-ui-connection.glade	2005-03-03 17:26:54.000000000 +0100
++++ gnome-cups-manager-0.31.new/libgnomecups/gnome-cups-ui-connection.glade	2006-04-21 17:27:44.000000000 +0200
+@@ -840,6 +840,353 @@
+ 		  <property name="fill">False</property>
+ 		</packing>
+ 	      </child>
++
++	      <child>
++		<widget class="GtkNotebook" id="port_notebook">
++		  <property name="visible">True</property>
++		  <property name="show_tabs">False</property>
++		  <property name="show_border">False</property>
++		  <property name="tab_pos">GTK_POS_TOP</property>
++		  <property name="scrollable">False</property>
++		  <property name="enable_popup">False</property>
++
++		  <child>
++		    <widget class="GtkLabel" id="empty_page">
++		      <property name="visible">True</property>
++		      <property name="label" translatable="yes"></property>
++		      <property name="use_underline">False</property>
++		      <property name="use_markup">False</property>
++		      <property name="justify">GTK_JUSTIFY_LEFT</property>
++		      <property name="wrap">False</property>
++		      <property name="selectable">False</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xpad">0</property>
++		      <property name="ypad">0</property>
++		    </widget>
++		    <packing>
++		      <property name="tab_expand">False</property>
++		      <property name="tab_fill">True</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkLabel" id="label65">
++		      <property name="visible">True</property>
++		      <property name="label" translatable="yes">other</property>
++		      <property name="use_underline">False</property>
++		      <property name="use_markup">False</property>
++		      <property name="justify">GTK_JUSTIFY_LEFT</property>
++		      <property name="wrap">False</property>
++		      <property name="selectable">False</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xpad">0</property>
++		      <property name="ypad">0</property>
++		    </widget>
++		    <packing>
++		      <property name="type">tab</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkTable" id="serial_table">
++		      <property name="visible">True</property>
++		      <property name="n_rows">2</property>
++		      <property name="n_columns">6</property>
++		      <property name="homogeneous">False</property>
++		      <property name="row_spacing">4</property>
++		      <property name="column_spacing">4</property>
++
++		      <child>
++			<widget class="GtkLabel" id="label59">
++			  <property name="visible">True</property>
++			  <property name="label" translatable="yes">_Baud Rate:</property>
++			  <property name="use_underline">True</property>
++			  <property name="use_markup">False</property>
++			  <property name="justify">GTK_JUSTIFY_LEFT</property>
++			  <property name="wrap">False</property>
++			  <property name="selectable">False</property>
++			  <property name="xalign">0</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xpad">0</property>
++			  <property name="ypad">0</property>
++			  <property name="mnemonic_widget">serial_baudrate</property>
++			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			  <property name="width_chars">-1</property>
++			  <property name="single_line_mode">False</property>
++			  <property name="angle">0</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">0</property>
++			  <property name="right_attach">1</property>
++			  <property name="top_attach">0</property>
++			  <property name="bottom_attach">1</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkComboBox" id="serial_baudrate">
++			  <property name="visible">True</property>
++			  <property name="can_focus">True</property>
++			  <property name="items">1200
++2400
++4800
++9600
++19200
++38400
++57600
++76800
++115200
++153600
++230400</property>
++			  <property name="add_tearoffs">False</property>
++			  <property name="focus_on_click">True</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">1</property>
++			  <property name="right_attach">2</property>
++			  <property name="top_attach">0</property>
++			  <property name="bottom_attach">1</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkLabel" id="label60">
++			  <property name="visible">True</property>
++			  <property name="label" translatable="yes">_Parity:</property>
++			  <property name="use_underline">True</property>
++			  <property name="use_markup">False</property>
++			  <property name="justify">GTK_JUSTIFY_LEFT</property>
++			  <property name="wrap">False</property>
++			  <property name="selectable">False</property>
++			  <property name="xalign">0</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xpad">0</property>
++			  <property name="ypad">0</property>
++			  <property name="mnemonic_widget">serial_parity</property>
++			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			  <property name="width_chars">-1</property>
++			  <property name="single_line_mode">False</property>
++			  <property name="angle">0</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">0</property>
++			  <property name="right_attach">1</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkComboBox" id="serial_parity">
++			  <property name="visible">True</property>
++			  <property name="can_focus">True</property>
++			  <property name="items" translatable="yes">Even
++Odd
++None
++Mark
++Space</property>
++			  <property name="add_tearoffs">False</property>
++			  <property name="focus_on_click">True</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">1</property>
++			  <property name="right_attach">2</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkLabel" id="label64">
++			  <property name="visible">True</property>
++			  <property name="label" translatable="yes">_Stop Bits:</property>
++			  <property name="use_underline">True</property>
++			  <property name="use_markup">False</property>
++			  <property name="justify">GTK_JUSTIFY_LEFT</property>
++			  <property name="wrap">False</property>
++			  <property name="selectable">False</property>
++			  <property name="xalign">0</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xpad">0</property>
++			  <property name="ypad">0</property>
++			  <property name="mnemonic_widget">serial_stopbits</property>
++			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			  <property name="width_chars">-1</property>
++			  <property name="single_line_mode">False</property>
++			  <property name="angle">0</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">4</property>
++			  <property name="right_attach">5</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkLabel" id="label62">
++			  <property name="visible">True</property>
++			  <property name="label" translatable="yes">_Data Bits:</property>
++			  <property name="use_underline">True</property>
++			  <property name="use_markup">False</property>
++			  <property name="justify">GTK_JUSTIFY_LEFT</property>
++			  <property name="wrap">False</property>
++			  <property name="selectable">False</property>
++			  <property name="xalign">0</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xpad">0</property>
++			  <property name="ypad">0</property>
++			  <property name="mnemonic_widget">serial_databits</property>
++			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			  <property name="width_chars">-1</property>
++			  <property name="single_line_mode">False</property>
++			  <property name="angle">0</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">2</property>
++			  <property name="right_attach">3</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkLabel" id="label63">
++			  <property name="visible">True</property>
++			  <property name="label" translatable="yes">_Flow Control:</property>
++			  <property name="use_underline">True</property>
++			  <property name="use_markup">False</property>
++			  <property name="justify">GTK_JUSTIFY_LEFT</property>
++			  <property name="wrap">False</property>
++			  <property name="selectable">False</property>
++			  <property name="xalign">0</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xpad">0</property>
++			  <property name="ypad">0</property>
++			  <property name="mnemonic_widget">serial_flowcontrol</property>
++			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			  <property name="width_chars">-1</property>
++			  <property name="single_line_mode">False</property>
++			  <property name="angle">0</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">2</property>
++			  <property name="right_attach">3</property>
++			  <property name="top_attach">0</property>
++			  <property name="bottom_attach">1</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkComboBox" id="serial_databits">
++			  <property name="visible">True</property>
++			  <property name="can_focus">True</property>
++			  <property name="items" translatable="yes">7
++8</property>
++			  <property name="add_tearoffs">False</property>
++			  <property name="focus_on_click">True</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">3</property>
++			  <property name="right_attach">4</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkComboBox" id="serial_flowcontrol">
++			  <property name="visible">True</property>
++			  <property name="can_focus">True</property>
++			  <property name="items" translatable="yes">DTR/DSR (Hardware)
++RTS/CTS (Hardware)
++XON/XOFF (Software)
++None</property>
++			  <property name="add_tearoffs">False</property>
++			  <property name="focus_on_click">True</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">3</property>
++			  <property name="right_attach">6</property>
++			  <property name="top_attach">0</property>
++			  <property name="bottom_attach">1</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++
++		      <child>
++			<widget class="GtkComboBox" id="serial_stopbits">
++			  <property name="visible">True</property>
++			  <property name="can_focus">True</property>
++			  <property name="items" translatable="yes">1
++2</property>
++			  <property name="add_tearoffs">False</property>
++			  <property name="focus_on_click">True</property>
++			</widget>
++			<packing>
++			  <property name="left_attach">5</property>
++			  <property name="right_attach">6</property>
++			  <property name="top_attach">1</property>
++			  <property name="bottom_attach">2</property>
++			  <property name="x_options">fill</property>
++			  <property name="y_options"></property>
++			</packing>
++		      </child>
++		    </widget>
++		    <packing>
++		      <property name="tab_expand">False</property>
++		      <property name="tab_fill">False</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkLabel" id="label58">
++		      <property name="visible">True</property>
++		      <property name="label" translatable="yes">serial</property>
++		      <property name="use_underline">False</property>
++		      <property name="use_markup">False</property>
++		      <property name="justify">GTK_JUSTIFY_LEFT</property>
++		      <property name="wrap">False</property>
++		      <property name="selectable">False</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xpad">0</property>
++		      <property name="ypad">0</property>
++		      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++		      <property name="width_chars">-1</property>
++		      <property name="single_line_mode">False</property>
++		      <property name="angle">0</property>
++		    </widget>
++		    <packing>
++		      <property name="type">tab</property>
++		    </packing>
++		  </child>
++		</widget>
++		<packing>
++		  <property name="padding">0</property>
++		  <property name="expand">False</property>
++		  <property name="fill">False</property>
++		</packing>
++	      </child>
+ 	    </widget>
+ 	    <packing>
+ 	      <property name="tab_expand">False</property>
+
