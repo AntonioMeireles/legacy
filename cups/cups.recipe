@@ -1,73 +1,49 @@
 #
-# Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2004-2006 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Cups(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Cups(RPMPackageRecipe, CPackageRecipe):
+    name = 'cups'
+    version = '1.2.1'
 
     buildRequires = [ 'pam:devel', 'xorg-x11:devel', 'openssl:devel',
                       'pkgconfig:devel', 'dbus:devel', 'libjpeg:devel',
                       'libpng:devel', 'libtiff:devel', 'zlib:devel',
-                      'groff:runtime', 'perl:runtime', 'libstdc++:devellib' ]
+                      'groff:runtime', 'perl:runtime', 'php:runtime',
+                      'libstdc++:devellib',  'acl:devel', 'libstdc++:devel',
+                      'openldap:devel', 'desktop-file-utils:runtime',
+                      'gtk:runtime', 'php:devel' ]
 
-    name = 'cups'
-    version = '1.1.23'
+    rpmRelease = '18'
+    rpmPatches = [ 'cups-1.1.15-initscript.patch', 'cups-no-gzip-man.patch',
+        'cups-1.1.16-system-auth.patch', 'cups-ext.patch',
+        'cups-locale.patch', 'cups-language.patch',
+        'cups-maxlogsize.patch', 'cups-pid.patch', ]
+    tarballName = '%(name)s-%(version)s-source.tar.bz2'
 
     def setup(r):
-        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/cups-1.1.23-30.2.src.rpm'
-
-        r.addArchive('%(name)s-%(version)s-source.tar.bz2', rpm=srpm)
-        r.addSource('cups.init' , rpm=srpm)
-        r.addSource('cupsprinter.png' , rpm=srpm)
-        r.addSource('cups-lpd' , rpm=srpm)
-        r.addSource('pstoraster' , rpm=srpm, dest='pstoraster.new')
-        r.addSource('pstoraster.convs' , rpm=srpm)
-        r.addSource('postscript.ppd.gz' , rpm=srpm)
-        r.addSource('cups.logrotate' , rpm=srpm)
-        r.addSource('ncp.backend' , rpm=srpm)
-        r.addSource('cups.cron' , rpm=srpm)
+        r.unpack()
+        r.addSource('cups.init' , rpm=r.srpm)
+        r.addSource('cupsprinter.png' , rpm=r.srpm)
+        r.addSource('cups-lpd' , rpm=r.srpm)
+        r.addSource('pstoraster' , rpm=r.srpm, dest='pstoraster.new')
+        r.addSource('pstoraster.convs' , rpm=r.srpm)
+        r.addSource('postscript.ppd.gz' , rpm=r.srpm)
+        r.addSource('cups.logrotate' , rpm=r.srpm)
+        r.addSource('ncp.backend' , rpm=r.srpm)
+        r.addSource('cups.cron' , rpm=r.srpm)
 
         # Use local cups.conf to work with upstream dbus namespace
         r.addSource('cups.conf')
 
-        for patch in ('cups-1.1.15-initscript.patch',
-                      'cups-1.1.14-doclink.patch',
-                      'cups-1.1.16-system-auth.patch',
-                      'cups-1.1.17-backend.patch',
-                      'cups-ext.patch',
-                      'cups-1.1.17-pdftops.patch',
-                      'cups-logfileperm.patch',
-                      'cups-1.1.17-rcp.patch',
-                      'cups-1.1.17-ppdsdat.patch',
-                      'cups-1.1.17-sanity.patch',
-                      'cups-1.1.19-lpstat.patch',
-                      'cups-locale.patch',
-                      'cups-CAN-2005-0064.patch',
-                      'cups-str1068.patch',
-                      'cups-sigchld.patch',
-                      'cups-1.1.19-no_rpath.patch',
-                      'cups-language.patch',
-                      'cups-gcc34.patch',
-                      'cups-gcc4.patch',
-                      'cups-maxlogsize.patch',
-                      'cups-enabledisable.patch',
-                      'cups-no-propagate-ipp-port.patch',
-                      'cups-pid.patch',
-                      'cups-CAN-2004-0888.patch',
-                      'cups-CAN-2005-2097.patch'):
-            r.addPatch(patch, rpm=srpm)
-
-        # This patch is required for x86_64
-        r.addPatch('cups-1.1.20-pic.patch')
-        # Patch from upstream dbus namespace
-        r.addPatch('cups-dbus.patch')
-
-        r.Replace((r'^#(Printcap\s+/etc/printcap)', r'\1',),
-                  (r'^#(MaxLogSize\s+0)', r'\1'),
-                  'conf/cupsd.conf.in')
+        #r.Replace((r'^#(Printcap\s+/etc/printcap)', r'\1',),
+        #          (r'^#(MaxLogSize\s+0)', r'\1'),
+        #          'conf/cupsd.conf.in')
         r.Copy('cups-lpd', 'cups-lpd.real')
-        r.Replace(r'\@LIBDIR\@', '%(libdir)s', 'cups-lpd.real')
+        #r.Replace(r'\@LIBDIR\@', '%(libdir)s', 'cups-lpd.real')
         r.Replace('^.SILENT:', '', 'Makedefs.in')
 
         if Use.ssl:
@@ -99,7 +75,7 @@ class Cups(CPackageRecipe):
         r.Install('cups-lpd.real', '%(sysconfdir)s/xinetd.d/cups-lpd',
                   mode=0755)
         r.Install('cups.logrotate', '%(sysconfdir)s/logrotate.d/cups',
-                  mode=0755)
+                  mode=0644)
         r.Install('ncp.backend', '%(libdir)s/cups/backend/ncp')
         r.Symlink('%(bindir)s/smbspool', '%(libdir)s/cups/backend/smb')
         r.Symlink('%(thisdocdir)s', '%(datadir)s/%(name)s/doc')
@@ -135,10 +111,6 @@ If your browser does not support redirection, please use
         # D-BUS configuration.
         r.Install('cups.conf', '%(sysconfdir)s/dbus-1/system.d/')
 
-        # Symlinks to avoid conflicting with bash builtins
-        r.Symlink('enable', '%(bindir)s/cups-enable')
-        r.Symlink('disable', '%(bindir)s/cups-disable')
-
         r.DanglingSymlinks(exceptions=['%(mandir)s/man1/.*',
                                        '%(libdir)s/cups/backend/smb'])
         r.MakeDirs('%(localstatedir)s/spool/cups')
@@ -149,7 +121,7 @@ If your browser does not support redirection, please use
         r.SetModes('%(bindir)s/lppasswd', 04755)
         r.SetModes('%(localstatedir)s/spool/cups/tmp/', 01700)
         r.SetModes('%(localstatedir)s/spool/cups/', 0710)
-        r.SetModes('%(sysconfdir)s/cups/{classes,cupsd,printers}.conf', 0640)
+        r.SetModes('%(sysconfdir)s/cups/cupsd.conf', 0640)
         r.Ownership('root', 'sys',
             '%(localstatedir)s/spool/cups/tmp/',
             '%(localstatedir)s/spool/cups/',
