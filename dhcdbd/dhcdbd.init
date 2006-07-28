@@ -1,0 +1,105 @@
+#!/bin/bash
+#
+#  dhcdbd  :  DHcp Client D-Bus Daemon
+#
+#  chkconfig: 345 98 02
+#  description: dhcdbd provides D-BUS control of the ISC DHCP client, dhclient,
+#               and D-BUS access to the DHCP options obtained by dhclient 
+#               for each IPv4 interface .
+#  processname: dhcdbd
+#
+#  dhcdbd shuts down automatically when the messagebus is shut down .
+#
+. /etc/rc.d/init.d/functions
+[ -e /etc/sysconfig/network ] && . /etc/sysconfig/network
+[ "${NETWORKING}" = "no" ] && exit 0
+
+start() {
+	echo -n "Starting dhcdbd:"
+	daemon /sbin/dhcdbd --system 
+	RETVAL=$?
+	echo
+	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/dhcdbd
+	return $RETVAL;
+}
+
+stop () {
+        echo -n "Stopping dhcdbd:"
+	if [ -e /var/lock/subsys/dhcdbd ] && [ -e /var/run/dbus/system_bus_socket ]; then
+	    /usr/bin/dbus-send --system \
+		               --dest=com.redhat.dhcp \
+		               --type=method_call \
+		               --print-reply \
+		               --reply-timeout=20000 \
+		               /com/redhat/dhcp \
+		               com.redhat.dhcp.quit >/dev/null 2>&1
+	    RETVAL=$?
+	else 
+	    killproc dhcdbd -TERM
+	    RETVAL=$?
+	fi;
+	rm -f /var/lock/subsys/dhcdbd
+	if [ $RETVAL -eq 0 ]; then
+	    success;
+	    echo;
+	else
+	    failure;
+	    echo;
+        fi;
+}
+
+status() {
+        pid=`cat /var/run/dhcdbd.pid`;
+	RETVAL=$?
+	if [ "$RETVAL" -eq 0 ] && [ -n "$pid" ]; then
+	    sender=`/usr/bin/dbus-send --system \
+		                       --dest=com.redhat.dhcp \
+		                       --type=method_call \
+		                       --print-reply --reply-timeout=20000 \
+		                       /com/redhat/dhcp \
+		                       com.redhat.dhcp.ping |
+	            grep 'sender=' | sed 's/^.*sender=//;s/\ .*$//'`;
+	    RETVAL=$?
+	    if [ "$RETVAL" -eq 0 ]; then
+		echo -n 'dhcdbd ( '$pid' ) listening on '$sender
+		success;
+		echo;
+	    else
+	        failure;
+		echo;
+	    fi;
+	fi;
+	return $RETVAL;
+}
+
+case "$1" in
+  start) 
+	start ;
+	RETVAL=$?;
+	;;
+  stop) stop  ;
+	RETVAL=$?;
+	;;
+  condrestart)
+	if [ -e /var/lock/subsys/dhcdbd ] && [ -e /var/run/dhcdbd.pid ] && [ -e /proc/`cat /var/run/dhcdbd.pid` ]; then
+	    stop ;
+	    start;
+	    RETVAL=$?;
+	fi;
+	;;
+  restart|reload)
+	stop ;
+	start;
+	RETVAL=$?;
+        ;;
+  status)
+        status;
+	RETVAL=$?;
+	;;
+  *)
+        echo 'dhcdbd: Usage: < start | stop | restart | reload | status >'
+	;;
+esac;
+
+exit $RETVAL;
+
