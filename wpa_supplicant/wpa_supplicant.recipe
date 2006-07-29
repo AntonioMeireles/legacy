@@ -1,0 +1,48 @@
+class WpaSupplicant(CPackageRecipe):
+
+   name = 'wpa_supplicant'
+   version = '0.4.8'
+
+   buildRequires = ['openssl:devel']
+
+   def setup(r):
+      #r.addArchive('http://hostap.epitest.fi/releases/%(name)s-%(version)s.tar.gz')
+      srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/5/source/SRPMS/wpa_supplicant-0.4.8-5.src.rpm'
+      r.addArchive('wpa_supplicant-0.4.8.tar.gz', rpm=srpm)
+      # PLEASE READ THIS!
+      # These headers are from our version (2006-02-12) version
+      # of madwifi-ng.
+      # Needed because wpa_supplicant needs madwifi headers to
+      # support this card
+      r.addSource('madwifi-headers.tar.bz2', rpm=srpm)
+      r.addAction('tar xjf madwifi-headers.tar.bz2')
+
+
+      r.addPatch('wpa_supplicant-assoc-timeout.patch', rpm=srpm)
+      r.addPatch('wpa_supplicant-auth-fallback-v4.patch', level=0, rpm=srpm)
+      r.addPatch('wpa_supplicant-ctrl-iface-ap-scan.patch', rpm=srpm)
+      r.addPatch('wpa_supplicant-ctrl-iface-hide-keys.patch', rpm=srpm)
+      r.addPatch('wpa_supplicant-driver-wext-debug.patch', rpm=srpm)
+
+      r.addSource('wpa_supplicant.init.d',rpm=srpm)
+
+      # Our .config file, needed for compilation
+      r.addSource('wpa_supplicant.config')
+      r.addAction('cp wpa_supplicant.config .config')
+      r.addSource('wpa_supplicant.sysconfig', rpm=srpm)
+      # Our .conf file
+      #r.addSource('wpa_supplicant_foresight.conf')
+      r.addSource('wpa_supplicant.conf', rpm=srpm)
+      r.Make()
+      # No make install, so we copy manually
+      for x in ['wpa_cli', 'wpa_passphrase', 'wpa_supplicant']:
+         r.Install(x, '%(sbindir)s/')
+
+      r.Install('wpa_supplicant.init.d','%(initdir)s/wpa_supplicant', mode=0755)
+      r.MakeDirs('%(localstatedir)s/run/wpa_supplicant')
+      r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/wpa_supplicant'])
+      r.Install('wpa_supplicant.sysconfig','%(sysconfdir)s/sysconfig/wpa_supplicant')
+      r.Install('wpa_supplicant.conf','%(sysconfdir)s/wpa_supplicant/')
+      r.Install('doc/docbook/*.8','%(mandir)s/man8/')
+      r.Install('doc/docbook/*.5','%(mandir)s/man5/')
+
