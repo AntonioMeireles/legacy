@@ -1,0 +1,123 @@
+#
+# Copyright (c) 2005-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('xorgpackage.recipe')
+class XorgServer(XorgPackageRecipe):
+    name = 'xorg-server'
+    version = '1.1.1'
+    component = 'xserver'
+
+    Flags.dmx  = True
+    Flags.dri = True
+    Flags.xnest = True
+
+    # XXX: ld dies trying to link xorgcfg without libXext, need to make sure
+    # configure checks for it
+    # perl:lib needed to satisfy "perl: File::Glob" for /usr/bin/getconfig.pl
+    buildRequires = [ 'flex:runtime', 'freetype:devel', 'libICE:devel',
+        'libSM:devel', 'libXaw:devel', 'libXext:devel', 'libXfont:devel',
+        'libXmu:devel', 'libXpm:devel', 'libXt:devel', 'libXxf86misc:devel',
+        'libXxf86vm:devel', 'libfontenc:devel', 'liblbxutil:devellib',
+        'libxkbfile:devel', 'libxkbui:devel', 'ncurses:devel', 'perl:lib',
+        'perl:runtime', 'xtrans:devel', 'zlib:devel' ]
+
+    protoBuildRequires = [ 'bigreqsproto:devel', 'compositeproto:devel',
+        'damageproto:devel', 'evieext:devel',  'fixesproto:devel',
+        'fontsproto:devel', 'inputproto:devel', 'randrproto:devel',
+        'recordproto:devel', 'renderproto:devel', 'resourceproto:devel',
+        'scrnsaverproto:devel', 'trapproto:devel', 'videoproto:devel',
+        'xcmiscproto:devel', 'xextproto:devel', 'xf86bigfontproto:devel',
+        'xf86dgaproto:devel', 'xf86miscproto:devel', 'xf86vidmodeproto:devel',
+        'xineramaproto:devel', 'xproto:devel' ]
+
+    buildRequires.extend(protoBuildRequires)
+
+    # XXX: can go away when the libxf86config parser patches go away
+    buildRequires.extend([ 'autoconf:runtime', 'automake:runtime',
+        'libtool:runtime', 'util-macros:devel' ])
+
+    # XXX: we don't support xprint
+    extraConfig = ' --disable-xprint'
+
+    if Flags.dmx:
+        buildRequires.extend([ 'libXi:devel', 'libXrender:devel',
+            'libXres:devel', 'libXtst:devellib', 'libdmx:devel' ])
+    else:
+        extraConfig += ' --disable-dmx'
+
+    if Flags.dri:
+        buildRequires.extend([ 'Mesa:devel', 'glproto:devel', 'libdrm:devel',
+            'xf86driproto:devel' ])
+
+    if not Flags.xnest:
+        extraConfig += ' --disable-xnest'
+
+    def setup(r):
+        r.macros.osname = "'Foresight Desktop Linux'"
+        r.macros.vendor = "'Foresight'"
+        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s --enable-install-libxf86config'
+
+        XorgPackageRecipe.setup(r)
+
+    def unpack(r):
+        # pulled from Fedora CVS (xorg-x11-xdm, rev. 1.1)
+        r.addSource('xserver.pamd',
+                    dest='%(sysconfdir)s/pam.d/xserver', mode=00644)
+
+        # need to have archive before we apply patches to it
+        XorgPackageRecipe.unpack(r)
+
+        # according to http://xorg.freedesktop.org/wiki/ModularDevelopersGuide
+        # we need the Mesa source to build GLX support
+        r.macros.mesaVersion = '6.5'
+        r.addArchive('http://easynews.dl.sourceforge.net/sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', use=Flags.dri)
+
+        if Flags.dri:
+            r.extraConfig += ( ' --enable-dri'
+                               ' --enable-glx-tls'
+                               ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
+                               ' --with-dri-driver-path=%(libdir)s/dri' )
+        else:
+            r.extraConfig += ' --disable-dri'
+
+        # pulled from Fedora CVS (xorg-x11-server, rev. 1.1)
+        r.addPatch('xorg-redhat-die-ugly-pattern-die-die-die.patch', level=0)
+
+        # pulled from xorg-xserver git; see fd.o BZ #4320
+        # should be in xorg-server-1.2
+        r.addPatch('fdo4320-xaaPict.c.patch')
+
+        # XXX: the next two patches require running r.Automake()
+        # The patches are for the libxf86config parser used by pyxf86config
+        # See RH BZ #173084 & #181292, respectively
+        # XXX: really need to get pushed upstream
+        r.addPatch('xserver-1.0.0-parser-add-missing-headers-to-sdk.patch', level=0)
+        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch')
+        r.addPatch('xorg-x11-server-1.0.1-Red-Hat-extramodes.patch')
+
+
+        r.Automake()
+
+    def install(r):
+        XorgPackageRecipe.install(r)
+
+        r.SetModes('%(bindir)s/Xorg', 04611)
+
+        # copied from xorg-x11 recipe; is this for consolehelper?
+        r.MakeDirs('%(sysconfdir)s/security/console.apps/')
+        r.Run('touch %(destdir)s%(sysconfdir)s/security/console.apps/xserver')
+
+
+        # make xorg.conf an InitialContents file so it's managed locally, but
+        # removed when xorg-server is
+        r.MakeDirs('%(sysconfdir)s/X11')
+        r.Run('touch %(destdir)s%(sysconfdir)s/X11/xorg.conf')
+        r.InitialContents('%(sysconfdir)s/X11/xorg.conf')
+
+        # Install the vesamodes and extramodes files to let our install/config tools
+        # be able to parse the same modelist as the X server uses (rhpxl).
+        r.Install('hw/xfree86/common/vesamodes','%(datadir)s/xorg/vesamodes')
+        r.Install('hw/xfree86/common/extramodes','%(datadir)s/xorg/extramodes')
