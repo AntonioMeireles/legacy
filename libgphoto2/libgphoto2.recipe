@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class LibGphoto2(CPackageRecipe):
+    name = 'libgphoto2'
+    version = '2.2.0'
+
+    buildRequires = [ 'gtk:devel', 'findutils:runtime', 'libexif:devel', 'libusb:devel',
+                      'lockdev:devel', 'libjpeg:devel', 'pkgconfig:devel', 'libtool:devel',
+                      'dbus:devel', 'hal:devel']
+
+    def setup(r):
+        r.addArchive('http://easynews.dl.sourceforge.net/sourceforge/gphoto/%(name)s-%(version)s.tar.gz')
+        r.addSource('usbcam.console', dest="%(sysconfdir)s/hotplug/usb/usbcam", mode=0755)
+
+        # fix up the source code to avoid bogus include paths
+        r.Replace("#include <gphoto2/", "#include <", "packaging/generic/print-camera-list.c")
+        # work around upstream bug; remove when this fails
+        r.Replace('-lgphoto2', '-lgphoto2 -lgphoto2_port', 'gphoto2-config.in')
+
+        r.Run('libtoolize -f')
+        r.Configure('--disable-rpath --with-doc-dir=%(thisdocdir)s')
+
+        r.Make()
+        r.MakeInstall()
+
+        r.Remove('%(libdir)s/gphoto2/%(version)s/*.a')
+        r.Provides(exceptions=['%(libdir)s/gphoto2/%(version)s/'])
+        # generate the usb usermap and hal defs
+        r.Run('LD_LIBRARY_PATH=%(destdir)s/%(libdir)s CAMLIBS=%(destdir)s/%(libdir)s/%(name)s/%(version)s '
+              '%(destdir)s/%(libdir)s/%(name)s/print-camera-list usb-usermap '
+              '> %(destdir)s/%(sysconfdir)s/hotplug/usb/usbcam.usermap '
+              ' < /dev/null')
+        r.MakeDirs("%(datadir)s/hal/fdi/information/10freedesktop")
+        r.Run('LD_LIBRARY_PATH=%(destdir)s/%(libdir)s CAMLIBS=%(destdir)s/%(libdir)s/%(name)s/%(version)s '
+              '%(destdir)s/%(libdir)s/%(name)s/print-camera-list hal-fdi '
+              '> %(destdir)s/%(datadir)s/hal/fdi/information/10freedesktop/10-camera-%(name)s.fdi '
+              ' < /dev/null')
+        r.ComponentSpec("runtime", "%(datadir)s/hal/")
