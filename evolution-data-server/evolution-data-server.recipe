@@ -4,43 +4,47 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadRecipe('gnomepackage.recipe')
+loadSuperClass('gnomepackage.recipe')
 class EvolutionDataServer(GnomePackageRecipe):
-
     name = 'evolution-data-server'
     version = '1.7.90.1'
 
-    buildRequires = [ 'glib:devel', 'gnome-vfs:devel',
-        'GConf:devel', 'seamonkey:devel','openldap:devel',
-        'intltool:runtime', 'libsoup:devel', 'ORBit2:devel',
-        'libgnome:devel', 'libgnomeui:devel', 'atk:devel',
-        'cairo:devel', 'e2fsprogs:devel', 'fontconfig:devel',
-        'freetype:devel', 'gnome-keyring:devel', 'libart_lgpl:devel',
-        'libbonobo:devel', 'libbonoboui:devel', 'libglade:devel',
-        'libgnomecanvas:devel', 'libpng:devel', 'libxml2:devel',
-        'pango:devel', 'popt:devel', 'GConf:runtime', 'bison:runtime',
-        'docbook-utils:runtime', 'flex:runtime', 'perl:runtime',
-        'glib:runtime', 'gcc-c++:runtime', 'gettext:runtime',
-        'sendmail:runtime' ]
+    buildRequires = [ 'gnome-vfs:devel', 'GConf:devel', 'openldap:devel',
+        'intltool:runtime', 'libsoup:devel', 'ORBit2:devel', 'libgnome:devel',
+        'libgnomeui:devel', 'nss:devel', 'nspr:devel',
+        'bison:runtime', 'bison:devellib', 'flex:runtime', 'flex:devel',
+        'gettext:runtime', 'sendmail:runtime', 'krb5:devel', 'libbonobo:devel',
+        'libxml2:devel', 'libglade:devel', 'glib:devel',
+        'popt:devel', 'atk:devel', 'gnome-keyring:devel', 'libart_lgpl:devel',
+        'libbonoboui:devel', 'libgnomecanvas:devel', 'pango:devel',
+        'cairo:devel', 'fontconfig:devel', 'freetype:devel', 'libpng:devel',
+        'GConf:runtime', 'docbook-utils:runtime', 'perl:runtime',
+        'e2fsprogs:devel', ]
 
-    # add krb5 support
+    extraConfig = ''
+
     if Use.krb:
-        extraConfig = ' --with-krb5=/usr/kerberos'
         buildRequires.append('krb5:devel')
     else:
-        extraConfig = ' --without-krb5'
+        extraConfig += ' --without-krb5'
 
-    # add ldap support
     if Use.ldap:
-        extraConfig += ' --with-openldap=yes'
+        extraConfig += ' --with-openldap'
         buildRequires.append('openldap:devel')
     else:
         extraConfig += ' --without-openldap'
 
-
     def unpack(r):
         GnomePackageRecipe.unpack(r)
-        r.Replace('/var/spool/mail','%(servicedir)s/spool/mail','configure*')
+        r.addPatch('servicedir.patch', macros=True,
+                   use=(r.macros.servicedir != '/var'))
+
+    def build(r):
+        r.Run('intltoolize -c -f')
+        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+                  'configure{.in}')
+        GnomePackageRecipe.build(r)
+
     def setup(r):
         r.disableParallelMake()
         GnomePackageRecipe.setup(r)
