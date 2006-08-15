@@ -1,0 +1,84 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Udev(CPackageRecipe):
+    name = 'udev'
+    version = '096'
+
+    buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
+                      'bison:runtime', 'pam:devel' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/udev-095-5.src.rpm'
+        r.macros.debug = 'false'
+
+        r.addArchive('ftp://ftp.kernel.org/pub/linux/utils/kernel/hotplug/%(name)s-%(version)s.tar.bz2')
+
+        # addons and extra features
+        r.addSource('start_udev', rpm=srpm)
+        r.addSource('firmware_helper.c', rpm=srpm)
+
+        # Make the static binaries...
+        r.Make('USE_KLIBC=false'
+               ' USE_SELINUX=false'
+               ' USE_STATIC=true'
+               ' STRIP="%(essentialbindir)s/true"'
+               ' udevdir="/dev"'
+               ' USE_LOG=false'
+               ' DEBUG=%(debug)s'
+               ' EXTRAS="extras/scsi_id extras/ata_id"'
+               ' all ')
+
+        r.Move('udev', 'udev.static')
+        r.Move('udevstart', 'udevstart.static')
+        r.Move('extras/scsi_id/scsi_id', 'extras/scsi_id/scsi_id.static')
+        r.Move('extras/ata_id/ata_id', 'extras/ata_id/ata_id.static')
+
+        r.Make('clean')
+
+        # Make the shared binaries...
+        r.Make('CC="gcc %(cflags)s"'
+               ' USE_KLIBC=false'
+               ' USE_SELINUX=false'
+               ' udevdir="/dev"'
+               ' USE_LOG=true'
+               ' DEBUG=%(debug)s'
+               ' STRIP="%(essentialbindir)s/true"'
+               ' EXTRAS="extras/scsi_id extras/ata_id extras/usb_id extras/volume_id extras/run_directory"')
+        # this is from firmware_helper from the srpm
+        r.Run('%(cc)s %(cflags)s -o firmware_helper firmware_helper.c')
+
+        r.MakeInstall('EXTRAS="'
+               'extras/scsi_id'
+               ' extras/ata_id'
+               ' extras/usb_id'
+               ' extras/volume_id'
+               ' extras/run_directory"')
+
+        r.Remove('%(sysconfdir)s/hotplug.d/default/10-udev.hotplug')
+        r.Remove('%(sysconfdir)s/init.d/udev')
+
+        r.MakeDirs('%(sysconfdir)s/udev/devices')
+        r.MakeDirs('%(sysconfdir)s/udev/{rules.d,scripts,devices,makedev.d}')
+        r.MakeDirs('%(sysconfdir)s/dev.d/{default,block}')
+        r.MakeDirs('%(datadir)s/udev')
+        r.MakeDirs('%(essentiallibdir)s/firmware')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/.*')
+        r.ExcludeDirectories(exceptions='%(datadir)s/udev')
+        r.ExcludeDirectories(exceptions='%(essentiallibdir)s/firmware')
+        r.ExcludeDirectories(exceptions='/dev')
+
+        r.Install('udev.static', '%(essentialsbindir)s/udev.static')
+        r.Install('udevstart.static', '%(essentialsbindir)s/udevstart.static')
+        r.Install('extras/scsi_id/scsi_id.static', '%(essentialsbindir)s/scsi_id.static')
+        r.Install('extras/ata_id/ata_id.static', '%(essentialsbindir)s/ata_id.static')
+        r.Install('start_udev', '%(essentialsbindir)s/')
+
+        for i in ('0', '1', '2', '3'):
+            r.MakeDirs('%%(sysconfdir)s/dev.d/fd%s' % i)
+
+        r.Install('firmware_helper', '%(essentialsbindir)s/')
