@@ -12,14 +12,45 @@ class NSS(CPackageRecipe):
 
     def setup(r):
         r.macros.underVer = r.version.replace('.', '_')
-        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/security/%(name)s/releases/NSS_%(underVer)s_RTM/src/%(name)s-%(version)s.tar.gz')
+       
+	r.macros.nsprVer = "4.6.2"
+
+	r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/security/%(name)s/releases/NSS_%(underVer)s_RTM/src/%(name)s-%(version)s.tar.gz')
+
+	r.addSource('nss.pc.in', macros=True)
+	r.addSource('nss-config.in', macros=True)
 
         if Arch.x86_64:
             r.Environment('USE_64', '1')
 
-        r.Make(subDir='mozilla/security/coreconf')
-        r.Make(subDir='mozilla/security/dbm')
-        r.Make(subDir='mozilla/security/nss')
+	r.macros.mflags = ' '         
+
+
+	r.Make(dir='mozilla/security/coreconf')
+        r.Make(dir='mozilla/security/dbm')
+        r.Make(dir='mozilla/security/nss')
+	
+	r.MakeDirs('/usr/lib/pkgconfig')
+
+	r.Run(""" 
+
+	NSS_VMAJOR=`grep "#define.*NSS_VMAJOR" mozilla/security/nss/lib/nss/nss.h | awk '{print $3}'`
+        NSS_VMINOR=`grep "#define.*NSS_VMINOR" mozilla/security/nss/lib/nss/nss.h | awk '{print $3}'`
+        NSS_VPATCH=`grep "#define.*NSS_VPATCH" mozilla/security/nss/lib/nss/nss.h | awk '{print $3}'`
+
+        sed nss.pc.in -e "s,_NSPR_VERSION_,%(nsprVer)s,g" \
+				 -e "s,_includedir_,%(includedir)s/nss,g" \
+		 		-e "s,_NSS_VERSION_,%(version)s,g" > \
+				nss.pc
+
+        sed nss-config.in 	    -e "s,_includedir_,%(includedir)s/nss,g" \
+				    -e "s,_MOD_MAJOR_VERSION_,${NSS_VMAJOR},g" \
+				    -e "s,_MOD_MINOR_VERSION_,${NSS_VMINOR},g" \
+				    -e "s,_MOD_PATCH_VERSION_,${NSS_VPATCH},g" \
+				    > nss-config
+	""")
+	r.Copy('nss.pc','/usr/lib/pkgconfig/nss.pc')
+	r.Copy('nss-config','/usr/bin/nss-config', mode=0755)
 
         for file in ('libnss3.so', 'libssl3.so', 'libsmime3.so',
                      'libsoftokn3.so', 'libnssckbi.so', 'libfreebl3.so'):
@@ -31,4 +62,4 @@ class NSS(CPackageRecipe):
         for file in ('certutil', 'modutil', 'pk12util', 'signtool', 'ssltap'):
             r.Install('mozilla/dist/*.OBJ/bin/%s' % file, '%(bindir)s/')
 
-        r.Install('mozilla/dist/public/nss/*.h', '%(includedir)s/nss3/')
+        r.Install('mozilla/dist/public/nss/*.h', '%(includedir)s/nss/')
