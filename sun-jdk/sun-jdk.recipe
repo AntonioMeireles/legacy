@@ -1,0 +1,75 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+#
+# Upgrade process:
+# o Download both the x86 and x86_64 versions of the jdk from 
+#   http://java.sun.com.
+# o Unpack each of them (the 64bit version will have to be unpacked on a 
+#   64bit box).
+# o Create tarballs from each one.
+#
+
+loadSuperClass('javapackage')
+class SunJava(JavaPackageRecipe):
+    name = 'sun-jdk'
+    version = '1.5.0_07'
+
+    clearBuildReqs()
+    buildRequires = PackageRecipe.buildRequires + ['desktop-file-utils:runtime']
+
+    jdkhome = '%%(jvmdir)s/sun-java-%s' % version
+    javahome = '%s/jre' % jdkhome
+
+    def upstreamUnpack(r):
+        r.macros.jrename = 'sun-jre'
+        r.macros.jdkhome = r.jdkhome
+        r.macros.desktopfile = 'jre/plugin/desktop/sun_java.desktop'
+        r.addArchive('jdk%(version)s-x86.tar.bz2',
+                     use=(not Use.gcj, Arch.x86))
+        r.addArchive('jdk%(version)s-x86_64.tar.bz2',
+                     use=(not Use.gcj, Arch.x86_64))
+
+    def upstreamSetup(r):
+        if Arch.x86:
+            r.Replace('INSTALL_DIR/JRE_NAME_VERSION', '%(javahome)s', 
+                      '%(desktopfile)s')
+            r.Desktopfile('%(desktopfile)s')
+
+            r.Install('jre/plugin', '%(javahome)s')
+
+            # Create symlink for firefox plugin
+            r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
+                      '%(libdir)s/firefox/plugins/')
+
+            r.PackageSpec('%(jrename)s', '%(libdir)s/firefox/plugins/')
+            r.ComponentSpec('lib', '%(libdir)s/firefox/plugins/')
+
+        r.Install('bin', '%(jdkhome)s')
+        r.Install('lib', '%(jdkhome)s')
+        r.Install('include', '%(jdkhome)s/')
+        r.Install('man/man1/', '%(datadir)s/man/man1/')
+        r.Install('jre/bin', '%(javahome)s')
+        r.Install('jre/lib', '%(javahome)s')
+
+        # Setup environment variables
+        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.sh', mode=0755,
+                 contents='export PATH="%(javahome)s/bin:$PATH"\n'
+                          'export JAVA_HOME="%(javahome)s"')
+        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.csh', mode=0755,
+                 contents='setenv PATH "%(javahome)s/bin:$PATH"\n'
+                          'setenv JAVA_HOME "%(javahome)s"')
+
+        r.Create('%(sysconfdir)s/profile.d/%(name)s.sh', mode=0755,
+                 contents='export PATH="%(jdkhome)s/bin:$PATH"')
+        r.Create('%(sysconfdir)s/profile.d/%(name)s.csh', mode=0755,
+                 contents='setenv PATH "%(jdkhome)s/bin:$PATH"')
+
+        r.PackageSpec('%(jrename)s', '%(javahome)s/', 
+                                     '%(sysconfdir)s/profile.d/%(jrename)s.*')
+
+        r.Requires('%(jrename)s:runtime', '%(sysconfdir)s/profile.d/%(name)s.*')
+        r.Requires('%(jrename)s:lib', '%(jdkhome)s/bin/.*')
