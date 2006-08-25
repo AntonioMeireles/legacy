@@ -1,0 +1,60 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Tk(CPackageRecipe):
+
+    buildRequires = [ 'autoconf:runtime', 'tcl:devel', 'xorg-x11:devel' ]
+
+    name = 'tk'
+
+    majorver = '8.4'
+    version = majorver + '.13'
+
+    def setup(r):
+        if not Use.tcl or not Use.tk or not Use.X:
+            return
+
+        r.macros.majorver = r.majorver
+        r.addArchive('mirror://sourceforge/tcl/%(name)s%(version)s-src.tar.gz')
+
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/tk-8.4.13-3.fc6.src.rpm'
+        r.addPatch('tk-8.3.5-tclm4-soname.patch', rpm=srpm)
+        r.addPatch('tk-8.4-no_rpath.patch', rpm=srpm)
+        r.addPatch('tk-8.4.13-autoconf.patch', rpm=srpm)
+
+        r.Run('cd unix && autoconf')
+
+        r.Configure(dir='unix')
+        r.Make('TK_LIBRARY=%(datadir)s/%(name)s%(majorver)s', dir='unix')
+
+        r.MakeInstall('INSTALL_ROOT=%(destdir)s'
+                      ' TK_LIBRARY=%(datadir)s/%(name)s%(majorver)s',
+                      dir='unix')
+        r.Symlink('%(bindir)s/wish%(majorver)s', '%(bindir)s/wish')
+        r.Symlink('%(libdir)s/lib%(name)s%(majorver)s.so',
+                  '%(libdir)s/lib%(name)s.so')
+
+        # backward compatible symlink for legacy tcl packages that hardcode
+        # lib path to prefix/lib/%(name)s%(majorver)s
+        r.Symlink('%(datadir)s/%(name)s%(majorver)s',
+                  '%(prefix)s/%(lib)s/%(name)s%(majorver)s')
+
+        # some really ugly header manipulation - required
+        r.Run('''mkdir -p %(destdir)s/%(includedir)s/%(name)s-private/{generic,unix}
+                 find generic unix -name "*.h" -exec cp -p '{}' %(destdir)s/%(includedir)s/%(name)s-private/'{}' ';'
+                 ( cd %(destdir)s/%(includedir)s
+                   for i in *.h ; do
+                     [ -f %(destdir)s/%(includedir)s/%(name)s-private/generic/$i ] && ln -sf ../../$i %(destdir)s/%(includedir)s/%(name)s-private/generic ;
+                   done
+                 )''')
+
+        r.Replace(('%(builddir)s/unix', '%(libdir)s'),
+                  ('%(builddir)s', '%(includedir)s/%(name)s-private'),
+                  '%(destdir)s/%(libdir)s/%(name)sConfig.sh')
+        r.AutoDoc('changes', 'license.terms')
+        r.Provides('file', '/usr/bin/wish.*')
+        r.Requires('tcl:devel', '%(includedir)s/tk.h')
+        r.Requires('xorg-x11:devel', '%(includedir)s/tk.h')
