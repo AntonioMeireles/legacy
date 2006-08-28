@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Guile(CPackageRecipe):
+    name = 'guile'
+    version = '1.6.7'
+
+    # needs info-file tag description from the install-info package
+    buildRequires = [ 'install-info:runtime', 'sed:runtime', 'ncurses:devel',
+                      'readline:devel' ]
+
+    def setup(r):
+        r.disableParallelMake()
+
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/guile-1.6.7-2.src.rpm'
+
+        r.addArchive('http://ftp.gnu.org/gnu/%(name)s/%(name)s-%(version)s.tar.gz')
+        #r.addPatch('guile-1.6.0-ppc64.patch', rpm=srpm)
+        r.addPatch('guile-1.6.0-unknown_arch.patch', rpm=srpm)
+        r.addPatch('guile-1.6.7-rpath.patch', rpm=srpm)
+        r.addPatch('guile-1.6.7-ltdl.patch', rpm=srpm)
+
+        extraConfig = '--with-threads '
+
+        # last tested version 1.6.4: guile cannot find its own libraries
+        # and depends on versions installed on the system.  Oops.
+        r.macros.ldflags += ' -L%(builddir)s/libguile/.libs'
+        r.Environment('LD_LIBRARY_PATH',
+                      '%(builddir)s/libguile/.libs'
+                      ':%(builddir)s/qt/.libs'
+                      ':%(builddir)s/libguile-ltdl/.libs')
+
+        r.Configure(extraConfig)
+
+        # Now, the workaround for guile not building unless it is
+        # already installed creates its own problems, which we now
+        # have to clean up after...
+        r.Make('libpath.h', subDir='libguile')
+        # needs more than r.Replace...
+        r.Run("sed -i '/srcdir/d;s^-L%(builddir)s/libguile/.libs ^^'"
+              " libguile/libpath.h")
+        r.Make()
+        r.MakeInstall()
+        # symlink in the slib library from umb-scheme
+        for l in ('slib', 'slibcat'):
+            r.Symlink('%(datadir)s/umb-scheme/' + l, '%(datadir)s/guile/' + l)
+            r.Requires('umb-scheme:runtime', '%(datadir)s/guile/' + l)
+            r.DanglingSymlinks(exceptions='%(datadir)s/guile/' + l)
+        r.Provides('file', '%(bindir)s/guile')
