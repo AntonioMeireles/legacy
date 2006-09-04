@@ -1,0 +1,314 @@
+--- freetype/freetype-2.1.10/include/freetype/fterrdef.h	2004-02-12 02:33:20.000000000 -0600
++++ freetype-2.1.10-fix/include/freetype/fterrdef.h	2006-08-07 13:41:31.000000000 -0500
+@@ -4,7 +4,7 @@
+ /*                                                                         */
+ /*    FreeType error codes (specification).                                */
+ /*                                                                         */
+-/*  Copyright 2002, 2004 by                                                */
++/*  Copyright 2002, 2004, 2006 by                                          */
+ /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+ /*                                                                         */
+ /*  This file is part of the FreeType project, and may only be used,       */
+@@ -226,6 +226,8 @@
+                 "`ENCODING' field missing" )
+   FT_ERRORDEF_( Missing_Bbx_Field,                           0xB6, \
+                 "`BBX' field missing" )
++  FT_ERRORDEF_( Bbx_Too_Big,                                 0xB7, \
++                "`BBX' too big" )
+ 
+ 
+ /* END */
+--- freetype/freetype-2.1.10/include/freetype/internal/ftmemory.h	2005-06-04 00:17:10.000000000 -0500
++++ freetype-2.1.10-fix/include/freetype/internal/ftmemory.h	2006-08-07 13:42:04.000000000 -0500
+@@ -430,7 +430,7 @@
+           FT_ALLOC( _pointer_, (_count_) * sizeof ( _type_ ) )
+ 
+ #define FT_REALLOC_ARRAY( _pointer_, _old_, _new_, _type_ )   \
+-          FT_REALLOC( _pointer, (_old_) * sizeof ( _type_ ),  \
++          FT_REALLOC( _pointer_, (_old_) * sizeof ( _type_ ),  \
+                                 (_new_) * sizeof ( _type_ ) )
+ 
+ 
+--- freetype/freetype-2.1.10/src/base/ftsynth.c	2005-05-30 01:08:03.000000000 -0500
++++ freetype-2.1.10-fix/src/base/ftsynth.c	2006-08-07 13:42:15.000000000 -0500
+@@ -81,7 +81,7 @@
+ 
+     /* some reasonable strength */
+     xstr = FT_MulFix( face->units_per_EM,
+-                      face->size->metrics.y_scale ) / 42;
++                      face->size->metrics.y_scale ) / 24;
+     ystr = xstr;
+ 
+     if ( slot->format == FT_GLYPH_FORMAT_OUTLINE )
+@@ -122,8 +122,8 @@
+     /* modify the metrics accordingly */
+     if ( !error )
+     {
++      /* assume the layout is horizontal */
+       slot->advance.x += xstr;
+-      slot->advance.y += ystr;
+ 
+       slot->metrics.width        += xstr;
+       slot->metrics.height       += ystr;
+--- freetype/freetype-2.1.10/src/base/ftutil.c	2005-03-03 16:59:06.000000000 -0600
++++ freetype-2.1.10-fix/src/base/ftutil.c	2006-08-07 13:41:31.000000000 -0500
+@@ -67,6 +67,14 @@
+       }
+       FT_MEM_ZERO( *P, size );
+     }
++    else if ( size < 0 )
++    {
++        /* may help catch/prevent security issues */
++        FT_ERROR(( "FT_QAlloc:" ));
++        FT_ERROR(( " Negative size requested. (%ld requested)\n",
++                   size ));
++	return FT_Err_Invalid_Argument;
++    }
+     else
+       *P = NULL;
+ 
+@@ -99,6 +107,14 @@
+         return FT_Err_Out_Of_Memory;
+       }
+     }
++    else if ( size < 0 )
++    {
++        /* may help catch/prevent security issues */
++        FT_ERROR(( "FT_QAlloc:" ));
++        FT_ERROR(( " Negative size requested. (%ld requested)\n",
++                   size ));
++	return FT_Err_Invalid_Argument;
++    }
+     else
+       *P = NULL;
+ 
+@@ -128,7 +144,11 @@
+       return FT_Alloc( memory, size, P );
+ 
+     /* if the new block if zero-sized, clear the current one */
+-    if ( size <= 0 )
++    if ( size < 0 || current < 0 )
++    {
++	    return FT_Err_Invalid_Argument;
++    }
++    else if ( size == 0 )
+     {
+       FT_Free( memory, P );
+       return FT_Err_Ok;
+@@ -170,7 +190,11 @@
+       return FT_QAlloc( memory, size, P );
+ 
+     /* if the new block if zero-sized, clear the current one */
+-    if ( size <= 0 )
++    if ( size < 0 || current < 0 )
++    {
++        return FT_Err_Invalid_Argument;
++    }
++    else if ( size == 0 )
+     {
+       FT_Free( memory, P );
+       return FT_Err_Ok;
+--- freetype/freetype-2.1.10/src/bdf/bdflib.c	2005-05-21 12:19:52.000000000 -0500
++++ freetype-2.1.10-fix/src/bdf/bdflib.c	2006-08-07 13:41:31.000000000 -0500
+@@ -1092,6 +1092,7 @@
+ #define ERRMSG1  "[line %ld] Missing \"%s\" line.\n"
+ #define ERRMSG2  "[line %ld] Font header corrupted or missing fields.\n"
+ #define ERRMSG3  "[line %ld] Font glyphs corrupted or missing fields.\n"
++#define ERRMSG4  "[line %ld] BBX too big.\n"
+ 
+ 
+   static FT_Error
+@@ -1805,6 +1806,9 @@
+     /* And finally, gather up the bitmap. */
+     if ( ft_memcmp( line, "BITMAP", 6 ) == 0 )
+     {
++      unsigned long  bitmap_size;
++
++
+       if ( !( p->flags & _BDF_BBX ) )
+       {
+         /* Missing BBX field. */
+@@ -1815,7 +1819,16 @@
+ 
+       /* Allocate enough space for the bitmap. */
+       glyph->bpr   = ( glyph->bbx.width * p->font->bpp + 7 ) >> 3;
+-      glyph->bytes = (unsigned short)( glyph->bpr * glyph->bbx.height );
++
++      bitmap_size = glyph->bpr * glyph->bbx.height;
++      if ( bitmap_size > 0xFFFFU )
++      {
++        FT_ERROR(( "_bdf_parse_glyphs: " ERRMSG4, lineno ));
++        error = BDF_Err_Bbx_Too_Big;
++        goto Exit;
++      }
++      else
++        glyph->bytes = (unsigned short)bitmap_size;
+ 
+       if ( FT_NEW_ARRAY( glyph->bitmap, glyph->bytes ) )
+         goto Exit;
+--- freetype/freetype-2.1.10/src/cff/cffgload.c	2005-04-17 23:53:05.000000000 -0500
++++ freetype-2.1.10-fix/src/cff/cffgload.c	2006-08-07 13:41:31.000000000 -0500
+@@ -2284,7 +2284,7 @@
+   FT_LOCAL_DEF( FT_Error )
+   cff_slot_load( CFF_GlyphSlot  glyph,
+                  CFF_Size       size,
+-                 FT_Int         glyph_index,
++                 FT_UInt        glyph_index,
+                  FT_Int32       load_flags )
+   {
+     FT_Error      error;
+@@ -2330,7 +2330,7 @@
+ 
+         error = sfnt->load_sbit_image( face,
+                                        (FT_ULong)size->strike_index,
+-                                       (FT_UInt)glyph_index,
++                                       glyph_index,
+                                        (FT_Int)load_flags,
+                                        stream,
+                                        &glyph->root.bitmap,
+@@ -2393,7 +2393,12 @@
+       /* subsetted font, glyph_indices and CIDs are identical, though */
+       if ( cff->top_font.font_dict.cid_registry != 0xFFFFU &&
+            cff->charset.cids )
+-        glyph_index = cff->charset.cids[glyph_index];
++      {
++        if ( glyph_index < cff->charset.max_cid )
++          glyph_index = cff->charset.cids[glyph_index];
++        else
++          glyph_index = 0;
++      }
+ 
+       cff_decoder_init( &decoder, face, size, glyph, hinting,
+                         FT_LOAD_TARGET_MODE( load_flags ) );
+--- freetype/freetype-2.1.10/src/cff/cffgload.h	2004-05-13 16:59:17.000000000 -0500
++++ freetype-2.1.10-fix/src/cff/cffgload.h	2006-08-07 13:41:31.000000000 -0500
+@@ -4,7 +4,7 @@
+ /*                                                                         */
+ /*    OpenType Glyph Loader (specification).                               */
+ /*                                                                         */
+-/*  Copyright 1996-2001, 2002, 2003, 2004 by                               */
++/*  Copyright 1996-2001, 2002, 2003, 2004, 2006 by                         */
+ /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+ /*                                                                         */
+ /*  This file is part of the FreeType project, and may only be used,       */
+@@ -196,7 +196,7 @@
+   FT_LOCAL( FT_Error )
+   cff_slot_load( CFF_GlyphSlot  glyph,
+                  CFF_Size       size,
+-                 FT_Int         glyph_index,
++                 FT_UInt        glyph_index,
+                  FT_Int32       load_flags );
+ 
+ 
+--- freetype/freetype-2.1.10/src/cff/cffload.c	2005-05-06 00:49:46.000000000 -0500
++++ freetype-2.1.10-fix/src/cff/cffload.c	2006-08-07 13:41:31.000000000 -0500
+@@ -1235,7 +1235,7 @@
+       }
+ 
+       /* access element */
+-      if ( off1 )
++      if ( off1 && off2 > off1 )
+       {
+         *pbyte_len = off2 - off1;
+ 
+@@ -1688,6 +1688,8 @@
+ 
+       for ( i = 0; i < num_glyphs; i++ )
+         charset->cids[charset->sids[i]] = (FT_UShort)i;
++
++      charset->max_cid = max_cid;
+     }
+ 
+   Exit:
+@@ -2011,7 +2013,7 @@
+ 
+     if ( error )
+       goto Exit;
+-
++ 
+     /* if it is a CID font, we stop there */
+     if ( top->cid_registry != 0xFFFFU )
+       goto Exit;
+@@ -2040,6 +2042,9 @@
+       FT_FRAME_EXIT();
+       if ( error )
+         goto Exit;
++
++      /* ensure that 'num_blue_values' is even */
++      priv->num_blue_values &= ~1;
+     }
+ 
+     /* read the local subrs, if any */
+--- freetype/freetype-2.1.10/src/cff/cfftypes.h	2003-12-20 01:30:05.000000000 -0600
++++ freetype-2.1.10-fix/src/cff/cfftypes.h	2006-08-07 13:41:31.000000000 -0500
+@@ -5,7 +5,7 @@
+ /*    Basic OpenType/CFF type definitions and interface (specification     */
+ /*    only).                                                               */
+ /*                                                                         */
+-/*  Copyright 1996-2001, 2002, 2003 by                                     */
++/*  Copyright 1996-2001, 2002, 2003, 2006 by                               */
+ /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+ /*                                                                         */
+ /*  This file is part of the FreeType project, and may only be used,       */
+@@ -84,6 +84,7 @@
+     FT_UShort*  sids;
+     FT_UShort*  cids;       /* the inverse mapping of `sids'; only needed */
+                             /* for CID-keyed fonts                        */
++    FT_UInt     max_cid;
+   } CFF_CharsetRec, *CFF_Charset;
+ 
+ 
+--- freetype/freetype-2.1.10/src/pshinter/pshglob.c	2004-04-02 01:13:53.000000000 -0600
++++ freetype-2.1.10-fix/src/pshinter/pshglob.c	2006-08-07 13:41:31.000000000 -0500
+@@ -150,7 +150,7 @@
+     FT_UNUSED( target );
+ 
+ 
+-    for ( ; read_count > 0; read_count -= 2 )
++    for ( ; read_count > 1; read_count -= 2 )
+     {
+       FT_Int         reference, delta;
+       FT_UInt        count;
+--- freetype/freetype-2.1.10/src/sfnt/sfdriver.c	2005-03-03 05:29:59.000000000 -0600
++++ freetype-2.1.10-fix/src/sfnt/sfdriver.c	2006-08-07 13:41:59.000000000 -0500
+@@ -367,8 +367,8 @@
+     /* see `ttsbit.h' and `sfnt.h' */
+     tt_face_set_sbit_strike,
+     tt_face_load_sbit_strikes,
+-    0 /* tt_find_sbit_image */,
+-    0 /* tt_load_sbit_metrics */,
++    tt_find_sbit_image,
++    tt_load_sbit_metrics,
+     tt_face_load_sbit_image,
+     tt_face_free_sbit_strikes,
+ 
+--- freetype/freetype-2.1.10/src/sfnt/ttcmap.c	2005-05-11 09:37:40.000000000 -0500
++++ freetype-2.1.10-fix/src/sfnt/ttcmap.c	2006-08-07 13:41:31.000000000 -0500
+@@ -2145,13 +2145,12 @@
+       offset              = TT_NEXT_ULONG( p );
+ 
+       if ( offset                     &&
+-           table + offset + 2 < limit &&
+-           table + offset >= table    )
++           offset <= face->cmap_size -2 )
+       {
+         FT_Byte*                       cmap   = table + offset;
+         volatile FT_UInt               format = TT_PEEK_USHORT( cmap );
+         const TT_CMap_Class* volatile  pclazz = tt_cmap_classes;
+-        TT_CMap_Class                  clazz;
++        TT_CMap_Class volatile         clazz;
+ 
+ 
+         for ( ; *pclazz; pclazz++ )
+--- freetype/freetype-2.1.10/src/type1/t1load.c	2005-04-14 06:39:28.000000000 -0500
++++ freetype-2.1.10-fix/src/type1/t1load.c	2006-08-07 13:41:31.000000000 -0500
+@@ -1989,6 +1989,9 @@
+                         keyword_flags );
+     if ( error )
+       goto Exit;
++ 
++    /* ensure even-ness of 'num_blue_values' */
++    priv->num_blue_values &= ~1;
+ 
+ #ifndef T1_CONFIG_OPTION_NO_MM_SUPPORT
+ 
