@@ -1,0 +1,982 @@
+diff -Naur firstboot-1.4.6.orig/src/modules/additional_cds.py firstboot-1.4.6/src/modules/additional_cds.py
+--- firstboot-1.4.6.orig/src/modules/additional_cds.py	2006-01-19 14:22:41.000000000 -0500
++++ firstboot-1.4.6/src/modules/additional_cds.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,222 +0,0 @@
+-#
+-# additional_cds.py - firstboot module for add-on CDs
+-#
+-# Copyright 2002, 2003 Red Hat, Inc.
+-# Copyright 2002, 2003 Brent Fox <bfox@redhat.com>
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-#
+-
+-from gtk import *
+-import string
+-import gtk
+-import gobject
+-import kudzu
+-import os
+-import time
+-import functions
+-import rhpl.diskutil as diskutil
+-from firstboot import start_process
+-
+-
+-##
+-## I18N
+-## 
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-
+-class childWindow:
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 140
+-    moduleName = (_("Additional CDs"))
+-
+-    # Turned off for now.
+-    skipme = True
+-
+-    def launch(self, doDebug=None):
+-        if doDebug:
+-            print "initializing additional_cd module"
+-
+-        self.vbox = gtk.VBox()
+-        self.vbox.set_size_request(400, 200)
+-
+-        title_pix = functions.imageFromFile("lacd.png")
+-
+-        internalVBox = gtk.VBox()
+-        internalVBox.set_border_width(10)
+-
+-        table = gtk.Table(3, 3)
+-        table.set_col_spacings(10)
+-        table.set_row_spacings(10)
+-
+-        cd_label_rhel = _("""Please insert the disc labeled "Red Hat Enterprise Linux """
+-                          """Extras" to allow for installation of third-party plug-ins and """
+-                          """applications.  You may also insert the Documentation disc, or """
+-                          """other Red Hat-provided discs to install additional software at """
+-                          """this time.""")
+-
+-        cd_label = _("""Please insert any additional software install cds """
+-                     """at this time.""")
+-
+-
+-        if os.uname()[4] == "ia64":
+-#        if 1:
+-            cd_label = cd_label + _("""\n\nTo enable runtime support of 32-bit applications on the Intel """
+-                                    """Itanium2 architecture you must install the Intel Execution """
+-                                    """Layer package from the Extras disc now.""")
+-
+-
+-            
+-        label = gtk.Label(cd_label)
+-        label.set_line_wrap(True)
+-        label.set_size_request(500, -1)
+-        label.set_alignment(0.0, 0.5)
+-        internalVBox.pack_start(label, False, True)
+-
+-#        pix = functions.imageFromFile("docs.png")
+-#        table.attach(pix, 0, 1, 0, 1, gtk.SHRINK)
+-
+-#        label = gtk.Label(_("Red Hat Linux Documentation CD"))                            
+-#        label.set_alignment(0.0, 0.5)
+-#        table.attach(label, 1, 2, 0, 1, gtk.FILL, gtk.SHRINK)
+-
+-#        button = gtk.Button(_("Install..."))
+-#        button.connect("clicked", self.autorun)
+-#        table.attach(button, 2, 3, 0, 1, gtk.SHRINK, gtk.SHRINK)
+- 
+-##         pix = functions.imageFromFile("cd.png")
+-##         table.attach(pix, 0, 1, 1, 2, gtk.SHRINK)
+-
+-##         label = gtk.Label(_("Red Hat Linux Installation CD"))                            
+-##         label.set_alignment(0.0, 0.5)
+-##         table.attach(label, 1, 2, 1, 2, gtk.FILL, gtk.SHRINK)
+-
+-##         button = gtk.Button(_("Install..."))
+-##         button.connect("clicked", self.autorun)
+-##         table.attach(button, 2, 3, 1, 2, gtk.SHRINK, gtk.SHRINK)
+-
+-        pix = functions.imageFromFile("lacd.png")
+-        table.attach(pix, 0, 1, 2, 3, gtk.SHRINK)
+-
+-        label = gtk.Label(_("Additional CDs"))                            
+-        label.set_alignment(0.0, 0.5)
+-        table.attach(label, 1, 2, 2, 3, gtk.FILL, gtk.SHRINK)
+-
+-        button = gtk.Button(_("Install..."))
+-        button.connect("clicked", self.autorun)
+-        table.attach(button, 2, 3, 2, 3, gtk.SHRINK, gtk.SHRINK)
+-
+-
+-#        pix = functions.imageFromFile("lacd.png")
+-#        table.attach(pix, 0, 1, 3, 4, gtk.SHRINK)
+-                                                                                                             
+-#        label = gtk.Label(_("Intel Execution Layer from the Extras CD."))
+-#        label.set_alignment(0.0, 0.5)
+-#        table.attach(label, 1, 2, 3, 4, gtk.FILL, gtk.SHRINK)
+-                                                                                                             
+-#        button = gtk.Button(_("Install..."))
+-#        button.connect("clicked", self.autorun)
+-#        table.attach(button, 2, 3, 3, 4, gtk.SHRINK, gtk.SHRINK)
+-
+-
+-        internalVBox.pack_start(table, False, padding=20)
+-        self.vbox.pack_start(internalVBox, True)
+-
+-        return self.vbox, title_pix, self.moduleName
+-
+-    def autorun(self, *args):
+-        def getCDDev():
+-            drives = kudzu.probe(kudzu.CLASS_CDROM,
+-                                 kudzu.BUS_UNSPEC, kudzu.PROBE_ALL)
+-            for d in drives:
+-                return d.device
+-            return None
+-            
+-            
+-        #Create a gtkInvisible widget to block until the autorun is complete
+-        i = gtk.Invisible ()
+-        i.grab_add ()
+-
+-        mountFlag = None
+-
+-        while not mountFlag:
+-            try:
+-                dev = getCDDev()
+-                if dev is None:
+-                    raise Exception, "no cd drive found"
+-                diskutil.mount("/dev/%s" % (dev,) , '/mnt', fstype="iso9660", readOnly = 1)
+-                mountFlag = 1
+-            except:
+-                dlg = gtk.MessageDialog(None, 0, gtk.MESSAGE_ERROR, gtk.BUTTONS_NONE,
+-                                        (_("A CD-ROM has not been detected.  Please insert "
+-                                           "a CD-ROM in the drive and click \"OK\" to continue.")))
+-                dlg.set_position(gtk.WIN_POS_CENTER)
+-                dlg.set_modal(True)
+-                cancelButton = dlg.add_button('gtk-cancel', 0)
+-                okButton = dlg.add_button('gtk-ok', 1)
+-                rc = dlg.run()
+-                dlg.destroy()
+-                
+-                if rc == 0:
+-                    #Be sure to remove the focus grab if we have to return here.
+-                    #Otherwise, the user is stuck
+-                    i.grab_remove ()
+-                    return
+-
+-        if os.access("/mnt/autorun", os.R_OK):
+-            #If there's an autorun file on the cd, run it
+-            pid = start_process("/mnt/autorun")
+-
+-            flag = None
+-            while not flag:
+-                while gtk.events_pending():
+-                    gtk.main_iteration_do()
+-
+-                child_pid, status = os.waitpid(pid, os.WNOHANG)
+-
+-                if child_pid == pid:
+-                    flag = 1
+-                else:
+-                    time.sleep(0.1)
+-
+-        else:
+-            #There's no autorun on the disc, so complain
+-            dlg = gtk.MessageDialog(None, 0, gtk.MESSAGE_ERROR, gtk.BUTTONS_NONE,
+-                                    (_("The autorun program cannot be found on the CD. "
+-                                       "Click \"OK\" to continue.")))
+-            dlg.set_position(gtk.WIN_POS_CENTER)
+-            dlg.set_modal(True)
+-            okButton = dlg.add_button('gtk-ok', 0)
+-            rc = dlg.run()
+-            dlg.destroy()
+-
+-            if rc == 0:
+-                #Be sure to remove the focus grab if we have to return here.
+-                #Otherwise, the user is stuck
+-                i.grab_remove ()
+-
+-        #I think system-config-packages will do a umount, but just in case it doesn't...
+-        try:
+-            diskutil.umount('/mnt')
+-        except:
+-            #Yep, system-config-packages has already umounted the disc, so fall through and go on
+-            pass
+-
+-        #Remove the focus grab of the gtkInvisible widget
+-        i.grab_remove ()
+-
+-    def apply(self, notebook):
+-        return 1
+diff -Naur firstboot-1.4.6.orig/src/modules/create_user.py firstboot-1.4.6/src/modules/create_user.py
+--- firstboot-1.4.6.orig/src/modules/create_user.py	2006-01-19 14:22:41.000000000 -0500
++++ firstboot-1.4.6/src/modules/create_user.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,275 +0,0 @@
+-import sys
+-sys.path.append('/usr/share/system-config-users/')
+-
+-from gtk import *
+-import string
+-import os
+-import time
+-import gtk
+-import gobject
+-import functions
+-import libuser
+-import rhpl.executil as executil
+-import userGroupCheck
+-from firstboot import start_process
+-
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-
+-import crypt,random
+-
+-def cryptPassword(password, useMD5 = 1):
+-    if useMD5:
+-        salt = "$1$"
+-        saltLen = 8
+-    else:
+-        salt = ""
+-        saltLen = 2
+-
+-    for i in range(saltLen):
+-        salt = salt + random.choice (string.letters + string.digits + './')
+-
+-    return crypt.crypt (password, salt)
+-
+-class childWindow:
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 110
+-    moduleName = _("System User")
+-    windowName = moduleName
+-
+-    def launch(self, doDebug = None):
+-        self.doDebug = doDebug
+-        self.admin = libuser.admin()
+-        self.nisFlag = None
+-
+-        if doDebug:
+-            print "initializing newuser module"
+-
+-        self.usernameEntry = gtk.Entry()
+-        self.fullnameEntry = gtk.Entry()
+-        self.passwordEntry = gtk.Entry()
+-        self.passwordEntry.set_visibility(False)
+-        self.confirmEntry = gtk.Entry()
+-        self.confirmEntry.set_visibility(False)
+-        
+-        self.vbox = gtk.VBox()
+-        self.vbox.set_size_request(400, 200)
+-
+-        title_pix = functions.imageFromFile("create-user.png")
+-
+-        internalVBox = gtk.VBox()
+-        internalVBox.set_border_width(10)
+-        internalVBox.set_spacing(10)
+-
+-        label = gtk.Label(_("It is recommended that you create a system 'username' for regular "
+-                            "(non-administrative) use of your system. To create a system 'username,' "
+-                            "please provide the information requested below."))
+-
+-        label.set_line_wrap(True)
+-        label.set_alignment(0.0, 0.5)
+-        label.set_size_request(500, -1)
+-        internalVBox.pack_start(label, False, True)
+-
+-        table = gtk.Table(2, 4)
+-        label = gtk.Label(_("_Username:"))
+-        label.set_use_underline(True)
+-        label.set_mnemonic_widget(self.usernameEntry)
+-        label.set_alignment(0.0, 0.5)
+-        table.attach(label, 0, 1, 0, 1, gtk.FILL)
+-        table.attach(self.usernameEntry, 1, 2, 0, 1, gtk.SHRINK, gtk.FILL, 5, 5)
+-
+-        label = gtk.Label(_("Full Nam_e:"))
+-        label.set_use_underline(True)
+-        label.set_mnemonic_widget(self.fullnameEntry)
+-        label.set_alignment(0.0, 0.5)
+-        table.attach(label, 0, 1, 1, 2, gtk.FILL)
+-        table.attach(self.fullnameEntry, 1, 2, 1, 2, gtk.SHRINK, gtk.FILL, 5, 5)
+-
+-        label = gtk.Label(_("_Password:"))
+-        label.set_use_underline(True)
+-        label.set_mnemonic_widget(self.passwordEntry)
+-        label.set_alignment(0.0, 0.5)
+-        table.attach(label, 0, 1, 2, 3, gtk.FILL)
+-        table.attach(self.passwordEntry, 1, 2, 2, 3, gtk.SHRINK, gtk.FILL, 5, 5)
+-
+-        label = gtk.Label(_("Confir_m Password:"))
+-        label.set_use_underline(True)
+-        label.set_mnemonic_widget(self.confirmEntry)
+-        label.set_alignment(0.0, 0.5)
+-        table.attach(label, 0, 1, 3, 4, gtk.FILL)
+-        table.attach(self.confirmEntry, 1, 2, 3, 4, gtk.SHRINK, gtk.FILL, 5, 5)
+-
+-        internalVBox.pack_start(table, True, 15)
+-
+-#        internalVBox.pack_start(gtk.HSeparator())
+-
+-        align = gtk.Alignment()
+-        align.set(0.9, 0.5, 0.0, 1.0)
+-        align.set_size_request(-1, 30)
+-        internalVBox.pack_start(align, False)
+-
+-        label = gtk.Label(_("If you need to use network authentication, such as Kerberos or NIS, "
+-                            "please click the Use Network Login button."))
+-
+-        label.set_line_wrap(True)
+-        label.set_alignment(0.0, 0.5)
+-        label.set_size_request(500, -1)
+-        internalVBox.pack_start(label, False, True)
+-
+-
+-        authHBox = gtk.HBox()
+-        authButton = gtk.Button(_("Use Network _Login..."))
+-        authButton.connect("clicked", self.run_authconfig)
+-        align = gtk.Alignment()
+-        align.add(authButton)
+-        align.set(0.9, 0.5, 0.0, 1.0)
+-        authHBox.pack_start(align, True)
+-        internalVBox.pack_start(authHBox, True, True)
+-
+-        self.vbox.pack_start(internalVBox, False, 15)
+-
+-        users = self.admin.enumerateUsersFull()
+-        self.normalUsersList = []
+-        for userEnt in users:
+-            uidNumber = int(userEnt.get(libuser.UIDNUMBER)[0])
+-            if uidNumber == 500:
+-                self.usernameEntry.set_text(userEnt.get(libuser.USERNAME)[0])
+-                self.fullnameEntry.set_text(userEnt.get(libuser.GECOS)[0])
+-
+-        return self.vbox, title_pix, self.moduleName
+-
+-    def grabFocus(self):
+-        self.usernameEntry.grab_focus()
+-
+-    def apply(self, notebook):
+-        if self.doDebug:
+-            return 0
+-
+-        username = self.usernameEntry.get_text()
+-        username = string.strip(username)
+-
+-        if username == "" and self.nisFlag != None:
+-            #If they've run authconfig, don't pop up messageDialog
+-            return 0
+-        
+-        if username == "":
+-            dlg = gtk.MessageDialog(None, 0, gtk.MESSAGE_WARNING, gtk.BUTTONS_NONE,
+-                                    (_("It is highly recommended that a personal user account be "
+-                                       "created.  If you continue without an account, you "
+-                                       "can only log in with the root account, which is reserved "
+-                                       "for administrative use only.")))
+-
+-            dlg.set_position(gtk.WIN_POS_CENTER)
+-            dlg.set_modal(True)
+-
+-            dlg.add_button(_("_Continue"), 0)
+-            b = dlg.add_button(_("Create _account"), 1)
+-            b.grab_focus()
+-
+-            rc = dlg.run()
+-            dlg.destroy()
+-
+-            if rc == 0:
+-                return 0
+-            else:
+-                self.usernameEntry.grab_focus()
+-                return None
+-
+-        if not userGroupCheck.isUsernameOk(username, self.usernameEntry):
+-            return None
+-
+-        password = self.passwordEntry.get_text()
+-        confirm = self.confirmEntry.get_text()
+-
+-        if not userGroupCheck.isPasswordOk(password, self.passwordEntry) or \
+-           not userGroupCheck.isPasswordOk(confirm, self.confirmEntry):
+-            return None
+-
+-        if password != confirm:
+-            self.showErrorMessage(_("The passwords do not match.  Please enter "
+-                                    "the password again."))
+-            self.passwordEntry.set_text("")
+-            self.confirmEntry.set_text("")
+-            self.passwordEntry.grab_focus()
+-            return None
+-        
+-        elif len (password) < 6:
+-            self.showErrorMessage(_("The password is too short.  Please use at "
+-                                    "least 6 characters."))
+-
+-            self.passwordEntry.set_text("")
+-            self.confirmEntry.set_text("")
+-            self.passwordEntry.grab_focus()                
+-            return None
+-
+-        user = self.admin.lookupUserByName(username)
+-
+-        if user != None and user.get(libuser.UIDNUMBER)[0] < 500:
+-            self.showErrorMessage(_("The username '%s' is a reserved system account.  Please " \
+-                                    "specify another username." % username))
+-            self.usernameEntry.set_text("")
+-            self.usernameEntry.grab_focus()
+-            return None
+-
+-        fullName = self.fullnameEntry.get_text()
+-
+-        #Check for valid strings
+-        if not userGroupCheck.isNameOk(fullName, self.fullnameEntry):
+-            return None
+-
+-        #If we get to this point, all the input seems to be valid.  Let's add the user
+-        if user == None:
+-            #if the user doesn't already exist
+-            userEnt = self.admin.initUser(username)
+-        else:
+-            userEnt = user
+-            
+-        userEnt.set(libuser.GECOS, [fullName])
+-
+-        groupEnt = self.admin.initGroup(username)
+-        gidNumber = groupEnt.get(libuser.GIDNUMBER)[0]
+-        userEnt.set(libuser.GIDNUMBER, [gidNumber])
+-
+-        if user == None:
+-            self.admin.addUser(userEnt)
+-            self.admin.addGroup(groupEnt)
+-        else:
+-            self.admin.modifyUser(userEnt)
+-            self.admin.modifyGroup(groupEnt)
+-            
+-        self.admin.setpassUser(userEnt, self.passwordEntry.get_text(), 0)
+-        
+-        return 0
+-
+-    def showErrorMessage(self, text):
+-        dlg = gtk.MessageDialog(None, 0, gtk.MESSAGE_ERROR, gtk.BUTTONS_OK, text)
+-        dlg.set_position(gtk.WIN_POS_CENTER)
+-        dlg.set_modal(True)
+-        rc = dlg.run()
+-        dlg.destroy()
+-        return None
+-
+-    def run_authconfig(self, *args):
+-        self.nisFlag = 1
+-        
+-        #Create a gtkInvisible dialog to block until up2date is complete
+-        i = gtk.Invisible ()
+-        i.grab_add ()
+-
+-        #Run rhn_register so they can register with RHN
+-        pid = start_process("/usr/bin/authconfig-gtk", "--firstboot")
+-
+-        flag = None
+-        while not flag:
+-            while gtk.events_pending():
+-                gtk.main_iteration_do()
+-
+-            child_pid, status = os.waitpid(pid, os.WNOHANG)
+-            
+-            if child_pid == pid:
+-                flag = 1
+-            else:
+-                time.sleep(0.1)
+-
+-        i.grab_remove ()
+diff -Naur firstboot-1.4.6.orig/src/modules/date.py firstboot-1.4.6/src/modules/date.py
+--- firstboot-1.4.6.orig/src/modules/date.py	2006-01-09 18:19:39.000000000 -0500
++++ firstboot-1.4.6/src/modules/date.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,96 +0,0 @@
+-#
+-# date.py - GUI front end code for date, time and ntp configuration
+-#
+-# Copyright 2002, 2003 Red Hat, Inc.
+-# Copyright 2002, 2003 Brent Fox <bfox@redhat.com>
+-# Copyright 2004 Nils Philippsen <nphilipp@redhat.com>
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-#
+-
+-import string
+-import gtk
+-import sys
+-import os
+-import signal
+-import time
+-import functions
+-
+-sys.path.append('/usr/share/system-config-date/')
+-import scdMainWindow
+-
+-from firstboot_module_window import FirstbootModuleWindow
+-
+-##
+-## I18N
+-## 
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-
+-class TimeWindow(FirstbootModuleWindow):
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 100
+-    moduleName = _("Date and Time")
+-    windowTitle = moduleName
+-    htmlTag = "time"
+-    shortMessage = _("Please set the date and time for the system.")
+-
+-    def getNext(self):
+-        pass
+-
+-    def setupScreen(self):
+-        self.dateWindow = scdMainWindow.scdMainWindow (firstboot = True, showPages = ["datetime", "ntp"])
+-
+-        self.datePageNotebook = self.dateWindow.firstboot_widget ()
+-
+-        #Add icon to the top frame
+-        self.icon = functions.imageFromPath("/usr/share/system-config-date/pixmaps/system-config-date.png")
+-        self.mainVBox = gtk.VBox()
+-
+-        internalVBox = gtk.VBox(False, 10)
+-        internalVBox.set_border_width(10)
+-
+-        messageLabel = gtk.Label(_(self.shortMessage))
+-        messageLabel.set_line_wrap(True)
+-        messageLabel.set_size_request(500, -1)
+-        messageLabel.set_alignment(0.0, 0.5)
+-
+-        internalVBox.pack_start(messageLabel, False)
+-        internalVBox.pack_start(self.datePageNotebook, True)
+-        self.mainVBox.pack_start(internalVBox, True)
+-
+-    def launch(self, doDebug=None):
+-        self.doDebug = doDebug
+-        self.setupScreen()
+-        return self.mainVBox, self.icon, self.windowTitle
+-
+-    def response_cb (self, dialog, response_id, pid):
+-        if response_id == gtk.RESPONSE_CANCEL:
+-            os.kill (pid, signal.SIGINT)
+-        dialog.hide ()
+-
+-    def apply(self, *args):
+-        if self.doDebug:
+-            print "applying date changes not available in debug mode"
+-        else:
+-            return self.dateWindow.firstboot_apply ()
+-
+-        return 0
+-
+-    def grabFocus(self):
+-        pass
+-
+-childWindow = TimeWindow
+diff -Naur firstboot-1.4.6.orig/src/modules/networking.py firstboot-1.4.6/src/modules/networking.py
+--- firstboot-1.4.6.orig/src/modules/networking.py	2006-01-19 14:22:41.000000000 -0500
++++ firstboot-1.4.6/src/modules/networking.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,172 +0,0 @@
+-#
+-# networking.py - networking module for firstboot
+-#
+-# Copyright 2002, 2003 Red Hat, Inc.
+-# Copyright 2002, 2003 Brent Fox <bfox@redhat.com>
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-#
+-
+-from gtk import *
+-import string
+-import os
+-import time
+-import gtk
+-import gobject
+-import sys
+-import functions
+-import libuser
+-import kudzu
+-from firstboot import start_process
+-
+-##
+-## I18N
+-## 
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-class childWindow:
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 45
+-    moduleName = (_("Network Setup"))
+-    moduleClass = "reconfig"
+-
+-    def launch(self, doDebug = None):
+-        self.doDebug = doDebug
+-        self.admin = libuser.admin()
+-
+-        if doDebug:
+-            print "initializing networking module"
+-
+-        self.usernameEntry = gtk.Entry()
+-        self.fullnameEntry = gtk.Entry()
+-        self.passwordEntry = gtk.Entry()
+-        self.passwordEntry.set_visibility(False)
+-        self.confirmEntry = gtk.Entry()
+-        self.confirmEntry.set_visibility(False)
+-        
+-        self.vbox = gtk.VBox()
+-        self.vbox.set_size_request(400, 200)
+-
+-        title_pix = functions.imageFromFile("networking.png")
+-
+-        internalVBox = gtk.VBox()
+-        internalVBox.set_border_width(10)
+-        internalVBox.set_spacing(10)
+-
+-        label = gtk.Label(_("The following network devices have been detected on the system:"))
+-
+-        label.set_line_wrap(True)
+-        label.set_alignment(0.0, 0.5)
+-        label.set_size_request(500, -1)
+-        internalVBox.pack_start(label, False, True)
+-
+-        self.deviceStore = gtk.ListStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
+-        self.deviceView = gtk.TreeView()
+-        self.deviceView.set_size_request(-1, 200)
+-        self.deviceView.set_model(self.deviceStore)
+-        self.deviceSW = gtk.ScrolledWindow()
+-        self.deviceSW.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+-        self.deviceSW.set_shadow_type(gtk.SHADOW_IN)
+-        self.deviceSW.add(self.deviceView)
+-
+-        self.deviceBox = gtk.HBox()
+-        self.deviceBox.pack_start(self.deviceSW, True)
+-        
+-        col = gtk.TreeViewColumn(_("Network Device"), gtk.CellRendererText(), text = 0)
+-        self.deviceView.append_column(col)
+-        col = gtk.TreeViewColumn(_("Boot protocol"), gtk.CellRendererText(), text = 1)        
+-        self.deviceView.append_column(col)
+-        
+-        internalVBox.pack_start(self.deviceBox, False)
+-        self.updateLabels()
+-
+-        networkButton = gtk.Button(_("_Change Network Configuration..."))
+-        networkButton.connect("clicked", self.run_neat)
+-
+-        align = gtk.Alignment()
+-        align.add(networkButton)
+-        align.set(1.0, 0.5, 0.1, 1.0)
+-                             
+-        internalVBox.pack_start(align, False)
+-
+-        self.vbox.pack_start(internalVBox, False, 15)
+-
+-        users = self.admin.enumerateUsersFull()
+-        self.normalUsersList = []
+-        for userEnt in users:
+-            uidNumber = int(userEnt.get(libuser.UIDNUMBER)[0])
+-            if uidNumber == 500:
+-                self.usernameEntry.set_text(userEnt.get(libuser.USERNAME)[0])
+-                self.fullnameEntry.set_text(userEnt.get(libuser.GECOS)[0])
+-
+-        return self.vbox, title_pix, self.moduleName
+-
+-    def updateLabels(self):
+-        module_dict = {}
+-        lines = open("/etc/modprobe.conf").readlines()
+-        for line in lines:
+-            tokens = string.split(line)
+-            if string.strip(tokens[0]) == "alias" and string.strip(tokens[1][:3]) == "eth":
+-                module_dict[tokens[1]] = tokens[2]
+-
+-        self.deviceStore.clear()
+-        
+-        for dev in module_dict.keys():
+-            path = '/etc/sysconfig/network-scripts/ifcfg-%s' % dev
+-            try:
+-                lines = open(path).readlines()
+-            except:
+-                continue
+-            bootproto = None
+-            for line in lines:
+-                if string.strip(line[:9]) == "BOOTPROTO":
+-                    key, value = string.split(line, "=")
+-                    key = string.strip(key)
+-                    value = string.strip(string.lower(value))
+-                    if value == "none":
+-                        iter = self.deviceStore.append()
+-                        self.deviceStore.set_value(iter, 0, dev)
+-                        self.deviceStore.set_value(iter, 1, (_("static")))
+-                    else:
+-                        iter = self.deviceStore.append()
+-                        self.deviceStore.set_value(iter, 0, dev)
+-                        self.deviceStore.set_value(iter, 1, value)
+-
+-    def apply(self, notebook):
+-        return 0
+-
+-    def run_neat(self, *args):
+-        #Create a gtkInvisible dialog to block until up2date is complete
+-        i = gtk.Invisible ()
+-        i.grab_add ()
+-
+-        #Run rhn_register so they can register with RHN
+-        pid = start_process("/usr/bin/system-config-network")
+-
+-        flag = None
+-        while not flag:
+-            while gtk.events_pending():
+-                gtk.main_iteration_do()
+-
+-            child_pid, status = os.waitpid(pid, os.WNOHANG)
+-            
+-            if child_pid == pid:
+-                flag = 1
+-            else:
+-                time.sleep(0.1)
+-
+-        i.grab_remove ()
+-        self.updateLabels()
+diff -Naur firstboot-1.4.6.orig/src/modules/soundcard_gui.py firstboot-1.4.6/src/modules/soundcard_gui.py
+--- firstboot-1.4.6.orig/src/modules/soundcard_gui.py	2005-12-02 14:23:30.000000000 -0500
++++ firstboot-1.4.6/src/modules/soundcard_gui.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,96 +0,0 @@
+-#
+-# soundcard_gui.py - GUI front end code for soundcard configuration
+-#
+-# Copyright 2002, 2003 Red Hat, Inc.
+-# Copyright 2002, 2003 Brent Fox <bfox@redhat.com>
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-#
+-
+-import string
+-import gtk
+-import gobject
+-import sys
+-import os
+-import functions
+-
+-sys.path.append('/usr/share/system-config-soundcard/')
+-import soundcard
+-import soundcardBackend
+-
+-##
+-## I18N
+-## 
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-
+-class SoundWindow:
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 120
+-    moduleName = _("Sound Card")
+-    windowTitle = _("Sound Card")
+-    shortMessage = _("A sound card has been detected in your computer.")
+-    
+-    def __init__(self):
+-        #Initialize soundcard page
+-        self.soundcardPage = soundcard.childWindow()
+-        self.soundcardBox = self.soundcardPage.getSoundcardBox()
+-        self.soundcardBackend = soundcardBackend.soundcardBackend()
+-        
+-    def launch(self, doDebug = None):
+-        cards = self.soundcardBackend.probeCards()
+-
+-        if cards == []:
+-            return None, None, None
+-        else:
+-            self.mainVBox = gtk.VBox()
+-
+-            #Add icon to the top frame
+-            self.icon = functions.imageFromFile("multimedia.png")
+-
+-            internalVBox = gtk.VBox(False, 10)
+-            internalVBox.set_border_width(10)
+-
+-
+-            label = gtk.Label(_("Click the "
+-                                "\"Play test sound\" button to hear a sample sound.  You should "
+-                                "hear a series of three sounds.  The first sound will be in the "
+-                                "right channel, the second sound will be in the left channel, "
+-                                "and the third sound will be in the center."))
+-            label.set_line_wrap(True)
+-            label.set_size_request(500, -1)
+-            label.set_alignment(0.0, 0.5)
+-
+-            messageLabel = gtk.Label(_(self.shortMessage))
+-            messageLabel.set_line_wrap(True)
+-            messageLabel.set_size_request(500, -1)
+-            messageLabel.set_alignment(0.0, 0.5)
+-
+-            self.mainVBox.pack_start(internalVBox, False)
+-            internalVBox.pack_start(messageLabel, False)
+-            internalVBox.pack_start(label, False)
+-
+-            hbox = gtk.HBox()
+-            hbox.pack_start(self.soundcardBox, False)
+-            
+-            internalVBox.pack_start(hbox, False)
+-
+-            return self.mainVBox, self.icon, self.windowTitle
+-
+-    def apply(self, *args):
+-        return 0
+-
+-childWindow = SoundWindow
+diff -Naur firstboot-1.4.6.orig/src/modules/timezone.py firstboot-1.4.6/src/modules/timezone.py
+--- firstboot-1.4.6.orig/src/modules/timezone.py	2006-01-09 18:19:39.000000000 -0500
++++ firstboot-1.4.6/src/modules/timezone.py	1969-12-31 19:00:00.000000000 -0500
+@@ -1,97 +0,0 @@
+-#
+-# timezone.py - GUI front end code for timezone configuration
+-#
+-# Copyright 2002, 2003 Red Hat, Inc.
+-# Copyright 2002, 2003 Brent Fox <bfox@redhat.com>
+-# Copyright 2004 Nils Philippsen <nphilipp@redhat.com>
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-#
+-
+-import string
+-import gtk
+-import sys
+-import os
+-import signal
+-import time
+-import functions
+-
+-sys.path.append('/usr/share/system-config-date/')
+-import scdMainWindow
+-
+-from firstboot_module_window import FirstbootModuleWindow
+-
+-##
+-## I18N
+-## 
+-from rhpl.translate import _, N_
+-from rhpl import translate
+-translate.textdomain("firstboot")
+-
+-class TimeWindow(FirstbootModuleWindow):
+-    #You must specify a runPriority for the order in which you wish your module to run
+-    runPriority = 89
+-    moduleName = _("Timezone")
+-    windowTitle = moduleName
+-    moduleClass = "reconfig"
+-    htmlTag = "timezone"
+-    shortMessage = _("Please set the timezone for the system.")
+-
+-    def getNext(self):
+-        pass
+-
+-    def setupScreen(self):
+-        self.timezoneWindow = scdMainWindow.scdMainWindow (firstboot = True, showPages = ["timezone"])
+-
+-        self.timezoneWidget = self.timezoneWindow.firstboot_widget ()
+-
+-        #Add icon to the top frame
+-        self.icon = functions.imageFromPath("/usr/share/system-config-date/pixmaps/system-config-date.png")
+-        self.mainVBox = gtk.VBox()
+-
+-        internalVBox = gtk.VBox(False, 10)
+-        internalVBox.set_border_width(10)
+-
+-        messageLabel = gtk.Label(_(self.shortMessage))
+-        messageLabel.set_line_wrap(True)
+-        messageLabel.set_size_request(500, -1)
+-        messageLabel.set_alignment(0.0, 0.5)
+-
+-        internalVBox.pack_start(messageLabel, False)
+-        internalVBox.pack_start(self.timezoneWidget, True)
+-        self.mainVBox.pack_start(internalVBox, True)
+-
+-    def launch(self, doDebug=None):
+-        self.doDebug = doDebug
+-        self.setupScreen()
+-        return self.mainVBox, self.icon, self.windowTitle
+-
+-    def response_cb (self, dialog, response_id, pid):
+-        if response_id == gtk.RESPONSE_CANCEL:
+-            os.kill (pid, signal.SIGINT)
+-        dialog.hide ()
+-
+-    def apply(self, *args):
+-        if self.doDebug:
+-            print "applying timezone changes not available in debug mode"
+-        else:
+-            return self.timezoneWindow.firstboot_apply ()
+-
+-        return 0
+-
+-    def grabFocus(self):
+-        pass
+-
+-childWindow = TimeWindow
