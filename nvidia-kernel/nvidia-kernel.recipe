@@ -1,0 +1,30 @@
+loadSuperClass('kernelmodulepackage.recipe', label='drivers.rpath.org@rpl:devel')
+class NvidiaKernel(KernelModulePackageRecipe):
+    name = 'nvidia-kernel'
+    version = '1.0_8774'
+
+    buildRequires = ['kernel:build-tree', 'mkinitrd:runtime']
+
+    def unpack(r):
+        r.macros.version = r.version.replace('_','-')
+        r.macros.url = 'http://download.nvidia.com/XFree86/Linux-x86'
+        r.addSource('%(url)s/%(version)s/NVIDIA-Linux-x86-%(version)s-pkg0.run')
+        r.Run('sh NVIDIA-Linux-x86-%(version)s-pkg0.run -x') # Extract only
+
+        r.Make('module SYSSRC=/lib/modules/%(kver)s/build',
+               dir='NVIDIA-Linux-x86-%(version)s-pkg0/usr/src/nv')
+        r.Install('NVIDIA-Linux-x86-%(version)s-pkg0/usr/src/nv/nvidia.ko',
+                  '/lib/modules/%(kver)s/kernel/drivers/video/')
+
+        # All docs are in user-space where multiple-install conflicts
+        # are prevented.
+        del r.AutoDoc
+
+        # We want to make sure that the userspace code can require the
+        # matching kernel-space code
+        r.ComponentProvides('%(version)s')
+        r.ComponentSpec('runtime', '/lib/modules/')
+
+        # We need the kernel module and userspace versions to match
+        r.Requires('nvidia:lib(%(version)s)',
+                   '/lib/modules/%(kver)s/kernel/drivers/video/nvidia.ko')
