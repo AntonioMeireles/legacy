@@ -1,0 +1,70 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Filesystem(PackageRecipe):
+
+    name = 'filesystem'
+    version = '2.2.1'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+
+    def setup(r):
+        r.macros.usrdirs = ('{bin,etc,games,lib,%(lib)s,sbin,src,'
+                            'share/{man/man{1,2,3,4,5,6,7,8,9,n},info},'
+                            'libexec,include}')
+        r.MakeDirs(
+            '%(essentialbindir)s',
+            '/boot',
+            '%(sysconfdir)s/X11/{applnk,sysconfig,serverconfig,starthere}',
+            '%(sysconfdir)s/{opt,xinetd.d,skel,sysconfig}',
+            '/home',
+            '/initrd',
+            '%(essentiallibdir)s',
+            '/lib/modules',
+            '/mnt/{floppy,cdrom}',
+            '/media',
+            '/opt',
+            '/proc',
+            '%(essentialsbindir)s',
+            '%(prefix)s/%(usrdirs)s',
+            '%(prefix)s/local/%(usrdirs)s',
+            '%(prefix)s/share/{applications,doc,empty,misc,pixmaps,xsessions}',
+            '%(x11prefix)s/{bin,include,lib/X11,%(lib)s,man,share}',
+            '%(localstatedir)s/lib/{games,misc}',
+            '%(localstatedir)s/spool/lpd',
+            '%(localstatedir)s/{db,cache,games,local,lock/subsys,'
+                               'log,nis,opt,preserve,run,tmp,yp}')
+        r.MakeDirs('%(servicedir)s/spool/mail', mode=02775)
+        r.Ownership('root', 'mail', '%(servicedir)s/spool/mail')
+        r.SetModes('%(localstatedir)s/lock', 0775)
+        r.Ownership('root', 'lock', '%(localstatedir)s/lock')
+        if r.macros.servicedir != '/var':
+            r.Symlink('%(servicedir)s/spool/mail',
+                      '%(localstatedir)s/spool/mail')
+            r.Symlink('%(servicedir)s/spool/mail', '%(localstatedir)s/mail')
+        else:
+            r.Symlink('spool/mail', '%(localstatedir)s/mail')
+        r.MakeDirs('/tmp', '/var/tmp', mode=01777)
+        r.MakeDirs('/root', mode=0750)
+
+        r.MakeDirs('%(initdir)s')
+        if r.macros.initdir != r.macros.sysconfdir+'/init.d':
+            # Using something other than FHS standard, add compat symlinks
+            r.Symlink('%(initdir)s', '%(sysconfdir)s/init.d')
+            # "rcdir = initdir - /init.d"
+            rcdir='/'.join(r.macros.initdir.split('/')[:-1])
+            for level in range(7):
+                r.Symlink('%s/rc%d.d' %(rcdir, level),
+                          '/%%(sysconfdir)s/rc%d.d' %level)
+
+        r.Symlink('%(x11prefix)s/bin', '%(bindir)s/X11')
+        r.Symlink('%(x11prefix)s/lib/X11', '%(prefix)s/lib/X11')
+        r.Symlink('%(localstatedir)s/tmp', '%(prefix)s/tmp')
+        r.ComponentSpec('runtime', '.*')
+        # include all the directories in the filesystem package -- that's
+        # the point..
+        r.ExcludeDirectories(exceptions='.*')
