@@ -1,0 +1,60 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# All rights reserved
+#
+
+class Groff(CPackageRecipe):
+    buildRequires = [ 'zlib:devel', 'texinfo:runtime', 'install-info:runtime',
+                      'gcc:devel' ]
+    if Use.X:
+        # xorg-x11:runtime needed for xmkmf
+        buildRequires.extend(['xorg-x11:devel', 'xorg-x11:runtime'])
+
+    name = 'groff'
+    version = '1.19.1'
+    
+    def setup(r):
+        r.addArchive('http://ftp.gnu.org/gnu/groff/groff-%(version)s.tar.gz',
+                        keyid='E707FDA5')
+        r.addSource('hyphen.cs')
+        r.addPatch('groff-1.18.1-no-color-segfault.patch')
+        r.addPatch('groff-1.19.1-parallel-make.patch')
+        r.addPatch('groff-1.19.1-stack.patch')
+        r.addPatch('groff-1.19.1-tmpfile.patch')
+        r.addPatch('groff-man-UTF-8.diff')
+
+        # need to make sure that X is accessible
+        # should do no harm even if not Use.X
+        os.environ['PATH'] = os.environ['PATH'] + ':%(x11prefix)s/bin'
+        r.Configure('--enable-multibyte')
+        # do not use r.disableParallelMake; that specifies that no
+        # parallelization is possible in this package
+        mflags = r.macros.parallelmflags
+        r.macros.parallelmflags = ''
+        r.Make('PARALLELMFLAGS="%s"' %mflags)
+        r.Replace(('@//', '/'), ('@setfilename groff', '@setfilename groff.info'),
+                  'doc/groff.texinfo')
+        r.Run('cd doc; makeinfo groff.texinfo')
+        if Use.X:
+            r.Run('cd src/xditview; xmkmf; make')
+            r.MakeInstall(subDir='src/xditview')
+        # groff doesn't make all necessary directories for make install
+        r.MakeDirs('/usr')
+        r.MakePathsInstall('manroot=%(destdir)s%(mandir)s')
+        for g in ('s.tmac', 'mse.tmac', 'm.tmac'):
+            r.Symlink(g, '%(datadir)s/groff/%(version)s/tmac/g'+g)
+        for g in ('troff', 'tbl', 'pic', 'eqn', 'neqn', 'refer', 'lookbib',
+                  'indxbib', 'soelim', 'nroff'):
+            r.Symlink(g, '%(prefix)s/bin/g'+g)
+            r.Symlink(g+'.1', '%%(mandir)s/man1/g%s.1' %g)
+        r.Symlink('soelim', '%(prefix)s/bin/zsoelim')
+        r.Symlink('soelim.1', '%(mandir)s/man1/zsoelim.1')
+        r.Install('hyphen.cs', '%(datadir)s/groff/%(version)s/tmac/', mode=0644)
+        r.Symlink('doc.tmac', '%(datadir)s/groff/%(version)s/tmac/docj.tmac')
+        r.Move('%(docdir)s/groff/%(version)s', '%(docdir)s/groff-%(version)s')
+        r.Remove('%(docdir)s/groff', recursive=True)
+        # groff installs a symlink here, remove it
+        r.Remove('/usr/X11R6/lib/X11/app-defaults')
+
+        r.PackageSpec('groff-x11', '/usr/X11R6/bin/gxditview',
+                '%(thisdocdir)s/src/xditview/')
