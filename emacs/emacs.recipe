@@ -1,4 +1,9 @@
 #
+#
+# Antonio Meireles
+# 
+# sbin.reboot.sh
+#
 # Copyright (c) 2004-2006 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
@@ -6,194 +11,40 @@
 
 class Emacs(CPackageRecipe):
 
-    buildRequires = [ 'bzip2:runtime', 'ncurses:devel', 'zlib:devel',
-                      'autoconf:runtime=:autoconf213', 'xorg-x11:devel',
-                      'libpng:devel', 'libjpeg:devel', 'libungif:devel',
-                      'libtiff:devel', 'Xaw3d:devel', 'texinfo:runtime',
-                      'desktop-file-utils:runtime', 'install-info:runtime',
-                      'mktemp:runtime' ]
+    buildRequires = [ 
+                       ]
 
     if Arch.x86:
         buildRequires.append('setarch:runtime')
 
     name = 'emacs'
-    version = '21.4a'
-    # to be imported into other recipes that need to know the current
-    # emacs version site-lisp directory (most can just use the non-versioned
-    # directory, do not use this unless you really need it).
-    versionsitelisp = ''.join(('%(datadir)s/emacs/', version, '/site-lisp/'))
+    version = '23.0.0cvs09092006'
+
 
     def setup(r):
-        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/development/SRPMS/emacs-21.4-8.src.rpm'
+	#
+	# this is Foresight. 
+	#
+	#  cvs -z3 -d:pserver:anonymous@cvs.savannah.gnu.org:/sources/emacs co emacs
+	#  cd emacs
+	#  cvs up -Pd -r emacs-unicode-2
+	#
+	# so emacs should have... gtk, pango, xft and so on...
+	# http://www.emacswiki.org/cgi-bin/wiki/XftGnuEmacs
+	#
 
-        # 21.4a is packaged as emacs-21.4 -- remove the next line when
-        # updating to a newer version
-        r.mainDir('emacs-21.4')
-        # override the version macro - remove when updating
-        r.macros.version = '21.4'
-        r.macros.muleucs_ver = 'current'
-        r.macros.leim_ver = '21.4'
+	r.addArchive('%(name)s-%(version)s.tar.bz2')
+    		
+	r.Configure(' --with-x-toolkit=gtk --enable-font-backend '
+		    ' --with-xft  --with-xpm'
+		    ' --with-jpeg  --with-tiff '
+		    ' --with-gif  --with-png  --with-freetype ')
 
-        # XXX change 21.4a back to %(version)s when updating
-        r.addArchive('http://ftp.gnu.org/gnu/emacs/emacs-21.4a.tar.gz',
-                     keyid='BE216115')
-        r.addArchive('ftp://ftp.gnu.org/gnu/emacs/leim-%(leim_ver)s.tar.gz',
-                     keyid='BE216115')
-        r.addArchive('elisp-manual-21-2.8.tar.bz2',
-                     dir=r.macros.maindir, rpm=srpm)
-        r.addArchive('Mule-UCS-%(muleucs_ver)s.tar.gz',
-                     dir=r.macros.maindir, rpm=srpm)
+	r.macros.mflags=''
 
-        # disabled patches are disabled to avoid autoconf dependency
-        for patch in (
-                    # 'emacs-21.2-s390.patch',
-                      'emacs-21.2-x86_64.patch',
-                      'emacs-21.2-sticky-bit-80049.patch',
-                    # 'emacs-21.2-s390x.patch',
-                      'emacs-21.2-alloc-blockinput-83600.patch',
-                      'emacs-21.3-ppc64.patch',
-                      'editfns.c-Fformat-multibyte-davej.patch',
-                      'emacs-21.3-no-rpath.patch'):
-             r.addPatch(patch, rpm=srpm)
-
-        # Lisp patches
-        # remove trademarked game
-        r.addPatch('emacs-21.2-menubar-games.patch', rpm=srpm)
-        r.addAction('rm lisp/{finder-inf.el,play/tetris.el*}')
-
-        r.addPatch('browse-url-htmlview-84262.patch', rpm=srpm)
-        r.addAction('autoconf-2.13')
-
-        # install rest of site-lisp
-        for source in ('python-mode.el',
-                       'ssl.el',
-                       'po-mode.el',
-                       'po-compat.el'):
-            r.addSource(source, rpm=srpm, dir='site-lisp')
-
-        r.addPatch('po-mode-auto-replace-date-71264.patch', rpm=srpm,
-                   dir='site-lisp', level=0)
-
-        r.addArchive('php-mode-1.1.0.tgz', rpm=srpm, dir='%(maindir)s/site-lisp')
-
-        r.Run('cp rfc1345.el leim/quail')
-
-        for source in ('emacs.desktop',
-                       'emacs.png',
-                       'dotemacs.el',
-                       'site-start.el',
-                       'php-mode-init.el',
-                       'python-mode-init.el',
-                       'po-mode-init.el',
-                       # Source: ftp://ftp.m17n.org/pub/mule/Mule-UCS/test/
-                       'lang-coding-systems-init.el',
-                       'default.el',
-                       'rfc1345.el'):
-            r.addSource(source, rpm=srpm)
-
-        r.macros.cflags += ' -DMAIL_USE_LOCKF'
-        if Use.X:
-            extraConfig = '--with-pop --with-sound'
-        else:
-            extraConfig = '--without-x'
-
-        r.Configure(extraConfig)
-        # just in case someone is building on an exec-shield kernel, work
-        # around RH BZ#101818 since the workaround doesn't hurt otherwise
-        if Arch.x86:
-            preMake = 'setarch i386'
-        else:
-            preMake = ''
-        r.Make(preMake=preMake)
-
-        r.macros.emacsbatch = '%(builddir)s/src/emacs -batch --no-init-file --no-site-file'
-
-        # servicedir for mail
-        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
-            'man/gnus.texi', 'lisp/paths.el', 'lisp/eshell/esh-var.el',
-            'lisp/mail/rmail.el')
-
-        r.Run('%(emacsbatch)s -f batch-byte-recompile-directory lisp')
-        r.Run('%(emacsbatch)s -f batch-byte-compile leim/quail/rfc1345.el '
-              ' site-lisp/*.el')
-
-        r.Make('-C lisp updates', preMake=preMake)
-
-        r.Run('cd Mule-UCS-%(muleucs_ver)s; %(emacsbatch)s -l mucs-comp.el')
-
-        r.MakePathsInstall(preMake=preMake)
-
-        # Emacs uses glob method to get around having to know specific dir
-        # it is installing to -- our Install doesn't handle that
-        r.Run('install -m755 lib-src/fns-%(version)s.2.el'
-              ' %(destdir)s%(libexecdir)s/emacs/%(version)s/*/')
-
-        # make sure movemail isn't setgid
-        r.SetModes('%(libexecdir)s/emacs/%(version)s/*/movemail', 0755)
-
-        r.Remove('%(infodir)s/dir')
-
-        r.macros.site_lisp = '%(datadir)s/emacs/site-lisp'
-        r.macros.version_site_lisp = r.versionsitelisp
-        r.Install('site-start.el', 'default.el', '%(site_lisp)s/')
-
-        r.Move('%(bindir)s/etags', '%(bindir)s/etags.emacs')
-        r.Move('%(bindir)s/ctags', '%(bindir)s/ctags.emacs')
-        r.Move('%(mandir)s/man1/ctags.1', '%(mandir)s/man1/gctags.1')
-        r.Symlink('ctags.emacs', '%(bindir)s/gctags')
-
-        # freedesktop.org files
-        r.Run('mv emacs.desktop gnu-emacs.desktop')
-        r.Desktopfile('gnu-emacs.desktop')
-        r.Install('emacs.png', '%(datadir)s/pixmaps/')
-
-        r.Install('site-lisp/*.el{,c}', '%(site_lisp)s/')
-        r.Install('*-init.el', '%(site_lisp)s/site-start.d/')
-
-        r.Install('dotemacs.el', '%(sysconfdir)s/skel/.emacs')
-
-        r.Install('elisp-manual-21-2.8/{elisp,elisp-*}', '%(infodir)s/')
-        r.Install('Mule-UCS-%(muleucs_ver)s/lisp/*.{el,elc}', '%(site_lisp)s/Mule-UCS/')
-        r.Doc('etc/NEWS', 'BUGS', 'README')
-
-        #r.NonBinariesInBindirs(exceptions='%(libexecdir)s/emacs/%(version)s/.*/fns-%(version)s.1.el')
-        r.NonBinariesInBindirs(exceptions='.*')
-
-        r.PackageSpec('emacs',
-            '%(bindir)s/(emacs|emacs-%(version)s)',
-            '%(datadir)s/emacs/%(version)s/etc/DOC-%(version)s.1',
-            '%(libexecdir)s/emacs/%(version)s/.*/fns-%(version)s.1.el')
-
-        # not everyone wants the input method
-        r.PackageSpec('emacs-leim',
-            '%(datadir)s/emacs/%(version)s/leim/leim-list.el',
-            '%(datadir)s/emacs/%(version)s/leim/.*\.elc')
-
-        # el files that go in :runtime instead of :elisp for some reason
-        # XXX find out if this is really necessary by deleting these
-        # .el files from a running system and see if emacs breaks
-        for file in (
-            '(cus-load|cus-start|finder-inf|forms-d2|forms-pass|generic-x|loaddefs|loadup|patcomp|paths|subdirs|version)',
-            'emacs-lisp/cl-specs',
-            'eshell/(esh-groups|esh-maint)',
-            'international/(latin-.*|mule-conf)',
-            'mail/blessmail',
-            'play/bruce',
-            'term/(AT386|apollo|bobcat|internal|iris-ansi|keyswap|linux|lk201|news|vt[234-].*|vt102.*|vt12.*|vt-control|wyse50|xterm)'):
-            r.ComponentSpec('runtime',
-                '%(datadir)s/emacs/%(version)s/lisp/' + file + '\.el')
-
-        for file in (
-            '(default|site-start|subdirs)',
-            'Mule-UCS/un-trbase',
-            'site-start.d/.*'):
-            r.ComponentSpec('runtime',
-                '%(datadir)s/emacs/site-lisp/' + file + '\.el')
-
-        r.ComponentSpec('runtime', '%(version_site_lisp)s/subdirs\.el')
-
-        # all the rest of the elisp files go in the elisp component
-        r.ComponentSpec('elisp', '%(datadir)s/emacs/.*\.el')
-
-        # override default :emacs component, which we do not want in emacs:
-        r.ComponentSpec('runtime', '%(datadir)s/emacs/site-lisp/.*')
+	r.Make('bootstrap')
+#	r.Make('bootstrap-clean', dir='lisp')
+#	r.Make('compile ', dir='lisp')
+#	r.Make('clean')
+	r.Make()
+	r.MakeInstall()
