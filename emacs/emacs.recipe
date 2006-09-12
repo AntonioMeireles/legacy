@@ -32,7 +32,7 @@ class Emacs(CPackageRecipe):
 
     name = 'emacs'
     version = '23.0.0cvs09092006'
-
+    versionsitelisp = ''.join(('%(datadir)s/emacs/', version, '/site-lisp/'))
 
     def setup(r):
 	#
@@ -51,13 +51,75 @@ class Emacs(CPackageRecipe):
 	r.Configure(' --with-x-toolkit=gtk --enable-font-backend '
 		    ' --with-xft  --with-xpm'
 		    ' --with-jpeg  --with-tiff '
+		    '--with-pop --with-sound'
 		    ' --with-gif  --with-png  --with-freetype ')
 
 	r.macros.mflags=''
+	r.macros.cflags += ' -DMAIL_USE_LOCKF'
 
 	r.Make('bootstrap')
-#	r.Make('bootstrap-clean', dir='lisp')
-#	r.Make('compile ', dir='lisp')
-#	r.Make('clean')
 	r.Make()
-	r.MakeInstall()
+
+	r.macros.emacsbatch = '%(builddir)s/src/emacs -batch --no-init-file --no-site-file'
+
+	# servicedir for mail
+        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+            'man/gnus.texi', 'lisp/paths.el', 'lisp/eshell/esh-var.el',
+            'lisp/mail/rmail.el')
+
+        r.Run('%(emacsbatch)s -f batch-byte-recompile-directory lisp')
+
+	r.Make('-C lisp updates')
+        r.MakePathsInstall()
+
+        # make sure movemail isn't setgid
+        r.SetModes('%(libexecdir)s/emacs/%(version)s/*/movemail', 0755)
+
+        r.Remove('%(infodir)s/dir')
+
+        r.macros.site_lisp = '%(datadir)s/emacs/site-lisp'
+        r.macros.version_site_lisp = r.versionsitelisp
+
+        r.Move('%(bindir)s/etags', '%(bindir)s/etags.emacs')
+        r.Move('%(bindir)s/ctags', '%(bindir)s/ctags.emacs')
+        r.Move('%(mandir)s/man1/ctags.1', '%(mandir)s/man1/gctags.1')
+        r.Symlink('ctags.emacs', '%(bindir)s/gctags')
+
+
+	r.NonBinariesInBindirs(exceptions='.*')
+
+	r.PackageSpec('emacs',
+            '%(bindir)s/(emacs|emacs-%(version)s)',
+            '%(datadir)s/emacs/%(version)s/etc/DOC-%(version)s.1',
+            '%(libexecdir)s/emacs/%(version)s/.*/fns-%(version)s.1.el')
+
+        # not everyone wants the input method
+        r.PackageSpec('emacs-leim',
+            '%(datadir)s/emacs/%(version)s/leim/leim-list.el',
+            '%(datadir)s/emacs/%(version)s/leim/.*\.elc')
+
+        for file in (
+            '(cus-load|cus-start|finder-inf|forms-d2|forms-pass|generic-x|loaddefs|loadup|patcomp|paths|subdirs|version)',
+            'emacs-lisp/cl-specs',
+            'eshell/(esh-groups|esh-maint)',
+            'international/(latin-.*|mule-conf)',
+            'mail/blessmail',
+            'play/bruce',
+            'term/(AT386|apollo|bobcat|internal|iris-ansi|keyswap|linux|lk201|news|vt[234-].*|vt102.*|vt12.*|vt-control|wyse50|xterm)'):
+            r.ComponentSpec('runtime',
+                '%(datadir)s/emacs/%(version)s/lisp/' + file + '\.el')
+
+        for file in (
+            '(default|site-start|subdirs)',
+            'Mule-UCS/un-trbase',
+            'site-start.d/.*'):
+            r.ComponentSpec('runtime',
+                '%(datadir)s/emacs/site-lisp/' + file + '\.el')
+
+        r.ComponentSpec('runtime', '%(version_site_lisp)s/subdirs\.el')
+
+        # all the rest of the elisp files go in the elisp component
+        r.ComponentSpec('elisp', '%(datadir)s/emacs/.*\.el')
+
+        # override default :emacs component, which we do not want in emacs:
+        r.ComponentSpec('runtime', '%(datadir)s/emacs/site-lisp/.*')
