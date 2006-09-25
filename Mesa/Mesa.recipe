@@ -6,7 +6,7 @@
 
 class Mesa(CPackageRecipe):
     name = 'Mesa'
-    version = '6.5'
+    version = '6.5.1'
 
     # XXX: Maybe his should become a Use flag shared with xorg-server
     Flags.dri = True
@@ -22,7 +22,7 @@ class Mesa(CPackageRecipe):
             'libXxf86vm:devel', 'libdrm:devel' ])
 
     def setup(r):
-        r.macros.site = 'http://umn.dl.sourceforge.net/sourceforge/mesa3d'
+        r.macros.site = 'mirror://sourceforge/mesa3d'
         r.addArchive('%(site)s/MesaLib-%(version)s.tar.bz2')
 
         # XXX: Until Mesa build architecture is fixed the demos require MesaLib
@@ -30,16 +30,19 @@ class Mesa(CPackageRecipe):
         r.addArchive('%(site)s/MesaDemos-%(version)s.tar.bz2')
 
         # based on mesa-6.5-build-config.patch from Fedora CVS
-        r.Replace(    
+        r.Replace(('MKDEP = makedepend', 'MKDEP = gcc -M -MG'),
                   ('MKDEP_OPTIONS = -fdepend', 'MKDEP_OPTIONS = -MF depend'),
+                  ('INSTALL_DIR = /usr/local', 'INSTALL_DIR = %(destdir)s/%(prefix)s'),
+                  ('DRI_DRIVER_INSTALL_DIR = /usr/X11R6/lib/modules/dri', 'DRI_DRIVER_INSTALL_DIR = %(destdir)s/%(libdir)s/dri'),
+                  ('DRI_DRIVER_SEARCH_DIR = \$\(DRI_DRIVER_INSTALL_DIR\)', 'DRI_DRIVER_SEARCH_DIR = %(libdir)s/dri'),
                   'configs/default')
-
+        
         for config in ('linux', 'linux-dri'):
             r.Replace(('ARCH_FLAGS \?=', 'ARCH_FLAGS ?= -DGLX_USE_TLS'),
                       ('X11_INCLUDES = -I/usr/X11R6/include', 'X11_INCLUDES ='),
                       ('EXTRA_LIB_PATH=-L/usr/X11R6/lib', 'EXTRA_LIB_PATH ='),
                       'configs/' + config)
-        
+            
         for config in ('x86', 'x86-64'):
             r.Replace(('ARCH_FLAGS =', 'ARCH_FLAGS +='),
                       'configs/linux-dri-' + config)
@@ -49,26 +52,26 @@ class Mesa(CPackageRecipe):
 
         # copied from Fedora spec file; this file is not F/OSS
         r.Remove('include/GL/uglglutshapes.h')
-
+        
         # see fd.o BZ # 4095
         r.Replace('#define DEFAULT_DRIVER_DIR "/usr/X11R6/lib/modules/dri"',
                   '#define DEFAULT_DRIVER_DIR "%(libdir)s/dri"',
                   'src/glx/x11/dri_glx.c')
 
         # based on Fedora modifications & suggestions from Pavel Volkovitskiy
-        r.Replace(('INCLUDE_DIR=\$1/include', 'INCLUDE_DIR="$1/%(includedir)s"'),
-                  ('LIB_DIR=\$1/lib', 'LIB_DIR="$1/%(libdir)s"'),
-                  'bin/installmesa')
-
+        # r.Replace(('INCLUDE_DIR=\$1/include', 'INCLUDE_DIR="$1/%(includedir)s"'),
+        #           ('LIB_DIR=\$1/lib', 'LIB_DIR="$1/%(libdir)s"'),
+        #           'bin/installmesa')
+        
         # based on Fedora patch to enable Motif support in libGLw
         # XXX: disabled b/c it requires openmotif which is only in contrib
         #r.Replace('GLW_LIB_DEPS = -L\$\(LIB_DIR\) -l\$\(GL_LIB\) \$\(EXTRA_LIB_PATH\) -lXt -lX11',
         #    'GLW_LIB_DEPS = -L$(LIB_DIR) -l$(GL_LIB) -lXm $(EXTRA_LIB_PATH) -lXt -lX11',
         #    'configs/default')
-
+        
         # XXX: we don't supply any version of GLUT
-        r.Replace('APP_LIB_DEPS = -L\$\(LIB_DIR\) -l\$\(GLUT_LIB\) -l\$\(GLU_LIB\) -l\$\(GL_LIB\) -lm',
-                  'APP_LIB_DEPS = -L$(LIB_DIR) -l$(GLU_LIB) -l$(GL_LIB) -lm',
+        r.Replace('APP_LIB_DEPS = -L\$\(TOP\)\/\$\(LIB_DIR\) -l\$\(GLUT_LIB\) -l\$\(GLU_LIB\) -l\$\(GL_LIB\) -lm',
+                  'APP_LIB_DEPS = -L$(TOP)/$(LIB_DIR) -l$(GLU_LIB) -l$(GL_LIB) -lm',
                   'configs/default')
 
         if Flags.dri:
@@ -90,6 +93,20 @@ class Mesa(CPackageRecipe):
 
         r.MakeInstall()
 
+
+        # XXX: until conary has overrides
+        # we remove the files that conflict with proprietary drivers
+        # by having flavoured Mesa's
+
+        r.ComponentSpec('libGL','%(libdir)s/libGL.*')
+
+        if Use.nvidia:
+            r.ByDefault(exceptions=['libGL'])
+        if Use.ati:
+            r.ByDefault(exceptions=['libGL'])
+
+
+
         # Mesa's build system doesn't install the DRI drivers even when you
         # choose a DRI config
         if Flags.dri:
@@ -98,3 +115,7 @@ class Mesa(CPackageRecipe):
         # XXX: until MesaDemos can build separately
         r.Install('progs/xdemos/glx{info,gears}', '%(bindir)s/')
         r.PackageSpec('glx-utils', '%(bindir)s/glx.*')
+
+
+
+
