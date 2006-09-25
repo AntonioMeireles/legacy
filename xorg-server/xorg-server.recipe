@@ -22,7 +22,7 @@ class XorgServer(XorgPackageRecipe):
         'libXmu:devel', 'libXpm:devel', 'libXt:devel', 'libXxf86misc:devel',
         'libXxf86vm:devel', 'libfontenc:devel', 'liblbxutil:devellib',
         'libxkbfile:devel', 'libxkbui:devel', 'ncurses:devel', 'perl:lib',
-        'perl:runtime', 'xtrans:devel', 'zlib:devel' ]
+        'perl:runtime', 'xtrans:devel', 'zlib:devel', 'espgs:runtime'  ]
 
     protoBuildRequires = [ 'bigreqsproto:devel', 'compositeproto:devel',
         'damageproto:devel', 'evieext:devel',  'fixesproto:devel',
@@ -56,14 +56,17 @@ class XorgServer(XorgPackageRecipe):
         extraConfig += ' --disable-xnest'
 
     def setup(r):
-        r.macros.osname = "'Foresight Desktop Linux'"
-        r.macros.vendor = "'Foresight'"
-        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s --enable-install-libxf86config'
-        r.extraConfig += ' --with-fontdir=%(datadir)s/X11/fonts --with-default-font-path=unix/:7100'
+        r.macros.osname = "'Foresight Linux (rPath Linux derivative)'"
+        r.macros.vendor = "'António Meireles aka doniphon'"
+        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s'
 
         XorgPackageRecipe.setup(r)
 
     def unpack(r):
+
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.1.1-40.fc6.src.rpm'
+
+        r.addArchive(srpm)
         # pulled from Fedora CVS (xorg-x11-xdm, rev. 1.1)
         r.addSource('xserver.pamd',
                     dest='%(sysconfdir)s/pam.d/xserver', mode=00644)
@@ -73,39 +76,74 @@ class XorgServer(XorgPackageRecipe):
 
         # according to http://xorg.freedesktop.org/wiki/ModularDevelopersGuide
         # we need the Mesa source to build GLX support
-        r.macros.mesaVersion = '6.5'
-        r.addArchive('http://easynews.dl.sourceforge.net/sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', use=Flags.dri)
+        r.macros.mesaVersion = '6.5.1'
+        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', use=Flags.dri)
 
         if Flags.dri:
             r.extraConfig += ( ' --enable-dri'
                                ' --enable-glx-tls'
                                ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
-                               ' --with-dri-driver-path=%(libdir)s/dri' )
+                               ' --with-dri-driver-path=%(libdir)s/dri'
+                               ' --with-pic'
+                               ' --enable-composite'
+                               ' --enable-xtrap'
+                               ' --enable-xcsecurity'
+                               ' --enable-xevie'
+                               ' --with-default-font-path="unix/:7100,built-ins"'
+                               ' --with-xkb-output=%(localstatedir)s/lib/xkb'
+                               ' --with-rgb-path=%(datadir)s/X11'
+                               )
         else:
             r.extraConfig += ' --disable-dri'
 
-        # pulled from Fedora CVS (xorg-x11-server, rev. 1.1)
-        r.addPatch('xorg-redhat-die-ugly-pattern-die-die-die.patch', level=0)
+        # Fedora xorg-server patchset
+        # base patches
+        r.addPatch('xorg-x11-server-0.99.3-init-origins-fix.patch', rpm=srpm)
+        r.addPatch('xserver-1.0.0-parser-add-missing-headers-to-sdk.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-libxf86config-dont-write-empty-sections.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-builderstring.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-xkb-in-xnest.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-xvfb-composite-crash.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-pclose-confusion.patch', rpm=srpm)
+        # OpenGL compositing manager feature/optimization patches.
+        r.addPatch('xorg-x11-server-1.1.0-no-move-damage.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-dont-backfill-bg-none.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-tfp-damage.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-mesa-copy-sub-buffer.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-enable-composite.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-no-composite-in-xnest.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-offscreen-pixmaps.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-mesa-6.5.1.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-aiglx-happy-vt-switch.patch', rpm=srpm)
+        # Red Hat specific tweaking (some are usefull to us ;-) )
+        r.addPatch('xorg-redhat-die-ugly-pattern-die-die-die.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch', rpm=srpm)
+        # Backports of post-1.1 stuff.
+        r.addPatch('xorg-x11-server-1.1.0-pci-scan-fixes.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-no-zlib.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-Xdmx-render-fix-fdo7482.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-revert-xkb-change.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-aiglx-locking.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-edid-hex-dump.patch', rpm=srpm)
+        # autoconfiguration feature patches
+        r.addPatch('xorg-x11-server-1.1.0-edid-mode-injection-1.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-edid-mode-injection-2.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-cvt-generator-in-core.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-no-autoconfig-targetrefresh.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-getconfig-pl-die-die-die.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-dpms-on-by-default.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-edid-root-window-properties.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-sanedefaultmode.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-module-list.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-edid-quirks-list.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-defaultdepth-24.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-always-mouse-thyself.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-fix-default-mouse-device-yet-again.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-infer-virtual.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-mode-sort-kung-fu.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-pci-paranoia.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-believe-monitor-rb-modes.patch', rpm=srpm)
 
-        # pulled from xorg-xserver git; see fd.o BZ #4320
-        # should be in xorg-server-1.2
-        r.addPatch('fdo4320-xaaPict.c.patch')
-
-        # XXX: the next two patches require running r.Automake()
-        # The patches are for the libxf86config parser used by pyxf86config
-        # See RH BZ #173084 & #181292, respectively
-        # XXX: really need to get pushed upstream
-        r.addPatch('xserver-1.0.0-parser-add-missing-headers-to-sdk.patch', level=0)
-        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch')
-        r.addPatch('xorg-x11-server-Red-Hat-extramodes.patch')
-
-
-        r.addPatch('xorg-x11-server-1.1.1-fix-default-mouse-device-yet-again.patch')
-        r.addPatch('xorg-x11-server-1.1.1-sanedefaultmode.patch')
-        r.addPatch('xorg-x11-server-libxf86config-dont-write-empty-sections.patch')
-        r.addPatch('xorg-x11-server-1.1.0-pci-scan-fixes.patch')
-        r.addPatch('xorg-x11-server-1.1.1-always-mouse-thyself.patch')
-        r.addPatch('xorg-x11-server-1.1.1-defaultdepth-24.patch')
 
         r.Automake()
 
@@ -125,9 +163,13 @@ class XorgServer(XorgPackageRecipe):
         r.Run('touch %(destdir)s%(sysconfdir)s/X11/xorg.conf')
         r.InitialContents('%(sysconfdir)s/X11/xorg.conf')
 
-        # Install the vesamodes and extramodes files to let our install/config tools
-        # be able to parse the same modelist as the X server uses (rhpxl).
-        r.Install('hw/xfree86/common/vesamodes','%(datadir)s/xorg/vesamodes')
-        r.Install('hw/xfree86/common/extramodes','%(datadir)s/xorg/extramodes')
-        #r.Remove('%(datadir)s/X11/xkb/compiled/README.compiled')
-        #r.Remove('%(prefix)s/lib/X11/Cards')
+        # XXX: until conary has overrides
+        # we remove the files that conflict with proprietary drivers
+        # by having a flavoured xorg-server
+        # contrary to Mesa, only nVidia messes with files from xorg-server
+
+        r.ComponentSpec('libGLX','%(libdir)s/xorg/modules/extensions/libglx.*')
+
+        if Use.nvidia:
+            r.ByDefault(exceptions=['libGLX'])
+
