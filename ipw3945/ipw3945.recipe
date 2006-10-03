@@ -8,32 +8,33 @@ class Ipw3945(KernelModulePackageRecipe):
     buildRequires = [ 'mkinitrd:runtime', 'ipw3945config']
     name = 'ipw3945'
     version = '1.1.0'
-    
-    def unpack(r):
-	r.addArchive('%(name)s-%(version)s-pre2.tgz')
 
+    def unpack(r):
+        r.addArchive('http://belnet.dl.sourceforge.net/sourceforge/%(name)s/%(name)s-%(version)s.tgz')
+        r.addArchive('mirror://sourceforge/ieee80211/ieee80211-1.2.15.tgz', 
+                     dir='%(name)s-%(version)s')
     def build(r):
         r.Replace(('/sbin/depmod.*', '@/bin/true'),
                   ('^install: modules', 'install:'),
                   'Makefile')
-        r.Make(' CONFIG_IPW3945_MONITOR=y CONFIG_IEEE80211_RADIOTAP=y  KVER=%(kver)s modules '
-               'LINUXINCLUDE="-I/lib/modules/%(kver)s/include '
-               '-I/lib/modules/%(kver)s/build/include"')
+        #  CONFIG_IPW3945_QOS=y is disabled for a reason. breaks 2.6.18x
+
+        r.Make(' CONFIG_IPW3945_PROMISCUOUS=y '
+               ' CONFIG_IPW3945_MONITOR=y CONFIG_IEEE80211_RADIOTAP=y' 
+               ' KVER=%(kver)s modules '
+               ' IEEE80211_INC=%(builddir)s/ieee80211-1.2.15/'
+               ' IEEE80211_IGNORE_DUPLICATE=y ')
         # This makefile doesn't have a nice way to deal with DESTDIR
         r.Make('KVER=%(kver)s'
               ' KMISC=%(destdir)s/lib/modules/%(kver)s/drivers/net/wireless/'
-               ' LINUXINCLUDE="-I/lib/modules/%(kver)s/include'
-               ' -I/lib/modules/%(kver)s/build/include"'
+               ' IEEE80211_INC=%(builddir)s/ieee80211-1.2.15/'
+               ' IEEE80211_IGNORE_DUPLICATE=y '
                ' install')
-        r.Install('ipw3945.ko','%(destdir)s/lib/modules/%(kver)s/drivers/net/wireless/')
 
+        r.Install('ipw3945.ko','%(destdir)s/lib/modules/%(kver)s/drivers/net/wireless/')
         r.AutoDoc('CHANGES')
-        
+
         def policy(r):
-            r.Requires('ieee80211:lib',
-                       r'/lib/modules/%(kver)s/drivers/net/wireless/.*\.ko')
             r.Requires('ipw3945-fw:lib',
                        r'/lib/modules/%(kver)s/drivers/net/wireless/.*\.ko')
-            
 
-                
