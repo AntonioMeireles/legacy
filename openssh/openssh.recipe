@@ -1,0 +1,164 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class OpenSSH(CPackageRecipe):
+    name = 'openssh'
+    version = '4.4p1'
+
+    Flags.smartcard = False
+    Flags.smartcard.setShortDoc('Enable if you have smartcard support')
+    Flags.static_libcrypto = False
+    Flags.static_libcrypto.setShortDoc('Link to libcrypto statically')
+
+    buildRequires = [ 'openssl:devel', 'atk:devel', 'glib:devel', 'gtk:devel',
+                      'pango:devel', 'xorg-x11:devel', 'zlib:devel',
+                      'pkgconfig:devel', 'cairo:devel', 'fontconfig:devel',
+                      'freetype:devel', 'libpng:devel', 'groff:runtime',
+                      'net-tools:runtime', 'passwd:runtime', 'procps:runtime',
+                      'shadow:runtime', 'sysstat:runtime', 'sysvinit:runtime',
+                      'util-linux:runtime']
+
+    if Use.tcpwrappers:
+        buildRequires.append('tcp_wrappers:devel')
+
+    if Use.krb:
+        # need krb5:runtime to put /usr/kerberos/bin on the path
+        # to access krb5-config
+        buildRequires.extend(['krb5:devel', 'krb5:runtime'])
+
+    if Use.pam:
+        buildRequires.append('pam:devel')
+
+    if Use.gnome:
+        buildRequires.extend(['libgnome:devel', 'libgnomeui:devel' ])
+
+    def setup(r):
+        r.addArchive('ftp://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-%(version)s.tar.gz',
+                     keyid="86FF9C48")
+
+        r.addPatch('config.patch')
+        r.addAction("sed -i '/# chkconfig:/s/ 55/ 20/g' contrib/redhat/sshd.init")
+
+        extraConfig = ''
+
+        if Use.pam:
+            extraConfig += ' --with-pam'
+        else:
+            extraConfig += ' --without-pam --with-md5-passwords'
+
+        if r.Flags.smartcard:
+            extraConfig += ' --with-smartcard'
+
+        if not Use.ipv6:
+            extraConfig += ' --with-ipv4-default'
+
+        if Use.selinux:
+            extraConfig += ' --with-selinux'
+        else:
+            extraConfig += ' --without-selinux'
+
+        if Use.krb:
+            extraConfig += ' --with-kerberos5=$(krb5-config --prefix)'
+            r.macros.cppflags += (' -I$(krb5-config --prefix)/include'
+                                ' -I$(krb5-config --prefix)/include/gssapi')
+            r.macros.cflags += (' -I$(krb5-config --prefix)/include'
+                                ' -I$(krb5-config --prefix)/include/gssapi')
+            r.macros.ldflags += ' -L$(krb5-config --prefix)/%(lib)s'
+        else:
+            extraConfig += ' --without-kerberos'
+
+        if Use.tcpwrappers:
+            extraConfig += ' --with-tcp-wrappers'
+
+        r.Replace(r'initlog -c "\$SSHD \$OPTIONS" && success \|\| failure',
+                  '$SSHD $OPTIONS && success || failure',
+                  'contrib/redhat/sshd.init')
+        r.Configure('--sysconfdir=%(sysconfdir)s/ssh'
+                    ' --libexecdir=%(libexecdir)s/openssh'
+                    ' --datadir=%(datadir)s/openssh'
+                    ' --with-rsh=%(bindir)s/rsh'
+                    ' --with-default-path=/usr/local/bin:/bin:/usr/bin'
+                    ' --with-superuser-path=/usr/local/sbin:/usr/local/bin'
+                                           ':/sbin:/bin:/usr/sbin:/usr/bin'
+                    ' --with-privsep-path=%(localstatedir)s/empty/sshd' +
+                    extraConfig)
+
+        if r.Flags.static_libcrypto:
+            r.Replace('-lcrypto',
+                      '%(libdir)s/libcrypto.a',
+                      'Makefile')
+        r.Make()
+        r.MakeInstall()
+        r.Install('contrib/redhat/sshd.init', '%(initdir)s/sshd')
+        r.MakeDirs('%(localstatedir)s/empty/sshd', mode=0111)
+        r.SetModes('%(libexecdir)s/openssh/ssh-keysign', 04711)
+        r.SetModes('%(sysconfdir)s/ssh/{sshd_config,moduli}', 0600)
+        r.UtilizeUser('sshd', '%(sbindir)s/sshd')
+
+        r.Install('contrib/ssh-copy-id', '%(bindir)s/ssh-copy-id')
+
+        r.Install('contrib/ssh-copy-id.1', '%(mandir)s/man1/ssh-copy-id.1')
+
+        # fixing install modes
+        r.SetModes('%(bindir)s/*', 0755)
+        r.SetModes('%(mandir)s/*/*', 0644)
+
+        if Use.pam:
+            r.Install('contrib/redhat/sshd.pam',
+                      '%(sysconfdir)s/pam.d/sshd', mode=0600)
+
+        if not r.Flags.smartcard:
+            r.Remove('%(datadir)s/openssh/Ssh.bin')
+
+        if Use.gnome:
+            r.Make('gnome-ssh-askpass2', dir='contrib/')
+            r.Install('contrib/gnome-ssh-askpass2',
+                      '%(libexecdir)s/openssh/gnome-ssh-askpass',
+                      mode=0755)
+            r.Install('contrib/redhat/gnome-ssh-askpass.{csh,sh}',
+                      '%(sysconfdir)s/profile.d/', mode=0755)
+            r.PackageSpec('gnome-ssh-askpass',
+                          '%(libexecdir)s/openssh/gnome-ssh-askpass',
+                          '%(sysconfdir)s/profile.d/gnome-ssh-askpass.csh',
+                          '%(sysconfdir)s/profile.d/gnome-ssh-askpass.sh')
+
+        r.AutoDoc('OVERVIEW', 'RFC.nroff', 'WARNING.RNG')
+
+        r.PackageSpec('openssh-server',
+                      '%(localstatedir)s/empty/sshd',
+                      '%(libexecdir)s/openssh/sftp-server',
+                      '%(mandir)s/man5/sshd_config\.5.*',
+                      '%(mandir)s/man8/sshd\.8.*',
+                      '%(mandir)s/man8/sftp-server\.8.*',
+                      '%(sysconfdir)s/ssh/sshd_config',
+                      '%(sbindir)s/sshd',
+                      '%(initdir)s/sshd')
+
+        r.PackageSpec('openssh-server', '%(sysconfdir)s/pam.d/sshd')
+
+        r.PackageSpec('openssh-client',
+                      '%(sysconfdir)s/ssh/ssh_config',
+                      '%(bindir)s/ssh',
+                      '%(bindir)s/scp',
+                      '%(bindir)s/slogin',
+                      '%(bindir)s/ssh-agent',
+                      '%(bindir)s/ssh-add',
+                      '%(bindir)s/sftp',
+                      '%(bindir)s/ssh-keyscan',
+                      '%(mandir)s/man1/scp.*',
+                      '%(mandir)s/man1/slogin.*',
+                      '%(mandir)s/man1/ssh\.1.*',
+                      '%(mandir)s/man1/ssh-agent.*',
+                      '%(mandir)s/man1/ssh-add.*',
+                      '%(mandir)s/man1/ssh-keyscan.*',
+                      '%(mandir)s/man5/ssh_config.*',
+                      '%(mandir)s/man1/sftp.*')
+
+        # Init script requires ssh-keygen
+        r.Requires('openssh:runtime', '%(initdir)s/sshd')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
