@@ -1,0 +1,98 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Texlive(CPackageRecipe):
+    name = 'texlive'
+    version = '20051102'
+
+    buildRequires = [ 'glibc:devel', 'gcc-java:data', 'perl-SGMLS:perl',
+        'perl-Time-HiRes:perl', 'perl-XML-Parser:perl', 'perl:lib',
+        'perl:runtime', 'libstdc++:devel', 'ncurses:devel', 'xorg-x11:devel',
+        'bash:runtime', 'coreutils:runtime', 'ctags:runtime', 'gawk:runtime',
+        'mkisofs:runtime', 'util-linux:runtime', 'unzip:runtime',
+        'flex:runtime', 'byacc:runtime', 'bison:runtime', 'ed:runtime',
+        'gcc-c++:runtime', 'tcsh:runtime', ]
+
+    def setup(r):
+        r.macros.texmfdir = '%(datadir)s/texmf'
+        build='%(name)s-%(version)s'
+        instl='texmf-install'
+        r.mainDir(build)
+        r.addArchive('http://www.tug.org/texlive/Contents/live/texlive/source/source.tar.bz2', dir=build)
+        r.addArchive('http://people.rpath.com/~smithj/texlive2005-inst-20051102.iso', dir=instl)
+        r.addSource('texmf.cnf')
+        r.addSource('Mybuild')
+        r.addSource('texpackagesource.tagdescription', macros=True)
+        r.addSource('texdata.tagdescription', macros=True)
+        r.addSource('texpackagesource.taghandler', macros=True)
+        r.addSource('texdata.taghandler', macros=True)
+
+        r.Create('../texmf-install/install-script', contents='\n'.join((
+                  'd',
+                  '1', #install tex data into:
+                  '%(destdir)s/%(datadir)s',
+                  '3', #put post-install generated files into:
+                  '%(destdir)s/%(texmfdir)s',
+                  'r',
+                  'b', #say no to all 11 binary platforms:
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'n',
+                  'i')))
+
+        # iso unpacking doesn't restore permissions; so make all shell scripts
+        # executable:
+        r.Run("find . -name '*.sh' -execdir chmod +x '{}' ';' ", dir='../texmf-install')
+
+        # INSTALL the texmf data trees from texlive2005-inst-20051102.iso
+        # deleting some Windows stuff that never belonged anyway
+        # and merging texmf-dist (by far the larger) and texmf
+        # into one tree named texmf.
+        r.Run('./install-tl.sh < install-script', dir='../texmf-install')
+        r.Run("find %(destdir)s/%(texmfdir)s* -name '*.exe' -printf 'deleting %%p\n' -delete")
+        r.Run("find %(destdir)s/%(texmfdir)s* -name '*i386' -printf 'deleting %%p\n' -delete")
+        r.Copy('%(texmfdir)s/*', '%(texmfdir)s-dist/')
+        r.Remove('%(texmfdir)s', recursive=True)
+        r.Move('%(texmfdir)s-dist', '%(texmfdir)s')
+
+        # BUILD AND INSTALL the executables, from sources in source.tar.bz2
+        #FIXME: use a patch
+        r.Run('TEXMFMAIN=/usr/share/texmf DESTDIR=   ./Mybuild')
+        r.Move('inst/bin/*', '/usr/bin/')
+
+        # MERGE the texmf trees, giving precedence to files generated in
+        # the build, but preserving texmf.cnf from the data install.
+        r.Copy('%(texmfdir)s/web2c/texmf.cnf', 'texmf.cnf.temp')
+        r.Copy('inst/texmf', '%(texmfdir)s')
+
+        # PATCH the generated master config file texmf.cnf to work for us
+        #FIXME: use a patch
+        r.Copy('texmf.cnf', '%(texmfdir)s/web2c/texmf.cnf')
+
+
+        r.Move('%(texmfdir)s/doc/man/man1/*', '/usr/share/man/man1/')
+        r.Move('%(texmfdir)s/doc/man/man3/*', '/usr/share/man/man3/')
+        r.Move('%(texmfdir)s/doc/man/man5/*', '/usr/share/man/man5/')
+
+        r.Remove('%(mandir)s/man3/zlib.3*')
+
+        r.Install('texpackagesource.tagdescription',
+                  '%(tagdescriptiondir)s/texpackagesource')
+        r.Install('texdata.tagdescription', '%(tagdescriptiondir)s/texdata')
+
+        r.Install('texpackagesource.taghandler',
+                  '%(taghandlerdir)s/texpackagesource', mode=0755)
+        r.Install('texdata.taghandler', '%(taghandlerdir)s/texdata', mode=0755)
+
+        r.Run('cd %(destdir)s; find . | xargs chmod go-w')
