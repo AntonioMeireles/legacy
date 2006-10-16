@@ -1,0 +1,293 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+# FIXME: add linux-kernel-headers:devel requirement on glibc:devel
+
+class Glibc(PackageRecipe):
+    name = 'glibc'
+    version = '2.3.6'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+        buildRequires = [ 'cross-gcc-core', 'linux-kernel-headers:devel' ]
+    else:
+        buildRequires = [ 'gd:devel', 'libpng:devel', 'libstdc++:devel',
+                          'linux-kernel-headers:devel', 'perl:runtime',
+                          'perl:lib', 'zlib:devel', 'texinfo:runtime',
+                          'gettext:runtime' ]
+
+
+    # we don't specify --libdir here because glibc is smart enough
+    # to figure that out.  Furthermore, if we use --libdir=/usr/lib64
+    # on 64-bit systems, glibc will start looking for locale data in
+    # /usr/lib64/locale instead of /usr/lib/locale, which is bad.
+    baseConf = ('--target=%(target)s '
+                '--host=%(host)s '
+                '--build=%(build)s '
+                '--without-cvs '
+                '--disable-profile '
+                '--disable-debug '
+                '--enable-clocale=gnu '
+                '--prefix=/usr '
+                '--infodir=%(infodir)s ')
+
+    def setup(r):
+        # make the build more quiet
+        r.macros.parallelmflags += ' -s'
+        # FIXME: may want to add -finline-limit=2000 to CFLAGS
+
+        r.addArchive('http://ftp.gnu.org/gnu/glibc/glibc-%(version)s.tar.gz',
+                     keyid='7EBBD625')
+        r.addArchive('http://ftp.gnu.org/gnu/glibc/glibc-linuxthreads-%(version)s.tar.gz',
+                     keyid='7EBBD625', dir='%(maindir)s/')
+        r.addSource('hardlink.c')
+
+        r.addPatches()
+
+        r.install()
+
+        r.installCommon()
+        # LinkCount exceptions for Locale
+        r.LinkCount(exceptions='.*')
+        # /etc/ld.so.cache is a binary file, do not treat it as a config file.
+        r.Config(exceptions='%(sysconfdir)s/ld.so.cache')
+        # We never want to overwrite the contents of ld.so.cache
+        r.InitialContents('%(sysconfdir)s/ld.so.cache')
+        r.InitialContents('%(sysconfdir)s/nsswitch.conf')
+
+        # Shared library files in glibc do not have version numbers after
+        # the .so
+        r.SharedLibrary(inclusions=(r'..*\.so$', None, stat.S_IFDIR))
+        # make sure that /usr/lib/locale /usr/share/i18n go in the
+        # :locale component so they can be shared
+        r.ComponentSpec('locale','%(prefix)s/lib/locale/')
+        r.ComponentSpec('locale','%(datadir)s/i18n/')
+
+        if not Use.bootstrap:
+            # libpthread-using applications cannot be debugged without
+            # glibc:debuginfo installed, unless we leave some extra
+            # information in libpthread-.*.so
+            r.Strip(exceptions='%(essentiallibdir)s/libpthread-.*.so')
+            # First, copy source files into the builddir manually for
+            # debugging purposes, and modify the file to point to the
+            # new location for the sources.
+            r.Run('cd ..;'
+                  '%(debugedit)s -b $(dirname %(builddir)s) -d %(debugsrcdir)s'
+                  ' -l /dev/stdout'
+                  ' %(destdir)s%(essentiallibdir)s/libpthread-*.so |'
+                  ' xargs -0 -n 1 -i cp -a --parents {}'
+                  ' %(destdir)s%(debugsrcdir)s/')
+            # Make a copy from which to strip debugging information
+            r.Copy('%(essentiallibdir)s/libpthread-*.so',
+                   '%(essentiallibdir)s/libpthread-dbtp')
+            # Copy out the full debugging information for :debuginfo
+            r.MakeDirs('%(debuglibdir)s%(essentiallibdir)s')
+            r.Run('%(strip)s -f %(destdir)s%(debuglibdir)s%(essentiallibdir)s/'
+                   '$(basename'
+                   ' %(destdir)s/%(essentiallibdir)s/libpthread-*.so).debug'
+                   ' %(destdir)s%(essentiallibdir)s/libpthread-dbtp')
+            # Remove the (broken) copy from :lib
+            r.Remove('%(essentiallibdir)s/libpthread-dbtp')
+            # strip out only the bits that we actually want to remove
+            r.Run('strip -g --remove-section=.comment --remove-section=.note'
+                  ' %(destdir)s/%(essentiallibdir)s/libpthread-*.so')
+
+        # Remove tzselect from the ~bootstrap :runtime as tzdata:data req
+        # perl which we do not want to bootstrap.
+        if Use.bootstrap:
+            r.Remove('%(bindir)s/tzselect')
+
+        r.Requires('tzdata:data', '%(bindir)s/tzselect')
+        r.Provides('file', '%(essentialsbindir)s/ldconfig')
+        # make sure that ldconfig is installed
+        r.Requires('%(essentialsbindir)s/ldconfig', r'/%(lib)s/.*lib.*-.*so')
+        r.Requires('linux-kernel-headers:devel', '%(includedir)s/.*')
+
+        for utilFile in 'mtrace', 'pcprofiledump', 'sprof', 'xtrace', 'memusage', 'memusagestat':
+            r.PackageSpec('glibc-utils', '%(bindir)s/' + utilFile)
+
+        for develFile in 'gencat', 'rpcgen', 'localedef':
+            r.ComponentSpec('glibc:devel', '%(bindir)s/' + develFile)
+
+        r.TagSpec('info-file', '/usr/share/info/')
+
+        r.PackageSpec('nscd', 
+                '%(sbindir)s/nscd.*', 
+                '%(initdir)s/nscd',
+                '%(sysconfdir)s/nscd.conf')
+        r.TagSpec('initscript', '%(initdir)s/')
+
+    def addPatches(r):
+        """
+        add any patches needed for glibc
+        """
+        # Do not build locale as an archive
+        r.addPatch('glibc-2.3.5-locale-build.patch')
+        # fix glibc for new assembler
+        r.addPatch('glibc-2.3.6-binutils-2.16.patch', level=0)
+
+    def build(r, conf, objDir='obj'):
+        """
+        configure and build glibc for a given configration
+
+        @param conf: the configuration flags to pass to configure.
+        @param objDir: the location that object files will be placed during
+                       the build
+        """
+        r.ManualConfigure(conf, objDir=objDir)
+        r.Make("PARALLELMFLAGS='%(parallelmflags)s'", subDir=objDir)
+
+    def buildExtraLibraries(r, conf, threadmodel, subdir):
+        """
+        build and install only the libraries needed into the destdir
+
+        @param conf: the configuration flags to pass to configure.
+        @param threadmodel: the threadding model to use
+        @param subdir: the subdirectory of /lib/ that the libraries should
+                       be installed in
+        """
+        objdir = 'obj-' + subdir
+
+        # XXX add rtkio if enabled
+        subdirs = 'math rt'
+        if threadmodel == 'nptl':
+            subdirs += ' nptl nptl_db'
+            conf += ' --enable-add-ons=nptl'
+        elif threadmodel == 'linuxthreads':
+            subdirs += ' linuxthreads linuxthreads_db'
+            conf += ' --enable-add-ons=linuxthreads'
+        else:
+            raise ValueError, threadmodel
+
+        r.build(conf, objdir)
+        # normally glibc uses elf/sln to create symlinks, but we didn't
+        # build that.  So use the system copy instead.
+        r.Make('install_root=%%(destdir)s/%s symbolic-link-prog=/sbin/sln '
+               '"subdirs=%s" install' %(subdir, subdirs), subDir=objdir)
+        for f in ('libc', 'libm', 'libpthread', 'libthread_db',
+                  'librtkio', 'librt'):
+            r.Move('/%s/%%(essentiallibdir)s/%s[.-]*' %(subdir, f),
+                   '%%(essentiallibdir)s/%s/' %subdir)
+        r.Remove('/%s' %subdir, recursive=True)
+        r.SharedLibrary(subtrees='/lib/%s' %subdir)
+
+    def buildBootstrap(r):
+        r.Environment('BUILD_CC', '%(buildcc)s')
+        conf = r.baseConf + ('--enable-kernel=2.4.3 '
+                             '--without-gd '
+                             '--without-__thread '
+                             '--without-tls '
+                             '--enable-add-ons=linuxthreads '
+                             '--with-headers=%(headerpath)s ')
+        # glibc-redhat-%(glibcdate)s adds -lgcc_eh, which we don't
+        # have yet.  Remove it for bootstrap.
+        r.Run('sed -i "s/-lgcc -lgcc_eh/-lgcc/g" Makeconfig')
+        r.Run('sed -i "s/-lgcc_eh/-lgcc/g" Makeconfig')
+        r.build(conf, 'obj')
+        r.MakeInstall(rootVar='install_root', subDir='obj')
+
+        # since we're cross compiling and placing this libc in
+        # a sys-root, we need to modify the linker scripts to remove
+        # the absolute paths (since that isn't where the libraries
+        # actually are)
+        r.Run("""
+for file in `find %(destdir)s -name "*.so" -exec grep -l nonshared {} \;`; do
+    sed -i 's,/usr/lib/,,g;s,/usr/lib64/,,g;s,/lib/,,g;s,/lib64/,,g' $file
+done""")
+
+    def install(r):
+        if Use.bootstrap:
+            r.buildBootstrap()
+            # pt_chown is no longer needed on systems with devpts.  We
+            # include it just in case someone wants to run without devpts
+            # mounted, in which case they need to chmod 04755 it on their
+            # local system
+            r.SetModes('%(libexecdir)s/pt_chown', 0755)
+            # we need ld.so.cache to exit for the bootstrap version so
+            # it can be owned.  (without this touch it wouldn't).
+            # Otherwise, upgrading from the bootstrap version to the
+            # non-bootstrap version complains of overwriting
+            # the unowned ld.so.cache
+            r.Create('%(sysconfdir)s/ld.so.cache')
+            # the bootstrap case is simple, there's nothing left to do
+            return
+
+        if Arch.x86_64 or Arch.ia64 or Arch.sparc64:
+            # XXX add s380x to this list
+            r.macros.kernelver = '2.4.0'
+        elif Arch.ppc64:
+            r.macros.kernelver = '2.4.19'
+        else:
+            r.macros.kernelver = '2.2.5'
+
+        conf = r.baseConf + ('--build=%(target)s '
+                             '--with-headers=%(includedir)s ')
+
+        # XXX change to a Use flag in the future
+        Flags.tls = False
+        r.macros.objdir = "obj"
+        if Arch.x86 or Arch.x86_64:
+            conf += '--with-tls '
+            Flags.tls = True
+
+        if Use.nptl:
+            if not Flags.tls:
+                raise RuntimeError, 'invalid configuration: nptl requires tls'
+            # build nptl library and put it in /lib/tls. These libraries
+            # require Linux kernel ABI 2.4.20
+            r.buildExtraLibraries(conf + ('--enable-kernel=2.4.20 '
+                                          '--with-__thread'), 'nptl', 'tls')
+            # XXX set up development libs and headers for nptl
+            # since we build fallback libraries, nptl is not required
+            Use.nptl.setRequired(False)
+            r.macros.objdir = "obj-tls"
+
+        if Arch.x86.i686:
+            # Build libraries that support floating stacks. These
+            # libraries require Linux kernel ABI version 2.4.1
+            r.buildExtraLibraries(conf + ('--enable-kernel=2.4.1 '
+                                          '--without-__thread'),
+                                  'linuxthreads', 'i686')
+            r.macros.objdir = "obj-i686"
+
+        # now build the vanilla fallback libs.  These require the
+        # default Linux ABI version for this architecture
+        r.build(conf + ('--enable-add-ons=linuxthreads '
+                        '--without-__thread '
+                        '--enable-kernel=%(kernelver)s '), 'obj')
+        r.MakeInstall(rootVar='install_root', subDir='obj')
+        # pt_chown is no longer needed on systems with devpts.  We
+        # include it just in case someone wants to run without devpts
+        # mounted, in which case they need to chmod 04755 it on their
+        # local system
+        r.SetModes('%(libexecdir)s/pt_chown', 0755)
+
+        r.addSource('nsswitch.conf', dest='%(sysconfdir)s/')
+        
+        #nscd package items
+        r.Install('%(objdir)s/nscd/nscd', '%(sbindir)s')
+        r.Install('%(objdir)s/nscd/nscd_nischeck', '%(sbindir)s')
+        r.Install('nscd/nscd.init', '%(initdir)s/nscd', mode=0755)
+        r.Install('nscd/nscd.conf', '%(sysconfdir)s/')
+
+    def installCommon(r):
+        # we use Make instead of MakeInstall here because install-locales
+        # benefits from -jN, but MakeInstall never uses -jN
+        r.Make('-C ../localedata install-locales objdir=`pwd` '
+               'install_root=%(destdir)s', subDir='obj')
+        r.Create('%(sysconfdir)s/ld.so.conf')
+        # We never want to overwrite the contents of ld.so.conf
+        r.Config(exceptions='%(sysconfdir)s/ld.so.conf')
+        r.InitialContents('%(sysconfdir)s/ld.so.conf')
+        # zoneinfo files come from the tzdata package
+        r.Remove('%(datadir)s/zoneinfo', recursive=True)
+        r.Remove('/etc/localtime')
+        # these belong in quota package
+        r.Remove('%(includedir)s/rpcsvc/rquota.{h,h}')
+
+        # hard link duplicate locale files to save space
+        r.Run('%(buildcc)s -O2 -o hardlink hardlink.c')
+        r.Run('./hardlink -vc %(destdir)s/%(prefix)s/lib/locale')
