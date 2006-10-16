@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2004-2006 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -17,7 +17,9 @@ class Glibc(PackageRecipe):
         buildRequires = [ 'gd:devel', 'libpng:devel', 'libstdc++:devel',
                           'linux-kernel-headers:devel', 'perl:runtime',
                           'perl:lib', 'zlib:devel', 'texinfo:runtime',
-                          'gettext:runtime' ]
+                          'gettext:runtime', 'gcc:runtime', 'gcc:devel',
+                          'glibc:devel', 'autoconf:runtime', 'make:runtime',
+                          'diffutils:runtime', 'elfutils:runtime', ]
 
 
     # we don't specify --libdir here because glibc is smart enough
@@ -43,6 +45,7 @@ class Glibc(PackageRecipe):
                      keyid='7EBBD625')
         r.addArchive('http://ftp.gnu.org/gnu/glibc/glibc-linuxthreads-%(version)s.tar.gz',
                      keyid='7EBBD625', dir='%(maindir)s/')
+        r.addPatch('glibc-bz-786.patch')
         r.addSource('hardlink.c')
 
         r.addPatches()
@@ -114,8 +117,8 @@ class Glibc(PackageRecipe):
 
         r.TagSpec('info-file', '/usr/share/info/')
 
-        r.PackageSpec('nscd', 
-                '%(sbindir)s/nscd.*', 
+        r.PackageSpec('nscd',
+                '%(sbindir)s/nscd.*',
                 '%(initdir)s/nscd',
                 '%(sysconfdir)s/nscd.conf')
         r.TagSpec('initscript', '%(initdir)s/')
@@ -138,7 +141,7 @@ class Glibc(PackageRecipe):
                        the build
         """
         r.ManualConfigure(conf, objDir=objDir)
-        r.Make("PARALLELMFLAGS='%(parallelmflags)s'", subDir=objDir)
+        r.Make("PARALLELMFLAGS='%(parallelmflags)s'", dir=objDir)
 
     def buildExtraLibraries(r, conf, threadmodel, subdir):
         """
@@ -166,7 +169,7 @@ class Glibc(PackageRecipe):
         # normally glibc uses elf/sln to create symlinks, but we didn't
         # build that.  So use the system copy instead.
         r.Make('install_root=%%(destdir)s/%s symbolic-link-prog=/sbin/sln '
-               '"subdirs=%s" install' %(subdir, subdirs), subDir=objdir)
+               '"subdirs=%s" install' %(subdir, subdirs), dir=objdir)
         for f in ('libc', 'libm', 'libpthread', 'libthread_db',
                   'librtkio', 'librt'):
             r.Move('/%s/%%(essentiallibdir)s/%s[.-]*' %(subdir, f),
@@ -187,7 +190,7 @@ class Glibc(PackageRecipe):
         r.Run('sed -i "s/-lgcc -lgcc_eh/-lgcc/g" Makeconfig')
         r.Run('sed -i "s/-lgcc_eh/-lgcc/g" Makeconfig')
         r.build(conf, 'obj')
-        r.MakeInstall(rootVar='install_root', subDir='obj')
+        r.MakeInstall(rootVar='install_root', dir='obj')
 
         # since we're cross compiling and placing this libc in
         # a sys-root, we need to modify the linker scripts to remove
@@ -258,7 +261,7 @@ done""")
         r.build(conf + ('--enable-add-ons=linuxthreads '
                         '--without-__thread '
                         '--enable-kernel=%(kernelver)s '), 'obj')
-        r.MakeInstall(rootVar='install_root', subDir='obj')
+        r.MakeInstall(rootVar='install_root', dir='obj')
         # pt_chown is no longer needed on systems with devpts.  We
         # include it just in case someone wants to run without devpts
         # mounted, in which case they need to chmod 04755 it on their
@@ -266,7 +269,7 @@ done""")
         r.SetModes('%(libexecdir)s/pt_chown', 0755)
 
         r.addSource('nsswitch.conf', dest='%(sysconfdir)s/')
-        
+
         #nscd package items
         r.Install('%(objdir)s/nscd/nscd', '%(sbindir)s')
         r.Install('%(objdir)s/nscd/nscd_nischeck', '%(sbindir)s')
@@ -277,7 +280,7 @@ done""")
         # we use Make instead of MakeInstall here because install-locales
         # benefits from -jN, but MakeInstall never uses -jN
         r.Make('-C ../localedata install-locales objdir=`pwd` '
-               'install_root=%(destdir)s', subDir='obj')
+               'install_root=%(destdir)s', dir='obj')
         r.Create('%(sysconfdir)s/ld.so.conf')
         # We never want to overwrite the contents of ld.so.conf
         r.Config(exceptions='%(sysconfdir)s/ld.so.conf')
