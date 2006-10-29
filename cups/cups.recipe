@@ -1,0 +1,146 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Cups(RPMPackageRecipe, CPackageRecipe):
+    name = 'cups'
+    version = '1.2.2'
+
+    buildRequires = [ 'pam:devel', 'xorg-x11:devel', 'openssl:devel',
+                      'pkgconfig:devel', 'dbus:devel', 'libjpeg:devel',
+                      'libpng:devel', 'libtiff:devel', 'zlib:devel',
+                      'groff:runtime', 'perl:runtime', 'php:runtime',
+                      'libstdc++:devellib',  'acl:devel', 'libstdc++:devel',
+                      'openldap:devel', 'desktop-file-utils:runtime',
+                      'gtk:runtime', 'php:devel' ]
+
+    rpmRelease = '8'
+    rpmPatches = [ 'cups-1.1.15-initscript.patch', 'cups-no-gzip-man.patch',
+        'cups-1.1.16-system-auth.patch', 'cups-ext.patch',
+        'cups-locale.patch', 'cups-language.patch',
+        'cups-maxlogsize.patch', 'cups-pid.patch', ]
+    tarballName = '%(name)s-%(version)s-source.tar.bz2'
+
+    def setup(r):
+        r.unpack()
+        r.addSource('cups.init' , rpm=r.srpm)
+        r.addSource('cupsprinter.png' , rpm=r.srpm)
+        r.addSource('cups-lpd' , rpm=r.srpm)
+        r.addSource('pstoraster' , rpm=r.srpm, dest='pstoraster.new')
+        r.addSource('pstoraster.convs' , rpm=r.srpm)
+        r.addSource('postscript.ppd.gz' , rpm=r.srpm)
+        r.addSource('cups.logrotate' , rpm=r.srpm)
+        r.addSource('ncp.backend' , rpm=r.srpm)
+        r.addSource('cups.cron' , rpm=r.srpm)
+
+        # Use local cups.conf to work with upstream dbus namespace
+        r.addSource('cups.conf')
+
+        #r.Replace((r'^#(Printcap\s+/etc/printcap)', r'\1',),
+        #          (r'^#(MaxLogSize\s+0)', r'\1'),
+        #          'conf/cupsd.conf.in')
+        r.Copy('cups-lpd', 'cups-lpd.real')
+        #r.Replace(r'\@LIBDIR\@', '%(libdir)s', 'cups-lpd.real')
+        r.Replace('^.SILENT:', '', 'Makedefs.in')
+
+        r.macros.cflags += ' -fPIC'
+
+        if Use.ssl:
+            r.macros.cflags += ' `pkg-config --cflags openssl` -I%(krbprefix)s/include/ '
+            r.macros.ldflags += ' `pkg-config --libs-only-L openssl` -L%(krbprefix)s/%(lib)s/ '
+
+        r.Configure('--with-docdir=%(thisdocdir)s')
+
+        if Arch.ia64:
+            r.Make('OPTIM="%(cflags)s -O0"')
+        else:
+            r.Make('OPTIM="%(cflags)s"')
+
+
+        r.MakeInstall(rootVar='BUILDROOT')
+        r.Install('cups.init', '%(initdir)s/cups', mode=0755)
+        r.Run('find %(destdir)s%(datadir)s/cups/model -name "*.ppd" '
+              ' |xargs gzip -9f')
+
+        if Use.alternatives:
+            for file in 'cancel lp lpq lpr lprm lpstat'.split(' '):
+                r.Move('%(bindir)s/' + file, '%(bindir)s/' + file + '.cups')
+                r.Move('%(mandir)s/man1/' + file + '.1',
+                       '%(mandir)s/man1/' + file + '-cups.1')
+            r.Move('%(sbindir)s/lpc', '%(sbindir)s/lpc.cups')
+            r.Move('%(mandir)s/man8/lpc.8', '%(mandir)s/man8/lpc-cups.8')
+
+        r.Install('cupsprinter.png', '%(datadir)s/pixmaps/')
+        r.Install('cups-lpd.real', '%(sysconfdir)s/xinetd.d/cups-lpd',
+                  mode=0755)
+        r.Install('cups.logrotate', '%(sysconfdir)s/logrotate.d/cups',
+                  mode=0644)
+        r.Install('ncp.backend', '%(libdir)s/cups/backend/ncp')
+        r.Symlink('%(bindir)s/smbspool', '%(libdir)s/cups/backend/smb')
+        r.Symlink('%(thisdocdir)s', '%(datadir)s/%(name)s/doc')
+
+        for dir in 'admin classes jobs printers'.split(' '):
+            r.MakeDirs('%(thisdocdir)s/' + dir)
+            r.Create('%(thisdocdir)s/' + dir + '/index.html',
+            contents = '''<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="refresh" content="2; URL=http://localhost:631/%s" />
+<title>CUPS $i</title>
+</head>
+<body bgcolor="#cccc99" text="#000000" link="#0000ff" vlink="#ff00ff">
+<p>You are trying to access the CUPS admin frontend through reading the files.
+The correct way to access the CUPS admin frontend is pointing your browser at
+<a href="http://localhost:631/">http://localhost:631/</a>.</p>
+<p>You should be automatically redirected to the correct URL in 2 seconds.
+If your browser does not support redirection, please use
+<a href="http://localhost:631/%s">this link</a>.</p>
+</body>
+</html>''' % (dir, dir))
+
+        # Ship pstoraster (RH BZ #69573).
+        r.Install('pstoraster.new', '%(libdir)s/cups/filter/pstoraster',
+                  mode=0755)
+        r.Install('pstoraster.convs', '%(sysconfdir)s/cups/')
+
+        # Ship a generic postscript PPD file (RH BZ#73061)
+        r.Install('postscript.ppd.gz', '%(datadir)s/cups/model/')
+
+        # D-BUS configuration.
+        r.Install('cups.conf', '%(sysconfdir)s/dbus-1/system.d/')
+
+        r.DanglingSymlinks(exceptions=['%(mandir)s/man1/.*',
+                                       '%(libdir)s/cups/backend/smb'])
+        r.MakeDirs('%(localstatedir)s/spool/cups')
+        r.MakeDirs('%(sysconfdir)s/cups/certs/', mode=0711)
+        r.MakeDirs('%(sysconfdir)s/cups/ppd/', mode=0711)
+        r.MakeDirs('%(localstatedir)s/log/cups')
+
+        r.SetModes('%(bindir)s/lppasswd', 04755)
+        r.SetModes('%(localstatedir)s/spool/cups/tmp/', 01700)
+        r.SetModes('%(localstatedir)s/spool/cups/', 0710)
+        r.SetModes('%(sysconfdir)s/cups/cupsd.conf', 0640)
+        r.Ownership('root', 'sys',
+            '%(localstatedir)s/spool/cups/tmp/',
+            '%(localstatedir)s/spool/cups/',
+            '%(sysconfdir)s/cups',
+            '%(sysconfdir)s/cups/certs',
+            '%(sysconfdir)s/cups/ppd',
+            '%(sysconfdir)s/cups/(classes|cupsd|printers).conf')
+        r.Ownership('lp', 'sys', '%(localstatedir)s/log/cups')
+        r.Ownership('root', 'sys', '%(localstatedir)s/spool/cups')
+
+        r.Remove('%(mandir)s/cat?', '%(mandir)s/*/cat?', recursive=True)
+
+        r.ExcludeDirectories(exceptions=['%(localstatedir)s/spool/cups',
+                                         '%(sysconfdir)s/cups/certs',
+                                         '%(sysconfdir)s/cups/ppd',
+                                         '%(localstatedir)s/log/cups'])
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('espgs:runtime', '%(libdir)s/cups/filter/pstoraster')
+        # put filters/backend progs in :runtime
+        r.ComponentSpec('cups:runtime', '%(libdir)s/cups/')
