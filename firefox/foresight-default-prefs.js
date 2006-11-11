@@ -7,5 +7,5 @@ pref("startup.homepage_override_url", "http://www.foresightlinux.org");
 pref("startup.homepage_welcome_url, "http://www.foresightlinux.org");
 pref("general.smoothScroll",                true);
 pref("general.useragent.vendor", "Foreight");
-pref("general.useragent.vendorSub", "FIREFOX_RPM_VR");
+pref("general.useragent.vendorSub", "2.0");
 pref("intl.locale.matchOS", true);
