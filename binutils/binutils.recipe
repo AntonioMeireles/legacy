@@ -1,0 +1,56 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Binutils(CPackageRecipe):
+    name = 'binutils'
+    version = '2.17.50.0.6'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+        buildRequires = [ 'cross-gcc', 'glibc' ]
+    else:
+        buildRequires = [ 'flex:runtime', 'byacc:runtime', 'gettext:runtime',
+            'install-info:runtime', 'perl:runtime', 'autoconf:runtime',
+            'automake:runtime', 'texinfo:runtime', ]
+        # perl:runtime is required for pod2man, used to generate man pages.
+        # texinfo needed to build info pages
+
+    # True if should create <target>-ar -> ar link in usr/bin
+    createLinks = True
+
+    def setup(r):
+        r.addArchive('http://ftp.kernel.org/pub/linux/devel/binutils/binutils-%(version)s.tar.bz2')
+        r.addPatch('binutils-2.14.90.0.8-ltconfig-multilib.patch')
+        r.configure()
+        r.install()
+
+    def configure(r):
+        conf = ''
+        if not Use.bootstrap:
+            conf += ' --enable-shared'
+        r.Configure(conf)
+
+    def install(r):
+        r.Make()
+        r.MakeInstall()
+
+        # Prevent programs to link against libbfd and libopcodes dynamically,
+        # they are changing far too often
+        r.Remove('%(libdir)s/lib{bfd,opcodes}.so')
+
+        if r.createLinks:
+            for prog in ('addr2line ar as c++filt gprof ld nm objcopy objdump'
+                         ' ranlib readelf size strings strip').split():
+                r.Link(('%(target)s-' + prog) % r.macros,
+                       ('%(bindir)s/' + prog) % r.macros)
+
+        r.TestSuite('binutils/', 'make check-DEJAGNU')
+        r.TestSuite('gas/', 'make check-DEJAGNU')
+        r.TestSuite('ld/', 'make check-DEJAGNU')
+        r.TestSuite('libiberty/testsuite', 'make check-cplus-dem')
+
+        # this package likes its hardlinks...
+        r.LinkCount(exceptions='%(prefix)s/')
