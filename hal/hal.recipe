@@ -4,35 +4,47 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Hal(CPackageRecipe):
-    buildRequires = [ 'expat:devel', 'glib:devel', 'dbus:devel', 
-        'hwdata:runtime', 'libcap:devel', 'popt:devel',
-        'dbus-glib:devellib', 'glibc:devel', 'libusb:devel',
-        'perl-XML-Parser:perl', 'gnome-python:python',
-        'pygtk:python', 'binutils:runtime', 'docbook-utils:runtime',
-        'doxygen:runtime', 'gawk:runtime', 'gettext:runtime',
-        'glibc:runtime', 'perl:runtime', 'pkgconfig:devel',
-        'dbus-glib:devel', 'pygobject:python' ]
-
-    extraConfig = '--disable-docbook-docs --enable-hotplug-map --with-init-scripts=redhat --with-os-type=redhat --with-pid-file=%(localstatedir)s/run/haldaemon.pid --enable-sysfs-carrier --with-backend=linux2'
-    
-    extraConfig += '  --with-hal-user=root   --with-hal-group=root' 
-    #workaround solong the conary group / user support is broken. Otherway the dbus will not start
-
+class Hal(AutoPackageRecipe):
     name = 'hal'
-    version = '0.5.7.1'
+    version = '0.5.8.1'
 
-    def setup(r):
-        r.addArchive('http://freedesktop.org/~david/dist/%(name)s-%(version)s.tar.gz')
-        r.addPatch('hal-0.5.7-dbus-deprecated.patch')
-        r.addPatch('hal-0.5.7-lid-open-fix.patch')
-        r.addPatch('hal-0.5.7-fix-fedora-power-save.patch')
-        r.addPatch('hal-0.5.7-pcmcia-readers.patch')
+    # adding gnome-python creats a build req loop
+    # gnome-vfs -> hal -> gnome-python -> gnome-vfs
+    buildRequires = [ 'expat:devel', 'glib:devel', 'dbus-glib:devel',
+                      'dbus:devel', 'python:devel', 'hwdata:config',
+                      'doxygen:runtime', 'libusb:devel', 'popt:devel',
+                      'userspace-kernel-headers:devel', 'pkgconfig:devel',
+                      'gettext:runtime', 'perl:runtime', 'pygobject:python',
+                      'perl-XML-Parser:perl', 'pygtk:python',
+                      'PolicyKit:devel', ]
 
-        r.addAction("sed -i '/# chkconfig:/s/ 98/ 09/g' hald/haldaemon.in")
+    extraConfig = ( '--with-os-type=redhat --with-init-scripts=redhat '
+                    '--with-pid-file=%(localstatedir)s/run/haldaemon.pid '
+                    '--with-stab-file=%(localstatedir)s/lib/pcmcia/stab '
+                    '--enable-pcmcia-support --enable-sysfs-carrier '
+                    '--enable-hotplug-map --enable-acpi-acpid '
+                    '--disable-acpi-proc --disable-selinux' )
+
+    if Use.builddocs:
+        buildRequires.extend(['docbook-utils:runtime', 'openjade:runtime'])
+    else:
+        extraConfig += ' --disable-docbook-docs'
+
+    def unpack(r):
+        r.addArchive('http://freedesktop.org/~david/dist/')
+
+    def configure(r):
+        r.Replace('# chkconfig: 345 98 02', '# chkconfig: 345 98 09',
+                  'hald/haldaemon.in')
+        r.MakeDirs('%(sysconfdir)s/hal/fdi/information',
+                   '%(sysconfdir)s/hal/fdi/policy',
+                   '%(sysconfdir)s/hal/fdi/preprobe')
         r.Configure(r.extraConfig)
-        r.Make()
-        r.MakeInstall()
-        r.PackageSpec('hal-gnome', '%(datadir)s/%(name)s/device-manager/',
-            '%(bindir)s/hal-device-manager')
+
+    def policy(r):
         r.TagSpec('initscript', '%(initdir)s/')
+        r.UtilizeUser('haldaemon', r'%(sysconfdir)s/.*/hal\.conf')
+        r.ExcludeDirectories(exceptions=['%(datadir)s/hal/'])
+        r.ExcludeDirectories(exceptions=['%(sysconfdir)s/hal/'])
+        r.PackageSpec('hal-gnome', '%(datadir)s/%(name)s/device-manager/',
+                                   '%(bindir)s/hal-device-manager')
