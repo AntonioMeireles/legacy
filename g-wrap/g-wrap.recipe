@@ -1,0 +1,50 @@
+#
+# Portions Copyright (c) 2005 Specifix, Inc
+# 
+
+class GWrap(AutoPackageRecipe):
+
+    name = 'g-wrap'
+    version = '1.9.6'
+
+    buildRequires = [  
+                      'binutils:runtime',
+                      'gawk:runtime',
+                      'glib:devel',
+                      'gmp:devel',
+                      'gtk:devel',
+                      'guile:devel',
+                      'slib', 
+                      'pkgconfig:devel',
+    ]
+
+    def unpack(r):
+        srpm = "http://download.fedora.redhat.com/pub/fedora/linux/core" \
+                 "/6/source/SRPMS/g-wrap-1.9.6-7.1.src.rpm"
+        # We ignore the ia64 stuff
+        r.addArchive("%(name)s-%(version)s.tar.gz", rpm=srpm)
+        r.addPatch("g-wrap-info.patch", rpm=srpm)
+        r.addPatch("g-wrap-glib2.patch", rpm=srpm)
+        r.addPatch("g-wrap-staticffi.patch", rpm=srpm)
+        r.addPatch("g-wrap-consistent.patch", rpm=srpm)
+
+    def configure(r):
+	r.Configure("--disable-static")
+
+    def makeinstall(r):
+	r.MakeInstall()
+
+        r.Move("%(includedir)s/ffi*", "%(libdir)s/g-wrap/include/")
+        r.Move("%(includedir)s/g-wrap/ffi-support.h", "%(libdir)s/g-wrap/include/g-wrap-2.0-ffi-target.h")
+        r.Create("%(includedir)s/g-wrap/ffi-support.h", contents="""
+/* Wrapper for target-specific ffi-support file. */
+#include <g-wrap-2.0-ffi-target.h>
+""")
+        r.Remove("%(libdir)s/libffi.*")
+        r.Replace("-lffi", "", "%(libdir)s/pkgconfig/*", allowNoChange=True)
+        r.Replace("<ffi", "<g-wrap/ffi", "%(includedir)s/g-wrap/*.h", allowNoChange=True)
+        r.Replace("%(libdir)s/libffi.la", "", "%(libdir)s/*.la", allowNoChange=True)
+
+    def policy(r):
+        r.ComponentSpec("lib", "libgw-guile-gw-glib\.so$")
+        r.ComponentSpec("lib", "libgw-guile-standard\.so$")
