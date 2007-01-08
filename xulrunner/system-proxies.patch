@@ -1,0 +1,1146 @@
+Index: netwerk/base/public/nsISystemProxySettings.idl
+===================================================================
+RCS file: netwerk/base/public/nsISystemProxySettings.idl
+diff -N netwerk/base/public/nsISystemProxySettings.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ netwerk/base/public/nsISystemProxySettings.idl	30 Dec 2005 03:11:26 -0000
+@@ -0,0 +1,65 @@
++/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Novell code.
++ *
++ * The Initial Developer of the Original Code is Novell.
++ * Portions created by the Initial Developer are Copyright (C) 2005
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *    Robert O'Callahan (rocallahan@novell.com)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsISupports.idl"
++#include "nsIURI.idl"
++
++%{C++
++#define NS_SYSTEMPROXYSETTINGS_CONTRACTID "@mozilla.org/system-proxy-settings;1"
++%}
++
++/** 
++ * This interface allows the proxy code to use platform-specific proxy
++ * settings when the proxy preference is set to "automatic discovery". If it can
++ * load a service with the above contract ID, it will use it to determine the
++ * PAC file name. If no PAC file is specified then the service itself will behave
++ * like a PAC file.
++ */
++[scriptable, uuid(a9f3ae38-b769-4e0b-9317-578388e326c9)]
++interface nsISystemProxySettings : nsISupports
++{
++    /**
++     * If non-empty, use this PAC file. If empty, call getProxyForURI instead.
++     */
++    readonly attribute AUTF8String PACURI;
++    
++    /**
++     * See nsIProxyAutoConfig::getProxyForURI; this function behaves exactly
++     * the same way.
++     */
++    ACString getProxyForURI(in nsIURI aURI);
++};
+Index: allmakefiles.sh
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/allmakefiles.sh,v
+retrieving revision 1.608
+diff -u -t -p -1 -2 -r1.608 allmakefiles.sh
+--- allmakefiles.sh	7 Mar 2006 18:36:51 -0000	1.608
++++ allmakefiles.sh	14 Mar 2006 01:07:40 -0000
+@@ -965,24 +965,25 @@ toolkit/components/autocomplete/src/Make
+ toolkit/components/Makefile
+ toolkit/components/build/Makefile
+ toolkit/components/commandlines/Makefile
+ toolkit/components/commandlines/public/Makefile
+ toolkit/components/commandlines/src/Makefile
+ toolkit/components/console/Makefile
+ toolkit/components/cookie/Makefile
+ toolkit/components/downloads/public/Makefile
+ toolkit/components/downloads/Makefile
+ toolkit/components/downloads/src/Makefile
+ toolkit/components/filepicker/Makefile
+ toolkit/components/gnome/Makefile
++toolkit/components/unixproxy/Makefile
+ toolkit/components/help/Makefile
+ toolkit/components/history/Makefile
+ toolkit/components/history/public/Makefile
+ toolkit/components/history/src/Makefile
+ toolkit/components/passwordmgr/Makefile
+ toolkit/components/passwordmgr/base/Makefile
+ toolkit/components/passwordmgr/resources/Makefile
+ toolkit/components/printing/Makefile
+ toolkit/components/satchel/Makefile
+ toolkit/components/satchel/public/Makefile
+ toolkit/components/satchel/src/Makefile
+ toolkit/components/startup/Makefile
+Index: netwerk/base/src/nsPACMan.h
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/netwerk/base/src/nsPACMan.h,v
+retrieving revision 1.3
+diff -u -t -p -1 -2 -r1.3 nsPACMan.h
+--- netwerk/base/src/nsPACMan.h	30 Jun 2005 20:21:34 -0000	1.3
++++ netwerk/base/src/nsPACMan.h	14 Mar 2006 01:07:40 -0000
+@@ -119,24 +119,32 @@ public:
+    * processed once the PAC file finishes loading.
+    *
+    * @param pacURI
+    *        The nsIURI of the PAC file to load.
+    */
+   nsresult LoadPACFromURI(nsIURI *pacURI);
+ 
+   /**
+    * Returns true if we are currently loading the PAC file.
+    */
+   PRBool IsLoading() { return mLoader != nsnull; }
+ 
++  /**
++   * Returns true if the given URI matches the URI of our PAC file.
++   */
++  PRBool IsPACURI(nsIURI *uri) {
++    PRBool result;
++    return mPACURI && NS_SUCCEEDED(mPACURI->Equals(uri, &result)) && result;
++  }
++
+ private:
+   NS_DECL_NSISTREAMLOADEROBSERVER
+   NS_DECL_NSIINTERFACEREQUESTOR
+   NS_DECL_NSICHANNELEVENTSINK
+ 
+   ~nsPACMan();
+ 
+   /**
+    * Cancel any existing load if any.
+    */
+   void CancelExistingLoad();
+ 
+@@ -144,32 +152,24 @@ private:
+    * Process mPendingQ.  If status is a failure code, then the pending queue
+    * will be emptied.  If status is a success code, then the pending requests
+    * will be processed (i.e., their Start method will be called).
+    */
+   void ProcessPendingQ(nsresult status);
+ 
+   /**
+    * Start loading the PAC file.
+    */
+   nsresult StartLoading();
+ 
+   /**
+-   * Returns true if the given URI matches the URI of our PAC file.
+-   */
+-  PRBool IsPACURI(nsIURI *uri) {
+-    PRBool result;
+-    return mPACURI && NS_SUCCEEDED(mPACURI->Equals(uri, &result)) && result;
+-  }
+-
+-  /**
+    * Event fu for calling StartLoading asynchronously.
+    */
+   PR_STATIC_CALLBACK(void *) LoadEvent_Handle(PLEvent *);
+   PR_STATIC_CALLBACK(void) LoadEvent_Destroy(PLEvent *);
+ 
+ private:
+   nsCOMPtr<nsIProxyAutoConfig> mPAC;
+   nsCOMPtr<nsIURI>             mPACURI;
+   PRCList                      mPendingQ;
+   nsCOMPtr<nsIStreamLoader>    mLoader;
+   PLEvent                     *mLoadEvent;
+   PRBool                       mShutdown;
+Index: netwerk/base/src/nsProtocolProxyService.cpp
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/netwerk/base/src/nsProtocolProxyService.cpp,v
+retrieving revision 1.67
+diff -u -t -p -1 -2 -r1.67 nsProtocolProxyService.cpp
+--- netwerk/base/src/nsProtocolProxyService.cpp	30 Jun 2005 20:21:34 -0000	1.67
++++ netwerk/base/src/nsProtocolProxyService.cpp	14 Mar 2006 04:30:37 -0000
+@@ -402,24 +402,30 @@ nsProtocolProxyService::PrefsChanged(nsI
+                 // don't have to handle this case everywhere else
+                 // I'm paranoid about a loop of some sort - only do this
+                 // if we're enumerating all prefs, and ignore any error
+                 if (!pref)
+                     prefBranch->SetIntPref("network.proxy.type", type);
+             } else if (type >= eProxyConfig_Last) {
+                 LOG(("unknown proxy type: %lu; assuming direct\n", type));
+                 type = eProxyConfig_Direct;
+             }
+             mProxyConfig = NS_STATIC_CAST(ProxyConfig, type);
+             reloadPAC = PR_TRUE;
+         }
++
++        if (mProxyConfig == eProxyConfig_System) {
++            mSystemProxySettings = do_GetService(NS_SYSTEMPROXYSETTINGS_CONTRACTID);
++        } else {
++            mSystemProxySettings = nsnull;
++        }
+     }
+ 
+     if (!pref || !strcmp(pref, "network.proxy.http"))
+         proxy_GetStringPref(prefBranch, "network.proxy.http", mHTTPProxyHost);
+ 
+     if (!pref || !strcmp(pref, "network.proxy.http_port"))
+         proxy_GetIntPref(prefBranch, "network.proxy.http_port", mHTTPProxyPort);
+ 
+     if (!pref || !strcmp(pref, "network.proxy.ssl"))
+         proxy_GetStringPref(prefBranch, "network.proxy.ssl", mHTTPSProxyHost);
+ 
+     if (!pref || !strcmp(pref, "network.proxy.ssl_port"))
+@@ -457,51 +463,57 @@ nsProtocolProxyService::PrefsChanged(nsI
+         proxy_GetBoolPref(prefBranch, "network.proxy.socks_remote_dns", mSOCKSProxyRemoteDNS);
+ 
+     if (!pref || !strcmp(pref, "network.proxy.failover_timeout"))
+         proxy_GetIntPref(prefBranch, "network.proxy.failover_timeout", mFailedProxyTimeout);
+ 
+     if (!pref || !strcmp(pref, "network.proxy.no_proxies_on")) {
+         rv = prefBranch->GetCharPref("network.proxy.no_proxies_on",
+                                      getter_Copies(tempString));
+         if (NS_SUCCEEDED(rv))
+             LoadHostFilters(tempString.get());
+     }
+ 
+-    // We're done if not using PAC or WPAD
+-    if (mProxyConfig != eProxyConfig_PAC && mProxyConfig != eProxyConfig_WPAD)
++    // We're done if not using something that could give us a PAC URL
++    // (PAC, WPAD or System)
++    if (mProxyConfig != eProxyConfig_PAC && mProxyConfig != eProxyConfig_WPAD &&
++        mProxyConfig != eProxyConfig_System)
+         return;
+ 
+     // OK, we need to reload the PAC file if:
+     //  1) network.proxy.type changed, or
+     //  2) network.proxy.autoconfig_url changed and PAC is configured
+ 
+     if (!pref || !strcmp(pref, "network.proxy.autoconfig_url"))
+         reloadPAC = PR_TRUE;
+ 
+     if (reloadPAC) {
+-        tempString.Truncate();
+         if (mProxyConfig == eProxyConfig_PAC) {
++            tempString.Truncate();
+             prefBranch->GetCharPref("network.proxy.autoconfig_url",
+                                     getter_Copies(tempString));
+-        }
+-        else if (mProxyConfig == eProxyConfig_WPAD) {
++        } else {
+             // We diverge from the WPAD spec here in that we don't walk the
+             // hosts's FQDN, stripping components until we hit a TLD.  Doing so
+             // is dangerous in the face of an incomplete list of TLDs, and TLDs
+             // get added over time.  We could consider doing only a single
+             // substitution of the first component, if that proves to help
+             // compatibility.
+             tempString.AssignLiteral("http://wpad/wpad.dat");
++            if (mSystemProxySettings) {
++                mSystemProxySettings->GetPACURI(tempString);
++            }
++        }
++        if (!tempString.IsEmpty()) {
++            ConfigureFromPAC(tempString);
+         }
+-        ConfigureFromPAC(tempString);
+     }
+ }
+ 
+ PRBool
+ nsProtocolProxyService::CanUseProxy(nsIURI *aURI, PRInt32 defaultPort) 
+ {
+     if (mHostFiltersArray.Count() == 0)
+         return PR_TRUE;
+ 
+     PRInt32 port;
+     nsCAutoString host;
+  
+@@ -892,42 +904,47 @@ nsProtocolProxyService::NewProxyInfo(con
+                                  aFailoverProxy, aResult);
+ }
+ 
+ NS_IMETHODIMP
+ nsProtocolProxyService::ConfigureFromPAC(const nsACString &spec)
+ {
+     if (!mPACMan) {
+         mPACMan = new nsPACMan();
+         if (!mPACMan)
+             return NS_ERROR_OUT_OF_MEMORY;
+     }
+ 
+-    mFailedProxies.Clear();
+-
+     nsCOMPtr<nsIURI> pacURI;
+     nsresult rv = NS_NewURI(getter_AddRefs(pacURI), spec);
+     if (NS_FAILED(rv))
+         return rv;
+ 
++    if (mPACMan->IsPACURI(pacURI))
++        return NS_OK;
++
++    mFailedProxies.Clear();
++
+     return mPACMan->LoadPACFromURI(pacURI);
+ }
+ 
+ NS_IMETHODIMP
+ nsProtocolProxyService::GetFailoverForProxy(nsIProxyInfo  *aProxy,
+                                             nsIURI        *aURI,
+                                             nsresult       aStatus,
+                                             nsIProxyInfo **aResult)
+ {
+-    // We only support failover when a PAC file is configured.
+-    if (mProxyConfig != eProxyConfig_PAC && mProxyConfig != eProxyConfig_WPAD)
++    // We only support failover when a PAC file is configured, either
++    // directly or via system settings
++    if (mProxyConfig != eProxyConfig_PAC && mProxyConfig != eProxyConfig_WPAD &&
++        mProxyConfig != eProxyConfig_System)
+         return NS_ERROR_NOT_AVAILABLE;
+ 
+     // Verify that |aProxy| is one of our nsProxyInfo objects.
+     nsCOMPtr<nsProxyInfo> pi = do_QueryInterface(aProxy);
+     NS_ENSURE_ARG(pi);
+     // OK, the QI checked out.  We can proceed.
+ 
+     // Remember that this proxy is down.
+     DisableProxy(pi);
+ 
+     // NOTE: At this point, we might want to prompt the user if we have
+     //       not already tried going DIRECT.  This is something that the
+@@ -1205,33 +1222,54 @@ nsProtocolProxyService::Resolve_Internal
+                                          const nsProtocolInfo &info,
+                                          PRBool *usePAC,
+                                          nsIProxyInfo **result)
+ {
+     NS_ENSURE_ARG_POINTER(uri);
+ 
+     *usePAC = PR_FALSE;
+     *result = nsnull;
+ 
+     if (!(info.flags & nsIProtocolHandler::ALLOWS_PROXY))
+         return NS_OK;  // Can't proxy this (filters may not override)
+ 
++    if (mSystemProxySettings) {
++        nsCAutoString PACURI;
++        if (NS_SUCCEEDED(mSystemProxySettings->GetPACURI(PACURI)) &&
++            !PACURI.IsEmpty()) {
++            // Switch to new PAC file if that setting has changed. If the setting
++            // hasn't changed, ConfigureFromPAC will exit early.
++            nsresult rv = ConfigureFromPAC(PACURI);
++            if (NS_FAILED(rv))
++                return rv;
++        } else {
++            nsCAutoString proxy;
++            nsresult rv = mSystemProxySettings->GetProxyForURI(uri, proxy);
++            if (NS_SUCCEEDED(rv)) {
++                ProcessPACString(proxy, result);
++                return NS_OK;
++            }
++            // Otherwise, allow the WPAD PAC lookup to go ahead
++        }
++    }
++
+     // if proxies are enabled and this host:port combo is supposed to use a
+     // proxy, check for a proxy.
+     if (mProxyConfig == eProxyConfig_Direct ||
+             (mProxyConfig == eProxyConfig_Manual &&
+              !CanUseProxy(uri, info.defaultPort)))
+         return NS_OK;
+-    
++
+     // Proxy auto config magic...
+-    if (mProxyConfig == eProxyConfig_PAC || mProxyConfig == eProxyConfig_WPAD) {
++    if (mProxyConfig == eProxyConfig_PAC || mProxyConfig == eProxyConfig_WPAD ||
++        mProxyConfig == eProxyConfig_System) {
+         // Do not query PAC now.
+         *usePAC = PR_TRUE;
+         return NS_OK;
+     }
+ 
+     // proxy info values
+     const char *type = nsnull;
+     const nsACString *host = nsnull;
+     PRInt32 port = -1;
+ 
+     PRUint32 proxyFlags = 0;
+ 
+Index: netwerk/base/src/nsProtocolProxyService.h
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/netwerk/base/src/nsProtocolProxyService.h,v
+retrieving revision 1.28
+diff -u -t -p -1 -2 -r1.28 nsProtocolProxyService.h
+--- netwerk/base/src/nsProtocolProxyService.h	6 Jul 2005 17:42:06 -0000	1.28
++++ netwerk/base/src/nsProtocolProxyService.h	14 Mar 2006 04:23:52 -0000
+@@ -39,24 +39,25 @@
+ #ifndef nsProtocolProxyService_h__
+ #define nsProtocolProxyService_h__
+ 
+ #include "plevent.h"
+ #include "nsString.h"
+ #include "nsCOMPtr.h"
+ #include "nsAutoPtr.h"
+ #include "nsVoidArray.h"
+ #include "nsIPrefBranch.h"
+ #include "nsPIProtocolProxyService.h"
+ #include "nsIProtocolProxyFilter.h"
+ #include "nsIProxyAutoConfig.h"
++#include "nsISystemProxySettings.h"
+ #include "nsIProxyInfo.h"
+ #include "nsIObserver.h"
+ #include "nsDataHashtable.h"
+ #include "nsHashKeys.h"
+ #include "nsPACMan.h"
+ #include "prtime.h"
+ #include "prmem.h"
+ #include "prio.h"
+ 
+ typedef nsDataHashtable<nsCStringHashKey, PRUint32> nsFailedProxyTable;
+ 
+ class nsProxyInfo;
+@@ -301,24 +302,25 @@ public:
+         char    *host;
+         PRUint32 host_len;
+     };
+ 
+ protected:
+ 
+     enum ProxyConfig {
+         eProxyConfig_Direct,
+         eProxyConfig_Manual,
+         eProxyConfig_PAC,
+         eProxyConfig_Direct4x,
+         eProxyConfig_WPAD,
++        eProxyConfig_System, // use system proxy settings if available, otherwise WPAD
+         eProxyConfig_Last
+     };
+ 
+     // simplified array of filters defined by this struct
+     struct HostInfo {
+         PRBool  is_ipaddr;
+         PRInt32 port;
+         union {
+             HostInfoIP   ip;
+             HostInfoName name;
+         };
+ 
+@@ -362,19 +364,20 @@ protected:
+     nsCString                    mGopherProxyHost;
+     PRInt32                      mGopherProxyPort;
+ 
+     nsCString                    mHTTPSProxyHost;
+     PRInt32                      mHTTPSProxyPort;
+     
+     nsCString                    mSOCKSProxyHost;
+     PRInt32                      mSOCKSProxyPort;
+     PRInt32                      mSOCKSProxyVersion;
+     PRBool                       mSOCKSProxyRemoteDNS;
+ 
+     nsRefPtr<nsPACMan>           mPACMan;  // non-null if we are using PAC
++    nsCOMPtr<nsISystemProxySettings> mSystemProxySettings;
+ 
+     PRTime                       mSessionStart;
+     nsFailedProxyTable           mFailedProxies;
+     PRInt32                      mFailedProxyTimeout;
+ };
+ 
+ #endif // !nsProtocolProxyService_h__
+Index: toolkit/components/gnome/nsGConfService.cpp
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/toolkit/components/gnome/nsGConfService.cpp,v
+retrieving revision 1.2
+diff -u -t -p -1 -2 -r1.2 nsGConfService.cpp
+--- toolkit/components/gnome/nsGConfService.cpp	15 Jul 2004 22:51:19 -0000	1.2
++++ toolkit/components/gnome/nsGConfService.cpp	14 Mar 2006 20:33:00 -0000
+@@ -30,24 +30,26 @@
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsGConfService.h"
+ #include "nsCRT.h"
+ #include "nsString.h"
++#include "nsSupportsPrimitives.h"
++#include "nsArray.h"
+ 
+ #include <gconf/gconf-client.h>
+ 
+ nsGConfService::~nsGConfService()
+ {
+   if (mClient)
+     g_object_unref(mClient);
+ }
+ 
+ nsresult
+ nsGConfService::Init()
+ {
+@@ -116,24 +118,55 @@ nsGConfService::GetFloat(const nsACStrin
+   *aResult = gconf_client_get_float(mClient, PromiseFlatCString(aKey).get(),
+                                     &error);
+ 
+   if (error) {
+     g_error_free(error);
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
++nsGConfService::GetStringList(const nsACString &aKey, nsIArray** aResult)
++{
++  nsCOMPtr<nsIMutableArray> items;
++  NS_NewArray(getter_AddRefs(items));
++  if (!items)
++    return NS_ERROR_OUT_OF_MEMORY;
++    
++  GError* error = nsnull;
++  GSList* list = gconf_client_get_list(mClient, PromiseFlatCString(aKey).get(),
++                                       GCONF_VALUE_STRING, &error);
++  if (error) {
++    g_error_free(error);
++    return NS_ERROR_FAILURE;
++  }
++
++  for (GSList* l = list; l; l = l->next) {
++    nsSupportsCStringImpl* obj = new nsSupportsCStringImpl();
++    if (!obj) {
++      g_slist_free(list);
++      return NS_ERROR_OUT_OF_MEMORY;
++    }
++    obj->SetData(nsDependentCString((const char*)l->data));
++    items->AppendElement(obj, PR_FALSE);
++  }
++  
++  g_slist_free(list);
++  NS_ADDREF(*aResult = items);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
+ nsGConfService::SetBool(const nsACString &aKey, PRBool aValue)
+ {
+   PRBool res = gconf_client_set_bool(mClient, PromiseFlatCString(aKey).get(),
+                                      aValue, nsnull);
+ 
+   return res ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsGConfService::SetString(const nsACString &aKey, const nsACString &aValue)
+ {
+   PRBool res = gconf_client_set_string(mClient, PromiseFlatCString(aKey).get(),
+Index: toolkit/components/gnome/nsIGConfService.idl
+===================================================================
+RCS file: /home/rocallahan/mozilla-cvs-mirror/mozilla/toolkit/components/gnome/nsIGConfService.idl,v
+retrieving revision 1.2
+diff -u -t -p -1 -2 -r1.2 nsIGConfService.idl
+--- toolkit/components/gnome/nsIGConfService.idl	15 Jul 2004 22:51:19 -0000	1.2
++++ toolkit/components/gnome/nsIGConfService.idl	14 Mar 2006 01:07:40 -0000
+@@ -28,33 +28,35 @@
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
++#include "nsIArray.idl"
+ 
+ [scriptable, uuid(01ac7b2e-c07c-465f-b35c-542eaef420a9)]
+ interface nsIGConfService : nsISupports
+ {
+   /* Basic registry access */
+   boolean       getBool(in AUTF8String key);
+   AUTF8String   getString(in AUTF8String key);
+   long          getInt(in AUTF8String key);
+   float         getFloat(in AUTF8String key);
++  nsIArray      getStringList(in AUTF8String key);
+ 
+   void setBool(in AUTF8String key, in boolean value);
+   void setString(in AUTF8String key, in AUTF8String value);
+   void setInt(in AUTF8String key, in long value);
+   void setFloat(in AUTF8String key, in float value);
+ 
+   /*
+    * Look up the handler for a protocol under the
+    * /desktop/gnome/url-handlers hierarchy.
+    */
+   AUTF8String getAppForProtocol(in AUTF8String scheme, out boolean enabled);
+ 
+Index: toolkit/components/unixproxy/Makefile.in
+===================================================================
+RCS file: toolkit/components/unixproxy/Makefile.in
+diff -N toolkit/components/unixproxy/Makefile.in
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ toolkit/components/unixproxy/Makefile.in	14 Mar 2006 01:07:40 -0000
+@@ -0,0 +1,63 @@
++# ***** BEGIN LICENSE BLOCK *****
++# Version: MPL 1.1/GPL 2.0/LGPL 2.1
++#
++# The contents of this file are subject to the Mozilla Public License Version
++# 1.1 (the "License"); you may not use this file except in compliance with
++# the License. You may obtain a copy of the License at
++# http://www.mozilla.org/MPL/
++#
++# Software distributed under the License is distributed on an "AS IS" basis,
++# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++# for the specific language governing rights and limitations under the
++# License.
++#
++# The Original Code is the Mozilla GNOME integration code.
++#
++# The Initial Developer of the Original Code is
++# IBM Corporation.
++# Portions created by the Initial Developer are Copyright (C) 2004
++# the Initial Developer. All Rights Reserved.
++#
++# Contributor(s):
++#  Brian Ryner <bryner@brianryner.com>
++#
++# Alternatively, the contents of this file may be used under the terms of
++# either the GNU General Public License Version 2 or later (the "GPL"), or
++# the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++# in which case the provisions of the GPL or the LGPL are applicable instead
++# of those above. If you wish to allow use of your version of this file only
++# under the terms of either the GPL or the LGPL, and not to allow others to
++# use your version of this file under the terms of the MPL, indicate your
++# decision by deleting the provisions above and replace them with the notice
++# and other provisions required by the GPL or the LGPL. If you do not delete
++# the provisions above, a recipient may use your version of this file under
++# the terms of any one of the MPL, the GPL or the LGPL.
++#
++# ***** END LICENSE BLOCK *****
++
++DEPTH     = ../../..
++topsrcdir = @top_srcdir@
++srcdir    = @srcdir@
++VPATH     = @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++MODULE          = unixproxy
++MOZILLA_INTERNAL_API = 1
++
++REQUIRES = \
++        xpcom \
++        string \
++        necko \
++        mozgnome \
++        $(NULL)
++
++CPPSRCS = \
++        nsUnixSystemProxySettings.cpp \
++        $(NULL)
++
++LIBRARY_NAME    = unixproxy
++IS_COMPONENT    = 1
++FORCE_SHARED_LIB = 1
++
++include $(topsrcdir)/config/rules.mk
+Index: toolkit/components/unixproxy/nsUnixSystemProxySettings.cpp
+===================================================================
+RCS file: toolkit/components/unixproxy/nsUnixSystemProxySettings.cpp
+diff -N toolkit/components/unixproxy/nsUnixSystemProxySettings.cpp
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ toolkit/components/unixproxy/nsUnixSystemProxySettings.cpp	14 Mar 2006 01:07:40 -0000
+@@ -0,0 +1,425 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Netscape Communications Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 1998
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *    Robert O'Callahan (rocallahan@novell.com)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsISystemProxySettings.h"
++#include "nsIGenericFactory.h"
++#include "nsIServiceManager.h"
++#include "nsIGConfService.h"
++#include "nsIURI.h"
++#include "nsReadableUtils.h"
++#include "nsArray.h"
++#include "prnetdb.h"
++#include "prenv.h"
++#include "nsPrintfCString.h"
++#include "nsNetUtil.h"
++#include "nsISupportsPrimitives.h"
++
++class nsUnixSystemProxySettings : public nsISystemProxySettings {
++public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSISYSTEMPROXYSETTINGS
++
++  nsUnixSystemProxySettings() {}
++  nsresult Init();
++
++private:
++  ~nsUnixSystemProxySettings() {}
++  
++  nsCOMPtr<nsIGConfService> mGConf;
++};
++
++NS_IMPL_ISUPPORTS1(nsUnixSystemProxySettings, nsISystemProxySettings)
++
++nsresult
++nsUnixSystemProxySettings::Init()
++{
++  // If this is a GNOME session, load gconf and try to use its preferences.
++  // If gconf is not available (which would be stupid) we'll proceed as if this
++  // was not a GNOME session, using *_PROXY environment variables.
++  const char* sessionType = PR_GetEnv("DESKTOP_SESSION");
++  if (sessionType && !strcmp(sessionType, "gnome")) {
++    mGConf = do_GetService(NS_GCONFSERVICE_CONTRACTID);
++  }
++  return NS_OK;
++}
++
++static PRBool
++IsProxyMode(nsIGConfService* aGConf, const char* aMode)
++{
++  nsCAutoString mode;
++  return NS_SUCCEEDED(aGConf->GetString(NS_LITERAL_CSTRING("/system/proxy/mode"), mode)) &&
++      mode.EqualsASCII(aMode);
++}
++
++nsresult
++nsUnixSystemProxySettings::GetPACURI(nsACString& aResult)
++{
++  if (!mGConf || !IsProxyMode(mGConf, "auto"))
++    return NS_ERROR_FAILURE;
++  return mGConf->GetString(NS_LITERAL_CSTRING("/system/proxy/autoconfig_url"),
++                           aResult);
++}
++
++static PRBool
++IsInNoProxyList(const nsACString& aHost, PRInt32 aPort, const char* noProxyVal)
++{
++  NS_ASSERTION(aPort >= 0, "Negative port?");
++  
++  nsCAutoString noProxy(noProxyVal);
++  if (noProxy.EqualsLiteral("*"))
++    return PR_TRUE;
++    
++  noProxy.StripWhitespace();
++  
++  nsReadingIterator<char> pos;
++  nsReadingIterator<char> end;
++  noProxy.BeginReading(pos);
++  noProxy.EndReading(end);
++  while (pos != end) {
++    nsReadingIterator<char> last = pos;
++    nsReadingIterator<char> nextPos;
++    if (FindCharInReadable(',', last, end)) {
++      nextPos = last;
++      ++nextPos;
++    } else {
++      last = end;
++      nextPos = end;
++    }
++    
++    nsReadingIterator<char> colon = pos;
++    PRInt32 port = -1;
++    if (FindCharInReadable(':', colon, last)) {
++      ++colon;
++      nsDependentCSubstring portStr(colon, last);
++      nsCAutoString portStr2(portStr);
++      PRInt32 err;
++      port = portStr2.ToInteger(&err);
++      if (err != 0) {
++        port = -2; // don't match any port, so we ignore this pattern
++      }
++      --colon;
++    } else {
++      colon = last;
++    }
++    
++    if (port == -1 || port == aPort) {
++      nsDependentCSubstring hostStr(pos, colon);
++      if (StringEndsWith(aHost, hostStr, nsCaseInsensitiveCStringComparator()))
++        return PR_TRUE;
++    }
++    
++    pos = nextPos;
++  }
++  
++  return PR_FALSE;
++}
++
++static void SetProxyResult(const char* aType, const nsACString& aHost,
++                               PRInt32 aPort, nsACString& aResult)
++{
++  aResult.AppendASCII(aType);
++  aResult.Append(' ');
++  aResult.Append(aHost);
++  aResult.Append(':');
++  aResult.Append(nsPrintfCString("%d", aPort));
++}
++
++static nsresult
++GetProxyForURIFromEnvironment(const nsACString& aScheme,
++                              const nsACString& aHost,
++                              PRInt32 aPort,
++                              nsACString& aResult)
++{
++  nsCAutoString envVar;
++  envVar.Append(aScheme);
++  envVar.AppendLiteral("_proxy");
++  const char* proxyVal = PR_GetEnv(envVar.get());
++  if (!proxyVal) {
++    proxyVal = PR_GetEnv("all_proxy");
++    if (!proxyVal) {
++      // Return failure so that the caller can detect the failure and
++      // fall back to other proxy detection (e.g., WPAD)
++      return NS_ERROR_FAILURE;
++    }
++  }
++  
++  const char* noProxyVal = PR_GetEnv("no_proxy");
++  if (noProxyVal && IsInNoProxyList(aHost, aPort, noProxyVal)) {
++    aResult.AppendLiteral("DIRECT");
++    return NS_OK;
++  }
++  
++  // Use our URI parser to crack the proxy URI
++  nsCOMPtr<nsIURI> proxyURI;
++  nsresult rv = NS_NewURI(getter_AddRefs(proxyURI), proxyVal);
++  if (NS_FAILED(rv))
++    return rv;
++
++  // Is there a way to specify "socks://" or something in these environment
++  // variables? I can't find any documentation.
++  PRBool isHTTP;
++  rv = proxyURI->SchemeIs("http", &isHTTP);
++  if (NS_FAILED(rv))
++    return rv;
++  if (!isHTTP)
++    return NS_ERROR_FAILURE;
++
++  nsCAutoString proxyHost;
++  rv = proxyURI->GetHost(proxyHost);
++  if (NS_FAILED(rv))
++    return rv;
++  PRInt32 proxyPort;
++  rv = proxyURI->GetPort(&proxyPort);
++  if (NS_FAILED(rv))
++    return rv;
++
++  SetProxyResult("PROXY", proxyHost, proxyPort, aResult);
++  return NS_OK;
++}
++
++static nsresult
++SetProxyResultFromGConf(nsIGConfService* aGConf, const char* aKeyBase,
++                        const char* aType, nsACString& aResult)
++{
++  nsCAutoString hostKey;
++  hostKey.AppendASCII(aKeyBase);
++  hostKey.AppendLiteral("host");
++  nsCAutoString host;
++  nsresult rv = aGConf->GetString(hostKey, host);
++  if (NS_FAILED(rv))
++    return rv;
++  if (host.IsEmpty())
++    return NS_ERROR_FAILURE;
++  
++  nsCAutoString portKey;
++  portKey.AppendASCII(aKeyBase);
++  portKey.AppendLiteral("port");
++  PRInt32 port;
++  rv = aGConf->GetInt(portKey, &port);
++  if (NS_FAILED(rv))
++    return rv;
++    
++  SetProxyResult(aType, host, port, aResult);
++  return NS_OK;
++}
++
++/* copied from nsProtocolProxyService.cpp --- we should share this! */
++static void
++proxy_MaskIPv6Addr(PRIPv6Addr &addr, PRUint16 mask_len)
++{
++    if (mask_len == 128)
++        return;
++
++    if (mask_len > 96) {
++        addr.pr_s6_addr32[3] = PR_htonl(
++                PR_ntohl(addr.pr_s6_addr32[3]) & (~0L << (128 - mask_len)));
++    }
++    else if (mask_len > 64) {
++        addr.pr_s6_addr32[3] = 0;
++        addr.pr_s6_addr32[2] = PR_htonl(
++                PR_ntohl(addr.pr_s6_addr32[2]) & (~0L << (96 - mask_len)));
++    }
++    else if (mask_len > 32) {
++        addr.pr_s6_addr32[3] = 0;
++        addr.pr_s6_addr32[2] = 0;
++        addr.pr_s6_addr32[1] = PR_htonl(
++                PR_ntohl(addr.pr_s6_addr32[1]) & (~0L << (64 - mask_len)));
++    }
++    else {
++        addr.pr_s6_addr32[3] = 0;
++        addr.pr_s6_addr32[2] = 0;
++        addr.pr_s6_addr32[1] = 0;
++        addr.pr_s6_addr32[0] = PR_htonl(
++                PR_ntohl(addr.pr_s6_addr32[0]) & (~0L << (32 - mask_len)));
++    }
++}
++
++static PRBool ConvertToIPV6Addr(const nsACString& aName,
++                                PRIPv6Addr* aAddr)
++{
++  PRNetAddr addr;
++  if (PR_StringToNetAddr(PromiseFlatCString(aName).get(), &addr) != PR_SUCCESS)
++    return PR_FALSE;
++
++  PRIPv6Addr ipv6;
++  // convert parsed address to IPv6
++  if (addr.raw.family == PR_AF_INET) {
++    // convert to IPv4-mapped address
++    PR_ConvertIPv4AddrToIPv6(addr.inet.ip, &ipv6);
++  } else if (addr.raw.family == PR_AF_INET6) {
++    // copy the address
++    memcpy(&ipv6, &addr.ipv6.ip, sizeof(PRIPv6Addr));
++  } else {
++    return PR_FALSE;
++  }
++  
++  return PR_TRUE;
++}
++
++static PRBool GConfIgnoreHost(const nsACString& aIgnore,
++                              const nsACString& aHost)
++{
++  if (aIgnore.Equals(aHost, nsCaseInsensitiveCStringComparator()))
++    return PR_TRUE;
++
++  if (StringBeginsWith(aIgnore, NS_LITERAL_CSTRING("*")) &&
++      StringEndsWith(aHost, nsDependentCSubstring(aIgnore, 1),
++                     nsCaseInsensitiveCStringComparator()))
++    return PR_TRUE;
++
++  PRInt32 mask = 128;
++  nsReadingIterator<char> start;
++  nsReadingIterator<char> slash;
++  nsReadingIterator<char> end;
++  aIgnore.BeginReading(start);
++  aIgnore.BeginReading(slash);
++  aIgnore.EndReading(end);
++  if (FindCharInReadable('/', slash, end)) {
++    ++slash;
++    nsDependentCSubstring maskStr(slash, end);
++    nsCAutoString maskStr2(maskStr);
++    PRInt32 err;
++    mask = maskStr2.ToInteger(&err);
++    if (err != 0) {
++      mask = 128;
++    }
++    --slash;
++  } else {
++    slash = end;
++  }
++
++  PRIPv6Addr ignoreAddr, hostAddr;
++  if (!ConvertToIPV6Addr(aIgnore, &ignoreAddr) ||
++      !ConvertToIPV6Addr(aHost, &hostAddr))
++    return PR_FALSE;
++
++  proxy_MaskIPv6Addr(ignoreAddr, mask);
++  proxy_MaskIPv6Addr(hostAddr, mask);
++  
++  return memcmp(&ignoreAddr, &hostAddr, sizeof(PRIPv6Addr)) == 0;
++}
++
++static nsresult
++GetProxyForURIFromGConf(nsIGConfService* aGConf,
++                        const nsACString& aScheme,
++                        const nsACString& aHost,
++                        PRInt32 aPort,
++                        nsACString& aResult)
++{
++  if (!IsProxyMode(aGConf, "manual")) {
++    aResult.AppendLiteral("DIRECT");
++    return NS_OK;
++  }
++  
++  nsCOMPtr<nsIArray> ignoreList;
++  if (NS_SUCCEEDED(aGConf->GetStringList(NS_LITERAL_CSTRING("/system/http_proxy/ignore_hosts"),
++                                         getter_AddRefs(ignoreList))) && ignoreList) {
++    PRUint32 len = 0;
++    ignoreList->GetLength(&len);
++    for (PRUint32 i = 0; i < len; ++i) {
++      nsCOMPtr<nsISupportsCString> str = do_QueryElementAt(ignoreList, i);
++      if (str) {
++        nsCAutoString s;
++        if (NS_SUCCEEDED(str->GetData(s)) && !s.IsEmpty()) {
++          if (GConfIgnoreHost(s, aHost)) {
++            aResult.AppendLiteral("DIRECT");
++            return NS_OK;
++          }
++        }
++      }
++    }
++  }
++  
++  nsresult rv = SetProxyResultFromGConf(aGConf, "/system/proxy/socks_", "SOCKS", aResult);
++  if (NS_SUCCEEDED(rv))
++    return rv;
++  
++  if (aScheme.LowerCaseEqualsLiteral("http")) {
++    rv = SetProxyResultFromGConf(aGConf, "/system/http_proxy/", "PROXY", aResult);
++  } else if (aScheme.LowerCaseEqualsLiteral("https")) {
++    rv = SetProxyResultFromGConf(aGConf, "/system/proxy/secure_", "PROXY", aResult);
++  } else if (aScheme.LowerCaseEqualsLiteral("ftp")) {
++    rv = SetProxyResultFromGConf(aGConf, "/system/proxy/ftp_", "PROXY", aResult);
++  } else {
++    rv = NS_ERROR_FAILURE;
++  }
++  
++  if (NS_FAILED(rv)) {
++    aResult.AppendLiteral("DIRECT");
++  }
++  return NS_OK;
++}
++
++nsresult
++nsUnixSystemProxySettings::GetProxyForURI(nsIURI* aURI, nsACString& aResult)
++{
++  nsCAutoString scheme;
++  nsresult rv = aURI->GetScheme(scheme);
++  if (NS_FAILED(rv))
++    return rv;
++
++  nsCAutoString host;
++  rv = aURI->GetHost(host);
++  if (NS_FAILED(rv))
++    return rv;
++
++  PRInt32 port;
++  rv = aURI->GetPort(&port);
++  if (NS_FAILED(rv))
++    return rv;
++
++  if (!mGConf)
++    return GetProxyForURIFromEnvironment(scheme, host, port, aResult);
++
++  return GetProxyForURIFromGConf(mGConf, scheme, host, port, aResult);
++}
++
++#define NS_UNIXSYSTEMPROXYSERVICE_CID  /* 0fa3158c-d5a7-43de-9181-a285e74cf1d4 */\
++     { 0x0fa3158c, 0xd5a7, 0x43de, \
++       {0x91, 0x81, 0xa2, 0x85, 0xe7, 0x4c, 0xf1, 0xd4 } }
++
++NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsUnixSystemProxySettings, Init)
++
++static const nsModuleComponentInfo components[] = {
++  { "Unix System Proxy Settings Service",
++    NS_UNIXSYSTEMPROXYSERVICE_CID,
++    NS_SYSTEMPROXYSETTINGS_CONTRACTID,
++    nsUnixSystemProxySettingsConstructor }
++};
++
++NS_IMPL_NSGETMODULE(unixproxy, components)
+Index: Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/Makefile.in,v
+retrieving revision 1.299.2.2.4.2
+diff -u -p -6 -r1.299.2.2.4.2 Makefile.in
+--- Makefile.in	23 Feb 2006 23:34:41 -0000	1.299.2.2.4.2
++++ Makefile.in	11 Apr 2006 06:28:06 -0000
+@@ -297,12 +297,13 @@ ifdef MOZ_LDAP_XPCOM
+ tier_50_dirs	+= directory/xpcom
+ endif
+ 
+ ifdef MOZ_XUL_APP
+ ifdef MOZ_ENABLE_GTK2
+ tier_50_dirs    += toolkit/components/gnome
++tier_50_dirs    += toolkit/components/unixproxy
+ endif
+ endif
+ 
+ ifdef MOZ_LEAKY
+ tier_50_dirs        += tools/leaky
+ endif
+Index: netwerk/base/public/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/public/Makefile.in,v
+retrieving revision 1.106
+diff -u -p -6 -r1.106 Makefile.in
+--- netwerk/base/public/Makefile.in	25 Jul 2005 20:27:01 -0000	1.106
++++ netwerk/base/public/Makefile.in	11 Apr 2006 06:29:32 -0000
+@@ -93,12 +93,13 @@ XPIDLSRCS	= \
+ 		nsIStreamListenerProxy.idl \
+ 		nsIStreamListenerTee.idl \
+ 		nsISimpleStreamListener.idl \
+ 		nsIStreamTransportService.idl \
+ 		nsIStreamLoader.idl \
+ 		nsISyncStreamListener.idl \
++		nsISystemProxySettings.idl \
+ 		nsIUnicharStreamLoader.idl \
+ 		nsIStandardURL.idl \
+ 		nsIURLParser.idl \
+ 		nsIURIChecker.idl \
+ 		nsISecurityEventSink.idl \
+ 		nsISecretDecoderRing.idl \

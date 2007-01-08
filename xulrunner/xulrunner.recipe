@@ -6,7 +6,7 @@
 
 class XulRunner(CPackageRecipe):
     name = 'xulrunner'
-    version = '1.8.1'
+    version = '1.8.0.7'
     buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'atk:devel',
                       'cairo:devel', 'fontconfig:devel', 'freetype:devel',
                       'glib:devel', 'perl:runtime', 'gnome-keyring:devel',
@@ -21,24 +21,34 @@ class XulRunner(CPackageRecipe):
                       'libXt:devel', 'libXext:devel', 'libXi:devel',
                       'libXinerama:devellib', 'libXft:devel',
                       'libXrender:devel','libdmx:devel', 'libICE:devel',
-                      'libSM:devel', 'nspr:devel','nss:devel', 'expat:devel', 
-                      'python:devel']
+                      'libSM:devel', 'nspr:devel','nss:devel', 'expat:devel' ]
 
     def setup(r):
-        r.addArchive('http://www.archlinux.org/~jgc/mozilla/%(name)s-%(version)s-source.tar.bz2')
+        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/1.8.0.4/source/%(name)s-1.8.0.4-source.tar.bz2')
 
         patches = (
+            'xulrunner-1.8.0.4-1.8.0_20060925.patch.bz2',
             'firefox-1.1-uriloader.patch',
+            'firefox-1.5-with-system-nss.patch',
             'firefox-1.5-pango-cursor-position.patch',
-            'firefox-2.0-buildversion.patch', 
+            'firefox-1.5-pango-mathml.patch',
+            'firefox-nopangoxft.patch',
+            'moz252436.patch',
             'moz310924.patch',
             'moz325644.patch',
-            'nsIPermission.patch')
+            'system-prefs.patch',
+            'nsIPermission.patch',
+            'nsISidebar.patch',
+            'system-proxies.patch',
+            'file-saver.patch')
+
 
         for patch in patches:
             r.addPatch(patch)
 
         r.addSource('mozconfig', dest='.mozconfig')
+
+        r.Replace('1.8.0.8pre','%(version)s', 'config/milestone.txt')
 
         r.Configure()
 
@@ -46,31 +56,30 @@ class XulRunner(CPackageRecipe):
 
         r.Make(' -f client.mk build ')
 
-        r.Make(' DESTDIR=%(destdir)s DISTDIR=%(destdir)s prefix=%(prefix)s  install')
+        r.Make(' DESTDIR=%(destdir)s prefix=%(prefix)s install')
 
- 	# we depend on system' s nspr and nss so remove these... which we don 't built anyway.
-    #    r.Remove('/usr/lib/pkgconfig/xulrunner-nss.pc')
-    #    r.Remove('/usr/lib/pkgconfig/xulrunner-nspr.pc')
+	# we depend on system' s nspr and nss so remove these... which we don 't built anyway.
+        r.Remove('/usr/lib/pkgconfig/xulrunner-nss.pc')
+        r.Remove('/usr/lib/pkgconfig/xulrunner-nspr.pc')
 
+    # remove versioning from path names. fixes potential messes while updating
 
+        r.Symlink('/usr/lib/%(name)s-%(version)s','/usr/lib/%(name)s' )
+        r.Symlink('/usr/include/%(name)s-%(version)s','/usr/include/%(name)s' )
+        r.Symlink('/usr/share/idl/%(name)s-%(version)s','/usr/share/idl/%(name)s' )
 
-        # multilib fixes
-        r.Move('/usr/lib/*', '%(libdir)s/')
-        r.Replace('/usr/lib/xulrunner', '%(libdir)s/xulrunner',
-            '%(libdir)s/pkgconfig/*', allowNoChange=True)
+        r.Run("""
+	sed -i -e "s/usr\/local/usr/" -e "s/%(name)s-%(version)s/%(name)s/"  	%(destdir)s/usr/lib/pkgconfig/*.pc
 
-        # versionless paths
-        r.Move('%(libdir)s/%(name)s-%(version)s','%(libdir)s/%(name)s' )
-        r.Move('%(includedir)s/%(name)s-%(version)s','%(includedir)s/%(name)s' )
-        r.Move('%(datadir)s/idl/%(name)s-%(version)s','%(datadir)s/idl/%(name)s' )
+	""")
 
-        r.Replace(('/usr/local', '%(prefix)s'),
-                  ('%(name)s-%(version)s', '%(name)s'),
-                  '%(libdir)s/pkgconfig/*.pc')
+# r.Provides voodoo. mkj is my hero.
 
+        libs = ('gtkembedmoz','xpcom', 'xul',)
 
-        r.SharedLibrary(subtrees='%(libdir)s/%(name)s/')
-        r.Ldconfig('%(libdir)s/%(name)s/')
+        for libname in libs:
+            r.Provides('soname: lib%s.so' % libname,
+                       '%%(libdir)s/%%(name)s/lib%s.so' % libname)
 
 
 
