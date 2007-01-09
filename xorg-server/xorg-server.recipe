@@ -69,7 +69,7 @@ class XorgServer(XorgPackageRecipe):
 
     def unpack(r):
 
-        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.1.1-47.fc7.src.rpm'
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.1.1-56.fc7.src.rpm'
         r.addArchive(srpm)
 
 
@@ -82,15 +82,20 @@ class XorgServer(XorgPackageRecipe):
 
         # according to http://xorg.freedesktop.org/wiki/ModularDevelopersGuide
         # we need the Mesa source to build GLX support
-        r.macros.mesaVersion = '6.5.1'
-        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', use=Flags.dri)
+        r.macros.mesaVersion = '6.5.2'
+        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', 
+                     use=Flags.dri, dir='xorg-server-1.1.1/')
+        
+        # patch from RH needed for Mesa to build against this xorg.
+	r.addPatch('mesa-6.5.2-xserver-1.1-source-compat.patch')
 
         if Flags.dri:
             r.extraConfig += ( ' --enable-dri'
                                ' --enable-glx-tls'
-                               ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
+                               ' --with-mesa-source=%(builddir)s/Mesa-%(mesaVersion)s/'
                                ' --with-dri-driver-path=%(libdir)s/dri'
                                ' --with-pic'
+			       ' --disable-static' 
                                ' --enable-composite'
                                ' --enable-xtrap'
                                ' --enable-xcsecurity'
@@ -98,14 +103,31 @@ class XorgServer(XorgPackageRecipe):
                                ' --with-default-font-path="unix/:7100,built-ins"'
                                ' --with-xkb-output=%(localstatedir)s/lib/xkb'
                                ' --with-rgb-path=%(datadir)s/X11'
-                               )
+			       ' --disable-xorgcfg' 
+			       ' --with-int10=x86emu' 
+                               ' --enable-xorg'
+			       ' --enable-dmx'
+			       ' --enable-xvfb'
+			       ' --disable-xorgcfg' 
+			       ' --enable-install-libxf86config' 
+
+)
         else:
             r.extraConfig += ' --disable-dri'
+
+	# security patches (CVE-2006-6101 CVE-2006-6102 CVE-2006-6103)
+	# http://lists.freedesktop.org/archives/xorg-announce/2007-January/000235.html
+	# 
+
+        r.addPatch('xorg-xserver-1.1.0-dbe-render.diff')
+
 
         # Fedorg-server patchset
         # base patches
         r.addPatch('xorg-x11-server-0.99.3-init-origins-fix.patch',rpm=srpm)
+            # https://bugs.freedesktop.org/show_bug.cgi?id=5093
         r.addPatch('xserver-1.0.0-parser-add-missing-headers-to-sdk.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.0.1-composite-fastpath-fdo4320.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-libxf86config-dont-write-empty-sections.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-builderstring.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-xkb-in-xnest.patch',rpm=srpm)
@@ -114,9 +136,14 @@ class XorgServer(XorgPackageRecipe):
         r.addPatch('xorg-x11-server-1.1.1-vbe-filter-less.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-vt-activate-is-a-terrible-api.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-graphics-expose.patch',rpm=srpm)
-
-        # OpenGL compositing manager feature/optimization patches.
-
+        r.addPatch('xorg-x11-server-1.1.1-ia64-int10.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-ia64-pci-chipsets.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-automake-1.10-fixes.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-xkb-vidmode-switch.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-lid-close-crash.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-glcore-visual-matching.patch',rpm=srpm)
+           
+            # OpenGL compositing manager feature/optimization patches.
         r.addPatch('xorg-x11-server-1.1.0-no-move-damage.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.0-dont-backfill-bg-none.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.0-tfp-damage.patch',rpm=srpm)
@@ -126,40 +153,27 @@ class XorgServer(XorgPackageRecipe):
         r.addPatch('xorg-x11-server-1.1.1-offscreen-pixmaps.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-mesa-6.5.1.patch',rpm=srpm)
         r.addPatch('xorg-x11-server-1.1.1-aiglx-happy-vt-switch.patch',rpm=srpm)
-        # Red Hat specific tweaking (some are usefull to us ;-) )
-        r.addPatch('xorg-x11-server-Red-Hat-extramodes.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch', rpm=srpm)
-        # Backports of post-1.1 stuff.
-
-        r.addPatch('xorg-x11-server-1.1.0-pci-scan-fixes.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.0-no-zlib.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-Xdmx-render-fix-fdo7482.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-revert-xkb-change.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-aiglx-locking.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-edid-hex-dump.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-mesa-6.5.2.patch',rpm=srpm)
         
-
-        # autoconfiguration feature patches
-
-        r.addPatch('xorg-x11-server-1.1.0-edid-mode-injection-1.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.0-edid-mode-injection-2.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.0-cvt-generator-in-core.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.0-no-autoconfig-targetrefresh.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-getconfig-pl-die-die-die.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-dpms-on-by-default.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-edid-root-window-properties.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-sanedefaultmode.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-module-list.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-edid-quirks-list.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-defaultdepth-24.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-always-mouse-thyself.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-fix-default-mouse-device-yet-again.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-infer-virtual.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-mode-sort-kung-fu.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-pci-paranoia.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-believe-monitor-rb-modes.patch', rpm=srpm)
-
-        r.Automake()
+            # Red Hat specific tweaking (some are usefull to us ;-) )
+        r.addPatch('xorg-x11-server-Red-Hat-extramodes.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-no-scanpci.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-spurious-libxf1bpp-link.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-xf86config-comment-less.patch',rpm=srpm)
+        
+            # Backports of post-1.1 stuff.
+        r.addPatch('xorg-x11-server-1.1.0-pci-scan-fixes.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.0-no-zlib.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-Xdmx-render-fix-fdo7482.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-revert-xkb-change.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-aiglx-locking.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-edid-hex-dump.patch',rpm=srpm)
+        
+        r.addPatch('xorg-x11-server-1.1.1-autoconfig.patch',rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-maxpixclock-option.patch',rpm=srpm)
+        
+        r.Automake(autoMakeArgs='--add-missing')
 
     def install(r):
         XorgPackageRecipe.install(r)
