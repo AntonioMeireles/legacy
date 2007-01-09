@@ -6,7 +6,7 @@
 
 class Mesa(CPackageRecipe):
     name = 'Mesa'
-    version = '6.5.1'
+    version = '6.5.2'
 
     # XXX: Maybe his should become a Use flag shared with xorg-server
     Flags.dri = True
@@ -17,19 +17,18 @@ class Mesa(CPackageRecipe):
         'libXdmcp:devel', 'libXext:devel', 'libXt:devel', 'libstdc++:devel',
         'pkgconfig:devel', 'makedepend:runtime' ]
 
-
-
     if Use.nvidia:
         buildRequires.extend(['nvidia'])
     if Use.ati:
         buildRequires.extend(['ati-fglrx'])
-
 
     if Flags.dri:
         buildRequires.extend([ 'expat:devel', 'glproto:devel',
             'libXxf86vm:devel', 'libdrm:devel' ])
 
     def setup(r):
+        # Parallel builds appear to have problems in some cases.
+        r.disableParallelMake()
         r.macros.site = 'mirror://sourceforge/mesa3d'
         r.addArchive('%(site)s/MesaLib-%(version)s.tar.bz2')
 
@@ -44,13 +43,13 @@ class Mesa(CPackageRecipe):
                   ('DRI_DRIVER_INSTALL_DIR = /usr/X11R6/lib/modules/dri', 'DRI_DRIVER_INSTALL_DIR = %(destdir)s/%(libdir)s/dri'),
                   ('DRI_DRIVER_SEARCH_DIR = \$\(DRI_DRIVER_INSTALL_DIR\)', 'DRI_DRIVER_SEARCH_DIR = %(libdir)s/dri'),
                   'configs/default')
-        
+
         for config in ('linux', 'linux-dri'):
             r.Replace(('ARCH_FLAGS \?=', 'ARCH_FLAGS ?= -DGLX_USE_TLS'),
                       ('X11_INCLUDES = -I/usr/X11R6/include', 'X11_INCLUDES ='),
                       ('EXTRA_LIB_PATH=-L/usr/X11R6/lib', 'EXTRA_LIB_PATH ='),
                       'configs/' + config)
-            
+
         for config in ('x86', 'x86-64'):
             r.Replace(('ARCH_FLAGS =', 'ARCH_FLAGS +='),
                       'configs/linux-dri-' + config)
@@ -60,7 +59,7 @@ class Mesa(CPackageRecipe):
 
         # copied from Fedora spec file; this file is not F/OSS
         r.Remove('include/GL/uglglutshapes.h')
-        
+
         # see fd.o BZ # 4095
         r.Replace('#define DEFAULT_DRIVER_DIR "/usr/X11R6/lib/modules/dri"',
                   '#define DEFAULT_DRIVER_DIR "%(libdir)s/dri"',
@@ -70,13 +69,13 @@ class Mesa(CPackageRecipe):
         # r.Replace(('INCLUDE_DIR=\$1/include', 'INCLUDE_DIR="$1/%(includedir)s"'),
         #           ('LIB_DIR=\$1/lib', 'LIB_DIR="$1/%(libdir)s"'),
         #           'bin/installmesa')
-        
+
         # based on Fedora patch to enable Motif support in libGLw
         # XXX: disabled b/c it requires openmotif which is only in contrib
         #r.Replace('GLW_LIB_DEPS = -L\$\(LIB_DIR\) -l\$\(GL_LIB\) \$\(EXTRA_LIB_PATH\) -lXt -lX11',
         #    'GLW_LIB_DEPS = -L$(LIB_DIR) -l$(GL_LIB) -lXm $(EXTRA_LIB_PATH) -lXt -lX11',
         #    'configs/default')
-        
+
         # XXX: we don't supply any version of GLUT
         r.Replace('APP_LIB_DEPS = -L\$\(TOP\)\/\$\(LIB_DIR\) -l\$\(GLUT_LIB\) -l\$\(GLU_LIB\) -l\$\(GL_LIB\) -lm',
                   'APP_LIB_DEPS = -L$(TOP)/$(LIB_DIR) -l$(GLU_LIB) -l$(GL_LIB) -lm',
@@ -101,7 +100,7 @@ class Mesa(CPackageRecipe):
 
         r.MakeInstall()
 
-        # XXX: until conary has overrides
+	# XXX: until conary has overrides
         # we remove the files that conflict with proprietary drivers
         # by having flavoured Mesa's
 
@@ -110,12 +109,4 @@ class Mesa(CPackageRecipe):
         if Use.ati:
             r.Remove('%(libdir)s/libGL.s*')
 
-        # Mesa's build system doesn't install the DRI drivers even when you
-        # choose a DRI config
-        if Flags.dri:
-            r.Install('%(lib)s/*_dri.so', '%(libdir)s/dri/')
-
-        # XXX: until MesaDemos can build separately
-        r.Install('progs/xdemos/glx{info,gears}', '%(bindir)s/')
-        r.PackageSpec('glx-utils', '%(bindir)s/glx.*')
-
+        # Mesa's build system 
