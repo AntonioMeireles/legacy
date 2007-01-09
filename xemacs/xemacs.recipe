@@ -1,0 +1,124 @@
+#
+# Copyright (c) 2006-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Xemacs(CPackageRecipe):
+    name = 'xemacs'
+    version = '21.4.20'
+
+    buildRequires = [ 'db:devel', 'gpm:devel', 'libjpeg:devel',
+                      'libpng:devel', 'install-info:runtime',
+                      'libtiff:devel', 'nas:devel', 'ncurses:devel',
+                      'perl:lib', 'xorg-x11:devel', 'zlib:devel',
+                      'bison:runtime', 'texinfo:runtime',
+                      # provides <nlist.h>:
+                      'elfutils:devel',
+                      # provides <X11/bitmaps/gray>, &c.:
+                      'xorg-x11:runtime',
+                      ]
+    def setup(r):
+        r.addArchive('http://ftp.xemacs.org/pub/%(name)s/%(name)s-%(major_version)s/')
+        r.addArchive('http://ftp.xemacs.org/pub/%(name)s/packages/xemacs-sumo-2006-05-10.tar.gz', dir='%(datadir)s/%(name)s')
+        r.addArchive('http://ftp.xemacs.org/pub/%(name)s/packages/xemacs-mule-sumo-2006-05-10.tar.gz', dir='%(datadir)s/%(name)s')
+
+        r.addPatch("xemacs-21.4.19-configure.patch", backup=".configure")
+        r.addPatch("xemacs-21.4.19-archlibs.patch", backup=".archlibs")
+        r.addPatch("xemacs-21.4.19-destdir.patch", backup=".destdir")
+
+        # This does some fix-ups for finding things under %(datadir).
+        # FIXME: Need to re-implement this to eliminate later symlinks.
+        # r.addPatch("xemacs-paths.patch", backup=".paths")
+
+        r.Replace('"lib"', '"%(lib)s"', "lisp/find-paths.el")
+
+        # Remove precompiled Lisp files.
+        r.Run('find . -name "*.elc" -exec rm -f {} \;')
+
+        # non-autoconf build programs...
+        extraConf = ( ' --with-msw=no '
+                      ' --with-postgresql=no '
+                      ' --with-ldap=no --with-hesiod=no '
+                      ' --with-gcc ' )
+        if Use.X:
+            extraConf += (' --with-x11 ')
+            # Someday xemacs will support gtk properly....
+            extraConf += (' --with-menubars=lucid '
+                          ' --with-scrollbars=lucid '
+                          ' --with-dialogs=athena ')
+        else:
+            # This hasn't been tested recently:
+            extraConf += (' --with-sound=no --with-x11=no --with-canna=no '
+                          ' --with-wnn=no --with-xim=no --with-xfs=no ')
+
+        # Specifying mandir to be foo/man1 is a bad idea overall,
+        # but it needs to be done in this case.
+        r.Configure("--mandir=%(mandir)s/man1 "  + extraConf)
+        r.Make()
+        r.MakeInstall()
+
+        # Also compress .el files?  From build:
+        # If you would like to save approximately 2M of disk space, do
+        # make gzip-el
+        # or you may run
+        # .../build/xemacs/xemacs-21.4.19/lib-src/gzip-el.sh lispdir
+        # from the command line.
+        # Where lispdir is where the lisp files were installed, i.e.,
+        # .../_ROOT_//usr/share/xemacs-21.4.19/lisp
+
+        # This is the undump file xemacs needth to thart lithping.
+        # Please do not remove this thinking it's a leftover temp file:
+        # if you remove it, xemacs will think it's temacs and barf.
+        r.NonBinariesInBindirs(exceptions='%(bindir)s/%(name)s-%(version)s-.*')
+
+        # Clean up some archaic Perl paths.
+        r.Replace('/usr/local/bin/perl5', '/usr/bin/perl',
+                  '%(datadir)s/%(name)s/xemacs-packages/etc/bbdb/bbdb-cid.pl')
+        r.Replace('/usr/local/bin/perl', '/usr/bin/perl',
+                  '%(datadir)s/%(name)s/xemacs-packages/etc/bbdb/bbdb-srv.pl',
+                  '%(datadir)s/%(name)s/xemacs-packages/etc/bbdb/bbdb-unlazy-lock.pl',
+                  '%(datadir)s/%(name)s/xemacs-packages/lisp/hyperbole/file-newer')
+
+        r.MakeDirs('%(datadir)s/%(name)s/site-packages')
+
+        # Would be nice to get the binary to look under %(datadir) for these.
+        # Should be doable once xemacs-paths.patch is re-implemented.
+        r.Symlink('%(datadir)s/%(name)s/site-packages/',
+                  '%(libdir)s/%(name)s/')
+        r.Symlink('%(datadir)s/%(name)s/xemacs-packages/',
+                  '%(libdir)s/%(name)s/')
+        # (Similar link needed for mule-packages?)
+
+        r.ExcludeDirectories(exceptions='%(libdir)s/%(name)s-%(version)s/modules')
+        r.ExcludeDirectories(exceptions='%(libdir)s/%(name)s/site-modules')
+        r.ExcludeDirectories(exceptions='%(datadir)s/%(name)s/site-packages')
+
+        # These will complain for a gcc-java buildreq if not excepted.
+        r.Requires(exceptions='%(datadir)s/%(name)s/xemacs-packages/etc/jde/')
+        r.Requires(exceptions='%(datadir)s/%(name)s/xemacs-packages/etc/xslt-process/java/')
+
+        # Definitely packaging -mule separately.
+        # FIXME: mule is untested, and there appear to be load-path issues.
+        r.PackageSpec('%(name)s-mule',
+                      '%(datadir)s/%(name)s/mule-packages/')
+
+        # Conflicts with other packages
+        # FIXME: Should organize these a bit better.
+        r.PackageSpec('%(name)s-ctags',
+                      '%(bindir)s/ctags',
+                      '%(bindir)s/etags',
+                      '%(mandir)s/man1/ctags.1.gz',
+                      '%(mandir)s/man1/etags.1.gz')
+        r.PackageSpec('%(name)s-conflicts',
+                      '%(bindir)s/rcs-checkin',
+                      '%(bindir)s/b2m',
+                      '%(infodir)s/info.info.gz',
+                      '%(infodir)s/standards.info.gz',
+                      '%(infodir)s/termcap.info.gz')
+
+        # Should I package -sumo separately?  If so, here's how I'd do it:
+        #r.Requires('xemacs-sumo', '%(bindir)s/%(name)s')
+        #r.PackageSpec('%(name)s-sumo',
+        #              '%(datadir)s/%(name)s/xemacs-packages/',
+        #              '%(libdir)s/%(name)s/xemacs-packages/')
