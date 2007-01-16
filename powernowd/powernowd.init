@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# powernowd:   CPU speed scaling daemon
+#
+# chkconfig: 345 45 55
+# description:  This is a daemon which scales CPU speed using the cpufreq kernel interface
+#
+# processname: powernowd 
+# pidfile: /var/run/powernowd.pid
+#
+
+# Sanity checks.
+[ -x /usr/sbin/powernowd ] || exit 0
+[ -f /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor ] || exit 0
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# so we can rearrange this easily
+processname=powernowd
+servicename=powernowd
+
+RETVAL=0
+
+start() {
+    echo -n $"Starting CPU frequency manager: "
+    daemon --check $servicename $processname
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$servicename
+}
+
+stop() {
+    echo -n $"Stopping CPU frequency manager: "
+
+    killproc $servicename -TERM
+    RETVAL=$?
+    echo
+    if [ $RETVAL -eq 0 ]; then
+        rm -f /var/lock/subsys/$servicename
+        rm -f /var/run/powernowd.pid
+    fi
+}
+
+# See how we were called.
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status $processname
+        RETVAL=$?
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    condrestart)
+        if [ -f /var/lock/subsys/$servicename ]; then
+            stop
+            start
+        fi
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart|condrestart}"
+        ;;
+esac
+exit $RETVAL
