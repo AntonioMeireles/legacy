@@ -4,20 +4,12 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-#
-# Upgrade process:
-# o Download both the x86 and x86_64 versions of the jdk from
-#   http://java.sun.com.
-# o Unpack each of them (the 64bit version will have to be unpacked on a
-#   64bit box).
-# o Create tarballs from each one.
-#
-
-loadSuperClass('javapackage=conary.rpath.com@rpl:devel')
+loadSuperClass('javapackage')
 class SunJava(JavaPackageRecipe):
     name = 'sun-jdk'
-    version = '1.5.0_07'
+    version = '6'
 
+    clearBuildReqs()
     buildRequires = ['desktop-file-utils:runtime']
 
     jdkhome = '%%(jvmdir)s/sun-java-%s' % version
@@ -27,19 +19,25 @@ class SunJava(JavaPackageRecipe):
         r.macros.jrename = 'sun-jre'
         r.macros.jdkhome = r.jdkhome
         r.macros.desktopfile = 'jre/plugin/desktop/sun_java.desktop'
-        r.addArchive('ftp://download.rpath.com/autosource/jdk%(version)s-x86.tar.bz2',
-                     use=(not Use.gcj, Arch.x86))
-        r.addArchive('ftp://download.rpath.com/autosource/jdk%(version)s-x86_64.tar.bz2',
-                     use=(not Use.gcj, Arch.x86_64))
+        upver = r.version.replace('.', '_')
+        site = 'http://download.java.net/dlj/binaries/'+'jdk-'+upver+'-dlj-linux-'
+        arch32 = 'i586.bin'
+        arch64 = 'amd64.bin'
+        if not (Arch.x86 or Arch.x86_64):
+            print "your arch is not supported by sun"
+            return
+        r.addSource(site+arch32, use=(Arch.x86 and not Use.gcj))
+        r.addSource(site+arch64, use=(Arch.x86_64 and not Use.gcj))
+        r.Run('sh *.bin --accept-license --unpack')
+        r.Run('mv jdk*/* .')
 
     def upstreamSetup(r):
         if Arch.x86:
-            r.Replace('INSTALL_DIR/JRE_NAME_VERSION', '%(javahome)s',
-                      '%(desktopfile)s')
-
-
-
-            r.Replace('Categories=Application;Settings;X-Sun-Supported;X-Red-Hat-Base;' ,'Categories=Settings;Java;System;' , '%(desktopfile)s')
+            r.Replace( ('X-Sun-Supported;', ''),
+                       ('X-Red-Hat-Base;', ''),
+                       ('X-Ximian-Settings;', ''),
+                       ('Application;', ''),
+                       '%(desktopfile)s')
 
             r.Desktopfile('%(desktopfile)s')
 
@@ -49,14 +47,14 @@ class SunJava(JavaPackageRecipe):
             r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
                       '%(libdir)s/firefox/plugins/')
 
-            # Create symlink for mozilla plugin
+            # Create symlink for xulrunner plugin
             r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
-                      '%(libdir)s/mozilla/plugins/')
+                      '%(libdir)s/xulrunner/plugins/')
 
             r.PackageSpec('%(jrename)s', '%(libdir)s/firefox/plugins/')
             r.ComponentSpec('lib', '%(libdir)s/firefox/plugins/')
-            r.PackageSpec('%(jrename)s', '%(libdir)s/mozilla/plugins/')
-            r.ComponentSpec('lib', '%(libdir)s/mozilla/plugins/')
+            r.PackageSpec('%(jrename)s', '%(libdir)s/xulrunner/plugins/')
+            r.ComponentSpec('lib', '%(libdir)s/xulrunner/plugins/')
 
         r.Install('bin', '%(jdkhome)s')
         r.Install('lib', '%(jdkhome)s')
@@ -84,7 +82,3 @@ class SunJava(JavaPackageRecipe):
         r.Requires('%(jrename)s:runtime', '%(sysconfdir)s/profile.d/%(name)s.*')
         r.Requires('%(jrename)s:lib', '%(jdkhome)s/bin/.*')
 
-
-        r.ByDefault(exceptions=[':doc'])
-
-        r.Requires(exceptDeps='soname\:\ ELF32\/libXp\.so\.6\(SysV x86\)')
