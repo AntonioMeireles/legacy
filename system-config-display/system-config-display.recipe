@@ -1,39 +1,46 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage.recipe', label='conary.rpath.com@rpl:devel')
-class SystemConfigDisplay(RPMPackageRecipe):
-    buildRequires = [ 'desktop-file-utils:runtime', 'intltool:runtime',
-        'gtk:runtime', 'pygtk:python', 'pyxf86config:python', 'rhpl:python', 
-        'rhpxl:python', 'make:runtime','kudzu:python', 'pygobject:python' ]
+loadSuperClass('rpmpackage', label='conary.rpath.com@rpl:devel')
+class SystemConfigDisplay(RPMPackageRecipe, CPackageRecipe):
+    name = 'system-config-display'
+    version = '1.0.48'
+    rpmRelease = '1.fc7'
 
-    name = "system-config-display"
-    version = "1.0.37"
-    distroVersion = '5'
+    buildRequires = [ 'desktop-file-utils:runtime', 'intltool:runtime',
+        'gtk:runtime', 'kudzu:python', 'pygtk:python', 'pyxf86config:python',
+        'rhpl:python', 'pygobject:python', ]
 
     def setup(r):
-
-        #r.unpack()
-        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/5/source/SRPMS/%(name)s-%(version)s-2.src.rpm'
-        r.addArchive('%(name)s-%(version)s.tar.bz2', rpm=srpm)
-
+        r.unpack()
         r.addPatch('no_consolehelper.patch')
-        #r.Run("sed -i '/xsri/d' src/xconf.py")
+        # don't try to use xsri fanciness
+        r.Run("sed -i '/xsri/d' src/xconf.py")
+
         r.Replace('python2', 'python',
                   'src/system-config-display', 'src/xconf.py')
-        r.Replace('Exec=','Exec=gksudo ','system-config-display.desktop')
-        r.Replace('Categories=System;Application;SystemSetup;GTK;','Categories=Application;System;Settings','system-config-display.desktop')
-
+        r.Replace('Exec=','Exec=gksudo ','system-config-display.desktop','system-config-display.desktop.in')
+        r.Replace('^Categories=System;Application;SystemSetup;GTK;',
+                  'Categories=System;Settings;GTK;',
+                  'system-config-display.desktop',
+                  'system-config-display.desktop.in')
         r.Make()
         r.MakeInstall(rootVar='INSTROOT')
+        r.Desktopfile('system-config-display.desktop')
 
+        # remove the duplicated .desktop file (r.DesktopFile adds a prefix on install)
+        r.Remove('%(datadir)s/applications/system-config-display.desktop')
+
+        # don't include png only used by (removed) call to xsri
         r.Remove('%(datadir)s/system-config-display/pixmaps/lightrays.png')
-        r.Requires('pyxf86config:python', '%(bindir)s/system-config-display')
-        r.Requires('rhpl:python', '%(bindir)s/system-config-display')
-        # this is probably the only thing that *does* require rhpl:runtime
-        r.Requires('rhpxl:python', '%(bindir)s/system-config-display')
-        r.Requires('pygtk:python', '%(bindir)s/system-config-display')
-        r.Requires('kudzu:python', '%(bindir)s/system-config-display')
+
+        for trove in ('pyxf86config:python', 'rhpl:python',
+                      'pygtk:python', 'kudzu:python',
+                      'bitstream-vera-fonts:data',):
+            r.Requires(trove, '%(bindir)s/system-config-display')
+
+        r.TagSpec('gtk-update-icon-cache', '%(datadir)s/icons/')
+        r.TagSpec('desktop-file', '%(datadir)s/applications/')
