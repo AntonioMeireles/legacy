@@ -1,0 +1,46 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+# load mozilla, default to the one from conary.rpath.com@rpl:1
+loadInstalled('mozilla=conary.rpath.com@rpl:1')
+
+class MplayerPlugin(PackageRecipe):
+    name = 'mplayerplug-in'
+    version = '3.31'
+
+    buildRequires = [ 'pkgconfig:devel','mozilla:devel', 'atk:devel',
+        'cairo:devel', 'fontconfig:devel', 'freetype:devel', 'glib:devel',
+        'glibc:devel', 'gtk:devel', 'libgcc:devellib', 'libpng:devel',
+        'libstdc++:devel', 'mozilla-nspr:devel', 'pango:devel',
+        'xorg-x11:devel', 'zlib:devel', 'gawk:runtime' ]
+
+    def setup(r):
+        r.mainDir('mplayerplug-in')
+        r.addArchive('mirror://sourceforge/%(name)s/')
+        r.Configure()
+        r.Make()
+
+        r.macros.mozver = Mozilla.version
+        r.macros.mozilladir = 'mozilla-%(mozver)s'
+
+        # install for firefox
+        r.Install('%(name)s*.so', '%(libdir)s/firefox/plugins/')
+        r.Install('%(name)s*.xpt', '%(libdir)s/firefox/components/')
+        r.TagSpec("firefox-xpt-component", '%(libdir)s/firefox/components/.*')
+        # install for mozilla
+        r.Symlink('%(libdir)s/firefox/plugins/*', '%(libdir)s/%(mozilladir)s/plugins/')
+        r.Symlink('%(libdir)s/firefox/components/*', '%(libdir)s/%(mozilladir)s/components/')
+        # sample config file
+        r.Install('%(name)s.conf', '%(sysconfdir)s/%(name)s.conf')
+
+        r.ComponentSpec("runtime", "%(libdir)s/firefox.*")
+        r.ComponentSpec("runtime", "%(libdir)s/mozilla.*")
+
+        # each browser will have its own XPCOM already loaded, so this
+        # dependency becomes superfluous - we shouldn't pick up a
+        # dependency for the one from mozilla or firefox if the end
+        # user is not using it...
+        r.Requires(exceptDeps='soname: ELF32/libxpcom.so.*')
