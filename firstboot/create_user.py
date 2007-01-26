@@ -8,6 +8,7 @@ import sys
 import functions
 #import libuser
 import rhpl.executil as executil
+from firstboot import start_process
 
 ##
 ## I18N
@@ -352,7 +353,7 @@ class childWindow:
         i.grab_add ()
 
         #Run rhn_register so they can register with RHN
-        pid = functions.start_process("/usr/bin/authconfig-gtk", "--firstboot")
+        pid = start_process("/usr/bin/authconfig-gtk", "--firstboot")
 
         flag = None
         while not flag:
