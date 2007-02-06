@@ -6,6 +6,7 @@
 syntax clear
 runtime! syntax/python.vim
 syn keyword conarySFunction	mainDir addAction addSource addArchive addPatch
+syn keyword conarySFunction     addRedirect
 
 syn keyword conaryGFunction     add addAll addNewGroup addReference createGroup
 syn keyword conaryGFunction     addNewGroup startGroup remove removeComponents
@@ -39,7 +40,7 @@ syn keyword conaryPFunction 	NonMultilibDirectories NonUTF8Filenames TagSpec
 syn keyword conaryPFunction 	Provides RequireChkconfig Requires TagHandler
 syn keyword conaryPFunction 	TagDescription Transient User UtilizeGroup
 syn keyword conaryPFunction 	WorldWritableExecutables UtilizeUser
-syn keyword conaryPFunction 	WarnWritable
+syn keyword conaryPFunction 	WarnWritable Strip CheckDesktopFiles
 
 " Most destdirPolicy aren't called from recipes, except for these
 syn keyword conaryPFunction     AutoDoc RemoveNonPackageFiles TestSuiteFiles
@@ -50,18 +51,18 @@ syn match   conaryBadMacro	"%(\w*)[^sd]" contained " no final marker
 syn keyword conaryArches	contained x86 x86_64
 syn keyword conarySubArches	contained sse2 3dnow 3dnowext cmov i486 i586
 syn keyword conarySubArches	contained i686 mmx mmxext nx sse sse2
-syn keyword conaryBad		RPM_BUILD_ROOT EtcConfig InstallBucket
+syn keyword conaryBad		RPM_BUILD_ROOT EtcConfig InstallBucket subDir subdir 
 syn cluster conaryArchFlags 	contains=conaryArches,conarySubArches
 syn match   conaryArch		"Arch\.[a-z0-9.]*" contains=conaryArches,conarySubArches
 syn match   conaryArch		"Arch\.[a-z0-9.]*" contains=conaryArches,conarySubArches
 syn keyword conaryKeywords	name buildRequires version clearBuildReqs
 syn keyword conaryUseFlag	contained pcre tcpwrappers gcj gnat selinux pam 
-syn keyword conaryUseFlag	contained dietlibc bootstrap python perl 
+syn keyword conaryUseFlag	contained bootstrap python perl 
 syn keyword conaryUseFlag	contained readline gdbm emacs krb builddocs 
 syn keyword conaryUseFlag	contained alternatives tcl tk X gtk gnome qt
 syn keyword conaryUseFlag	contained xfce gd ldap sasl pie desktop ssl kde
 syn keyword conaryUseFlag	contained slang netpbm nptl ipv6 buildtests
-syn keyword conaryUseFlag	contained ntpl
+syn keyword conaryUseFlag	contained ntpl xen dom0 domU
 syn match   conaryUse		"Use\.[a-z0-9.]*" contains=conaryUseFlag
 
 "syn match   conaryR		"r\.\w*" contains=conaryFunction
