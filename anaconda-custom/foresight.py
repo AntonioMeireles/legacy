@@ -19,6 +19,7 @@ class InstallClass(BaseInstallClass):
 
     def setSteps(self, dispatch):
         BaseInstallClass.setSteps(self, dispatch);
+        dispatch.skipStep("checkdeps")
         dispatch.skipStep("package-selection")
         dispatch.skipStep("confirminstall")
 
