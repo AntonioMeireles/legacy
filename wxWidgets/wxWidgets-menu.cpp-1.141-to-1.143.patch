@@ -1,0 +1,76 @@
+Index: src/msw/menu.cpp
+===================================================================
+RCS file: /pack/cvsroots/wxwidgets/wxWidgets/src/msw/menu.cpp,v
+retrieving revision 1.141
+retrieving revision 1.143
+diff -u -r1.141 -r1.143
+--- src/msw/menu.cpp	2006/12/28 13:52:58	1.141
++++ src/msw/menu.cpp	2007/01/11 01:21:42	1.143
+@@ -4,7 +4,7 @@
+ // Author:      Julian Smart
+ // Modified by: Vadim Zeitlin
+ // Created:     04/01/98
+-// RCS-ID:      $Id: menu.cpp,v 1.141 2006/12/28 13:52:58 JS Exp $
++// RCS-ID:      $Id: menu.cpp,v 1.143 2007/01/11 01:21:42 VZ Exp $
+ // Copyright:   (c) Julian Smart
+ // Licence:     wxWindows licence
+ /////////////////////////////////////////////////////////////////////////////
+@@ -400,14 +400,14 @@
+         pos += 2; // for the title itself and its separator
+ 
+     BOOL ok = false;
+-    
++
+ #if wxUSE_OWNER_DRAWN
+     // Currently, mixing owner-drawn and non-owner-drawn items results in
+     // inconsistent margins, so we force this to be owner-drawn if any other
+     // items already are. Later we might want to use a boolean in the wxMenu
+     // to avoid search. Also we might make this fix unnecessary by getting the correct
+     // margin using NONCLIENTMETRICS.
+-    if ( !pItem->IsOwnerDrawn() )
++    if ( !pItem->IsOwnerDrawn() && !pItem->IsSeparator() )
+     {
+         // Check if any other items are ownerdrawn, and make ownerdrawn if so
+         wxMenuItemList::compatibility_iterator node = GetMenuItems().GetFirst();
+@@ -427,12 +427,11 @@
+ #if wxUSE_OWNER_DRAWN
+     if ( pItem->IsOwnerDrawn() )
+     {
+-        // is the item owner-drawn just because of the bitmap?
+-        if ( pItem->GetBitmap().Ok() &&
++        // is the item owner-drawn just because of the [checked] bitmap?
++        if ( (pItem->GetBitmap(false).Ok() || pItem->GetBitmap(true).Ok()) &&
+                 !pItem->GetTextColour().Ok() &&
+                     !pItem->GetBackgroundColour().Ok() &&
+-                        !pItem->GetFont().Ok() &&
+-                            !pItem->GetBitmap(true).Ok() )
++                        !pItem->GetFont().Ok() )
+         {
+             // try to use InsertMenuItem() as it's guaranteed to look correct
+             // while our owner-drawn code is not
+@@ -445,6 +444,13 @@
+             if ( wxGetWinVersion() >= wxWinVersion_98 )
+             {
+                 mii.fMask = MIIM_STRING | MIIM_DATA | MIIM_BITMAP;
++                if ( pItem->IsCheckable() )
++                {
++                    // need to set checked/unchecked bitmaps as otherwise our
++                    // MSWOnDrawItem() item is not called
++                    mii.fMask |= MIIM_CHECKMARKS;
++                }
++
+                 mii.cch = itemText.length();
+                 mii.dwTypeData = wx_const_cast(wxChar *, itemText.c_str());
+ 
+@@ -467,6 +473,11 @@
+                 //
+                 // so instead draw it ourselves in MSWOnDrawItem()
+                 mii.dwItemData = wx_reinterpret_cast(ULONG_PTR, pItem);
++                if ( pItem->IsCheckable() )
++                {
++                    mii.hbmpChecked =
++                    mii.hbmpUnchecked = HBMMENU_CALLBACK;
++                }
+                 mii.hbmpItem = HBMMENU_CALLBACK;
+ 
+                 ok = ::InsertMenuItem(GetHmenu(), pos, TRUE /* by pos */, &mii);
