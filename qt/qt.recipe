@@ -1,31 +1,29 @@
 #
-# Copyright (c) 2006 rPath, Inc.
+# Copyright (c) 2006-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 
 class Qt(AutoPackageRecipe):
-
     name = 'qt'
-    version = '3.3.7_r621294'
-    real_version = version[:version.rfind('_')]
+    version = '3.3.7'
 
-    buildRequires = [
-        'byacc:runtime', 'cups:devel', 'fontconfig:devel', 'freetype:devel',
-        'libICE:devel', 'libjpeg:devel', 'libmng:devel', 'libpng:devel',
-        'libSM:devel', 'libstdc++:devel', 'libX11:devel', 'libXcursor:devel',
-        'libXext:devel', 'libXft:devel', 'libXi:devel', 'libXinerama:devellib',
-        'libXmu:devel', 'libXrandr:devel', 'libXrender:devel', 'Mesa:devel',
-        'zlib:devel'
-    ]
+    buildRequires = [ 'byacc:runtime', 'fontconfig:devel',
+        'freetype:devel', 'zlib:devel', 'libpng:devel', 'libjpeg:devel',
+        'libmng:devel', 'libstdc++:devel', 'Mesa:devel', 'libXmu:devel',
+        'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXcursor:devel',
+        'libXext:devel', 'libXft:devel', 'libXi:devel', 'libXt:devel',
+        'libXinerama:devellib', 'libXrandr:devel', 'libXrender:devel', ]
 
-    Flags.cups       = True
-    Flags.odbc       = True
+    #Don't enable cups or odbc in rpl:devel until the build loops can be resolved
+    Flags.cups       = False
+    Flags.odbc       = False
+    Flags.postgresql = True
+    Flags.mysql      = True
     Flags.nis        = False
     Flags.sqlite     = True
-    Flags.mysql      = True
-    Flags.postgresql = True
+    Flags.nas        = True
 
     if Flags.mysql:
         buildRequires.append('mysql:devel')
@@ -35,6 +33,8 @@ class Qt(AutoPackageRecipe):
         buildRequires.append('unixODBC:devel')
     if Flags.cups:
         buildRequires.append('cups:devel')
+    if Flags.nas:
+        buildRequires.append('nas:devel')
 
     def unpack(r):
 
@@ -45,13 +45,8 @@ class Qt(AutoPackageRecipe):
 
         r.macros.qt = 'qt3'
 
-        r.addArchive('qt-copy-%(version)s.tar.bz2')
-        r.Run("find . -type d -name '.svn' -print0 | xargs -0 rm -rf")
-
+        r.addArchive('ftp://ftp.trolltech.com/qt/source/qt-x11-free-%(version)s.tar.bz2')
         r.addSource('qmake_env.conf')
-
-        r.Run('./apply_patches')
-
         r.addPatch('qt-fix_ftbfs_amd64.patch')
         r.addSource('qtrc', dir='%(sysconfdir)s/qt/')
 
@@ -69,10 +64,9 @@ class Qt(AutoPackageRecipe):
         # fix broken symlink
         r.Replace('ln -s -f @QMAKESPEC@', 'cp -f @QMAKESPEC@', 'qmake/Makefile.unix')
 
-        if r.macros.lib == 'lib64':
-           r.Replace('/usr/lib /lib', '/usr/lib64 /lib64', 'config.tests/{unix,x11}/*.test', allowNoChange=True)
-           r.Replace('/lib /usr/lib', '/lib64 /usr/lib64', 'config.tests/{unix,x11}/*.test', allowNoChange=True)
-           r.Replace('/lib', '/lib64', 'config.tests/unix/checkavail', allowNoChange=True)
+        r.Replace(('/usr/lib', '%(libdir)s',),('/lib64', '%(essentiallibdir)s'),
+            'config.tests/{unix,x11}/*.test',
+            'config.tests/unix/checkavail', allowNoChange=True)
 
     def configure(r):
 
@@ -82,17 +76,18 @@ class Qt(AutoPackageRecipe):
                      ' LD_LIBRARY_PATH=$QTDIR/lib:$LD_LIBRARY_PATH')
 
         conf = '-v'
-        conf += (' -prefix         %(prefix)s'
-                 ' -sysconfdir     %(sysconfdir)s/%(qt)s'
-                 ' -libdir         %(libdir)s'
-                 ' -datadir        %(datadir)s/%(qt)s'
-                 ' -headerdir      %(includedir)s/%(qt)s'
-                 ' -docdir         %(datadir)s/%(qt)s/doc'
-                 ' -plugindir      %(libdir)s/%(qt)s/plugins'
-                 ' -translationdir %(datadir)s/%(qt)s/translations')
+        conf += (' -prefix          %(prefix)s'
+                ' -sysconfdir     %(sysconfdir)s/%(qt)s'
+                ' -libdir         %(libdir)s'
+                ' -datadir        %(datadir)s/%(qt)s'
+                ' -headerdir      %(includedir)s/%(qt)s'
+                ' -docdir         %(datadir)s/%(qt)s/doc'
+                ' -plugindir      %(libdir)s/%(qt)s/plugins'
+                ' -translationdir %(datadir)s/%(qt)s/translations')
 
         conf += (' -platform %(platform)s'
-                 ' -no-debug'
+                 ' -no-nas-sound'
+                 ' -debug'
                  ' -thread'
                  ' -shared'
                  ' -fast'
@@ -111,6 +106,8 @@ class Qt(AutoPackageRecipe):
             conf = conf.replace('-no-cups', '-cups')
         if Use.ipv6:
             conf = conf.replace('-no-ipv6', '-ipv6')
+        if Flags.nas:
+            conf = conf.replace('-no-nas-sound', '-system-nas-sound')
 
         conf += (' -sm'
                  ' -xshape'
@@ -128,7 +125,7 @@ class Qt(AutoPackageRecipe):
                  ' -system-libjpeg')
 
         conf += (' -enable-opengl'
-                 ' -no-dlopen-opengl'
+                 ' -dlopen-opengl'
                  ' -qt-gif'
                  ' -qt-imgfmt-png'
                  ' -qt-imgfmt-jpeg'
@@ -200,22 +197,14 @@ class Qt(AutoPackageRecipe):
         r.Replace('%(builddir)s', '%(datadir)s/%(qt)s', '%(libdir)s/*.prl')
 
     def policy(r):
-
         r.Doc('examples')
         r.Doc('tutorial')
+        r.Move('/usr/share/qt3/doc/*', '%(thisdocdir)s/')
 
-        r.Doc('FAQ',
-              'README',
-              'LICENSE.GPL',
-              'LICENSE.QPL',
-              'README-QT.TXT',
-              'changes-'+r.real_version)
-
-        r.AutoDoc(exceptions='/')
         r.RemoveNonPackageFiles(exceptions='.*\.la')
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/%(qt)s')
 
-        r.ComponentSpec('apps',
+        r.ComponentSpec('qt-tools',
                         '%(bindir)s/(assistant|designer|createcw|conv2ui|linguist)',
                         '%(libdir)s/(libeditor|libdesignercore|libqassistantclient).*',
                         '%(libdir)s/%(qt)s/plugins/designer/',
