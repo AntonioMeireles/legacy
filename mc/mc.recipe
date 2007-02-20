@@ -1,0 +1,75 @@
+#
+# Copyright (c) 2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage=conary.rpath.com@rpl:devel')
+class MC(RPMPackageRecipe, AutoPackageRecipe):
+
+    name = 'mc'
+    version = '4.6.1a'
+
+    buildRequires = [
+        'e2fsprogs:devel', 'gettext:runtime', 'glib:devel', 'groff:runtime',
+        'perl:lib', 'pkgconfig:devel', 'slang:devel', 'unzip:runtime',
+        'zip:runtime'
+    ]
+
+    rpmRelease = '43.20070124cvs.fc7'
+    rpmPatches = [
+        'mc-utf8.patch',
+        'mc-extensions.patch',
+        'mc-userhost.patch',
+        'mc-64bit.patch',
+        'mc-utf8-look-and-feel.patch',
+        'mc-concat.patch',
+        'mc-showfree.patch',
+        'mc-cedit.patch',
+        'mc-delcheck.patch',
+        'mc-etcmc.patch',
+        'mc-exit.patch',
+        'mc-utf8-8bit-hex.patch',
+        'mc-ipv6.patch',
+        'mc-newlinedir.patch',
+        'mc-cloexec.patch'
+    ]
+
+    def unpack(r):
+
+        r.macros.archive_version = '2007-01-24-03'
+        r.addArchive('http://www.ibiblio.org/pub/Linux/utils/file/managers/mc/snapshots/')
+        r.addSource('mc.ini', dir='%(datadir)s/mc/')
+
+        for rpmPatch in r.rpmPatches:
+            r.addPatch(rpmPatch, rpm=r.srpm)
+
+    def configure(r):
+
+        r.macros.cflags += (
+            ' -DUTF8=1'
+            ' -D_FILE_OFFSET_BITS=64'
+            ' -D_LARGEFILE_SOURCE')
+
+        r.Configure('--with-screen=slang --enable-charset --without-x')
+
+    def policy(r):
+
+        r.AutoDoc(exceptions='/.*/')
+
+        r.Ownership('vcsa', 'root', '%(libexecdir)s/mc/cons.saver')
+        r.SetModes('%(libexecdir)s/mc/cons.saver', 04711)
+
+        r.Move('%(datadir)s/mc/bin/{mc.sh,mc.csh}',
+               '%(sysconfdir)s/profile.d/', mode=0755)
+
+        files = ','.join([
+            'cedit.menu' ,'edit.indent.rc', 'edit.spell.rc', 'mc.ext', 'mc.lib',
+            'mc.menu', 'mc.charsets'
+        ])
+        r.Move(
+            '%%(datadir)s/mc/{%s}' % files, '%(sysconfdir)s/mc/')
+
+        r.Move('%(datadir)s/mc/extfs/*.ini', '%(sysconfdir)s/mc/extfs/')
+        r.Move('%(datadir)s/mc/syntax/Syntax', '%(sysconfdir)s/mc/syntax/')
+
