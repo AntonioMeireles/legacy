@@ -1,0 +1,99 @@
+#
+# Copyright (c) 2005-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class KernelModulePackageRecipe(CPackageRecipe):
+
+    buildRequires = [ 'kernel:build-tree', 'mkinitrd:runtime' ]
+
+    name = "kernelmodulepackage"
+    version = "0"
+
+    Flags.smp = False
+    Flags.numa = False
+    Flags.debug = False
+
+    def setup(r):
+        if r.__class__.__name__ == 'KernelModulePackageRecipe':
+            return
+
+        r.macros.kver = os.uname()[2]
+
+        # Access current flavor values so that the flavor prints
+        # correctly at the beginning of the build process
+        if Flags.smp | Flags.numa | Flags.debug: pass
+        if Use.xen | Use.dom0 | Use.domU: pass
+
+        # we need to defer this check to the build pass in order to allow
+        # source checkins on machines where the kver doesn't match the
+        # default flavor
+        r.extraSource(checkKernelFlavorMismatch(r))
+
+        r.unpack()
+        r.build()
+        r.install()
+        r.requires()
+        r.policy()
+
+    def unpack(r):
+        pass
+    def build(r):
+        pass
+    def install(r):
+        pass
+    def requires(r):
+        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/.*')
+    def policy(r):
+        pass
+
+
+class checkKernelFlavorMismatch(action.RecipeAction):
+    def do(self):
+        r = self.recipe
+        if r.Flags.smp != (r.macros.kver.find('smp') >= 0):
+            raise KernelFlavorMismatch('smp', 'local', r)
+        if r.Flags.numa != (r.macros.kver.find('numa') >= 0):
+            raise KernelFlavorMismatch('numa', 'local', r)
+        if r.Flags.debug != (r.macros.kver.find('debug') >= 0):
+            raise KernelFlavorMismatch('debug', 'local', r)
+        if Use.xen != (r.macros.kver.find('xen') >= 0):
+            raise KernelFlavorMismatch('xen', 'use', r)
+        if Use.dom0 != (r.macros.kver.find('dom0') >= 0):
+            raise KernelFlavorMismatch('dom0', 'use', r)
+        if Use.domU != (r.macros.kver.find('domU') >= 0):
+            raise KernelFlavorMismatch('domU', 'use', r)
+
+    def doDownload(self):
+        return None
+
+    def fetch(self, refreshFilter=None):
+        pass
+
+    def fetchLocal(self):
+        pass
+
+
+class KernelFlavorMismatch(Exception):
+    def __init__(self, flagname, flagtype, recipe):
+        self.flagname = flagname
+        self.recipe = recipe
+        if flagtype == 'local':
+            self.flagvalue = str(recipe.Flags[flagname])
+            self.flagflavor = "[%s.%s]" %(recipe.name, flagname)
+        elif flagtype == 'use':
+            self.flagvalue = str(Use[flagname])
+            self.flagflavor = "[%s]" %(flagname)
+        else:
+            raise ValueError('unknown flag time %s' %flagtype)
+
+    def __repr__(self):
+        return ('kernel version %s does not match %s\n'
+                'To build this flavor, specify the correct kver with:\n'
+                "cvc cook --macros 'kver <uname_-r_of_desired_kernel>'\n"
+                'Alternatively, change the flavor:\n'
+                'cvc cook ... %s%s' %(
+                self.recipe.macros.kver, self.flagvalue,
+                self.recipe.name, self.flagflavor))
+    __str__ = __repr__
