@@ -8,7 +8,7 @@
 class Qt(AutoPackageRecipe):
 
     name = 'qt'
-    version = '3.3.7_r628196'
+    version = '3.3.8_r636583'
     release = version[:version.rfind('_')]
 
     buildRequires = [
@@ -16,28 +16,11 @@ class Qt(AutoPackageRecipe):
         'libICE:devel', 'libjpeg:devel', 'libmng:devel', 'libpng:devel',
         'libSM:devel', 'libstdc++:devel', 'libX11:devel', 'libXcursor:devel',
         'libXext:devel', 'libXft:devel', 'libXi:devel', 'libXinerama:devellib',
-        'libXmu:devel', 'libXrandr:devel', 'libXrender:devel', 'Mesa:devel',
-        'zlib:devel'
+        'libXmu:devel', 'libXrandr:devel', 'libXrender:devel', 'libXt:devel',
+        'Mesa:devel', 'mysql:devel', 'nas:devel', 'postgresql:devel',
+        'unixODBC:devel', 'zlib:devel'
     ]
 
-    Flags.cups       = True
-    Flags.odbc       = True
-    Flags.nis        = False
-    Flags.sqlite     = True
-    Flags.mysql      = True
-    Flags.postgresql = True
-    Flags.nas        = True
-
-    if Flags.mysql:
-        buildRequires.append('mysql:devel')
-    if Flags.postgresql:
-        buildRequires.append('postgresql:devel')
-    if Flags.odbc:
-        buildRequires.append('unixODBC:devel')
-    if Flags.cups:
-        buildRequires.append('cups:devel')
-    if Flags.nas:
-        buildRequires.append('nas:devel')
 
     def unpack(r):
 
@@ -49,15 +32,16 @@ class Qt(AutoPackageRecipe):
         else:
             r.macros.platform = 'linux-g++'
 
-        r.addArchive('ftp://ftp.trolltech.com'
-                     '/pub/qt/source/qt-x11-free-%(release)s.tar.bz2')
+        r.macros.archive_name = 'qt-x11-free'
+        r.macros.archive_version = r.release
+        r.addArchive('ftp://ftp.trolltech.com/pub/qt/source/')
 
         r.addSource('qmake_env.conf')
 
         # Apply qt-copy patches
         # svn co svn://anonsvn.kde.org/home/kde/branches/qt/3.3/qt-copy
         # diff -rNu qt-x11-free-3.3.7 qt-copy > qt-copy-3.3.7_r628196.diff
-        r.addPatch('qt-copy-%(version)s.diff')
+        r.addPatch('qt-copy-%(release)s.diff')
         r.Run('/bin/sh ./apply_patches')
 
         r.addPatch('qt-fix_ftbfs_amd64.patch')
@@ -99,7 +83,6 @@ class Qt(AutoPackageRecipe):
                  ' -translationdir %(datadir)s/%(qt)s/translations')
 
         conf += (' -platform %(platform)s'
-                 ' -no-nas-sound'
                  ' -no-debug'
                  ' -thread'
                  ' -shared'
@@ -107,20 +90,12 @@ class Qt(AutoPackageRecipe):
                  ' -no-exceptions'
                  ' -no-pch'
                  ' -stl'
-                 ' -no-ipv6'
+                 ' -ipv6'
                  ' -no-nis'
-                 ' -no-cups'
+                 ' -cups'
+                 ' -system-nas-sound'
                  ' -nomake examples'
                  ' -nomake tutorial')
-
-        if Flags.nis:
-            conf = conf.replace('-no-nis', '-nis')
-        if Flags.cups:
-            conf = conf.replace('-no-cups', '-cups')
-        if Use.ipv6:
-            conf = conf.replace('-no-ipv6', '-ipv6')
-        if Flags.nas:
-            conf = conf.replace('-no-nas-sound', '-system-nas-sound')
 
         conf += (' -sm'
                  ' -xshape'
@@ -144,31 +119,21 @@ class Qt(AutoPackageRecipe):
                  ' -qt-imgfmt-jpeg'
                  ' -plugin-imgfmt-mng')
 
-        conf += (' -no-sql-odbc'
-                 ' -no-sql-psql'
-                 ' -no-sql-mysql'
-                 ' -no-sql-sqlite')
+        conf += (' -plugin-sql-odbc'
+                 ' -plugin-sql-psql'
+                 ' -plugin-sql-mysql'
+                 ' -plugin-sql-sqlite')
 
         conf += (' -I%(includedir)s'
                  ' -I%(includedir)s/freetype2'
                  ' -lfontconfig')
 
-        if Flags.odbc:
-            conf = conf.replace('-no-sql-odbc', '-plugin-sql-odbc')
+        conf += (' -I%(includedir)s/postgresql/server'
+                 ' -I%(includedir)s/postgresql/pgsql'
+                 ' -I%(includedir)s/postgresql/pgsql/server')
 
-        if Flags.postgresql:
-            conf  = conf.replace('-no-sql-psql', '-plugin-sql-psql')
-            conf += (' -I%(includedir)s/postgresql/server'
-                     ' -I%(includedir)s/postgresql/pgsql'
-                     ' -I%(includedir)s/postgresql/pgsql/server')
-
-        if Flags.mysql:
-            conf  = conf.replace('-no-sql-mysql', '-plugin-sql-mysql')
-            conf += (' -I%(includedir)s/mysql'
-                     ' -L%(libdir)s/mysql')
-
-        if Flags.sqlite:
-            conf = conf.replace('-no-sql-sqlite', '-plugin-sql-sqlite')
+        conf += (' -I%(includedir)s/mysql'
+                 ' -L%(libdir)s/mysql')
 
         r.Replace(' sub-tutorial sub-examples', '', 'Makefile')
 
