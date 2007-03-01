@@ -1,55 +1,81 @@
 #
-# Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Freetype(CPackageRecipe):
-
-    # autoconf >= 2.59, symlinks (?)
-    buildRequires = [ 'automake:runtime', 'autoconf:runtime',
-                      'libtool:runtime', 'zlib:devel' ]
+loadSuperClass('rpmpackage')
+class Freetype(RPMPackageRecipe, AutoPackageRecipe):
 
     name = 'freetype'
-    version = '2.1.10'
+    version = '2.3.1'
 
-    # If you have a license from Apple, you can turn this on and rebuild
-    with_bytecode_interp = False
+    buildRequires = [ 'libX11:devel', 'zlib:devel' ]
 
-    def setup(r):
-        r.disableParallelMake()
+    rpmRelease = '1.fc7'
+    rpmPatches = [
+        # Enable otvalid and gxvalid modules
+        'freetype-2.2.1-enable-valid.patch',
+        # Fix multilib conflicts
+        'freetype-multilib.patch',
+        # Fix crash https://bugs.freedesktop.org/show_bug.cgi?id=6841
+        'freetype-2.2.1-memcpy-fix.patch',
+        # make fonts better
+        'freetype-2.3.0-enable-spr.patch',
+        'freetype-2.1.10-enable-ft2-bci.patch'
+    ]
 
-        r.addArchive('http://kent.dl.sourceforge.net/sourceforge/%(name)s/%(name)s-%(version)s.tar.bz2')
-        r.addArchive('http://kent.dl.sourceforge.net/sourceforge/%(name)s/freetype-doc-%(version)s.tar.bz2')
-        r.addArchive('http://kent.dl.sourceforge.net/sourceforge/%(name)s/ft2demos-%(version)s.tar.bz2',
-                        dir=r.theMainDir)
+    def unpack(r):
 
-        r.addPatch('freetype-2.1.10-enable-ft2-bci.patch',
-                    rpm='ftp://ftp.linux.ncsu.edu/pub/fedora/linux/core/5/source/SRPMS/freetype-2.1.10-5.2.1.src.rpm',
-                    use=r.with_bytecode_interp, level=0)
-        r.addPatch('freetype-2.1.10-multivuln.patch')
+        r.macros.site = 'mirror://sourceforge/%(name)s'
 
-        # https://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=118021
-        r.macros.cflags += ' -fno-strict-aliasing'
+        r.addArchive('%(site)s/')
+        r.addArchive('%(site)s/freetype-doc-%(version)s.tar.bz2')
+        r.addArchive('%(site)s/ft2demos-%(version)s.tar.bz2', dir=r.theMainDir)
+        r.addSource('ftconfig-multilib.h')
 
-        r.Configure()
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
+
+        # Add -lm when linking X demos
+        r.addPatch('ft2demos-2.1.9-mathlib.patch',
+                   dir='ft2demos-%(version)s', rpm=r.srpm)
+
+    def configure(r):
+
+        r.Configure('--disable-static')
+
+    def make(r):
+
         r.Make()
 
-        if 0 and Use.X:
-            r.Make('X11_LIB=%(x11prefix)s/%(lib)s X11_PATH="%(x11prefix)s"'
-                      ' TOP_DIR="%(builddir)s"',
-                      subDir='ft2demos-%(version)s')
+        # Make demos
+        r.Make('TOP_DIR=".."', dir='ft2demos-%(version)s')
 
-        r.MakeInstall('gnulocaledir=%(destdir)s/%(datadir)s/locale')
+    def makeinstall(r):
 
-        ftdemolist = ('ftdump', 'ftlint', 'ftmemchk', 'ftmulti', 'ftstring',
-                      'fttimer', 'ftview')
-        if 0 and Use.X:
-            for ftdemo in ftdemolist:
-                r.Run('libtool --mode=install install -m 755'
-                            ' ft2demos-%(version)s/bin/' + ftdemo +
-                            ' %(destdir)s/%(bindir)s/')
+        r.MakeInstall()
 
-        if 0 and Use.X:
-            demoexp = "|".join(ftdemolist)
-            r.ComponentSpec('demos', '%(bindir)s/(' + demoexp + ')')
+        # Install demos
+        demos = (
+            # X11
+            'ftgamma', 'ftmulti', 'ftstring', 'fttimer', 'ftview',
+            # Console
+            'ftbench', 'ftchkwd', 'ftdump', 'ftlint', 'ftmemchk', 'ftvalid',
+        )
+        for ftdemo in demos:
+            r.Run('builds/unix/libtool --mode=install install -m 755 '
+                    'ft2demos-%(version)s/bin/'+ftdemo+' %(destdir)s/%(bindir)s/')
+
+        # Fix multilib issues
+        r.macros.wordsize = '32'
+        if Arch.x86_64:
+            r.macros.wordsize = '64'
+
+        r.Move('%(includedir)s/freetype2/freetype/config/ftconfig.h',
+               '%(includedir)s/freetype2/freetype/config/ftconfig-%(wordsize)s.h')
+
+        r.Install('ftconfig-multilib.h',
+                  '%(includedir)s/freetype2/freetype/config/ftconfig.h',
+                  component='devellib')
+
