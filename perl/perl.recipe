@@ -1,0 +1,161 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Perl(CPackageRecipe):
+    name = 'perl'
+    version = '5.8.8'
+
+    buildRequires = [ 'db:devel', 'gdbm:devel' ]
+
+    def setup(r):
+        r.macros.perlthreadarch = '-thread-multi' # compatibility
+        r.macros.vendorarch = '%(libdir)s/perl5/vendor_perl/%(version)s/%(unamearch)s-%(os)s%(perlthreadarch)s'
+        r.macros.archlib = '%(libdir)s/perl5/%(version)s/%(unamearch)s-%(os)s%(perlthreadarch)s'
+        # note not %(libdir)s in the next macros
+        r.macros.privlib = '%(prefix)s/lib/perl5/%(version)s'
+        r.macros.sitelib = '%(prefix)s/lib/perl5/site_perl/%(version)s'
+        r.macros.vendorlib = '%(prefix)s/lib/perl5/vendor_perl/%(version)s'
+        # all minor revisions should be compatible. for ex: all 5.8.x are compatible
+        compatibleVersions = [ '%s.%s' % (r.macros.major_version,x) for x in range(0,int(r.version.split('.')[2:][0])+1) ]
+        r.macros.compatibleVersions = ' '.join(compatibleVersions)
+
+        # Perl mirrors are NOT standardized.  They scrub older versions
+        # at different rates, and use different compression technologies
+        # on different mirrors.
+        r.addArchive('http://www.cpan.org/src/')
+        r.addSource('perl-5.8.0-libnet.cfg')
+        r.addPatch('perl-5.8.0-root.patch')
+        # When updating, update version number in perl-5.8.3-incpush.patch
+        r.addPatch('perl-5.8.3-incpush.patch')
+        r.addPatch('perl-5.8.0-sharedlinker.patch')
+        r.addPatch('perl-5.8.0-rpath-make.patch')
+        r.addPatch('perl-5.8.1-fpic.patch')
+        r.addPatch('perl-5.8.0-libdir64.patch', use=Arch.bits64)
+        r.addPatch('perl-5.8.7-exp_parameter_intwrap_vulnerability.patch')
+
+        if Arch.bits64:
+            r.MakeDirs('%(sitelib)s', '%(vendorlib)s')
+
+        r.Run('./Configure -des -Doptimize="%(cflags)s"'
+              ' -Dversion=5.8.7'
+              ' -Dmyhostname=localhost'
+              ' -Dperladmin=root@localhost'
+              ' -Dcc=%(cc)s'
+              ' -Dcf_by="rPath, Inc."'
+              ' -Dinstallprefix=%(prefix)s'
+              ' -Dprefix=%(prefix)s'
+              ' -Dlibpth="/usr/local/%(lib)s %(essentiallibdir)s %(libdir)s"'
+              ' -Dprivlib=%(privlib)s'
+              ' -Dsitelib=%(sitelib)s'
+              ' -Dvendorlib=%(vendorlib)s'
+              ' -Darchlib=%(archlib)s'
+              ' -Dotherlibdirs=%(privlib)s'
+              ' -Dsitearch=%(libdir)s/perl5/site_perl/%(version)s'
+              ' -Dvendorarch=%(vendorarch)s'
+              ' -Darchname=%(unamearch)s-%(os)s'
+              ' -Dvendorprefix=%(prefix)s'
+              ' -Dsiteprefix=%(prefix)s'
+              ' -Duseshrplib'
+              ' -Dusethreads'
+              ' -Duseithreads'
+              ' -Duselargefiles'
+              ' -Dd_dosuid'
+              ' -Dd_semctl_semun'
+              ' -Di_db'
+              ' -Ui_ndbm'
+              ' -Di_shadow'
+              ' -Di_syslog'
+              ' -Dman3ext=3pm'
+              ' -Dman3dir=%(mandir)s/man3'
+              ' -Dman1dir=%(mandir)s/man1'
+              ' -Duseperlio'
+              ' -Dinstallusrbinperl'
+              ' -Ubincompat5005'
+              ' -Uversiononly'
+              ' -Dpager="/usr/bin/less -isr"'
+        # When updating, add old version to this list
+              ' -Dinc_version_list="%(compatibleVersions)s"'
+              ' -Di_gdbm'
+              )
+
+        # makefile exists; we want Makefile instead
+        r.Make('-f Makefile')
+        r.MakeInstall('-f Makefile')
+        # preserve compatablity when upgrading
+        for oldver in compatibleVersions[:-1]:
+            r.Symlink('%(archlib)s/CORE/libperl.so',
+                      '%%(libdir)s/perl5/%s/%%(unamearch)s-%%(os)s'
+                      '%%(perlthreadarch)s/CORE/libperl.so' % oldver)
+        # .so symlinks and .a files normally go in :devellib, but not these
+        r.ComponentSpec('lib', '%(libdir)s/perl5/.*/CORE/libperl.so',
+                               '.*/DynaLoader.a')
+
+        r.Install('utils/pl2pm', '%(bindir)s/', mode=0755)
+
+        r.ExcludeDirectories(exceptions='%(sitelib)s')
+
+        r.Install('perl-5.8.0-libnet.cfg',
+                  '%(libdir)s/perl5/%(version)s/Net/libnet.cfg')
+
+        # Let's move docs and demos to %(thisdocdir)s
+        #r.Move('%(privlib)s/Attribute/Handlers', '%(thisdocdir)s/')
+        r.Move('%(privlib)s/CGI/eg/*', '%(thisdocdir)s/CGI/')
+
+        # unicore/lib is used only internally, do not export almost
+        # twice as many perl: Provides as the rest of perl together
+        r.Provides(exceptions='%(privlib)s/unicore/lib/')
+
+        # By default, we do not ship these setuid; Conary will preserve
+        # the change if someone modifies them locally
+        #r.SetModes('%(bindir)s/{suidperl,sperl%(version)s}', 04711)
+
+        # fix up paths for dependencies
+        r.Replace('^#!./miniperl',
+                  '#!/usr/lib/perl5/%(version)s/ExtUtils/xsubpp/miniperl',
+                  '/usr/lib/perl5/%(version)s/ExtUtils/xsubpp')
+        r.Replace('#!perl', '#!%(bindir)s/perl',
+                  '/usr/lib/perl5/%(version)s/File/DosGlob.pm')
+
+        r.Provides('soname: libperl.so', '%(libdir)s/perl5/.*/CORE/libperl.so')
+
+        # Test suite files
+        r.Run('make test_prep')
+        r.TestSuite('t', ' PERL_SKIP_TTY_TEST=1'
+                    ' LD_LIBRARY_PATH=%(thistestdir)s %(thistestdir)s/preload'
+                    ' /var/conary/tests/perl-%(version)s/libperl.so  ./TEST')
+        # lots of relative interpreters here.
+        r.TestSuiteFiles('miniperl', 'preload', '.*/t/.*')
+        r.TestSuiteFiles('/lib/.*.pm') # just how much is this?
+        r.TestSuiteFiles('.*.t')
+        r.TestSuiteFiles('MANIFEST')
+        r.Symlink('%(thistestdir)s/perl', '%(thistestdir)s/t/perl')
+        r.Replace(('^#!perl', '#!%(thistestdir)s/perl'),
+                  ('^#!/bin/perl', '#!%(thistestdir)s/perl'),
+                  ('^#!/usr/local/bin/perl', '#!%(thistestdir)s/perl'),
+                  ('^#!./perl', '#!%(thistestdir)s/perl'),
+                  ('^#!../perl', '#!%(thistestdir)s/perl'),
+                  ('^#!./miniperl', '#!%(thistestdir)s/miniperl'),
+                  'configpm',
+                  'lib/File/DosGlob.pm',
+                  'lib/File/Temp/t/*',
+                  'lib/CGI/t/*',
+                  'ext/B/C/Makefile.PL',
+                  'ext/Encode/t/unibench.pl',
+                  'ext/Digest/MD5/Makefile.PL',
+                  't/TEST',
+                  't/harness',
+                  't/comp/cpp.aux',
+                  't/lib/compmod.pl',
+                  't/win32/system_tests', allowNoChange=True)
+        r.Run("find . -name '*.t' | xargs "
+              ' sed -i -e "s|^#!perl|#!%(thistestdir)s/perl|" '
+              '        -e "s|^#!./perl|#!%(thistestdir)s/perl|" '
+              '        -e "s|^#!../perl|#!%(thistestdir)s/perl|" '
+              '        -e "s|^#!./miniperl|#!%(thistestdir)s/miniperl|" ')
+        r.Provides('file', '%(thistestdir)s/(mini)?perl')
+        for manpage in ('Filter::Util::Call.3pm', 'Time::HiRes.3pm',
+                        'Filter::Simple.3pm'):
+            r.Remove('%(mandir)s/man3/' + manpage)
