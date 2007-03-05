@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Pcre(CPackageRecipe):
+    buildRequires = [ ]
+    if Use.bootstrap:
+        clearBuildReqs()
+        buildRequires = [ 'cross-gcc', 'glibc' ]
+    buildRequires.append('sed:runtime')
+
+    name = "pcre"
+    version = "5.0"
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive("ftp://ftp.csx.cam.ac.uk/pub/software/programming/pcre/pcre-%(version)s.tar.bz2")
+
+        # we will be installing in system library directory
+        r.Replace(r'-L@libdir@\$libR ', '', 'pcre-config.in')
+
+        r.Replace('alpha..hppa..i.86.ia64..m68..mips..powerpc..sparc..s390..sh.',
+                  'alpha*|hppa*|i*86|ia64*|m68*|mips*|powerpc*|sparc*|s390*|sh*|x86_64*',
+                  'configure')
+
+        if Use.bootstrap:
+            r.Configure("--includedir=%(includedir)s/pcre --enable-utf8",
+                         preConfigure='CC_FOR_BUILD=%(buildcc)s')
+        else:
+            r.Configure("--includedir=%(includedir)s/pcre --enable-utf8")
+        # avoid hardcoding the *build* path, including .lib, as an RPATH
+        r.Replace('hardcode_into_libs=yes', 'hardcode_into_libs=no', 'libtool')
+        r.Make('LIBTOOL="sh ./libtool --tag=CC"')
+        # avoid relinking when installing libraries
+        r.Run('sed -i "s/relink_command=.*//" $(find -name "*.la")')
+        r.MakeInstall('LIBTOOL="sh ./libtool --tag=CC"')
+        r.Move("%(libdir)s/libpcre.so.*", "/%(lib)s/")
+        r.Symlink("%(essentiallibdir)s/libpcre.so.0",
+                  "%(libdir)s/libpcre.so")
