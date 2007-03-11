@@ -1,24 +1,25 @@
 #
-# Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Fontconfig(CPackageRecipe):
     name = 'fontconfig'
-    version = '2.4.1'
+    version = '2.4.2'
 
     buildRequires = [ 'freetype:devel', 'expat:devel', 'perl:runtime',
-        'zlib:devel','pkgconfig:devel', 'opensp:runtime', 'perl-SGMLS:runtime',
-        'tetex:runtime' ]
+                      'zlib:devel', 'pkgconfig:devel','docbook-utils:runtime' ]
     if Use.builddocs:
         buildRequires.extend([
-            'docbook-utils:runtime', 'docbook-utils-pdf:runtime'])
+            'docbook-utils-pdf:runtime'])
 
     def setup(r):
-        r.addArchive('http://www.fontconfig.org/release/%(name)s-%(version)s.tar.gz')
-        r.addSource('cacheable-font.tagdescription', macros=True)
-        r.addSource('cacheable-font.taghandler', macros=True)
+        r.addArchive('http://www.fontconfig.org/release/')
+        r.addSource('cacheable-font.tagdescription', macros=True,
+            dest='%(tagdescriptiondir)s/cacheable-font')
+        r.addSource('cacheable-font.taghandler', macros=True,
+            dest='%(taghandlerdir)s/cacheable-font', mode=0755)
 
         extraConfig = ''
         if not Use.builddocs:
@@ -27,9 +28,7 @@ class Fontconfig(CPackageRecipe):
             r.Replace(r'  enable_docs=\$default_docs',
                        '  enable_docs=no',
                        'configure')
-        r.Configure('--with-add-fonts=%(x11prefix)s/%(lib)s/X11/fonts/Type1,'
-                                      '%(x11prefix)s/%(lib)s/X11/fonts/OTF'
-                    +extraConfig)
+        r.Configure('--with-add-fonts=%(datadir)s/X11/fonts'+extraConfig)
         if not Use.builddocs:
             # unfortunately, fc-cache and fc-list do not honor --disable-docs
             r.Replace(('^DOC2MAN = docbook2man',
@@ -42,12 +41,14 @@ class Fontconfig(CPackageRecipe):
             # these aren't installed by Makefile if !builddocs
             r.Install('doc/*.3', '%(mandir)s/man3/')
             r.Install('doc/*.5', '%(mandir)s/man5/')
-        r.Install('cacheable-font.tagdescription', '%(tagdescriptiondir)s/cacheable-font')
-        r.Install('cacheable-font.taghandler', '%(taghandlerdir)s/cacheable-font', mode=0755)
         r.MakeInstall()
 
         r.Move('%(docdir)s/%(name)s/*', '%(thisdocdir)s/')
         r.Requires('%(name)s:runtime', '%(libdir)s/.*')
 
+        # FIXME: remove when/if RPL-1077 is implemented
+        for req in ('/bin/cat', '/usr/bin/fc-cache'):
+            r.Requires(req, '%(taghandlerdir)s/cacheable-font')
 
-	r.Config(exceptions='/etc/fonts/conf.d/10LohitGujarati.conf')
+        # does not seem to be needed anymore...
+        # r.Config(exceptions='/etc/fonts/conf.d/10LohitGujarati.conf')
