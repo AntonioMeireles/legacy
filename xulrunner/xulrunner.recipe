@@ -1,85 +1,56 @@
 #
-# Copyright (c) 2006 rPath, Inc.
+# Copyright (c) 2006-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class XulRunner(CPackageRecipe):
+class XULRunner(AutoPackageRecipe):
     name = 'xulrunner'
-    version = '1.8.0.7'
-    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'atk:devel',
-                      'cairo:devel', 'fontconfig:devel', 'freetype:devel',
-                      'glib:devel', 'perl:runtime', 'gnome-keyring:devel',
-                      'gnome-vfs:devel', 'gtk:devel', 'libIDL:devel',
-                      'libart_lgpl:devel', 'libbonobo:devel',
-                      'libbonoboui:devel', 'libgnome:devel',
-                      'libgnomecanvas:devel', 'libgnomeui:devel',
-                      'libjpeg:devel', 'libpng:devel', 'libstdc++:devel',
-                      'libxml2:devel', 'pango:devel', 'popt:devel',
-                      'zlib:devel', 'zip:runtime', 'pkgconfig:devel',
-                      'libX11:devel', 'libXau:devel', 'libXdmcp:devel',
-                      'libXt:devel', 'libXext:devel', 'libXi:devel',
-                      'libXinerama:devellib', 'libXft:devel',
-                      'libXrender:devel','libdmx:devel', 'libICE:devel',
-                      'libSM:devel', 'nspr:devel','nss:devel', 'expat:devel' ]
+    version = '1.8.1.2pre_2007013013'
 
-    def setup(r):
-        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/1.8.0.4/source/%(name)s-1.8.0.4-source.tar.bz2')
+    buildRequires = [
+        'atk:devel', 'autoconf:runtime', 'cairo:devel',
+        'desktop-file-utils:runtime',
+        'doxygen:runtime', 'file:runtime', 'fontconfig:devel', 'freetype:devel',
+        'gcc:devel', 'glib:devel', 'gtk:devel', 'krb5:devel', 'libgcc:devellib',
+        'libICE:devel', 'libIDL:devel', 'libjpeg:devel', 'libpng:devel',
+        'libSM:devel', 'libstdc++:devel', 'libX11:devel', 'libXau:devel',
+        'libXdmcp:devel', 'libXext:devel', 'libXft:devel',
+        'libXinerama:devellib', 'libXrender:devel', 'libXt:devel',
+        'makedepend:runtime', 'nspr:devel', 'nss:devel', 'pango:devel',
+        'perl:runtime', 'pkgconfig:devel', 'unzip:runtime', 'zip:runtime',
+        'zlib:devel',
+        # gnome-related buildreqs
+        'GConf:devel', 'ORBit2:devel', 'gnome-vfs:devel',
+        'libbonobo:devel', 'libgnome:devel', 'popt:devel',
+        'gnome-keyring:devel', 'libart_lgpl:devel', 'libbonoboui:devel',
+        'libgnomecanvas:devel', 'libgnomeui:devel', 'libxml2:devel',
+        ]
+
+    def unpack(r):
+        r.disableParallelMake()
+        r.addArchive('ftp://download.rpath.com/autosource/')
 
         patches = (
-            'xulrunner-1.8.0.4-1.8.0_20060925.patch.bz2',
             'firefox-1.1-uriloader.patch',
-            'firefox-1.5-with-system-nss.patch',
             'firefox-1.5-pango-cursor-position.patch',
-            'firefox-1.5-pango-mathml.patch',
-            'firefox-nopangoxft.patch',
-            'moz252436.patch',
+            'firefox-2.0-buildversion.patch',
+            'firefox-unversioned-paths.patch',
             'moz310924.patch',
             'moz325644.patch',
-            'system-prefs.patch',
-            'nsIPermission.patch',
-            'nsISidebar.patch',
-            'system-proxies.patch',
-            'file-saver.patch')
-
+            'nsIPermission.patch')
 
         for patch in patches:
             r.addPatch(patch)
 
-        r.addSource('mozconfig', dest='.mozconfig')
+        r.addSource('mozconfig', dest='.mozconfig', macros=True)
 
-        r.Replace('1.8.0.8pre','%(version)s', 'config/milestone.txt')
+    def configure(r):
+        # http://benjamin.smedbergs.us/blog/2005-10-27/gcc-40-workaround/
+        r.Configure('--enable-gnomevfs --enable-gnomeui',
+                    preConfigure='ac_cv_visibility_pragma=no')
 
-        r.Configure()
-
-        r.macros.mflags = ' '
-
-        r.Make(' -f client.mk build ')
-
-        r.Make(' DESTDIR=%(destdir)s prefix=%(prefix)s install')
-
-	# we depend on system' s nspr and nss so remove these... which we don 't built anyway.
-        r.Remove('/usr/lib/pkgconfig/xulrunner-nss.pc')
-        r.Remove('/usr/lib/pkgconfig/xulrunner-nspr.pc')
-
-    # remove versioning from path names. fixes potential messes while updating
-
-        r.Symlink('/usr/lib/%(name)s-%(version)s','/usr/lib/%(name)s' )
-        r.Symlink('/usr/include/%(name)s-%(version)s','/usr/include/%(name)s' )
-        r.Symlink('/usr/share/idl/%(name)s-%(version)s','/usr/share/idl/%(name)s' )
-
-        r.Run("""
-	sed -i -e "s/usr\/local/usr/" -e "s/%(name)s-%(version)s/%(name)s/"  	%(destdir)s/usr/lib/pkgconfig/*.pc
-
-	""")
-
-# r.Provides voodoo. mkj is my hero.
-
-        libs = ('gtkembedmoz','xpcom', 'xul',)
-
-        for libname in libs:
-            r.Provides('soname: lib%s.so' % libname,
-                       '%%(libdir)s/%%(name)s/lib%s.so' % libname)
-
-
-
+    def policy(r):
+        # We use separate nspr & nss
+        r.Remove('%(libdir)s/pkgconfig/xulrunner-nspr.pc')
+        r.Remove('%(libdir)s/pkgconfig/xulrunner-nss.pc')
