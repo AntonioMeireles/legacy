@@ -1,0 +1,114 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class NetSnmp(RPMPackageRecipe, CPackageRecipe):
+    name = 'net-snmp'
+    version = '5.3.1'
+    rpmRelease = '11.fc6'
+
+    buildRequires = [ 'openssl:devel', 'bzip2:devel',
+        'elfutils:devel', 'perl:runtime', 'coreutils:runtime',
+        'grep:runtime', 'sed:runtime', 'findutils:runtime',
+        'libtool:runtime', 'zlib:devel', 'autoconf:runtime', 'cups:runtime',
+        'perl:lib', 'procps:runtime', 'tcp_wrappers:devel' ]
+
+    if Arch.x86 or Arch.x86_64:
+        buildRequires.append('lm_sensors:devel')
+
+    rpmPatches = [ 'ucd-snmp-4.2.4.pre3-mnttab.patch',
+                   'net-snmp-5.0.6-libtool.patch',
+                   'net-snmp-5.0.8-readonly.patch',
+                   'net-snmp-5.1-async-getnext.patch',
+                   'net-snmp-5.1.2-dir-fix.patch',
+                   'net-snmp-5.2.1-file_offset.patch' ]
+
+    rpmSources = [ 'net-snmpd.init', 'net-snmpd.logrotate', 'ucd5820stat' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.macros.perldir = '%(libdir)s/perl5/vendor_perl/'
+
+        r.unpack()
+
+        # Use source from srpm until patches can be dropped
+        #r.addArchive('mirror://sourceforge/%(name)s/', keyid='7800FEAC')
+        r.addSource('net-snmp.conf.new', dest='net-snmp.conf')
+
+        r.addSource('net-snmptrapd.init')
+        r.addPatch('net-snmp-5.1.1-pie.patch', use=Arch.ia64, rpm=r.srpm)
+
+        r.Replace(r'\$install_libdir', '%(libdir)s', 'ltmain.sh')
+
+        extraConfig = ''
+        if Arch.x86 or Arch.x86_64:
+            extraConfig += ' --with-mib-modules="host agentx smux' \
+                           '   ucd-snmp/lmSensors ucd-snmp/diskio"'
+        r.Configure(' --enable-static --enable-shared'
+                    ' --with-cflags="%(cflags)s -lcrypto"'
+                    ' --with-ldflags="-L%(libdir)s"'
+                    ' --with-sys-location="Unknown"'
+                    ' --with-logfile="%(localstatedir)s/log/snmpd.log"'
+                    ' --with-persistent-directory="/var/net-snmp"'
+                    ' --with-mib-modules="host agentx smux'
+                    '   ucd-snmp/lmSensors ucd-snmp/diskio"'
+                    ' --sysconfdir=%(sysconfdir)s'
+                    ' --enable-ipv6'
+                    ' --enable-ucd-snmp-compatibility'
+                    ' --with-default-snmp-version=3'
+                    ' --with-openssl'
+                    ' --with-pic'
+                    ' --with-libwrap="%(prefix)s"'
+                    ' --with-sys-contact="root@localhost"' +
+                    extraConfig)
+        r.Make('LIBTOOL=%(bindir)s/libtool')
+
+        r.Run('cd perl;   perl Makefile.PL -NET-SNMP-IN-SOURCE=true INSTALLDIRS=vendor PERL5DIR=%(perldir)s  ;')
+        for dir in 'default_store OID agent agent/default_store ASN SNMP'.split(' '):
+            r.Replace(('^LD_RUN_PATH.*', ''), (r'LD_RUN_PATH=\".*\" ', ''),
+                      'perl/%s/Makefile' % dir)
+
+        r.Make(dir='perl')
+
+        r.MakePathsInstall('LIBTOOL=%(bindir)s/libtool'
+                           ' ucdincludedir=%(destdir)s%(includedir)s/ucd-snmp')
+        r.MakeInstall('BINDIR=%(destdir)s%(bindir)s'
+                      ' PERL5DIR=%(destdir)s%(perldir)s',
+                      installtarget='install_vendor', dir='perl')
+        r.Install('local/mib2c.*.conf', '%(datadir)s/snmp')
+        r.Install('net-snmp.conf', '%(sysconfdir)s/snmp/snmpd.conf',
+                  mode=0644)
+        r.Install('net-snmpd.init', '%(initdir)s/snmpd', mode=0755)
+        r.Install('net-snmptrapd.init', '%(initdir)s/snmptrapd', mode=0755)
+        r.Install('net-snmpd.logrotate',
+                  '%(sysconfdir)s/logrotate.d/snmpd', mode=0644)
+        r.Install('ucd5820stat', '%(bindir)s/', mode=0755)
+        r.Symlink('snmptrap', '%(bindir)s/snmpinform')
+        r.Doc('AGENT.txt', 'EXAMPLE.conf', 'PORTING', 'local/passtest',
+              'local/ipf-mod.pl')
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.Remove('%(bindir)s/{snmpinform,tkmib,snmpcheck}')
+        r.Remove('%(mandir)s/man1/snmpconf.1*')
+
+        # hack to get everything where it should be
+        r.Move('%(includedir)s/*', '/tmp-net-snmp/')
+        r.Move('/tmp-net-snmp/*', '%(includedir)s/net-snmp/')
+        r.Move('%(includedir)s/net-snmp/ucd-snmp', '%(includedir)s/')
+
+        r.Run('find %(destdir)s%(libdir)s -name Makefile.subs.pl | xargs rm -f')
+
+        r.PackageSpec('net-snmp-client',
+                      '%(bindir)s/(fixproc|ipf-mod.pl|encode_keychange|snmp.*|traptoemail)',
+                      '.*snmptrapd.*',
+                      '%(mandir)s/man1/snmp.*.1.*')
+
+        r.PackageSpec('net-snmp-server', '.*snmpd.*')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
