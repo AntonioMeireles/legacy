@@ -1,60 +1,43 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class ImageMagick(CPackageRecipe):
     name = 'ImageMagick'
-    mainver = '6.2.3'
-    patchlevel = '6'
+    mainver = '6.3.3'
+    patchlevel = '1'
     version = mainver + '.' + patchlevel
 
     buildRequires = [ 'autoconf:runtime', 'automake:runtime', 'bzip2:devel',
+        'djvulibre:devel', 'lcms:devel',
         'freetype:devel', 'gcc:devel', 'libjpeg:devel', 'libpng:devel',
-        'libtiff:devel', 'libtool:devel', 'libtool:runtime', 'libungif:devel',
+        'libtiff:devel', 'libtool:devel', 'libtool:runtime', 'giflib:devel',
         'libxml2:devel', 'zlib:devel', 'libstdc++:devel',
-        'cups:runtime', 'enscript:runtime', 'espgs:runtime', 'fontconfig:devel',
-        'glib:devel', 'groff:runtime', 'gtk:devel', 'htmlview:runtime',
-        'lcms:devel', 'librsvg:devel', 'libwmf:devel', 'libwmf:runtime',
-        'netpbm:runtime', 'pkgconfig:devel', 'perl:lib',
-        'tetex-dvips:runtime', 'wget:runtime', 'libICE:devel',
-        'libSM:devel', 'libX11:devel', 'libXext:devel', 'libXt:devel' ]
-
-    if Use.perl:
-        buildRequires.extend(['perl:runtime', 'perl:devel'])
+        'fontconfig:devel', 'glib:devel', 'gtk:devel', 'librsvg:devel',
+        'perl:lib', 'libICE:devel', 'libSM:devel', 'libX11:devel',
+        'libXext:devel', 'libXt:devel', 'perl:runtime', 'perl:devel', ]
 
     def setup(r):
         r.macros.mainver = r.mainver
         r.macros.patchlevel = r.patchlevel
-        r.mainDir('%(name)s-%(mainver)s')
+        r.macros.archive_version = '%(mainver)s-%(patchlevel)s'
 
-        r.addArchive('ftp://ftp.imagemagick.net/pub/ImageMagick/%(name)s-%(mainver)s-%(patchlevel)s.tar.bz2')
+        r.addArchive('ftp://ftp.imagemagick.net/pub/%(name)s/')
 
-        config = '--enable-shared --with-threads --with-magick_plus_plus'
-        if Use.X:
-            config += ' --with-x'
-        if Use.perl:
-            r.macros.perl_make_options = "CC='%(cc)s -L%(builddir)s/magick/.libs' LD='%(bindir)s/ld -L%(builddir)s/magick/.libs'"
-            config += ' --without-perl' # we'll build perl stuff separately
-        else:
-            r.macros.perl_make_options = ''
-
-        r.Configure(config)
+        r.Configure('--enable-shared --with-threads --with-magick_plus_plus '
+            '--with-perl --with-x')
+        # in some configurations, several files are built with inappropriate
+        # --rpath specification pointing to the build directory
+        r.Replace('-Wl,--rpath', '-L%(builddir)s/magick/.libs',
+                  'PerlMagick/Makefile.PL', allowNoChange=True)
+        r.Replace('-Wl,--rpath -Wl,%(builddir)s',
+                  '-L%(builddir)s',
+                  'utilities/*', allowNoChange=True)
 
         r.Make()
-        if Use.perl:
-            # make sure that MakeMaker can find the freshly built libMagick
-            r.Replace('-lMagick', '-L%(builddir)s/magick/.libs -lMagick',
-                      'PerlMagick/Makefile.PL')
-            r.Run('PERL_MAKE_OPTIONS="%(perl_make_options)s" cd PerlMagick && perl Makefile.PL')
-            r.Run("sed -i 's,\\(^INSTALL.* = \\)/usr,\\1%(destdir)s/usr,g' PerlMagick/Makefile")
-            r.Make(dir='PerlMagick')
-
-        r.MakeInstall(preMake='DESTDIR=%(destdir)s PERL_MAKE_OPTIONS="%(perl_make_options)s"')
-
-        if Use.perl:
-                r.MakeInstall(dir='PerlMagick')
+        r.MakeInstall(preMake='DESTDIR=%(destdir)s')
 
         r.Run('find %(destdir)s -name "*.bs" |xargs rm -f')
         r.Remove('%(libdir)s/ImageMagick-%(mainver)s')
@@ -66,8 +49,7 @@ class ImageMagick(CPackageRecipe):
         r.Remove('%(libdir)s/libltdl*')
         r.Move('%(libdir)s/%(name)s-%(mainver)s/config/*',
                '%(datadir)s/%(name)s-%(mainver)s/config/')
-        r.ComponentSpec('data', '%(datadir)s/%(name)s-%(mainver)s/')
-        r.Requires('ImageMagick:data',
-                   r'%(libdir)s/libMagick\+*\.so\.%(mainver)s$')
 
         r.Doc('QuickStart.txt', 'www', 'images', 'index.html')
+
+        r.RemoveNonPackageFiles(exceptions='.*\.la')
