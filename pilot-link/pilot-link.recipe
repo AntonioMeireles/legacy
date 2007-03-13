@@ -1,33 +1,44 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2005 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class PilotLink(RPMPackageRecipe, CPackageRecipe):
-    name = 'pilot-link'
-    version = '0.12.1'
-    rpmRelease = '4.fc7'
-
+class PilotLink(CPackageRecipe):
     buildRequires = [ 'readline:devel', 'ncurses:devel', 'libpng:devel',
-        'bison:runtime', 'libstdc++:devel', 'perl:lib',
-        'python-setuptools:python', 'libtermcap:devel', 'libusb:devel',
-        'popt:devel', 'libtool:runtime', 'python:devel', ]
+                      'libtool:runtime', 'gcc:devel' ]
 
-    rpmPatches = [ 'pilot-link-0.12.1-var.patch' ]
+    if Use.perl:
+        buildRequires.append('perl:runtime')
+
+    name = 'pilot-link'
+    version = '0.11.8'
 
     def setup(r):
-        r.unpack()
-        r.addPatch('pilot-link-0.12.1-python-fix.patch')
-        r.Replace('/lib/python', '/%(lib)s/python', 'configure')
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/pilot-link-0.11.8-3.1.src.rpm'
+        r.addArchive('pilot-link-%(version)s.tar.bz2', rpm=srpm)
 
-        extraConfig = '--with-python=yes --with-itcl=no --with-tk=no '\
-                      '--with-tcl=no --with-java=yes --with-cpp=yes ' \
-                      '--enable-libusb --enable-threads --enable-conduits ' \
-                      '--with-perl=yes'
+        r.addPatch('pilot-link-0.11.0-perlmd5.patch', rpm=srpm, use=Use.perl)
+        r.addPatch('pilot-link-0.11.0-perlpollute.patch', rpm=srpm, use=Use.perl)
+        r.addPatch('pilot-link-0.11.2-malsync.patch', rpm=srpm, use=Use.perl)
+
+        extraConfig = '--with-python=no --with-itcl=no --with-tk=no '\
+                      '--with-tcl=no --with-java=no --with-cpp=yes ' \
+                      '--with-perl=no' # always disable perl and build by hand.
 
         r.Configure(extraConfig)
         r.Make('LIBTOOL=%(bindir)s/libtool')
+
+        if Use.perl:
+            r.Run("""cd bindings/Perl && sed -i 's|^\$libdir =.*|\$libdir = "../../libpisock/.libs/";|g' Makefile.PL""")
+            r.Run('cd bindings/Perl && perl Makefile.PL PREFIX=%(prefix)s INSTALLDIRS=vendor')
+            r.Make(subDir='bindings/Perl')
+
         r.MakeInstall('LIBTOOL=%(bindir)s/libtool')
-        r.PythonSetup(dir='bindings/Python')
+        r.MakeInstall(subDir='doc/man')
+
+        if Use.perl:
+            r.MakeInstall(subDir='bindings/Perl')
+
+            r.Remove('%(libdir)s/perl5/vendor_perl/*/*/auto/PDA/Pilot/Pilot.bs')
+            r.Remove('%(libdir)s/perl5/site_perl/*/*/*/PDA/Pilot/.packlist')
