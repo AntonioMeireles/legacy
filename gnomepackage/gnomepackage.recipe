@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -10,10 +10,8 @@ class GnomePackageRecipe(CPackageRecipe):
         'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXi:devel',
         'libXinerama:devellib', 'libXrender:devel', 'libdmx:devel' ,
         'libICE:devel', 'libSM:devel', 'dbus:devel', 'dbus-glib:devellib',
-        'dbus-glib:devel', 'intltool:runtime', 'gnome-doc-utils:devel',
-        'gnome-doc-utils:runtime', 'glib:runtime', 'libXt:devel',
-        'file:runtime', 'expat:devel', 'gettext:runtime',
-        ]
+        'dbus-glib:devel', 'intltool:runtime', 'glib:runtime', 'libXt:devel',
+        'atk:devel', 'which:runtime', ]
 
     name = 'gnomepackage'
     version = '2'
@@ -28,37 +26,31 @@ class GnomePackageRecipe(CPackageRecipe):
     # is not on GNOME's ftp server.
     externalArchive = None
 
-    checkUseGnome = False
-
     # standard GNOME docs
     docs = []
 
     if Use.builddocs:
         extraConfig += ' --enable-gtk-doc'
-        buildRequires.append('gtk-doc:runtime')
+        buildRequires.extend(['gtk-doc:runtime', 'gnome-doc-utils:runtime',
+                              'gnome-doc-utils:devel', ])
     else:
         extraConfig += ' --disable-gtk-doc'
 
     def setup(r):
-        # only flavor this as "gnome" or "!gnome" if checkUseGnome is set
-        if r.checkUseGnome == True and Use.gnome == False:
-            pass
         if r.__class__.__name__ == 'GnomePackageRecipe':
             return
         r.macros.majversion = '.'.join(r.version.split('.')[0:2])
 
-        r.macros.optflags = '-Os'
-
         r.unpack()
         r.build()
         r.install()
+        r.policy()
 
     def unpack(r):
         if r.externalArchive:
             r.addArchive(r.externalArchive)
         else:
-            # Please leave full path for now in case related to CNY-1041.
-            r.addArchive('mirror://gnome/%(name)s/%(majversion)s/%(name)s-%(version)s.tar.bz2')
+            r.addArchive('mirror://gnome/%(name)s/%(majversion)s/')
 
     def build(r):
         r.Configure(r.extraConfig, preConfigure=r.preConfigure)
@@ -89,8 +81,9 @@ class GnomePackageRecipe(CPackageRecipe):
 
         if r.docs:
             r.Doc(*r.docs)
-        if not Use.desktop:
-            r.Remove('%(datadir)s/applications/%(name)s.desktop')
 
         # GConf schemas should be in :data so that :lib depends on them
         r.ComponentSpec('data', '%(sysconfdir)s/gconf/schemas/')
+
+    def policy(r):
+        pass
