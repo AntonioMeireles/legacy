@@ -5,7 +5,7 @@ class AtiFglrxKernel(KernelModulePackageRecipe):
                      'elfutils:runtime', 'binutils:runtime']
 
     name = 'ati-fglrx-kernel'
-    version = '8.33.6'
+    version = '8.34.8'
 
     def unpack(r):
         installScriptName = \
@@ -13,17 +13,33 @@ class AtiFglrxKernel(KernelModulePackageRecipe):
 
         r.addSource('http://www2.ati.com/drivers/linux/%s' % \
             installScriptName)
-        r.Run('sh %s --extract archive_files' % installScriptName)
+        r.addAction('sh %s --extract archive_files ' % installScriptName)
+
+        # taken from ati-beta ML
+        r.addPatch('ati-drivers-2.6.20.patch', dir='archive_files/')
+
         r.Copy('archive_files/arch/x86/*', 'src/')
         r.Copy('archive_files/common/*', 'src/')
-        r.Copy('archive_files/x710/*', 'src/')
+        r.Copy('archive_files/x*0/*', 'src/')
         r.Copy('src/lib/modules/fglrx/build_mod/2.6.x/Makefile', 'src/lib/modules/fglrx/build_mod/')
+
+
+
         # XXX: this isn't necessary on Linux Kernel 2.6.19
         #r.Replace('linux/config.h','linux/autoconf.h',
         #          'src/lib/modules/fglrx/build_mod/firegl_public.c', 
         #          'src/lib/modules/fglrx/build_mod/drm.h',
         #          'src/lib/modules/fglrx/build_mod/drmP.h')
-        r.Make(dir='src/lib/modules/fglrx/build_mod/')
+
+
+        r.macros.ksrcdir = '/lib/modules/%(kver)s/build'
+        r.macros.modpath = '/lib/modules/%(kver)s/kernel/drivers/video'
+        r.macros.cflags += ' -I%(ksrcdir)s/include'
+
+        r.Make('KERNELPATH=%(ksrcdir)s MODULEPATH=%(modpath)s', dir='src/lib/modules/fglrx/build_mod/') 
+
+
+
         r.Install('src/lib/modules/fglrx/build_mod/fglrx.ko',
             '%(destdir)s/lib/modules/%(kver)s/video/fglrx.ko')
 
