@@ -19,12 +19,13 @@ class InstallClass(BaseInstallClass):
 
     def setSteps(self, dispatch):
         BaseInstallClass.setSteps(self, dispatch);
+        if 'displayHelp' in dispatch.intf.__dict__:
+            dispatch.intf.displayHelp = False
         dispatch.skipStep("checkdeps")
         dispatch.skipStep("package-selection")
         dispatch.skipStep("confirminstall")
 
     def setGroupSelection(self, grpset, intf):
         BaseInstallClass.__init__(self, grpset)
-
         grpset.unselectAll()
         grpset.selectGroup("everything")
