@@ -1,0 +1,92 @@
+#!/usr/bin/python
+
+import crypt
+import random
+from snack import *
+import string
+import subprocess
+
+def validate(name, username, password, password2):
+    if "" == name:
+        return "Please enter a display name."
+
+    if password != password2:
+        return "Passwords don't match."
+
+    if 6 > len(password):
+        return "Password needs to be at least six characters."
+
+    return None
+
+def cryptPassword(password, useMD5 = 1):
+    """
+    Copied from firstboot.
+    """
+
+    if useMD5:
+        salt = "$1$"
+        saltLen = 8
+    else:
+        salt = ""
+        saltLen = 2
+
+    for i in range(saltLen):
+        salt += random.choice(string.letters + string.digits + './')
+
+    return crypt.crypt(password, salt)
+
+def showError(text):
+    errorForm = GridForm(screen, "Error", 1, 2)
+    errorForm.add(TextboxReflowed(25, text), 0, 0)
+    errorForm.add(okbutton, 0, 1)
+    errorForm.runOnce()
+
+screen = SnackScreen()
+
+nameLabel = Label("Display Name")
+name = Entry(25, "")
+usernameLabel = Label("Username")
+username = Entry(25, "")
+passwordLabel = Label("Password")
+password = Entry(25, "", password=1)
+password2Label = Label("Password (again)")
+password2 = Entry(25, "", password=1)
+
+okbutton = Button('Ok')
+
+
+
+g = GridForm(screen, "Create a User", 2, 5)
+g.add(nameLabel, 0, 0, anchorLeft=1)
+g.add(name, 1, 0, anchorLeft=1)
+g.add(usernameLabel, 0, 1, anchorLeft=1)
+g.add(username, 1, 1, anchorLeft=1)
+g.add(passwordLabel, 0, 2, anchorLeft=1)
+g.add(password, 1, 2, anchorLeft=1)
+g.add(password2Label, 0, 3, anchorLeft=1)
+g.add(password2, 1, 3, anchorLeft=1)
+
+g.add(okbutton, 1, 4)
+
+while True:
+    result = g.run()
+
+    error = validate(
+        name.value(), username.value(), password.value(), password2.value())
+    if error:
+        showError(error)
+        continue
+
+    po = subprocess.Popen(
+        ["/usr/sbin/useradd", "-p", cryptPassword(password.value()), "-G",
+         "wheel", "-c", name.value(), username.value()],
+        stdin=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    ret = po.wait()
+
+    if ret:
+        (out, err) = po.communicate()
+        showError(err)
+        continue
+    break
+
+screen.finish()
