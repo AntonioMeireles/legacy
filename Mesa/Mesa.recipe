@@ -1,25 +1,25 @@
 #
-# Copyright (c) 2005-2006 rPath, Inc.
+# Copyright (c) 2005-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Mesa(CPackageRecipe):
+loadSuperClass('rpmpackage', label='conary.rpath.com@rpl:devel')
+class Mesa(RPMPackageRecipe, CPackageRecipe):
     name = 'Mesa'
     version = '6.5.2'
+    rpmRelease = '10.fc7'
+    rpmName = 'mesa'
 
-    # XXX: Maybe his should become a Use flag shared with xorg-server
-    Flags.dri = True
+    rpmPatches = [ 'mesa-6.5-dont-libglut-me-harder-ok-thx-bye.patch', 'mesa-6.5.2-xserver-1.1-source-compat.patch', 'mesa-6.5.2-r300-parallel-build.patch', 'mesa-6.5.2-libgl-visibility.patch', 'mesa-6.5.2-picify-dri-drivers.patch', 'mesa-6.5.2-hush-synthetic-visual-warning.patch', 'mesa-6.5.2-bindcontext-paranoia.patch', 'mesa-6.5.2-radeon-backports-231787.patch', ]
+
 
     # file is needed for the mklib script, which seems to be an alternative to
     # the ever-so-loved libtool
     buildRequires = [ 'file:runtime', 'libX11:devel', 'libXau:devel',
         'libXdmcp:devel', 'libXext:devel', 'libXt:devel', 'libstdc++:devel',
-        'pkgconfig:devel', 'makedepend:runtime' ]
-
-    if Flags.dri:
-        buildRequires.extend([ 'expat:devel', 'glproto:devel',
-            'libXxf86vm:devel', 'libdrm:devel' ])
+        'pkgconfig:devel', 'makedepend:runtime', 'expat:devel', 'glproto:devel',
+        'libXxf86vm:devel', 'libdrm:devel', 'distro-release:runtime', ]
 
     def setup(r):
         # Parallel builds appear to have problems in some cases.
@@ -30,6 +30,10 @@ class Mesa(CPackageRecipe):
         # XXX: Until Mesa build architecture is fixed the demos require MesaLib
         # sources to build
         r.addArchive('%(site)s/MesaDemos-%(version)s.tar.bz2')
+
+        for p in r.rpmPatches:
+            r.addPatch(p, rpm=r.srpm)
+
 
         # based on mesa-6.5-build-config.patch from Fedora CVS
         r.Replace(('MKDEP = makedepend', 'MKDEP = gcc -M -MG'),
@@ -60,26 +64,13 @@ class Mesa(CPackageRecipe):
                   '#define DEFAULT_DRIVER_DIR "%(libdir)s/dri"',
                   'src/glx/x11/dri_glx.c')
 
-        # based on Fedora modifications & suggestions from Pavel Volkovitskiy
-        # r.Replace(('INCLUDE_DIR=\$1/include', 'INCLUDE_DIR="$1/%(includedir)s"'),
-        #           ('LIB_DIR=\$1/lib', 'LIB_DIR="$1/%(libdir)s"'),
-        #           'bin/installmesa')
-
-        # based on Fedora patch to enable Motif support in libGLw
-        # XXX: disabled b/c it requires openmotif which is only in contrib
-        #r.Replace('GLW_LIB_DEPS = -L\$\(LIB_DIR\) -l\$\(GL_LIB\) \$\(EXTRA_LIB_PATH\) -lXt -lX11',
-        #    'GLW_LIB_DEPS = -L$(LIB_DIR) -l$(GL_LIB) -lXm $(EXTRA_LIB_PATH) -lXt -lX11',
-        #    'configs/default')
 
         # XXX: we don't supply any version of GLUT
         r.Replace('APP_LIB_DEPS = -L\$\(TOP\)\/\$\(LIB_DIR\) -l\$\(GLUT_LIB\) -l\$\(GLU_LIB\) -l\$\(GL_LIB\) -lm',
                   'APP_LIB_DEPS = -L$(TOP)/$(LIB_DIR) -l$(GLU_LIB) -l$(GL_LIB) -lm',
                   'configs/default')
 
-        if Flags.dri:
-            r.macros.mesaDri= '-dri'
-        else:
-            r.macros.mesaDri = ''
+        r.macros.mesaDri= '-dri'
 
         r.macros.mesaArch = ''
         if Arch.x86:
@@ -97,13 +88,12 @@ class Mesa(CPackageRecipe):
 
         # Mesa's build system doesn't install the DRI drivers even when you
         # choose a DRI config
-        if Flags.dri:
-            r.Install('%(lib)s/*_dri.so', '%(libdir)s/dri/') 
+        r.Install('%(lib)s/*_dri.so', '%(libdir)s/dri/') 
 
         # XXX: until MesaDemos can build separately
         r.Install('progs/xdemos/glx{info,gears}', '%(bindir)s/')
         r.PackageSpec('glx-utils', '%(bindir)s/glx.*')
-        
+
         # XXX: until conary has overrides
         # we remove the files that conflict with proprietary drivers
         # by having flavoured Mesa's
@@ -112,6 +102,4 @@ class Mesa(CPackageRecipe):
             r.Remove('%(libdir)s/libGL.s*')
         if Use.ati:
             r.Remove('%(libdir)s/libGL.s*')
-
-
 
