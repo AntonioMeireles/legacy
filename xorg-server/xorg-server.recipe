@@ -1,28 +1,31 @@
-loadSuperClass('xorgpackage.recipe=conary.rpath.com@rpl:devel')
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('xorgpackage')
 class XorgServer(XorgPackageRecipe):
     name = 'xorg-server'
-    version = '1.2.0'
+    version = '1.3.0.0'
     component = 'xserver'
-
-    Flags.dmx  = True
-    Flags.xnest = True
-
-    # FIXME: Maybe this should become a Use flag shared with Mesa
-    Flags.dri = True
 
     # FIXME: ld dies trying to link xorgcfg without libXext, need to make sure
     # configure checks for it
     # perl:lib needed to satisfy "perl: File::Glob" for /usr/bin/getconfig.pl
-    buildRequires = [ 'bison:runtime', 'espgs:runtime',
-        'flex:runtime', 'freetype:devel', 'libICE:devel',
-        'libSM:devel', 'libXaw:devel', 'libXext:devel', 'libXfont:devel',
-        'libXmu:devel', 'libXpm:devel', 'libXt:devel', 'libXxf86misc:devel',
-        'libXxf86vm:devel', 'libfontenc:devel', 'liblbxutil:devellib',
-        'libxkbfile:devel', 'libxkbui:devel',
-        'linuxdoc-tools:runtime', 'ncurses:devel', 'perl:lib',
-        'perl:runtime', 'xtrans:devel', 'zlib:devel',
-        'xorg-sgml-doctools:data', 'libXfixes:devel',
-        'SDL:devel', 'distro-release:runtime'
+    buildRequires = [ 'bison:runtime', 'flex:runtime', 'freetype:devel',
+        'espgs:runtime', 'libICE:devel', 'libSM:devel', 'libXaw:devel',
+        'libXext:devel', 'libXfixes:devel', 'libXfont:devel', 'libXmu:devel',
+        'libXpm:devel', 'libXt:devel', 'libXxf86misc:devel', 'libXxf86vm:devel',
+        'libfontenc:devel', 'liblbxutil:devellib', 'libxkbfile:devel',
+        'libxkbui:devel', 'ncurses:devel', 'perl:lib', 'perl:runtime',
+        'xorg-sgml-doctools:data', 'xtrans:devel', 'zlib:devel',
+        # begin dri
+        'Mesa:devel', 'glproto:devel', 'libdrm:devel', 'xf86driproto:devel',
+        # end dri, begin dmx
+        'libXi:devel', 'libXrender:devel', 'libXres:devel', 'libXtst:devellib',
+        'libdmx:devel',
+        # end dmx
         ]
 
     protoBuildRequires = [ 'bigreqsproto:devel', 'compositeproto:devel',
@@ -36,98 +39,88 @@ class XorgServer(XorgPackageRecipe):
 
     buildRequires.extend(protoBuildRequires)
 
-    extraConfig = ' --disable-xprint'
+    def unpack(r):
 
-    if Flags.dmx:
-        buildRequires.extend([ 'libXi:devel', 'libXrender:devel',
-            'libXres:devel', 'libXtst:devellib', 'libdmx:devel' ])
-    else:
-        extraConfig += ' --disable-dmx'
-
-    if Flags.dri:
-        buildRequires.extend([ 'Mesa:devel', 'glproto:devel', 'libdrm:devel',
-            'xf86driproto:devel' ])
-
-    if not Flags.xnest:
-        extraConfig += ' --disable-xnest'
-
-    def unpack(r):	
-
-        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.2.99.903-2.fc7.src.rpm'
-    
-        r.macros.osname = "'Foresight Linux (rPath Linux derivative)'"
+        r.macros.cflags += ' -fPIC'
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.2.99.905-5.fc7.src.rpm'
+        r.macros.osname = "'Foresight Linux'"
         r.macros.vendor = "'António Meireles aka doniphon'"
-        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s'
-        r.extraConfig += ' --enable-install-libxf86config'
-        r.extraConfig += ' --with-fontdir=%(datadir)s/X11/fonts --with-default-font-path=unix/:7100,built-ins'
-        r.extraConfig += ' -enable-xvfb  --enable-kdrive --enable-xephyr'
+
+        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s --enable-install-libxf86config'
+
+        # Fonts
+        r.extraConfig += (' --with-fontdir=%(datadir)s/X11/fonts'
+                          ' --with-default-font-path=unix/:7100,built-ins')
+
+        # Move xkb config to %(localstatedir)s so that X isn't trying to write
+        # to /usr on startup and /usr is not writable in anaconda.
+        r.extraConfig += ' --with-xkb-output=%(localstatedir)s/lib/xkb'
 
         XorgPackageRecipe.unpack(r)
-        
+
         r.addSource('xserver.pamd',
                     dest='%(sysconfdir)s/pam.d/xserver', mode=00644)
-        
+
         # according to http://xorg.freedesktop.org/wiki/ModularDevelopersGuide
         # we need the Mesa source to build GLX support
         r.macros.mesaVersion = '6.5.2'
-        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2', use=Flags.dri)
-        
-        if Flags.dri:
-            r.extraConfig += ( ' --enable-dri'
-                               ' --enable-glx-tls'
-                               ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
-                               ' --with-dri-driver-path=%(libdir)s/dri'
-                               ' --enable-composite'
-                               ' --enable-xtrap'
-                               ' --enable-xcsecurity'
-                               ' --enable-xevie')
-        else:
-            r.extraConfig += ' --disable-dri'
+        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2')
 
-        r.addPatch('xorg-x11-server-1.1.1-always-mouse-thyself.patch')
+        rpmPatches = [
+            # general bug fixes
+            'xorg-x11-server-0.99.3-init-origins-fix.patch',
+            'xorg-x11-server-libxf86config-dont-write-empty-sections.patch',
+            'xorg-x11-server-1.1.1-builderstring.patch',
+            'xorg-x11-server-1.1.1-xkb-in-xnest.patch',
+            'xorg-x11-server-1.1.1-vbe-filter-less.patch',
+            'xorg-x11-server-1.1.1-vt-activate-is-a-terrible-api.patch',
+            'xorg-x11-server-1.1.1-graphics-expose.patch',
+            'xorg-x11-server-1.1.1-automake-1.10-fixes.patch',
+            'xorg-x11-server-1.1.1-glcore-visual-matching.patch',
+            'xserver-1.3.0-xnest-exposures.patch',
+            'xserver-1.3.0-x86emu-imul-int64.patch',
+            # OpenGL compositing manager feature/optimization patches.
+            'xorg-x11-server-1.1.0-no-move-damage.patch',
+            'xorg-x11-server-1.1.0-dont-backfill-bg-none.patch',
+            'xorg-x11-server-1.2.0-enable-composite.patch',
+            'xorg-x11-server-1.1.1-no-composite-in-xnest.patch',
+            'xorg-x11-server-1.1.1-offscreen-pixmaps.patch',
+            'xserver-1.3.0-no-pseudocolor-composite.patch',
+            # Red Hat specific tweaking, not intended for upstream
+            # XXX move these to the end of the list
+            'xorg-x11-server-Red-Hat-extramodes.patch',
+            'xorg-x11-server-1.2.0-xephyr-only.patch',
+            'xorg-x11-server-1.0.1-fpic-libxf86config.patch',
+            'xorg-x11-server-1.1.1-builtin-fonts.patch',
+            'xorg-x11-server-1.1.1-no-scanpci.patch',
+            'xorg-x11-server-1.1.1-spurious-libxf1bpp-link.patch',
+            'xorg-x11-server-1.2.0-xf86config-comment-less.patch',
+            'xorg-x11-server-1.2.0-maxpixclock-option.patch',
+            'xserver-1.2.0-geode-mmx.patch',
+            'xserver-1.2.0-xephyr-keysym-madness.patch',
+            'xserver-1.2.0-vfprintf.patch',
+            'xserver-1.2.0-honor-displaysize.patch',
+            'xserver-1.2.99.901-xephyr-crash-at-exit.patch',
+            # assorted PCI layer shenanigans.  oh the pain.
+            'xorg-x11-server-1.2.99-unbreak-domain.patch',
+            'xserver-1.3.0-pci-bus-count.patch',
+            'xserver-1.3.0-mmap-failure-check.patch',
+            'xserver-1.3.0-rom-search.patch',
+            'xserver-1.3.0-domain-obiwan.patch',
+            'xserver-1.3.0-pci-device-enable.patch',]
 
-# general bug fixes
-        r.addPatch('xorg-x11-server-0.99.3-init-origins-fix.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-libxf86config-dont-write-empty-sections.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-builderstring.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-xkb-in-xnest.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-vbe-filter-less.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-vt-activate-is-a-terrible-api.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-graphics-expose.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-automake-1.10-fixes.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-glcore-visual-matching.patch', rpm=srpm)
-        
-# OpenGL compositing manager feature/optimization patches.
-        r.addPatch('xorg-x11-server-1.1.0-no-move-damage.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.0-dont-backfill-bg-none.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.2.0-enable-composite.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-no-composite-in-xnest.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-offscreen-pixmaps.patch', rpm=srpm)
-        
-        # Red Hat specific tweaking, not intended for upstream
-        # XXX move these to the end of the list
-        r.addPatch('xorg-x11-server-Red-Hat-extramodes.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.2.0-xephyr-only.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.0.1-fpic-libxf86config.patch', rpm=srpm)
-#        r.addPatch('xorg-x11-server-1.2.0-selinux-awareness.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-builtin-fonts.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-no-scanpci.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.1.1-spurious-libxf1bpp-link.patch', rpm=srpm)
-        r.addPatch('xorg-x11-server-1.2.0-xf86config-comment-less.patch', rpm=srpm)
-        
-        r.addPatch('xorg-x11-server-1.2.0-maxpixclock-option.patch', rpm=srpm)
+        for p in rpmPatches:
+            r.addPatch(p, rpm=srpm)
 
-        r.addPatch('xserver-1.2.0-geode-mmx.patch', rpm=srpm)
-        r.addPatch('xserver-1.2.0-xephyr-keysym-madness.patch', rpm=srpm)
-        r.addPatch('xserver-1.2.0-vfprintf.patch', rpm=srpm)
-
-        # X.Org security advisory, April 3rd, 2007
-        # Multiple vulnerability in X server, libXfont and libX11
-        # CVE IDs: CVE-2007-1003 CVE-2007-1351 CVE-2007-1352 CVE-2007-1352
-        # (FL-223)
-
-        r.addPatch('http://xorg.freedesktop.org/archive/X11R7.2/patches/xorg-xserver-1.2.0-xcmisc.diff')
-
+        # DRI
+        r.extraConfig += ( ' --enable-dri'
+                           ' --enable-glx-tls'
+                           ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
+                           ' --with-dri-driver-path=%(libdir)s/dri'
+                           ' --enable-composite'
+                           ' --enable-xtrap'
+                           ' --enable-xcsecurity'
+                           ' --enable-xevie')
 
     def policy(r):
         r.SetModes('%(bindir)s/Xorg', 04611)
@@ -148,7 +141,3 @@ class XorgServer(XorgPackageRecipe):
         # contrary to ATI, only nVidia messes with files from xorg-server
         if Use.nvidia:
             r.Remove('%(libdir)s/xorg/modules/extensions/libglx.*')
-            
-
-
-
