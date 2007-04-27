@@ -4,6 +4,7 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+
 loadRecipe('gnomepackage.recipe')
 class Gdm(GnomePackageRecipe):
 
@@ -28,18 +29,12 @@ class Gdm(GnomePackageRecipe):
         extraConfig += ' --with-pam --with-pam-prefix=%(sysconfdir)s'
     else:
         extraConfig += ' --without-pam'
-        
-    if Use.selinux:
-        buildRequires.append('libselinux:devel')
-        extraConfig += ' --with-selinux'
-    else:
-        extraConfig += ' --without-selinux'
-        
-    extraConfig += ' --enable-console-helper'
-        
+
+    extraConfig += ' --enable-console-helper --with-console-kit'
+
     name = 'gdm'
     version = '2.18.1'
-    
+
     docs = GnomePackageRecipe.docs
     docs.append('TODO')
 
@@ -49,6 +44,49 @@ class Gdm(GnomePackageRecipe):
             dir='%(datadir)s/gdm/themes/')
         r.addSource('gdm.conf-custom')
         r.addPatch('launchers.patch')
+
+        srpm='http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/gdm-2.18.0-11.fc7.src.rpm'
+
+        rpmPatches = [
+            #Patch1: gdm-2.18.0-change-defaults.patch
+            'gdm-2.13.0.4-update-switchdesk-location.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=301817
+            'gdm-2.8.0.2-clean-up-xsession-errors.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=301826
+            'gdm-2.8.0.2-merge-resources.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=349835
+            'gdm-2.17.6-audit-login.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=347798
+            #'gdm-2.17.7-move-default-message.patch',
+            #Patch20: gdm-2.17.7-reset-pam.patch
+            #Patch21: gdm-2.18.0-security-tokens.patch
+            # http://bugzilla.gnome.org/show_bug.cgi?id=347871
+            'gdm-2.16.0-wtmp.patch',
+            # https://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=203917
+            #gdm-2.16.0-indic-langs.patch
+            'gdm-2.17.1-desensitize-entry.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=411427
+            'gdm-2.17.7-greeter.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=426653
+            'gdm-2.17.8-hide-uninstalled-languages.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=412576
+            #'gdm-2.17.8-a11y-fixes-for-themed-greeter.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=411501
+            'gdm-2.17.7-pass-at-to-session-4.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=420610
+            'gdm-2.18.0-add-lowres-fix.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=424229
+            #'gdm-2.18.0-dont-strcpy-overlapping-strings.patch',
+            # http://bugzilla.gnome.org/show_bug.cgi?id=426647
+            'gdm-2.18.0-dont-expect-utf8.patch',
+            # https://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=234567
+            'gdm-2.18.0-be-more-verbose.patch'
+            ]
+
+        for p in rpmPatches:
+            r.addPatch(p, rpm=srpm)
+
+        r.addSource('90-grant-audio-devices-to-gdm.fdi', rpm=srpm)
 
     def build(r):
         # evaluate extraConfig's sysconfdir before setting new value
@@ -63,6 +101,8 @@ class Gdm(GnomePackageRecipe):
         r.SetModes('%(localstatedir)s/gdm', 01770)
         r.Ownership('root', 'gdm', '%(localstatedir)s/gdm')
 
-	r.Remove('%(datadir)s/applications/gdmsetup.desktop')
+        r.Remove('%(datadir)s/applications/gdmsetup.desktop')
 
-	r.Requires('foresight-gdm-login-simple-green:data','%(sysconfdir)s/gdm/custom.conf')
+        r.Install('90-grant-audio-devices-to-gdm.fdi','%(datadir)s/hal/fdi/policy/20thirdparty/90-grant-audio-devices-to-gdm.fdi')
+
+        r.Requires('foresight-gdm-login-simple-green:data','%(sysconfdir)s/gdm/custom.conf')
