@@ -1,0 +1,40 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class RpPppoe(RPMPackageRecipe,CPackageRecipe):
+    name = 'rp-pppoe'
+    version = '3.8'
+    rpmUpVer = '3.5'
+    rpmRelease = '32.1'
+
+    buildRequires = [ 'autoconf:runtime', 'ppp:devel', 'ppp:runtime', ]
+
+    def setup(r):
+        scripts = ['adsl-connect', 'adsl-setup', 'adsl-start',
+                   'adsl-status',  'adsl-stop' ]
+        r.addArchive('http://www.roaringpenguin.com/files/download/', keyid='126F42E0')
+        for script in scripts:
+            r.addSource(script, rpm=r.srpm, dir='%(essentialbindir)s/', mode=0755)
+        r.Replace('^PPPOE=/usr/sbin/pppoe', 'PPPOE=/sbin/pppoe',
+                  '%(essentialbindir)s/adsl-connect')
+        r.Replace('^CONNECT=/sbin/adsl-connect', 'CONNECT=/bin/adsl-connect',
+                  '%(essentialbindir)s/adsl-start')
+        r.addPatch('rp-pppoe-3.5-buildroot.patch', rpm=r.srpm)
+        r.Replace(' -ansi', '', 'src/configure*')
+        r.Replace('^ETH=eth1', 'ETH=eth0', 'configs/pppoe.conf')
+
+        r.Run('cd src && autoconf')
+        r.Configure('--enable-plugin=%(maindir)s/ppp', dir='src')
+
+        r.Make(dir='src')
+        r.MakeDirs('%(essentialbindir)s', '%(localstatedir)s/run/ppp')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/ppp')
+        r.MakeInstall('RPM_INSTALL_ROOT=%(destdir)s', dir='src')
+        r.Move('%(sbindir)s/*', '%(essentialsbindir)s/')
+
+        r.Doc('configs')
+        r.Move('/usr/doc/%(name)s-%(version)s/*', '%(thisdocdir)s/')
