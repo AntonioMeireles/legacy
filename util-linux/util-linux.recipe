@@ -12,7 +12,7 @@ class Utillinux(CPackageRecipe):
         'libtermcap:devel', 'ncurses:devel', 'slang:devel', 'gettext:devel',
         'texinfo:runtime', 'zlib:devel', 'audit:devel', 'perl:runtime',
         'perl:lib', 'automake:runtime', 'autoconf:runtime', 'pam:devel',
-        'userspace-kernel-headers:devel', 'gettext:runtime', ]
+        'linux-kernel-headers:devel', 'gettext:runtime', ]
 
     def setup(r):
         r.macros.upver = r.version.replace('_', '-')
@@ -113,7 +113,9 @@ class Utillinux(CPackageRecipe):
         # note: we disable tty group (USE_TTY_GROUP) in Makefiles to prevent call chgrp
         # during the "make install". But we define -DUSE_TTY_GROUP that enable tty groups in
         # *.c files only.
-        r.macros.cflags += ' -DUSE_TTY_GROUP'
+        # FUGLY HACK... foresight has way way way old kernel headers, so get
+        # around said limitation. this will magically go away for foresight 2.0
+        r.macros.cflags += ' -DUSE_TTY_GROUP -I/lib/modules/2.6.19.2-0.2.smp.gcc3.4.x86.i686/build/include'
         r.ManualConfigure('--prefix="" '
                           '--sysconfdir=%(sysconfdir)s '
                           '--datadir=%(datadir)s '
@@ -131,6 +133,8 @@ class Utillinux(CPackageRecipe):
                           '--enable-kill '
                           '--enable-raw '
                           '--enable-write')
+
+        r.Copy('mkinstalldirs', 'po/config/')
         # note: we install to /bin and /usr/bin, so there's $bindir and $usrbindir in
         # util-linux build system. It's better follow package build-system than recipe
         # macros (where is prefix=/usr)
@@ -163,6 +167,10 @@ class Utillinux(CPackageRecipe):
         r.Remove('/usr/bin/{chrt,taskset}')
         # mkcramfs link needed for anaconda:
         r.Symlink('%(essentialsbindir)s/mkfs.cramfs', '%(bindir)s/mkcramfs')
+
+        # file conflicts and we don't want to require perl
+        r.Remove('%(mandir)s/man1/{chrt,taskset}*')
+        r.Remove('%(bindir)s/{chkdupexe,scriptreplay}')
 
         r.Requires(exceptions='%(datadir)s/misc/getopt/.*')
         r.TagSpec('shell', '%(essentialsbindir)s/nologin')
