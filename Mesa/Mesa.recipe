@@ -4,35 +4,52 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage', label='conary.rpath.com@rpl:devel')
-class Mesa(RPMPackageRecipe, CPackageRecipe):
+class Mesa(CPackageRecipe):
     name = 'Mesa'
-    version = '6.5.2'
-    rpmRelease = '10.fc7'
-    rpmName = 'mesa'
-
-    rpmPatches = [ 'mesa-6.5-dont-libglut-me-harder-ok-thx-bye.patch', 'mesa-6.5.2-xserver-1.1-source-compat.patch', 'mesa-6.5.2-r300-parallel-build.patch', 'mesa-6.5.2-libgl-visibility.patch', 'mesa-6.5.2-picify-dri-drivers.patch', 'mesa-6.5.2-hush-synthetic-visual-warning.patch', 'mesa-6.5.2-bindcontext-paranoia.patch', 'mesa-6.5.2-radeon-backports-231787.patch', ]
-
+    version = '6.5.3'
 
     # file is needed for the mklib script, which seems to be an alternative to
     # the ever-so-loved libtool
     buildRequires = [ 'file:runtime', 'libX11:devel', 'libXau:devel',
-        'libXdmcp:devel', 'libXext:devel', 'libXt:devel', 'libstdc++:devel',
-        'pkgconfig:devel', 'makedepend:runtime', 'expat:devel', 'glproto:devel',
-        'libXxf86vm:devel', 'libdrm:devel', 'distro-release:runtime', ]
+        'libXdamage:devel', 'libXdmcp:devel', 'libXext:devel', 'libxcb:devel',
+        'libXfixes:devel', 'libXt:devel', 'libstdc++:devel', 'pkgconfig:devel' ]
+
+    # DRI
+    buildRequires.extend([ 'expat:devel', 'glproto:devel', 'libXxf86vm:devel',
+        'libdrm:devel' ])
+
+    buildRequires.extend(['distro-release:runtime'])
 
     def setup(r):
-        # Parallel builds appear to have problems in some cases.
-        r.disableParallelMake()
-        r.macros.site = 'mirror://sourceforge/mesa3d'
-        r.addArchive('%(site)s/MesaLib-%(version)s.tar.bz2')
+        if r.macros.version.find('rc') >= 0:
+            r.macros.site = 'http://www.mesa3d.org/beta'
+            r.macros.suffix = 'gz'
+        else:
+            r.macros.site = 'mirror://sourceforge/mesa3d'
+            r.macros.suffix = 'gz'
+        r.addArchive('%(site)s/MesaLib-%(version)s.tar.%(suffix)s')
 
         # XXX: Until Mesa build architecture is fixed the demos require MesaLib
         # sources to build
-        r.addArchive('%(site)s/MesaDemos-%(version)s.tar.bz2')
+        r.addArchive('%(site)s/MesaDemos-%(version)s.tar.%(suffix)s')
 
-        for p in r.rpmPatches:
-            r.addPatch(p, rpm=r.srpm)
+        srpm='http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/mesa-6.5.2-10.fc7.src.rpm'
+        rpmPatches = [
+            'mesa-6.5-dont-libglut-me-harder-ok-thx-bye.patch',
+            #'mesa-6.5.2-xserver-1.1-source-compat.patch',
+            # 'mesa-6.5.2-r300-parallel-build.patch',
+#            'mesa-6.5.2-libgl-visibility.patch',
+#            'mesa-6.5.2-picify-dri-drivers.patch',
+            'mesa-6.5.2-hush-synthetic-visual-warning.patch',
+            'mesa-6.5.2-bindcontext-paranoia.patch',
+            # 'mesa-6.5.2-radeon-backports-231787.patch', 
+	]
+
+        for p in rpmPatches:
+            r.addPatch(p, rpm=srpm)
+
+
+
 
 
         # based on mesa-6.5-build-config.patch from Fedora CVS
@@ -75,7 +92,15 @@ class Mesa(RPMPackageRecipe, CPackageRecipe):
                   '$(CC) $(CFLAGS) glxgears.c  -I$(INCDIR) -L$(TOP)/lib -L$(TOP)/lib64 -lGL -lGLU -o $@',
                   'progs/xdemos/Makefile')
 
+        # nouveau is breaking even with patched libdrm
+        r.Replace('nouveau', ' ', 'configs/linux-dri')
 
+        # XCB
+        for config in ('linux', 'linux-dri'):
+            r.Run(""" echo "DEFINES += -DUSE_XCB" >> configs/%s """ % config)
+            r.Run(""" echo "X11_INCLUDES += `pkg-config --cflags-only-I xcb` `pkg-config --cflags-only-I x11-xcb` `pkg-config --cflags-only-I xcb-glx`" >> configs/%s """ % config)
+            r.Run(""" echo "GL_LIB_DEPS += `pkg-config --libs xcb` `pkg-config --libs x11-xcb` `pkg-config --libs xcb-glx`" >> configs/%s """ % config)
+            
         r.macros.mesaDri= '-dri'
 
         r.macros.mesaArch = ''
@@ -92,10 +117,6 @@ class Mesa(RPMPackageRecipe, CPackageRecipe):
 
         r.MakeInstall()
 
-        # Mesa's build system doesn't install the DRI drivers even when you
-        # choose a DRI config
-        r.Install('%(lib)s/*_dri.so', '%(libdir)s/dri/') 
-
         # XXX: until MesaDemos can build separately
         r.Install('progs/xdemos/glx{info,gears}', '%(bindir)s/')
         r.PackageSpec('glx-utils', '%(bindir)s/glx.*')
@@ -108,4 +129,3 @@ class Mesa(RPMPackageRecipe, CPackageRecipe):
             r.Remove('%(libdir)s/libGL.s*')
         if Use.ati:
             r.Remove('%(libdir)s/libGL.s*')
-
