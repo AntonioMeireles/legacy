@@ -1,0 +1,76 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Vsftpd(CPackageRecipe):
+    buildRequires = [ 'libcap:devel', 'pam:devel', ]
+    if Use.tcpwrappers:
+        buildRequires.append('tcp_wrappers:devel')
+    if Use.ssl:
+        buildRequires.extend(['openssl:devel', 'krb5:devel'])
+
+    name = 'vsftpd'
+    version = '2.0.3'
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/vsftpd-2.0.3-1.src.rpm'
+        r.addArchive('ftp://vsftpd.beasts.org/users/cevans/%(name)s-%(version)s.tar.gz')
+
+        r.addSource('vsftpd.xinetd', rpm=srpm)
+        r.addSource('vsftpd.pam', rpm=srpm)
+        r.addSource('vsftpd.ftpusers', rpm=srpm)
+        r.addSource('vsftpd.user_list', rpm=srpm)
+        r.addSource('vsftpd.init', rpm=srpm)
+        r.addPatch('vsftpd-1.0.1-missingok.patch', rpm=srpm)
+        r.addPatch('vsftpd-2.0.1-tcp_wrappers.patch', rpm=srpm,
+                   use=Use.tcpwrappers)
+        r.addPatch('vsftpd-2.0.2-signal.patch', rpm=srpm)
+        r.addPatch('vsftpd-2.0.1-dir.patch', rpm=srpm)
+        r.addPatch('vsftpd-2.0.1-use_localtime.patch', rpm=srpm)
+        r.addPatch('vsftpd-2.0.1-build_ssl.patch', rpm=srpm,
+                   use=Use.ssl)
+        r.addPatch('rpath-runtime-config.patch')
+        r.SetModes('vsftpd.xinetd', 0644)
+
+        # Fix x86_64, and other 64bit archs that use /usr/lib64
+        r.Replace('/lib/', '/%(lib)s/', 'vsf_findlibs.sh')
+
+        if not Use.tcpwrappers:
+            r.Replace('-lwrap', '', 'Makefile')
+
+        extraConfig = ''
+        if Use.pie:
+            extraConfig += 'LINK="-pie "'
+            r.macros.cflags += ' -fpie'
+
+        if Use.ssl:
+            r.macros.vsftpd_extra_cflags = '$(pkg-config openssl --cflags) -I%(krbprefix)s/include/'
+        else:
+            r.macros.vsftpd_extra_cflags = ''
+
+        r.Make('CFLAGS="%(cflags)s %(vsftpd_extra_cflags)s -pipe" %(mflags)s' + extraConfig)
+
+        r.Install('vsftpd', '%(sbindir)s/')
+        r.Install('vsftpd.conf', '%(sysconfdir)s/vsftpd/', mode=0600)
+        r.Install('vsftpd.conf.5', '%(mandir)s/man5/')
+        r.Install('vsftpd.8', '%(mandir)s/man8/')
+        r.Install('RedHat/vsftpd.log', '%(sysconfdir)s/logrotate.d/vsftpd.log')
+        r.Install('vsftpd.pam', '%(sysconfdir)s/pam.d/ftp')
+        r.Install('vsftpd.ftpusers', '%(sysconfdir)s/vsftpd.ftpusers', mode=0600)
+        r.Install('vsftpd.user_list', '%(sysconfdir)s/vsftpd.user_list', mode=0600)
+        r.Install('vsftpd.init', '%(initdir)s/vsftpd')
+        r.MakeDirs('%(servicedir)s/ftp/pub')
+
+        # start initscript by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.ExcludeDirectories(exceptions='%(servicedir)s/ftp/pub')
+
+        r.AutoDoc('AUDIT', 'REWARD', 'SPEED', 'SECURITY', 'TUNING', 'SIZE',
+              'vsftpd.xinetd')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.UtilizeUser('nobody', '%(sbindir)s/vsftpd')
