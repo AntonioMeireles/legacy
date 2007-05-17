@@ -6,25 +6,20 @@
 
 class Vim(CPackageRecipe):
     name = 'vim'
-    version = '7.0.235'
+    version = '7.1.002'
     patchlevel = version[version.rfind('.')+1:]
 
     buildRequires = [ 'ncurses:devel', 'grep:runtime', 'libtermcap:devel',
-        'python:devel', 'sed:runtime', 'gettext:runtime', ]
-    if Use.desktop:
-        buildRequires.append('desktop-file-utils:runtime')
-    if Use.gtk:
-        buildRequires.extend([ 'atk:devel', 'glib:devel', 'gtk:devel',
-            'pango:devel', 'cairo:devel', 'fontconfig:devel',
-            'freetype:devel', 'libpng:devel', 'zlib:devel', 'perl:devel',
-            'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXext:devel',
-            'libXrender:devel', 'libXt:devel', 'libXdmcp:devel',
-            'libXpm:devel', 'imake:runtime',
-                               'expat:devel'])
-    if not Use.bootstrap:
-        buildRequires.extend([ 'acl:devel', 'perl:runtime',
-            'perl:lib', 'pkgconfig:devel' ])
-
+        'python:devel', 'sed:runtime', 'gettext:runtime',
+        'atk:devel', 'glib:devel', 'gtk:devel',
+        'pango:devel', 'cairo:devel', 'fontconfig:devel',
+        'freetype:devel', 'libpng:devel', 'zlib:devel', 'perl:devel',
+        'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXext:devel',
+        'libXrender:devel', 'libXt:devel', 'libXdmcp:devel',
+        'libXpm:devel', 'imake:runtime',
+        'acl:devel', 'perl:runtime', 'perl:lib', 'pkgconfig:devel',
+        'desktop-file-utils:runtime',
+        ]
 
     def setup(r):
         r.macros.update({
@@ -34,24 +29,28 @@ class Vim(CPackageRecipe):
         })
         r.mainDir('%(vername)s')
 
-        r.addArchive('http://ftp.vim.org/ftp/pub/vim/unix/vim-%(major_version)s.tar.bz2')
-        r.addArchive('http://ftp.vim.org/ftp/pub/vim/extra/vim-%(major_version)s-lang.tar.gz')
-        r.addArchive('http://ftp.vim.org/ftp/pub/vim/extra/vim-%(major_version)s-extra.tar.gz')
+        site = 'ftp://ftp.vim.org/pub/vim'
+        #site = 'ftp://ftp.vim.org/pub/vim/unstable'
+
+
+        r.addArchive(site+'/unix/vim-%(major_version)s.tar.bz2')
+        r.addArchive(site+'/extra/vim-%(major_version)s-extra.tar.gz')
+        r.addArchive(site+'/extra/vim-%(major_version)s-lang.tar.gz')
+
+
 
         # official upstream patches
         if r.patchlevel != '0':
             for patch in range(1,int(r.patchlevel)+1):
-                r.addPatch('ftp://ftp.vim.org/pub/vim/patches/%%(major_version)s/%%(major_version)s.%03d' % patch, level=0)
+                r.addPatch(site+'/patches/%%(major_version)s/%%(major_version)s.%03d' % patch, level=0)
 
         r.addPatch('vim-5.1-vimnotvi.patch') # default to enhanced behavior
         r.addPatch('vim-5.6a-paths.patch') # speed up by not calling env
         r.addPatch('xxd-locale.patch') # fix locale handling
         r.addPatch('vim-6.2-rclocation.patch', macros=True) # /etc is %(sysconfdir)s
-        r.addPatch('conaryRecipe.patch') # detect .recipe files
 
-        r.addSource('gvim.desktop', use=Use.desktop)
+        r.addSource('gvim.desktop')
         r.addSource('vimrc')
-        r.addSource('recipe.vim') # syntax file for recipes
         r.addSource('vi') #bash script to run vim-minimal, or vim if installed
 
 
@@ -60,43 +59,34 @@ class Vim(CPackageRecipe):
         r.Run('sed -i "s,\$VIMRUNTIME,/usr/share/vim/%(vername)s,g;'
                   's,\$VIM,/usr/share/vim/%(vername)s/macros,g" src/os_unix.h')
 
-        if Use.perl:
-            r.macros.enableperl = '--enable-perlinterp'
-        else:
-            r.macros.enableperl = '--disable-perlinterp'
-        if Use.python:
-            r.macros.enablepython = '--enable-pythoninterp'
-        else:
-            r.macros.enablepython = '--disable-pythoninterp'
+        r.macros.enableperl = '--enable-perlinterp'
+        r.macros.enablepython = '--enable-pythoninterp'
 
-        if Use.gtk:
-            r.Configure(
-                '--with-features=huge'
-                ' %(enablepython)s %(enableperl)s --disable-tclinterp'
-                ' --with-x=yes --enable-gtk2-check --enable-gui=gtk2'
-                ' --exec-prefix=%(exec_prefix)s'
-                ' --enable-xim --enable-multibyte --enable-fontset'
-                ' --disable-gpm'
-                ' --with-compiledby="<https://issues.rpath.com>"',
-                dir='src' )
-            r.Make('-C src')
-            r.Install('src/vim', '%(bindir)s/gvim', mode=0755)
-            r.Make('-C src clean')
+        r.Configure(
+            '--with-features=huge'
+            ' %(enablepython)s %(enableperl)s --disable-tclinterp'
+            ' --with-x=yes --enable-gtk2-check --enable-gui=gtk2'
+            ' --exec-prefix=%(exec_prefix)s'
+            ' --enable-xim --enable-multibyte --enable-fontset'
+            ' --disable-gpm'
+            ' --with-compiledby="<https://issues.rpath.com>"',
+            dir='src' )
+        r.Make('-C src')
+        r.Install('src/vim', '%(bindir)s/gvim', mode=0755)
+        r.Make('-C src clean')
 
-        if not Use.bootstrap:
-            r.Configure(
-                '--with-features=huge'
-                ' %(enablepython)s %(enableperl)s --disable-tclinterp'
-                ' --with-x=no --enable-gui=no'
-                ' --enable-multibyte'
-                ' --disable-gpm'
-                ' --with-compiledby="<http://bugs.rpath.com>"',
-                dir='src'
+        r.Configure(
+            '--with-features=huge'
+            ' %(enablepython)s %(enableperl)s --disable-tclinterp'
+            ' --with-x=no --enable-gui=no'
+            ' --enable-multibyte'
+            ' --disable-gpm'
+            ' --with-compiledby="<http://bugs.rpath.com>"',
+            dir='src'
             )
-            r.Make('-C src')
-            r.Run('mv src/vim .')
-            r.Make('-C src clean')
-
+        r.Make('-C src')
+        r.Run('mv src/vim .')
+        r.Make('-C src clean')
 
         r.Configure(
             '--with-features=tiny'
@@ -123,28 +113,23 @@ class Vim(CPackageRecipe):
         r.Requires(exceptions='/usr/share/vim/.*/tools/(vim132|.*.pl|mve.awk)')
         r.Symlink('vim', '%(bindir)s/vi')
         r.Install('vimrc', '/etc/', mode=0644)
-        r.Install('recipe.vim', '%(datadir)s/vim/%(vername)s/syntax/', mode=0644)
 
         for program in ('view', 'ex', 'rvi', 'rview'):
             r.Symlink('vi', '/bin/%s' %program)
 
-        if Use.gtk:
-            r.Symlink('vim.1', '%(mandir)s/man1/gvim.1')
-            r.Symlink('vim.1', '%(mandir)s/man1/gvimdiff.1')
-            for program in ('gview', 'gex', 'evim', 'gvimdiff', 'vimx'):
-                r.Symlink('gvim', '%(bindir)s/'+program)
-        else:
-            r.Remove('%(mandir)s/man?/evim*')
+        r.Symlink('vim.1', '%(mandir)s/man1/gvim.1')
+        r.Symlink('vim.1', '%(mandir)s/man1/gvimdiff.1')
+        for program in ('gview', 'gex', 'evim', 'gvimdiff', 'vimx'):
+            r.Symlink('gvim', '%(bindir)s/'+program)
 
         r.Desktopfile('gvim.desktop', category='Development')
 
-        if not Use.bootstrap:
-            r.Install('vim', '%(bindir)s/', mode=0755)
-            r.Symlink('vim.1', '%(mandir)s/man1/rvi.1')
-            r.Symlink('vim.1', '%(mandir)s/man1/rvim.1')
-            r.Symlink('vim.1', '%(mandir)s/man1/vimdiff.1')
-            for program in ('ex', 'rvim', 'vimdiff'):
-                r.Symlink('vim', '%%(bindir)s/%s' %program)
+        r.Install('vim', '%(bindir)s/', mode=0755)
+        r.Symlink('vim.1', '%(mandir)s/man1/rvi.1')
+        r.Symlink('vim.1', '%(mandir)s/man1/rvim.1')
+        r.Symlink('vim.1', '%(mandir)s/man1/vimdiff.1')
+        for program in ('ex', 'rvim', 'vimdiff'):
+            r.Symlink('vim', '%%(bindir)s/%s' %program)
 
         r.Run('mv -f runtime/macros/README.txt README.macros')
         r.Run('mv -f runtime/tools/README.txt README.tools')
