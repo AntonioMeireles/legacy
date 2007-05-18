@@ -1,0 +1,50 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Dbus(AutoPackageRecipe):
+    name = 'dbus'
+    version = '1.0.2'
+
+    buildRequires = [
+        'doxygen:runtime', 'expat:devel', 'pkgconfig:devel', 'xmlto:runtime', 'libICE:devel', 'libSM:devel', 'libX11:devel' ]
+
+    def unpack(r):
+        r.macros.dbus_user = 'dbus'
+        r.addArchive('http://dbus.freedesktop.org'
+                     '/releases/%(name)s/%(name)s-%(version)s.tar.gz')
+        # fixes build bug.
+        # taken from http://ftp.gnome.org/pub/GNOME/teams/releng/2.16.1/dbus-glib-build.patch
+        r.addPatch('dbus-glib-build.patch')
+        r.addSource('dbus.sh')
+
+        r.Replace('<user>.*</user>', '<user>%(dbus_user)s</user>',
+                  'bus/system.conf*')
+        r.Replace('# chkconfig: 345 97 03', '# chkconfig: 345 08 03',
+                  'bus/messagebus.in')
+
+    def configure(r):
+
+        r.Configure('--disable-tests '
+                    '--disable-asserts '
+                    '--disable-verbose-mode '
+                    '--with-init-scripts=redhat '
+                    '--with-system-pid-file=%(localstatedir)s/run/messagebus.pid')
+
+    def policy(r):
+
+        r.MakeDirs('%(localstatedir)s/run/dbus')
+        r.MakeDirs('%(datadir)s/dbus-1/services')
+        r.Install('dbus.sh', '/etc/X11/xinit/xinitrc.d/dbus.sh')
+
+        r.ExcludeDirectories(exceptions=['%(datadir)s/dbus-1/services'])
+        r.ExcludeDirectories(exceptions=['%(sysconfdir)s/dbus-1/system.d'])
+        r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/dbus'])
+        r.ExcludeDirectories(exceptions=['%(localstatedir)s/lib/dbus'])
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.UtilizeUser('dbus', '%(sysconfdir)s/.*/system.conf')
+
+        r.PackageSpec('dbus-x11', '%(bindir)s/dbus-launch')
