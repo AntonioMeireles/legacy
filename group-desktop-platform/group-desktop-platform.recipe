@@ -8,14 +8,14 @@
 
 class GroupDesktopPlatform(GroupRecipe):
     name = 'group-desktop-platform'
-    version = '1.9.0.0.1'
+    version = '1.9.0.0.2'
 
     autoResolve = True
 
     Flags.local_tools = True
     depCheck = True
     checkPathConflicts = True
-    x86_64FlavorString = 'is: x86(i486,i586,i686) x86_64'
+    x86_64FlavorString = 'is: x86_64(~3dnow, ~3dnowext, ~nx)  x86(~cmov, ~i486, ~i586, ~i686, ~mmx, ~nx, ~sse, ~sse2)'
     rPathVersionStr = None
 
     unwantedComponents = [ 'supdoc' ]
@@ -40,10 +40,27 @@ class GroupDesktopPlatform(GroupRecipe):
         r.setDefaultGroup(name)
         r.removeComponents(r.unwantedComponents)
 
-    def flAddCopy(r, name, origin , flavor=None):
+    def flAddCopy(r, name, origin, flavor=None):
         if Arch.x86_64 and not flavor:
             flavor=GroupDesktopPlatform.x86_64FlavorString
         r.addCopy(name, origin, flavor)
+
+
+    # this allows us to 'derive' nicely upstream groups (rpl:devel), overwritting them with our own stuff
+    def flAdd(r, name, source=None, groupName=None, flavor=None):
+        r.add(name, source=source, groupName=groupName, )
+
+        if Arch.x86_64:
+            r.replace(name, groupName='group-compat32', allowNoMatch=True,
+                      newFlavor='is: x86(~cmov, ~i486, ~i586, ~i686, ~mmx, ~nx, ~sse, ~sse2)')
+
+            for g in ['group-devel', 'group-os-devel', 'group-printing']:
+                r.replace(name, groupName=g, newFlavor='is: x86_64(~3dnow, ~3dnowext, ~nx)',
+                          allowNoMatch=True)
+        else:
+            for g in ['group-devel','group-os-devel', 'group-printing']: # 'group-gnome',
+                r.replace(name, groupName=g, allowNoMatch=True,
+                          newFlavor='is: x86(~cmov, ~i486, ~i586, ~i686, ~mmx, ~nx, ~sse, ~sse2)')
 
     def setup(r):
         rplBranch = "conary.rpath.com@rpl:devel"
@@ -52,9 +69,9 @@ class GroupDesktopPlatform(GroupRecipe):
         for groupName in ('base',
                           'core',
                           'devel',
-                          #'gnome',
-                          #'os-devel',
-                          #'printing',
+#                          'gnome',
+                          'os-devel',
+                          'printing',
                           'text-tools',):
             r.flAddCopy('group-'+groupName, rplBranch)
 
@@ -66,7 +83,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # temp hacks
         r.add('authconfig', groupName='group-core')
 
-        r.replace('xcb-proto', 'foresight.rpath.org@fl:2-devel')
+#        r.replace('xcb-proto', 'foresight.rpath.org@fl:2-devel')
 
         # we're jumping into python2.5
 #        r.replace('python', 'foresight.rpath.org@fl:2-devel')
@@ -78,7 +95,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
         r.startGroup('group-xorg', parentGroup='group-desktop-platform')
 
-        r.add('xorg-server')
+        r.flAdd('xorg-server')
 
         ## packages built by xorg-proto
         proto  = [
@@ -121,13 +138,13 @@ class GroupDesktopPlatform(GroupRecipe):
             'xproxymanagementprotocol',
             ]
         for p in proto:
-            r.add(p, source='xorg-proto')
+            r.flAdd(p, source='xorg-proto')
 
         ## end of list of packages built by xorg-proto
 
-        r.add('xcursor-themes')
-        r.add('xkeyboard-config')
-        r.add('xorg-sgml-doctools')
+        r.flAdd('xcursor-themes')
+        r.flAdd('xkeyboard-config')
+        r.flAdd('xorg-sgml-doctools')
 
         ## packages built by xorg-libs
 
@@ -167,30 +184,31 @@ class GroupDesktopPlatform(GroupRecipe):
              ]
 
         for p in libs:
-            r.add(p, source='xorg-libs')
+            r.flAdd(p, source='xorg-libs')
+
 
         ## end of packages built by xorg-libs
 
-        r.add('libfontenc')
-        r.add('libICE')
-        r.add('libSM')
-        r.add('libX11')
-        r.add('libXau')
-        r.add('libxcb')
-        r.add('libXdmcp')
-        r.add('libXext')
-        r.add('libXfixes')
-        r.add('libxkbfile')
-        r.add('libXmu')
-        r.add('libXp')
-        r.add('libXpm')
-        r.add('libXprintUtil')
-        r.add('libXrender')
-        r.add('libXt')
-        r.add('libXv')
-        r.add('Mesa')
-        r.add('glx-utils', source='Mesa')
-        r.add('libdrm')
+        r.flAdd('libfontenc')
+        r.flAdd('libICE')
+        r.flAdd('libSM')
+        r.flAdd('libX11')
+        r.flAdd('libXau')
+        r.flAdd('libxcb')
+        r.flAdd('libXdmcp')
+        r.flAdd('libXext')
+        r.flAdd('libXfixes')
+        r.flAdd('libxkbfile')
+        r.flAdd('libXmu')
+        r.flAdd('libXp')
+        r.flAdd('libXpm')
+        r.flAdd('libXprintUtil')
+        r.flAdd('libXrender')
+        r.flAdd('libXt')
+        r.flAdd('libXv')
+        r.flAdd('Mesa')
+        r.flAdd('glx-utils', source='Mesa')
+        r.flAdd('libdrm')
 
         ## packages built by xorg-apps
 
@@ -294,8 +312,7 @@ class GroupDesktopPlatform(GroupRecipe):
              ]
 
         for p in apps:
-            r.add(p, source='xorg-apps')
-
+            r.flAdd(p, source='xorg-apps')
 
         ## end of packages built by xorg-apps
 
@@ -342,15 +359,15 @@ class GroupDesktopPlatform(GroupRecipe):
              ]
 
         for p in fonts:
-            r.add(p, source='xorg-fonts')
+            r.flAdd(p, source='xorg-fonts')
 
         ## end of packages built by xorg fonts
 
 #        r.startGroup('group-xorg-fonts-extra', parentGroup='group-xorg', depCheck=False)
-#        r.add('scim')
-#        r.add('scim-anthy')
-#        r.add('anthy')
-#        r.add('sazanami')
+#         r.flAdd('scim')
+#         r.flAdd('scim-anthy')
+#         r.flAdd('anthy')
+#         r.flAdd('sazanami')
 
         r.startGroup('group-xorg-drivers', parentGroup='group-xorg', depCheck=False)
 
@@ -387,7 +404,7 @@ class GroupDesktopPlatform(GroupRecipe):
             ]
 
         for p in inputDrivers:
-            r.add(p, source='xorg-driver-input')
+            r.flAdd(p, source='xorg-driver-input')
         ## end of packages built by xorg-drivers-input
 
         ## packages built by xorg-drivers-video
@@ -441,7 +458,7 @@ class GroupDesktopPlatform(GroupRecipe):
             ]
 
         for p in videoDrivers:
-            r.add(p, source='xorg-driver-video')
+            r.flAdd(p, source='xorg-driver-video')
         ## end of packages built by xorg-drivers-video
 
         for moveGroup in (
@@ -449,9 +466,9 @@ class GroupDesktopPlatform(GroupRecipe):
             'group-core', 
             'group-devel', 
 
-            #'group-gnome',
-            #'group-os-devel',
-            #'group-printing',
+#            'group-gnome',
+            'group-os-devel',
+            'group-printing',
 
             'group-text-tools',):
             r.removeItemsAlsoInNewGroup('group-xorg', groupName= moveGroup)
@@ -461,12 +478,19 @@ class GroupDesktopPlatform(GroupRecipe):
           'group-core', 
           'group-text-tools',
 
-          #'group-gnome',
-          #'group-os-devel',
-          #'group-printing',
+#          'group-gnome',
+          'group-os-devel',
+          'group-printing',
  
           'group-xorg', 
           'group-xorg-fonts', 
           'group-xorg-drivers',):
             r.moveComponents([':devellib', ':devel'], moveGroup, 'group-devel')
 
+
+        # final hacks
+        if Arch.x86_64:
+            r.remove('libX11:data',  groupName='group-compat32',
+                     flavor='is: x86(~cmov, ~i486, ~i586, ~i686, ~mmx, ~nx, ~sse, ~sse2)')
+
+        r.remove('xcb-proto:data', groupName='group-devel')
