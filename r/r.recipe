@@ -1,0 +1,49 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class rproject(CPackageRecipe):
+    name = 'r'
+    version = '2.5.0'
+
+    buildRequires = ['bzip2:devel', 'cups:runtime', 'firefox:runtime', 'gcc-fortran:devellib', 'gcc-fortran:runtime', 'gcc-java:data', 'less:runtime', 'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXmu:devel', 'libXt:devel', 'libjpeg:devel', 'libpng:devel', 'pcre:devel', 'perl:lib', 'perl:runtime', 'readline:devel', 'tcl:devel', 'texinfo:runtime', 'tk:devel', 'unzip:runtime', 'zip:runtime', 'zlib:devel']
+
+    def setup(r):
+        r.macros.archive_name = 'R'
+        r.addArchive('http://lib.stat.cmu.edu/R/CRAN/src/base/R-2/')
+        r.Environment('MAIN_CFLAGS', '%(cflags)s')
+        r.Environment('MAIN_LDFLAGS', '%(ldflags)s')
+        r.Environment('LIBnn', '%(lib)s')
+
+        r.Configure('--with-system-zlib'
+                    ' --with-system-bzlib'
+                    ' --with-system-pcre')
+        r.Make()
+
+        r.MakePathsInstall()
+        # temporary paths in /usr/bin/R should be replaced with real paths
+        r.Replace(('^R_HOME_DIR=.*', 'R_HOME_DIR=%(libdir)s/R'),
+                  ('^R_SHARE_DIR=.*', 'R_SHARE_DIR=%(datadir)s/R'),
+                  ('^R_INCLUDE_DIR=.*', 'R_INCLUDE_DIR=%(includedir)s/R'),
+                  ('^R_DOC_DIR=.*', 'R_DOC_DIR=%(datadir)s/R/doc'),
+                  '/usr/bin/R')
+        # put things in more normal places to enhance componentization,
+        # but leave symlinks for R
+        for oldDir, newDir in (
+            ('%(libdir)s/R/include', '%(includedir)s/R'),
+            ('%(libdir)s/R/bin', '%(libexecdir)s/R'),
+            ('%(libdir)s/R/doc', '%(datadir)s/R/doc'),
+            ('%(libdir)s/R/share/locale', '%(datadir)s/locale'),
+            ('%(libdir)s/R/share', '%(datadir)s/R'),
+        ):
+            r.Move(oldDir+'/*', newDir+'/')
+            r.Remove(oldDir, recursive=True)
+            r.Symlink(newDir, oldDir)
+
+        r.SharedLibrary(subtrees='%(libdir)s/R/%(lib)s/')
+        # libRlapack.so does not have a SONAME entry
+        r.Provides('soname: libRlapack.so', '%(libdir)s/R/%(lib)s/libRlapack.so')
+        # do not try to require acroread
+        r.EnforceConfigLogBuildRequirements(exceptions='/usr/bin/acroread')
