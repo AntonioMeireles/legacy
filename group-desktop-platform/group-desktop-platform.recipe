@@ -15,7 +15,7 @@ class GroupDesktopPlatform(GroupRecipe):
     Flags.local_tools = True
     depCheck = True
     checkPathConflicts = True
-    x86_64FlavorString = 'is: x86_64(~3dnow,~3dnowext,~nx) x86(~cmov,~i486,~i586,~i686,~mmx,~nx,~sse,~sse2)'
+    x86_64FlavorString = 'is: x86(i486,i586,i686) x86_64'
     rPathVersionStr = None
 
     unwantedComponents = [ 'supdoc', ] # ? 'devel', 'devellib']
@@ -40,41 +40,48 @@ class GroupDesktopPlatform(GroupRecipe):
         r.setDefaultGroup(name)
         r.removeComponents(r.unwantedComponents)
 
-    def flAddCopy(r, name, origin, flavor=None):
-        if Arch.x86_64 and not flavor:
-            flavor=GroupDesktopPlatform.x86_64FlavorString
-        r.addCopy(name, origin, flavor)
+    def flAddCopy(r, name, version, flavor=None):
+        if not flavor:
+            if Arch.x86_64:
+                flavor = 'is: x86(i486,i586,i686) x86_64'
+            else:
+                flavor = 'is: x86(i486,i586,i686)'
 
+        r.addCopy(name, version, flavor)
 
     # this allows us to 'derive' nicely upstream groups (rpl:devel), overwritting them with our own stuff
     def flAdd(r, name, source=None, groupName=None, flavor=None):
         if not flavor:
             if Arch.x86_64:
-                flavor = 'is: x86_64(~3dnow,~3dnowext,~nx)'
-            if Arch.x86:
-                flavor = 'is: x86(~cmov,~i486,~i586,~i686,~mmx,~nx,~sse,~sse2)'
+                flavor = 'is: x86_64'# (i486,i586,i686) x86_64'
+            else:
+                flavor = 'is: x86(i486,i586,i686)'
 
         #  first, we add the trove, normally
-        r.add(name, source=source, groupName=groupName, flavor=flavor,)
+        r.add(name, source=source, groupName=groupName, flavor=flavor)
 
         # second, we check if that trove is already in any of the upstream, pre-built,
         # groups, we use, and - there - we replace it.
         if Arch.x86_64:
             r.replace(name, groupName='group-compat32', allowNoMatch=True,
-                      newFlavor='is: x86(~cmov,~i486,~i586,~i686,~mmx,~nx,~sse,~sse2)')
+                      newFlavor='is: x86(i486,i586,i686)')
 
             for g in ['group-devel', ]:
-                r.replace(name, groupName=g, newFlavor='is: x86_64(~3dnow,~3dnowext,~nx)',
+                r.replace(name, groupName=g, newFlavor='is: x86_64',
                           allowNoMatch=True)
         else:
             for g in ['group-devel', ]: # 'group-os-devel', 'group-printing', 'group-gnome',
                 r.replace(name, groupName=g, allowNoMatch=True,
-                          newFlavor='is: x86(~cmov,~i486,~i586,~i686,~mmx,~nx,~sse,~sse2)')
+                          newFlavor='is: x86(i486,i586,i686)')
 
     def setup(r):
         rplBranch = "conary.rpath.com@rpl:devel"
-        r.setSearchPath('foresight.rpath.org@fl:2-devel', 'group-os=conary.rpath.com@rpl:devel')
-
+        groupOs = 'group-os=' + rplBranch + '[%s]'
+        if Arch.x86_64:
+            groupOs = groupOs % 'is: x86(i486,i586,i686) x86_64'
+        else:
+            groupOs = groupOs % 'is: x86(i486,i586,i686)'
+        r.setSearchPath('foresight.rpath.org@fl:2-devel', groupOs)
 
         # stuff we reuse from upstream (rpl:devel)
         for groupName in ('base',
@@ -89,14 +96,9 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             r.flAddCopy('group-compat32', rplBranch)
 
-        if Arch.x86:
-            r.replace('distro-release', 'foresight.rpath.org@fl:2-devel',
-                      newFlavor='is: x86(~cmov, ~i486, ~i586, ~i686, ~mmx, ~nx, ~sse, ~sse2)')
-        else:
-            r.replace('distro-release', 'foresight.rpath.org@fl:2-devel',
-                      newFlavor='is: x86_64(~3dnow, ~3dnowext, ~nx)')
+        r.replace('distro-release', 'foresight.rpath.org@fl:2-devel',)
 
-        # temp hacks
+        # temp hacks (rpl:devel oddities)
         r.add('authconfig', groupName='group-core')
 
         # we're jumping into python2.5
@@ -479,7 +481,10 @@ class GroupDesktopPlatform(GroupRecipe):
         #
 
         # final housekeeping
-        # the r.replace in flAdd sadly doesn 't replace **only** the components already in
-        # the original group-compat32, so we need a final cleanup there to avoid dups.
+        # the r.replace in flAdd sadly doesn't allways replace **only** the components 
+        # already in the original group-compat32, so we need a final cleanup there to avoid dups.
         if Arch.x86_64:
             r.removeComponents(['devel', 'doc', 'data', 'runtime', 'supdoc'], groupName='group-compat32')
+            # libxcb is not used (yet) in rpl:devel, and libX11 needs it.
+            r.add('libxcb:lib', flavor='is: x86(i486,i586,i686)', groupName='group-compat32')
+            r.add('libXp:lib', flavor='is: x86(i486,i586,i686)', groupName='group-compat32')
