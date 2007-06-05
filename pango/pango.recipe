@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+
+loadRecipe('gnomepackage.recipe')
+class Pango(GnomePackageRecipe):
+
+    buildRequires = [ 'libtool:runtime', 'glib:devel', 'freetype:devel', 
+        'fontconfig:devel', 'cairo:devel', 'expat:devel',
+        'libXft:devel',    'libpng:devel',
+        'perl:runtime', 'glib:runtime' ]
+
+    extraConfig = GnomePackageRecipe.extraConfig + ' --build=%(host)s'
+
+    if not Use.qt:
+        extraConfig += ' --without-qt'
+                         
+    name = 'pango'
+    version = '1.16.4'
+
+    docs = ['README', 'AUTHORS', 'COPYING', 'ChangeLog']
+
+    def unpack(r):
+        GnomePackageRecipe.unpack(r)
+        r.addPatch('pango-1.2.5-lib64.patch')
+        r.addSource('pangomodule.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/pangomodule')
+        r.addSource('pangomodule.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/pangomodule', mode=0755)
+        r.macros.optflags = '-g -Os'
+
+    def install(r):
+        GnomePackageRecipe.install(r)
+        
+        # set up HOST definition for pango.modules location
+        r.macros.host = r.macros.target
+        if r.macros.target.endswith("linux"):
+            # autotools appends -gnu to -linux
+            r.macros.host += '-gnu'
+        r.macros.qm = '%(bindir)s/pango-querymodules-%(host)s'
+        r.macros.pm = '%(sysconfdir)s/pango/%(host)s/pango.modules'
+
+        # separate querymodules for multilib installation
+        r.Move('%(bindir)s/pango-querymodules', '%(qm)s')
+        r.Remove('%(sysconfdir)s/pango/pango.modules')
+        # zero-length config file
+        r.Create('%(pm)s')
+
+        # Files with %(host)s are really part of the library
+        r.ComponentSpec('lib', '%(qm)s', '%(pm)s')
+        r.ComponentSpec(catchall='data')
