@@ -1,0 +1,41 @@
+loadSuperClass('javapackage=conary.rpath.com@rpl:1')
+class Ec2ApiTools(JavaPackageRecipe):
+    name = 'ec2-api-tools'
+    version = '1.2_9739'
+
+    buildRequires = [ 'zip:runtime' ]
+
+    def upstreamUnpack(r):
+        if Use.gcj:
+            return
+
+        r.macros.ec2HomeDir = '/opt/ec2-api-tools'
+
+        # add sources
+        r.addArchive('http://s3.amazonaws.com/ec2-downloads/ec2-api-tools.zip')
+        r.addSource('ec2-api-tools.csh', macros=True)
+        r.addSource('ec2-api-tools.sh', macros=True)
+
+        # create home for EC2 tools
+        r.MakeDirs('%(ec2HomeDir)s')
+
+        # install the bits
+        r.Install('bin/', '%(ec2HomeDir)s/bin', mode=0755)
+        r.Install('lib/', '%(ec2HomeDir)s/lib', mode=0644)
+
+        # strip out the useless cmd files for Windoze users
+        r.Remove('%(ec2HomeDir)s/bin/*.cmd')
+
+        # install some scripts to set up the shell environment
+        r.Install('ec2-api-tools.csh', '%(sysconfdir)s/profile.d/', mode=0755)
+        r.Install('ec2-api-tools.sh', '%(sysconfdir)s/profile.d/', mode=0755)
+
+        # :runtime requires :java
+        r.Requires('ec2-api-tools:java', '%(ec2HomeDir)s/bin/.*')
+        r.Requires('sun-jre:java', '%(ec2HomeDir)s/lib/.*')
+        r.Requires('sun-jre:runtime', '%(ec2HomeDir)s/bin/.*')
+
+        # whiteout useless java requires/provides, as the package is
+        # self-sufficient
+        r.Requires(exceptions='%(ec2HomeDir)s/lib/.*.jar')
+        r.Provides(exceptions='%(ec2HomeDir)s/lib/.*.jar')
