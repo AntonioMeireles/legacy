@@ -1,0 +1,134 @@
+diff -Naur mkinitrd-6.0.9.orig/bdevid/Makefile mkinitrd-6.0.9/bdevid/Makefile
+--- mkinitrd-6.0.9.orig/bdevid/Makefile	2007-03-28 15:32:55.000000000 -0400
++++ mkinitrd-6.0.9/bdevid/Makefile	2007-06-06 11:12:07.000000000 -0400
+@@ -14,10 +14,11 @@
+ 
+ MODULES = scsi ata usb
+ OBJECTS = $(bdevid_OBJECTS)
+-LIBS = libbdevid.so
+-TARGETS = libbdevid.pc libbdevidprobe.pc bdevid
+-TARGETS += libbdevidprobe.a
++LIBS = libbdevid.so libbdevid.a
++TARGETS = libbdevid.pc libbdevidprobe.pc bdevid 
++TARGETS += libbdevidprobe.a libbdevid.a libbdevid.so
+ TARGETS += $(foreach dso, $(MODULES), ${dso}.so)
++
+ SUBDIRS = python
+ 
+ include ../Makefile.inc
+@@ -26,10 +27,10 @@
+ CFLAGS += $(shell pkg-config --cflags glib-2.0)
+ CFLAGS += "-DBDEVID_DEFAULT_SEARCH_PATH=\"/$(LIB)/bdevid/:/usr/$(LIB)/bdevid/\""
+ 
+-LDFLAGS += -Wl,-rpath-link,$(TOPDIR)/nash:$(TOPDIR)/bdevid
++#LDFLAGS += -Wl,-rpath-link,$(TOPDIR)/nash:$(TOPDIR)/bdevid
+ LDFLAGS += -L$(TOPDIR)/nash -L$(TOPDIR)/bdevid
+ 
+-bdevid :: command.o
++bdevid :: command.o libbdevid.a
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(command_LIBS)
+ 
+ $(foreach lib,$(MODULES),$(lib).so) :: %.so : %.o ../nash/wrap.o libbdevidprobe.a
+@@ -42,6 +43,9 @@
+ 	$(AR) crs $@ $^
+ 	ranlib $@
+ 
++libbdevid.a :: libbdevid.a($(bdevid_OBJECTS))
++	ranlib $@
++
+ %.so : %.so.$(VERSION)
+ 	@ln -vsf $(shell basename $<) $@
+ 
+@@ -60,6 +64,7 @@
+ 	mkdir -p $(DESTDIR)/usr/include/bdevid
+ 	install -m 755 bdevid $(DESTDIR)/sbin
+ 	install -m 644 libbdevidprobe.a $(DESTDIR)/usr/$(LIB)
++	install -m 644 libbdevid.a $(DESTDIR)/usr/$(LIB)
+ 	install -m 755 libbdevid.so.$(VERSION) $(DESTDIR)/usr/$(LIB)
+ 	ln -sf libbdevid.so.$(VERSION) $(DESTDIR)/usr/$(LIB)/libbdevid.so
+ 	install -m 644 libbdevidprobe.pc $(DESTDIR)/usr/$(LIB)/pkgconfig
+diff -Naur mkinitrd-6.0.9.orig/grubby/Makefile mkinitrd-6.0.9/grubby/Makefile
+--- mkinitrd-6.0.9.orig/grubby/Makefile	2007-03-29 13:08:14.000000000 -0400
++++ mkinitrd-6.0.9/grubby/Makefile	2007-06-06 11:19:53.000000000 -0400
+@@ -6,7 +6,7 @@
+ 
+ include ../Makefile.inc
+ 
+-CFLAGS := $(CFLAGS) -iquote../nash/ \
++CFLAGS := $(CFLAGS) -I../nash/ \
+ 	-I$(TOPDIR)/nash/include -I$(TOPDIR)/bdevid/include $(RPM_OPT_FLAGS)
+ LDFLAGS := -L$(TOPDIR)/nash -L$(TOPDIR)/bdevid \
+ 	-Wl,--wrap,open,--wrap,fopen,--wrap,opendir,--wrap,socket \
+diff -Naur mkinitrd-6.0.9.orig/nash/Makefile mkinitrd-6.0.9/nash/Makefile
+--- mkinitrd-6.0.9.orig/nash/Makefile	2007-06-06 09:20:04.000000000 -0400
++++ mkinitrd-6.0.9/nash/Makefile	2007-06-06 11:18:11.000000000 -0400
+@@ -1,33 +1,37 @@
+ TOPDIR ?= $(shell pwd)/../
+ export TOPDIR
+ 
+-LIBS	= libnash.so
++LIBS	= libnash.a libnash.so
+ TARGETS = nash libnash.pc
+ OBJECTS = util.o linkdetect.o nash.o network.o nfsmount.o \
+ 	  nfsmount_clnt.o nfsmount_xdr.o dns.o block_priv.o \
+ 	  waitdev.o
+ 
++
+ libnash_OBJECTS = lib.o hotplug.o wrap.o list.o block.o uevent.o dm.o \
+-		devtree.o vitals.o blkent.o
++		  devtree.o vitals.o blkent.o
+ 
+-#libnash_OBJECTS = lib.o hotplug.o wrap.o list.o block.o uevent.o dm.o
+ 
+ include ../Makefile.inc
+ 
+ CFLAGS += -I$(TOPDIR)/nash/include -I$(TOPDIR)/bdevid/include
+ CFLAGS += $(shell pkg-config --cflags libdhcp glib-2.0)
+ 
+-LDFLAGS += -Wl,-rpath-link,$(TOPDIR)/bdevid:$(TOPDIR)/nash
+-
+ nash_LIBS = -L$(TOPDIR)/nash -L$(TOPDIR)/bdevid -L/$(LIB)
+-nash_LIBS += -lnash -lbdevid
++nash_LIBS += -lnash
+ nash_LIBS += -ldevmapper -lparted -lblkid -lselinux -lsepol
+ nash_LIBS += -luuid -lpopt -lresolv -lbdevid -ldl
+ nash_LIBS += $(shell pkg-config --libs libdhcp glib-2.0) -lm
+ 
+-nash :: version.h $(OBJECTS) libnash.so
++nash:: version.h $(OBJECTS) libnash.a
++	$(CC) $(CFLAGS) $(LDFLAGS) -static -o $@ $^ $(nash_LIBS)
++
++nash.dynamic:: version.h $(OBJECTS) libnash.a
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(nash_LIBS)
+ 
++libnash.a :: $(libnash_OBJECTS)
++	$(AR) crs $@ $^
++
+ libnash.so : libnash.so.$(VERSION)
+ 	ln -sf $< $@
+ 
+@@ -43,13 +47,13 @@
+ 
+ debug::
+ 	$(MAKE) clean
+-debug:: $(shell pwd)/version.h hotplug libnash.so
++debug:: $(shell pwd)/version.h hotplug libnash.a libnash.so
+ 	$(MAKE) CFLAGS="$(CFLAGS) -DDEBUG" $(OBJECTS)
+ debug:: $(OBJECTS)
+-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(nash_LIBS)
++	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ libnash.a $(nash_LIBS)
+ 
+ clean::
+-	rm -f nash nash.dynamic debug hotplug *.so *.so.* *.o *.a libnash.pc
++	rm -f nash nash.dynamic debug hotplug *.o *.a libnash.pc
+ 
+ install:
+ 	mkdir -p $(DESTDIR)/sbin
+@@ -59,6 +63,7 @@
+ 	mkdir -p $(DESTDIR)/$(mandir)/man8
+ 	install -m 755 nash $(DESTDIR)/sbin
+ 	install -m 644 nash.8 $(DESTDIR)/$(mandir)/man8
++	install -m 644 libnash.a $(DESTDIR)/usr/$(LIB)
+ 	install -m 755 libnash.so.$(VERSION) $(DESTDIR)/usr/$(LIB)
+ 	ln -sf libnash.so.$(VERSION) $(DESTDIR)/usr/$(LIB)/libnash.so
+ 	install -m 644 libnash.pc $(DESTDIR)/usr/$(LIB)/pkgconfig
