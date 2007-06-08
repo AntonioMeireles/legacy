@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Pwlib(CPackageRecipe):
+    name = 'pwlib'
+    version = '1.10.7'
+
+    buildRequires = [ 'expat:devel', 'pkgconfig:devel', 'krb5:devel',
+        'autoconf:runtime', 'bison:runtime', 'alsa-lib:devel',
+        'cyrus-sasl:devel', 'libstdc++:devel', 'SDL:devel',
+        'flex:runtime', 'libavc1394:devel', 'libdv:devel',
+        'libraw1394:devel', 'openldap:devel', ]
+
+    extraConfig = ''
+    if Use.ssl:
+        buildRequires.append('openssl:devel')
+    else:
+        extraConfig += ' --disable-openssl'
+
+    if not Use.ipv6:
+        extraConfig += ' --disable-ipv6'
+
+    def setup(r):
+        r.addArchive('http://www.ekiga.org/admin/downloads/latest/sources/sources/')
+
+        r.Replace('ac_cv_lib_ldap_ldap_open=no','ac_cv_lib_ldap_ldap_open=yes','configure')
+        r.macros.cflags += ' -DLDAP_DEPRECATED'
+        r.Run('autoconf')
+        r.Configure('--enable-plugins --enable-openldap')
+        r.Make('OPTCCFLAGS="%(cflags)s"')
+
+        r.MakeInstall()
+        r.Run("sed -i 's@PWLIBDIR.*=.*@PWLIBDIR = /usr/share/pwlib@' %(destdir)s/%(datadir)s/pwlib/make/ptbuildopts.mak")
+        r.Doc('History.txt', 'ReadMe.txt', 'mpl-1.0.htm')
+        r.Symlink('%(datadir)s/pwlib/make/ptlib-config', '%(bindir)s/')
+
+        r.ComponentSpec('devel', '%(datadir)s/pwlib/make/.*')
+        r.ComponentSpec('runtime', '%(libdir)s/pwlib/.*')
