@@ -1,0 +1,150 @@
+#!/bin/bash
+
+if [ $# -lt 2 ]; then
+    echo "not enough arguments: $0 $*" >&2
+    exit 1
+fi
+
+type="$1"
+shift
+action="$1"
+shift
+
+# allow for debugging
+run ()
+{
+    #echo "$@"
+    #return 0
+    "$@"
+    return $?
+}
+
+bootPrefix ()
+{
+    case $1 in
+	*ia64)
+	    echo "/boot/efi/EFI/linux/"
+	    ;;
+	*)
+	    echo "/boot/"
+	    ;;
+    esac
+}
+
+run_grubby ()
+{
+    version=$2
+    pre=$3
+    initrd=$4
+    multiboot=$5
+    # default to LILO if lilo is installed:
+    bootloaders=`/sbin/grubby --bootloader-probe`
+    if echo $bootloaders | grep lilo >& /dev/null; then
+	bootloader="--lilo"
+    
+	# LILO won't accept a title longer than 15 characters, so let's just use the version:
+	title=$(echo "$version" | cut -b -14)
+    else
+	bootloader="--grub"
+	if [ -f /etc/distro-release ] ; then
+	    title="$(cat /etc/distro-release) (${version})"
+	else
+	    title="$version"
+	fi
+    fi
+    case $1 in
+	--add)
+	    # first non-commented / entry is the one we want...
+	    rootdev=$(awk '{ if ($1 !~ /^[ \t]*#/ && $2 == "/")
+				 { print $1; exit}
+			   }' /etc/fstab)
+	    label=${rootdev/*=/}
+	    if [ "$label" != "$rootdev" ] ; then
+		# if nash can find the label, then root=LABEL=/ is OK
+		# and the root filesystem will be found at boot time
+		if [ -z $(echo showlabels | /sbin/nash --force --quiet | awk '$2 == "'$label'" {print $1; exit}') ] ; then
+		    # nash couldn't find it, so we have to dig it out
+		    # of the current mount table and use that instead
+		    # of the literal label.  Oh, well.
+		    rootdev=$(mount | awk '$3 == "/" {print $1 ; exit}')
+		fi
+	    fi
+
+	    # XXX bootargs= for stuff like lilo arguments
+	    # the initrd line below resolves to nothing if $initrd is empty
+	    # and to --intird="$initrd" if $initrd has content
+	    run /sbin/grubby $bootloader --add-kernel=${pre}vmlinuz-$version \
+		--bad-image-okay \
+		${initrd:+--initrd=${initrd}} \
+		${multiboot:+--add-multiboot=${multiboot}} \
+		--title="$title" --copy-default --make-default \
+		--args="root=$rootdev" \
+		--remove-kernel="${pre}vmlinuz-$version" \
+		$bootargs
+	    ;;
+
+	--del)
+	    # XXX bootargs= for stuff like lilo arguments
+	    run /sbin/grubby $bootloader --remove-kernel=${pre}vmlinuz-$version $bootargs
+	    ;;
+    esac
+}
+
+case $type in 
+    files)
+	# parse version list from stdin; separate module and kernel versions
+	# in case they're all mixed up. a multitag handler w/ separate kernel
+	# and kernel-module tags could be used here, but why bother when 
+	# this works just fine
+	itemlist=$(sed 's,^/lib/modules/\([^/]*\)/.*,module-\1,g
+	                s,^/boot/vmlinuz-,kernel-,g
+			s,^/boot/xen.gz-,xen.gz-,g' | sort -u)
+	kernelversionlist=$(echo $itemlist | sed 's,kernel-,,g
+						  s,module-[^ ]*,,g
+						  s,xen.gz-[^ ]*,,g')
+	moduleversionlist=$(echo $itemlist | sed 's,module-,,g
+						  s,kernel-[^ ]*,,g
+						  s,xen.gz-[^ ]*,,g')
+
+	case $action in
+	    update)
+                for version in $moduleversionlist; do
+		    pre=$(bootPrefix $version)
+                    run /sbin/depmod -ae -F "/boot/System.map-$version" \
+                                     "$version"
+                    initrd=${pre}initrd-${version}.img
+                    run /sbin/mkinitrd -f --allow-missing $initrd $version
+                done
+
+		for version in $kernelversionlist; do
+		    pre=$(bootPrefix $version)
+                    initrd=${pre}initrd-${version}.img
+                    xenmultiboot=${pre}xen.gz-${version}
+                    if [ ! -f $xenmultiboot ]; then
+			xenmultiboot=""
+		    fi
+                    if [ ! -f $initrd ]; then
+                        initrd=""
+		    fi
+                        
+                    run_grubby --add $version $pre $initrd $xenmultiboot
+		done
+		;;
+	    remove)
+		for version in $kernelversionlist; do
+		    pre=$(bootPrefix $version)
+		    if [ -d /lib/modules/$version ] ; then
+			run rm -f /lib/modules/$version/modules.*
+		    fi
+		    initrd=${pre}initrd-${version}.img
+		    if [ -f $initrd ] ; then
+			run rm -f ${pre}initrd-${version}.img
+		    fi
+		    run_grubby --del $version $pre ""
+		done
+		;;
+	esac
+	;;
+esac
+
+exit 0
