@@ -1,0 +1,81 @@
+#
+# Copyright (c) 2006-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('javapackage')
+class SunJava(JavaPackageRecipe):
+    name = 'sun-jdk'
+    version = '6'
+
+    JavaPackageRecipe.buildRequires = []
+    buildRequires = [ 'desktop-file-utils:runtime', ]
+
+    jdkhome = '%%(jvmdir)s/sun-java-%s' % version
+    javahome = '%s/jre' % jdkhome
+
+    def upstreamUnpack(r):
+        r.macros.jrename = 'sun-jre'
+        r.macros.jdkhome = r.jdkhome
+        r.macros.desktopfile = 'jre/plugin/desktop/sun_java.desktop'
+        upver = r.version.replace('.', '_')
+        site = 'http://download.java.net/dlj/binaries/'+'jdk-'+upver+'-dlj-linux-'
+        arch32 = 'i586.bin'
+        arch64 = 'amd64.bin'
+        r.addSource(site+arch32, use=(Arch.x86 and not Use.gcj))
+        r.addSource(site+arch64, use=(Arch.x86_64 and not Use.gcj))
+        r.Run('sh *.bin --accept-license --unpack')
+        r.Run('mv jdk*/* .')
+
+    def upstreamSetup(r):
+        if Arch.x86:
+            r.Replace( ('X-Sun-Supported;', ''),
+                       ('X-Red-Hat-Base;', ''),
+                       ('X-Ximian-Settings;', ''),
+                       ('Application;', ''),
+                       '%(desktopfile)s')
+
+            r.Desktopfile('%(desktopfile)s')
+
+            r.Install('jre/plugin', '%(javahome)s')
+
+            # Create symlink for firefox plugin
+            r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
+                      '%(libdir)s/firefox/plugins/')
+
+            # Create symlink for xulrunner plugin
+            r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
+                      '%(libdir)s/xulrunner/plugins/')
+
+            r.PackageSpec('%(jrename)s', '%(libdir)s/firefox/plugins/')
+            r.ComponentSpec('lib', '%(libdir)s/firefox/plugins/')
+            r.PackageSpec('%(jrename)s', '%(libdir)s/xulrunner/plugins/')
+            r.ComponentSpec('lib', '%(libdir)s/xulrunner/plugins/')
+
+        r.Install('bin', '%(jdkhome)s')
+        r.Install('lib', '%(jdkhome)s')
+        r.Install('include', '%(jdkhome)s/')
+        r.Install('man/man1/', '%(datadir)s/man/man1/')
+        r.Install('jre/bin', '%(javahome)s')
+        r.Install('jre/lib', '%(javahome)s')
+
+        # Setup environment variables
+        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.sh', mode=0755,
+                 contents='export PATH="%(javahome)s/bin:$PATH"\n'
+                          'export JAVA_HOME="%(javahome)s"')
+        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.csh', mode=0755,
+                 contents='setenv PATH "%(javahome)s/bin:$PATH"\n'
+                          'setenv JAVA_HOME "%(javahome)s"')
+
+        r.Create('%(sysconfdir)s/profile.d/%(name)s.sh', mode=0755,
+                 contents='export PATH="%(jdkhome)s/bin:$PATH"')
+        r.Create('%(sysconfdir)s/profile.d/%(name)s.csh', mode=0755,
+                 contents='setenv PATH "%(jdkhome)s/bin:$PATH"')
+
+        r.PackageSpec('%(jrename)s', '%(javahome)s/',
+                                     '%(sysconfdir)s/profile.d/%(jrename)s.*')
+
+        r.Requires('%(jrename)s:runtime', '%(sysconfdir)s/profile.d/%(name)s.*')
+        r.Requires('%(jrename)s:lib', '%(jdkhome)s/bin/.*')
+
