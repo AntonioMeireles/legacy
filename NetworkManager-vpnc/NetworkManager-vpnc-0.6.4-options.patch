@@ -1,0 +1,1550 @@
+--- NetworkManager-vpnc-0.6.4.orig/properties/nm-vpnc.c	2007-03-19 14:24:15.000000000 +0100
++++ NetworkManager-vpnc-0.6.4/properties/nm-vpnc.c	2007-03-19 14:27:12.000000000 +0100
+@@ -55,8 +55,11 @@
+ 	GtkCheckButton *w_use_domain;
+ 	GtkEntry *w_domain;
+ 	GtkCheckButton *w_use_routes;
++	GtkCheckButton *w_use_keepalive;
++	GtkEntry *w_keepalive;
++	GtkCheckButton *w_disable_natt;
++	GtkCheckButton *w_enable_singledes;
+ 	GtkEntry *w_routes;
+-	GtkExpander *w_opt_info_expander;
+ 	GtkButton *w_import_button;
+ };
+ 
+@@ -68,14 +71,18 @@
+ 	gtk_entry_set_text (impl->w_group_name, "");
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username), FALSE);
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_routes), FALSE);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt), FALSE);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes), FALSE);
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_domain), FALSE);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive), FALSE);
+ 	gtk_entry_set_text (impl->w_username, "");
+ 	gtk_entry_set_text (impl->w_routes, "");
+ 	gtk_entry_set_text (impl->w_domain, "");
++	gtk_entry_set_text (impl->w_keepalive, "");
+ 	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_username), FALSE);
+ 	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_routes), FALSE);
+ 	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), FALSE);
+-	gtk_expander_set_expanded (impl->w_opt_info_expander, FALSE);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_keepalive), FALSE);
+ }
+ 
+ static const char *
+@@ -95,12 +102,9 @@
+ {
+ 	GSList *i;
+ 	NetworkManagerVpnUIImpl *impl = (NetworkManagerVpnUIImpl *) self->data;
+-	gboolean should_expand;
+ 
+ 	vpnc_clear_widget (impl);
+ 
+-	should_expand = FALSE;
+-
+ 	if (connection_name != NULL)
+ 		gtk_entry_set_text (impl->w_connection_name, connection_name);
+ 
+@@ -119,12 +123,18 @@
+ 			gtk_entry_set_text (impl->w_username, value);
+ 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username), TRUE);
+ 			gtk_widget_set_sensitive (GTK_WIDGET (impl->w_username), TRUE);
+-			should_expand = TRUE;
+ 		} else if (strcmp (key, "Domain") == 0) {
+ 			gtk_entry_set_text (impl->w_domain, value);
+ 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_domain), TRUE);
+ 			gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), TRUE);
+-			should_expand = TRUE;
++		} else if (strcmp (key, "NAT-Keepalive packet interval") == 0) {
++			gtk_entry_set_text (impl->w_keepalive, value);
++			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive), TRUE);
++			gtk_widget_set_sensitive (GTK_WIDGET (impl->w_keepalive), TRUE);
++		} else if (strcmp (key, "Disable NAT Traversal") == 0) {
++			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt), TRUE);
++		} else if (strcmp (key, "Enable Single DES") == 0) {
++			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes), TRUE);
+ 		}
+ 	}
+ 
+@@ -149,12 +159,8 @@
+ 		g_free (str);
+ 		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_routes), TRUE);
+ 		gtk_widget_set_sensitive (GTK_WIDGET (impl->w_routes), TRUE);
+-
+-		should_expand = TRUE;
+ 	}
+ 
+-	gtk_expander_set_expanded (impl->w_opt_info_expander, should_expand);
+-
+ 	gtk_container_resize_children (GTK_CONTAINER (impl->widget));
+ 
+ 	return impl->widget;
+@@ -171,7 +177,11 @@
+ 	const char *secret;
+ 	gboolean use_alternate_username;
+ 	const char *username;
++	gboolean use_keepalive;
++	const char *keepalive;
+ 	gboolean use_domain;
++	gboolean disable_natt;
++	gboolean enable_singledes;
+ 	const char *domain;
+ 
+ 	connectionname         = gtk_entry_get_text (impl->w_connection_name);
+@@ -180,6 +190,10 @@
+ 	use_alternate_username = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username));
+ 	username               = gtk_entry_get_text (impl->w_username);
+ 	use_domain             = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_domain));
++	keepalive              = gtk_entry_get_text (impl->w_keepalive);
++	use_keepalive          = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive));
++	disable_natt           = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt));
++	enable_singledes       = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes));
+ 	domain                 = gtk_entry_get_text (impl->w_domain);
+ 
+ 	data = NULL;
+@@ -195,6 +209,18 @@
+ 		data = g_slist_append (data, g_strdup ("Domain"));
+ 		data = g_slist_append (data, g_strdup (domain));
+ 	}
++	if (use_keepalive) {
++		data = g_slist_append (data, g_strdup ("NAT-Keepalive packet interval"));
++		data = g_slist_append (data, g_strdup (keepalive));
++	}
++	if (enable_singledes) {
++		data = g_slist_append (data, g_strdup ("Enable Single DES"));
++		data = g_slist_append (data, g_strdup (""));
++	}
++	if (disable_natt) {
++		data = g_slist_append (data, g_strdup ("Disable NAT Traversal"));
++		data = g_slist_append (data, g_strdup (""));
++	}
+ 
+ 	return data;
+ }
+@@ -266,6 +292,10 @@
+ 	gboolean use_routes;
+ 	const char *routes_entry;
+ 	gboolean use_domain;
++	gboolean use_keepalive;
++	const char* keepalive;
++	gboolean disable_natt;
++	gboolean enable_singledes;
+ 	const char *domain_entry;
+ 
+ 	is_valid = FALSE;
+@@ -276,9 +306,13 @@
+ 	use_alternate_username = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username));
+ 	username               = gtk_entry_get_text (impl->w_username);
+ 	use_routes             = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_routes));
++	disable_natt           = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt));
++	enable_singledes       = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes));
+ 	routes_entry           = gtk_entry_get_text (impl->w_routes);
+ 	use_domain             = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_domain));
+ 	domain_entry           = gtk_entry_get_text (impl->w_domain);
++	use_keepalive          = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive));
++	keepalive              = gtk_entry_get_text (impl->w_keepalive);
+ 
+ 	/* initial sanity checking */
+ 	if (strlen (connectionname) > 0 &&
+@@ -286,6 +320,7 @@
+ 	    strlen (groupname) > 0 &&
+ 	    ((!use_alternate_username) || (use_alternate_username && strlen (username) > 0)) &&
+ 	    ((!use_routes) || (use_routes && strlen (routes_entry) > 0)) &&
++	    ((!use_keepalive) || (use_keepalive && strlen (keepalive) > 0)) &&
+ 	    ((!use_domain) || (use_domain && strlen (domain_entry) > 0)))
+ 		is_valid = TRUE;
+ 
+@@ -296,6 +331,11 @@
+ 		is_valid = FALSE;
+ 	}
+ 
++	/* validate keepalive: must be non-zero */
++	if (use_keepalive && atoi(keepalive) == 0) {
++		is_valid = FALSE;
++	}
++
+ 	/* validate groupname; can be anything */
+ 
+ 	/* validate user; can be anything */
+@@ -394,6 +434,22 @@
+ }
+ 
+ static void 
++use_keepalive_toggled (GtkToggleButton *togglebutton, gpointer user_data)
++{
++	NetworkManagerVpnUIImpl *impl = (NetworkManagerVpnUIImpl *) user_data;
++
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_keepalive), 
++				  gtk_toggle_button_get_active (togglebutton));
++
++	if (impl->callback != NULL) {
++		gboolean is_valid;
++
++		is_valid = impl_is_valid (&(impl->parent));
++		impl->callback (&(impl->parent), is_valid, impl->callback_user_data);
++	}
++}
++
++static void 
+ editable_changed (GtkEditable *editable, gpointer user_data)
+ {
+ 	NetworkManagerVpnUIImpl *impl = (NetworkManagerVpnUIImpl *) user_data;
+@@ -429,9 +485,13 @@
+ 	gboolean use_alternate_username;
+ 	const char *username;
+ 	gboolean use_routes;
++	gboolean disable_natt;
++	gboolean enable_singledes;
+ 	const char *routes;
+ 	gboolean use_domain;
+ 	const char *domain;
++	gboolean use_keepalive;
++	const char *keepalive;
+ 
+ 	connectionname         = gtk_entry_get_text (impl->w_connection_name);
+ 	gateway                = gtk_entry_get_text (impl->w_gateway);
+@@ -439,11 +499,15 @@
+ 	use_alternate_username = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username));
+ 	username               = gtk_entry_get_text (impl->w_username);
+ 	use_routes             = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_routes));
++	disable_natt           = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt));
++	enable_singledes       = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes));
+ 	routes                 = gtk_entry_get_text (impl->w_routes);
+ 	use_domain             = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_domain));
+ 	domain                 = gtk_entry_get_text (impl->w_domain);
++	use_keepalive          = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive));
++	keepalive              = gtk_entry_get_text (impl->w_keepalive);
+ 
+-	buf = g_string_sized_new (512);
++	buf = g_string_sized_new (1024);
+ 
+ 	g_string_append (buf, _("The following vpnc VPN connection will be created:"));
+ 	g_string_append (buf, "\n\n\t");
+@@ -468,6 +532,18 @@
+ 		g_string_append (buf, "\n\t");
+ 		g_string_append_printf (buf, _("Routes:  %s"), routes);
+ 	}
++	if (use_keepalive) {
++		g_string_append (buf, "\n\t");
++		g_string_append_printf (buf, _("NAT-Keepalive packet interval:  %s"), keepalive);
++	}
++	if (enable_singledes) {
++		g_string_append (buf, "\n\t");
++		g_string_append_printf (buf, _("Enable Single DES"));
++	}
++	if (disable_natt) {
++		g_string_append (buf, "\n\t");
++		g_string_append_printf (buf, _("Disable NAT Traversal"));
++	}
+ 
+ 	g_string_append (buf, "\n\n");
+ 	g_string_append (buf, _("The connection details can be changed using the \"Edit\" button."));
+@@ -483,7 +559,6 @@
+ 	const char *buf;
+ 	gboolean have_value;
+ 	char *basename = NULL;
+-	gboolean expand = FALSE;
+ 	gboolean success = FALSE;
+ 
+ 	pcf = pcf_file_load (path);
+@@ -510,26 +585,36 @@
+ 	if ((buf = pcf_file_lookup_value (pcf, "main", "UserName")))
+ 		gtk_entry_set_text (impl->w_username, buf);
+ 	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
+-	expand |= have_value;
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username), have_value);
+ 	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_username), have_value);
+-	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), have_value);
+ 
+ 	if ((buf = pcf_file_lookup_value (pcf, "main", "NTDomain")))
+ 		gtk_entry_set_text (impl->w_domain, buf);
+ 	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
+-	expand |= have_value;
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_domain), have_value);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), have_value);
++
++	buf = pcf_file_lookup_value (pcf, "main", "ForceKeepAlives");
++	have_value = (buf == NULL ? FALSE : strcmp (buf, "0") != 0);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_keepalive), have_value);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_keepalive), have_value);
++	gtk_entry_set_text (impl->w_keepalive, have_value ? buf : "");
++
++	buf = pcf_file_lookup_value (pcf, "main", "SingleDES");
++	have_value = (buf ? strncmp (buf, "1", 1) == 0 : FALSE);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_enable_singledes), have_value);
++
++	/* Default is enabled, only disabled if explicit EnableNat=0 exists */
++	buf = pcf_file_lookup_value (pcf, "main", "EnableNat");
++	have_value = (buf ? strncmp (buf, "0", 1) == 0 : FALSE);
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_disable_natt), have_value);
+ 
+ 	if ((buf = pcf_file_lookup_value (pcf, "main", "X-NM-Routes")))
+ 		gtk_entry_set_text (impl->w_routes, buf);
+ 	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
+-	expand |= have_value;
+ 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_routes), have_value);
+ 	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_routes), have_value);
+ 
+-	gtk_expander_set_expanded (impl->w_opt_info_expander, expand);
+-
+ 	if ((buf = pcf_file_lookup_value (pcf, "main", "TunnelingMode"))) {
+ 		/* If applicable, put up warning that TCP tunneling will be disabled */
+ 
+@@ -625,6 +710,9 @@
+ 	FILE *f;
+ 	GSList *i;
+ 	const char *gateway = NULL;
++	const char *keepalive = "0";
++	const char *enablenat = "1";
++	const char *singledes = "0";
+ 	const char *groupname = NULL;
+ 	const char *username = NULL;
+ 	const char *domain = NULL;
+@@ -648,6 +736,12 @@
+ 			username = value;
+ 		} else if (strcmp (key, "Domain") == 0) {
+ 			domain = value;
++		} else if (strcmp (key, "Disable NAT Traversal") == 0) {
++			enablenat = "0";
++		} else if (strcmp (key, "Enable Single DES") == 0) {
++			singledes = "1";
++		} else if (strcmp (key, "NAT-Keepalive packet interval") == 0) {
++			keepalive = value;
+ 		}
+ 	}
+ 
+@@ -693,14 +787,14 @@
+ 		 "SaveUserPassword=0\n"
+ 		 "EnableBackup=0\n"
+ 		 "BackupServer=\n"
+-		 "EnableNat=1\n"
++		 "EnableNat=%s\n"
+ 		 "CertStore=0\n"
+ 		 "CertName=\n"
+ 		 "CertPath=\n"
+ 		 "CertSubjectName=\n"
+ 		 "CertSerialHash=\n"
+ 		 "DHGroup=2\n"
+-		 "ForceKeepAlives=0\n"
++		 "ForceKeepAlives=%s\n"
+ 		 "enc_GroupPwd=\n"
+ 		 "UserPassword=\n"
+ 		 "enc_UserPassword=\n"
+@@ -714,13 +808,17 @@
+ 		 "SendCertChain=0\n"
+ 		 "VerifyCertDN=\n"
+ 		 "EnableSplitDNS=1\n"
++		 "SingleDES=%s\n"
+ 		 "SPPhonebook=\n"
+ 		 "%s",
+ 		 /* Description */ connection_name,
+ 		 /* Host */        gateway,
+ 		 /* GroupName */   groupname,
+ 		 /* Username */    username != NULL ? username : "",
++		 /* EnableNat */   enablenat,
++		 /* KeepAlive */   keepalive != NULL ? keepalive : "",
+ 		 /* NTDomain */    domain != NULL ? domain : "",
++		 /* SingleDES */   singledes,
+ 		 /* X-NM-Routes */ routes_str != NULL ? routes_str : "");
+ 
+ 	fclose (f);
+@@ -825,11 +923,13 @@
+ 	impl->w_use_alternate_username = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-use-alternate-username"));
+ 	impl->w_username               = GTK_ENTRY (glade_xml_get_widget (impl->xml, "vpnc-username"));
+ 	impl->w_use_routes             = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-use-routes"));
++	impl->w_use_keepalive          = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-use-keepalive"));
++	impl->w_keepalive              = GTK_ENTRY (glade_xml_get_widget (impl->xml, "vpnc-keepalive"));
++	impl->w_disable_natt           = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-disable-natt"));
++	impl->w_enable_singledes       = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-enable-singledes"));
+ 	impl->w_routes                 = GTK_ENTRY (glade_xml_get_widget (impl->xml, "vpnc-routes"));
+ 	impl->w_use_domain             = GTK_CHECK_BUTTON (glade_xml_get_widget (impl->xml, "vpnc-use-domain"));
+ 	impl->w_domain                 = GTK_ENTRY (glade_xml_get_widget (impl->xml, "vpnc-domain"));
+-	impl->w_opt_info_expander      = GTK_EXPANDER (glade_xml_get_widget (impl->xml, 
+-									     "vpnc-optional-information-expander"));
+ 	impl->w_import_button          = GTK_BUTTON (glade_xml_get_widget (impl->xml, 
+ 									   "vpnc-import-button"));
+ 	impl->callback                 = NULL;
+@@ -842,6 +942,8 @@
+ 
+ 	gtk_signal_connect (GTK_OBJECT (impl->w_use_domain), 
+ 			    "toggled", GTK_SIGNAL_FUNC (use_domain_toggled), impl);
++	gtk_signal_connect (GTK_OBJECT (impl->w_use_keepalive), 
++			    "toggled", GTK_SIGNAL_FUNC (use_keepalive_toggled), impl);
+ 
+ 	gtk_signal_connect (GTK_OBJECT (impl->w_connection_name), 
+ 			    "changed", GTK_SIGNAL_FUNC (editable_changed), impl);
+@@ -855,6 +957,8 @@
+ 			    "changed", GTK_SIGNAL_FUNC (editable_changed), impl);
+ 	gtk_signal_connect (GTK_OBJECT (impl->w_domain), 
+ 			    "changed", GTK_SIGNAL_FUNC (editable_changed), impl);
++	gtk_signal_connect (GTK_OBJECT (impl->w_keepalive), 
++			    "changed", GTK_SIGNAL_FUNC (editable_changed), impl);
+ 
+ 	gtk_signal_connect (GTK_OBJECT (impl->w_import_button), 
+ 			    "clicked", GTK_SIGNAL_FUNC (import_button_clicked), impl);
+--- NetworkManager-vpnc-0.6.4.orig/src/nm-vpnc-service.c	2007-03-19 14:24:15.000000000 +0100
++++ NetworkManager-vpnc-0.6.4/src/nm-vpnc-service.c	2007-03-19 14:05:48.000000000 +0100
+@@ -504,6 +504,8 @@
+ 		{ "Application Version",           OPT_TYPE_ASCII },
+ 		{ "Rekeying interval",             OPT_TYPE_ASCII },
+ 		{ "NAT-Keepalive packet interval", OPT_TYPE_ASCII },
++		{ "Disable NAT Traversal",         OPT_TYPE_NONE },
++		{ "Enable Single DES",             OPT_TYPE_NONE },
+ 		{ NULL,                            OPT_TYPE_UNKNOWN }
+ 	};
+ 
+--- NetworkManager-vpnc-0.6.4.orig/properties/nm-vpnc-dialog.glade	2006-05-29 04:56:33.000000000 +0200
++++ NetworkManager-vpnc-0.6.4/properties/nm-vpnc-dialog.glade	2007-03-19 13:53:37.000000000 +0100
+@@ -5,11 +5,12 @@
+ <requires lib="gnome"/>
+ 
+ <widget class="GtkWindow" id="nm-vpnc-widget-window">
++  <property name="border_width">5</property>
+   <property name="title" translatable="yes"></property>
+   <property name="type">GTK_WINDOW_TOPLEVEL</property>
+   <property name="window_position">GTK_WIN_POS_NONE</property>
+   <property name="modal">False</property>
+-  <property name="resizable">False</property>
++  <property name="resizable">True</property>
+   <property name="destroy_with_parent">False</property>
+   <property name="decorated">True</property>
+   <property name="skip_taskbar_hint">False</property>
+@@ -26,22 +27,36 @@
+       <property name="spacing">6</property>
+ 
+       <child>
+-	<widget class="GtkLabel" id="label1">
++	<widget class="GtkAlignment" id="alignment11">
+ 	  <property name="visible">True</property>
+-	  <property name="label" translatable="yes">Please enter the information provided by your system administrator below. Do not enter your password here as you will be prompted when connecting.</property>
+-	  <property name="use_underline">False</property>
+-	  <property name="use_markup">False</property>
+-	  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-	  <property name="wrap">True</property>
+-	  <property name="selectable">False</property>
+-	  <property name="xalign">0</property>
++	  <property name="xalign">0.5</property>
+ 	  <property name="yalign">0.5</property>
+-	  <property name="xpad">0</property>
+-	  <property name="ypad">0</property>
+-	  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-	  <property name="width_chars">-1</property>
+-	  <property name="single_line_mode">False</property>
+-	  <property name="angle">0</property>
++	  <property name="xscale">1</property>
++	  <property name="yscale">1</property>
++	  <property name="top_padding">2</property>
++	  <property name="bottom_padding">2</property>
++	  <property name="left_padding">4</property>
++	  <property name="right_padding">4</property>
++
++	  <child>
++	    <widget class="GtkLabel" id="label1">
++	      <property name="visible">True</property>
++	      <property name="label" translatable="yes">Please enter the information provided by your system administrator below. Do not enter your password here as you will be prompted when connecting.</property>
++	      <property name="use_underline">False</property>
++	      <property name="use_markup">False</property>
++	      <property name="justify">GTK_JUSTIFY_LEFT</property>
++	      <property name="wrap">True</property>
++	      <property name="selectable">False</property>
++	      <property name="xalign">0</property>
++	      <property name="yalign">0.5</property>
++	      <property name="xpad">0</property>
++	      <property name="ypad">0</property>
++	      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++	      <property name="width_chars">-1</property>
++	      <property name="single_line_mode">False</property>
++	      <property name="angle">0</property>
++	    </widget>
++	  </child>
+ 	</widget>
+ 	<packing>
+ 	  <property name="padding">0</property>
+@@ -52,9 +67,10 @@
+ 
+       <child>
+ 	<widget class="GtkVBox" id="vbox7">
++	  <property name="border_width">2</property>
+ 	  <property name="visible">True</property>
+ 	  <property name="homogeneous">False</property>
+-	  <property name="spacing">18</property>
++	  <property name="spacing">6</property>
+ 
+ 	  <child>
+ 	    <widget class="GtkVBox" id="vbox2">
+@@ -73,7 +89,7 @@
+ 		  <property name="selectable">False</property>
+ 		  <property name="xalign">0</property>
+ 		  <property name="yalign">0.5</property>
+-		  <property name="xpad">0</property>
++		  <property name="xpad">3</property>
+ 		  <property name="ypad">0</property>
+ 		  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+ 		  <property name="width_chars">-1</property>
+@@ -95,8 +111,8 @@
+ 		  <property name="xscale">1</property>
+ 		  <property name="yscale">1</property>
+ 		  <property name="top_padding">0</property>
+-		  <property name="bottom_padding">0</property>
+-		  <property name="left_padding">12</property>
++		  <property name="bottom_padding">8</property>
++		  <property name="left_padding">6</property>
+ 		  <property name="right_padding">0</property>
+ 
+ 		  <child>
+@@ -106,42 +122,35 @@
+ 		      <property name="spacing">6</property>
+ 
+ 		      <child>
+-			<widget class="GtkLabel" id="label4">
++			<widget class="GtkAlignment" id="alignment8">
+ 			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">_Name used to identify the connection to the private network, e.g. &quot;Campus VPN&quot; or &quot;Corporate Network&quot;</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">True</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0</property>
++			  <property name="xalign">0.5</property>
+ 			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			  <property name="mnemonic_widget">vpnc-connection-name</property>
+-			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-			  <property name="width_chars">-1</property>
+-			  <property name="single_line_mode">False</property>
+-			  <property name="angle">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
++			  <property name="xscale">1</property>
++			  <property name="yscale">1</property>
++			  <property name="top_padding">0</property>
++			  <property name="bottom_padding">0</property>
++			  <property name="left_padding">0</property>
++			  <property name="right_padding">6</property>
+ 
+-		      <child>
+-			<widget class="GtkEntry" id="vpnc-connection-name">
+-			  <property name="visible">True</property>
+-			  <property name="can_focus">True</property>
+-			  <property name="editable">True</property>
+-			  <property name="visibility">True</property>
+-			  <property name="max_length">0</property>
+-			  <property name="text" translatable="yes"></property>
+-			  <property name="has_frame">True</property>
+-			  <property name="invisible_char">*</property>
+-			  <property name="activates_default">False</property>
++			  <child>
++			    <widget class="GtkEntry" id="vpnc-connection-name">
++			      <property name="visible">True</property>
++			      <property name="tooltip" translatable="yes">Name used to identify the connection to the private network, e.g. &quot;Campus VPN&quot; or &quot;Corporate Network&quot;</property>
++			      <property name="can_focus">True</property>
++			      <property name="editable">True</property>
++			      <property name="visibility">True</property>
++			      <property name="max_length">0</property>
++			      <property name="text" translatable="yes"></property>
++			      <property name="has_frame">True</property>
++			      <property name="invisible_char">•</property>
++			      <property name="activates_default">False</property>
++			      <accessibility>
++				<atkproperty name="AtkObject::accessible_name" translatable="yes">Connection Name</atkproperty>
++				<atkproperty name="AtkObject::accessible_description" translatable="yes">Name used to identify the connection to the private network, e.g. &quot;Campus VPN&quot; or &quot;Corporate Network&quot;</atkproperty>
++			      </accessibility>
++			    </widget>
++			  </child>
+ 			</widget>
+ 			<packing>
+ 			  <property name="padding">0</property>
+@@ -167,15 +176,184 @@
+ 	  </child>
+ 
+ 	  <child>
+-	    <widget class="GtkVBox" id="vbox4">
++	    <widget class="GtkLabel" id="label20">
+ 	      <property name="visible">True</property>
+-	      <property name="homogeneous">False</property>
+-	      <property name="spacing">6</property>
++	      <property name="label" translatable="yes">&lt;b&gt;Connection Information&lt;/b&gt;</property>
++	      <property name="use_underline">False</property>
++	      <property name="use_markup">True</property>
++	      <property name="justify">GTK_JUSTIFY_LEFT</property>
++	      <property name="wrap">False</property>
++	      <property name="selectable">False</property>
++	      <property name="xalign">0</property>
++	      <property name="yalign">0.5</property>
++	      <property name="xpad">3</property>
++	      <property name="ypad">0</property>
++	      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++	      <property name="width_chars">-1</property>
++	      <property name="single_line_mode">False</property>
++	      <property name="angle">0</property>
++	    </widget>
++	    <packing>
++	      <property name="padding">0</property>
++	      <property name="expand">False</property>
++	      <property name="fill">False</property>
++	    </packing>
++	  </child>
++
++	  <child>
++	    <widget class="GtkNotebook" id="notebook1">
++	      <property name="border_width">4</property>
++	      <property name="visible">True</property>
++	      <property name="can_focus">True</property>
++	      <property name="show_tabs">True</property>
++	      <property name="show_border">True</property>
++	      <property name="tab_pos">GTK_POS_TOP</property>
++	      <property name="scrollable">False</property>
++	      <property name="enable_popup">False</property>
+ 
+ 	      <child>
+-		<widget class="GtkLabel" id="label5">
++		<widget class="GtkVBox" id="vbox4">
++		  <property name="border_width">12</property>
+ 		  <property name="visible">True</property>
+-		  <property name="label" translatable="yes">&lt;b&gt;Required Information&lt;/b&gt;</property>
++		  <property name="homogeneous">False</property>
++		  <property name="spacing">6</property>
++
++		  <child>
++		    <widget class="GtkAlignment" id="alignment3">
++		      <property name="visible">True</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xscale">1</property>
++		      <property name="yscale">1</property>
++		      <property name="top_padding">3</property>
++		      <property name="bottom_padding">0</property>
++		      <property name="left_padding">5</property>
++		      <property name="right_padding">3</property>
++
++		      <child>
++			<widget class="GtkTable" id="table1">
++			  <property name="visible">True</property>
++			  <property name="n_rows">2</property>
++			  <property name="n_columns">2</property>
++			  <property name="homogeneous">False</property>
++			  <property name="row_spacing">6</property>
++			  <property name="column_spacing">12</property>
++
++			  <child>
++			    <widget class="GtkEntry" id="vpnc-gateway">
++			      <property name="visible">True</property>
++			      <property name="can_focus">True</property>
++			      <property name="editable">True</property>
++			      <property name="visibility">True</property>
++			      <property name="max_length">0</property>
++			      <property name="text" translatable="yes"></property>
++			      <property name="has_frame">True</property>
++			      <property name="invisible_char">•</property>
++			      <property name="activates_default">False</property>
++			    </widget>
++			    <packing>
++			      <property name="left_attach">1</property>
++			      <property name="right_attach">2</property>
++			      <property name="top_attach">0</property>
++			      <property name="bottom_attach">1</property>
++			    </packing>
++			  </child>
++
++			  <child>
++			    <widget class="GtkEntry" id="vpnc-group-name">
++			      <property name="visible">True</property>
++			      <property name="can_focus">True</property>
++			      <property name="editable">True</property>
++			      <property name="visibility">True</property>
++			      <property name="max_length">0</property>
++			      <property name="text" translatable="yes"></property>
++			      <property name="has_frame">True</property>
++			      <property name="invisible_char">•</property>
++			      <property name="activates_default">False</property>
++			    </widget>
++			    <packing>
++			      <property name="left_attach">1</property>
++			      <property name="right_attach">2</property>
++			      <property name="top_attach">1</property>
++			      <property name="bottom_attach">2</property>
++			    </packing>
++			  </child>
++
++			  <child>
++			    <widget class="GtkLabel" id="label7">
++			      <property name="visible">True</property>
++			      <property name="label" translatable="yes">_Gateway:</property>
++			      <property name="use_underline">True</property>
++			      <property name="use_markup">False</property>
++			      <property name="justify">GTK_JUSTIFY_LEFT</property>
++			      <property name="wrap">False</property>
++			      <property name="selectable">False</property>
++			      <property name="xalign">1</property>
++			      <property name="yalign">0.5</property>
++			      <property name="xpad">0</property>
++			      <property name="ypad">0</property>
++			      <property name="mnemonic_widget">vpnc-gateway</property>
++			      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			      <property name="width_chars">-1</property>
++			      <property name="single_line_mode">False</property>
++			      <property name="angle">0</property>
++			    </widget>
++			    <packing>
++			      <property name="left_attach">0</property>
++			      <property name="right_attach">1</property>
++			      <property name="top_attach">0</property>
++			      <property name="bottom_attach">1</property>
++			      <property name="x_options"></property>
++			    </packing>
++			  </child>
++
++			  <child>
++			    <widget class="GtkLabel" id="label8">
++			      <property name="visible">True</property>
++			      <property name="label" translatable="yes">G_roup Name:</property>
++			      <property name="use_underline">True</property>
++			      <property name="use_markup">False</property>
++			      <property name="justify">GTK_JUSTIFY_LEFT</property>
++			      <property name="wrap">False</property>
++			      <property name="selectable">False</property>
++			      <property name="xalign">1</property>
++			      <property name="yalign">0.5</property>
++			      <property name="xpad">0</property>
++			      <property name="ypad">0</property>
++			      <property name="mnemonic_widget">vpnc-group-name</property>
++			      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			      <property name="width_chars">-1</property>
++			      <property name="single_line_mode">False</property>
++			      <property name="angle">0</property>
++			    </widget>
++			    <packing>
++			      <property name="left_attach">0</property>
++			      <property name="right_attach">1</property>
++			      <property name="top_attach">1</property>
++			      <property name="bottom_attach">2</property>
++			      <property name="x_options"></property>
++			    </packing>
++			  </child>
++			</widget>
++		      </child>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">False</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
++		</widget>
++		<packing>
++		  <property name="tab_expand">False</property>
++		  <property name="tab_fill">True</property>
++		</packing>
++	      </child>
++
++	      <child>
++		<widget class="GtkLabel" id="label18">
++		  <property name="visible">True</property>
++		  <property name="label" translatable="yes">&lt;b&gt;Required&lt;/b&gt;</property>
+ 		  <property name="use_underline">False</property>
+ 		  <property name="use_markup">True</property>
+ 		  <property name="justify">GTK_JUSTIFY_LEFT</property>
+@@ -191,35 +369,50 @@
+ 		  <property name="angle">0</property>
+ 		</widget>
+ 		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">True</property>
++		  <property name="type">tab</property>
+ 		</packing>
+ 	      </child>
+ 
+ 	      <child>
+-		<widget class="GtkAlignment" id="alignment3">
++		<widget class="GtkVBox" id="vbox5">
++		  <property name="border_width">12</property>
+ 		  <property name="visible">True</property>
+-		  <property name="xalign">0.5</property>
+-		  <property name="yalign">0.5</property>
+-		  <property name="xscale">1</property>
+-		  <property name="yscale">1</property>
+-		  <property name="top_padding">0</property>
+-		  <property name="bottom_padding">0</property>
+-		  <property name="left_padding">12</property>
+-		  <property name="right_padding">0</property>
++		  <property name="homogeneous">False</property>
++		  <property name="spacing">6</property>
+ 
+ 		  <child>
+-		    <widget class="GtkTable" id="table1">
++		    <widget class="GtkCheckButton" id="vpnc-use-alternate-username">
+ 		      <property name="visible">True</property>
+-		      <property name="n_rows">2</property>
+-		      <property name="n_columns">2</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="row_spacing">6</property>
+-		      <property name="column_spacing">12</property>
++		      <property name="can_focus">True</property>
++		      <property name="label" translatable="yes">Override _user name</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
++		    </widget>
++		    <packing>
++		      <property name="padding">3</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkAlignment" id="alignment5">
++		      <property name="visible">True</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xscale">1</property>
++		      <property name="yscale">1</property>
++		      <property name="top_padding">0</property>
++		      <property name="bottom_padding">0</property>
++		      <property name="left_padding">12</property>
++		      <property name="right_padding">3</property>
+ 
+ 		      <child>
+-			<widget class="GtkEntry" id="vpnc-gateway">
++			<widget class="GtkEntry" id="vpnc-username">
+ 			  <property name="visible">True</property>
+ 			  <property name="can_focus">True</property>
+ 			  <property name="editable">True</property>
+@@ -227,19 +420,51 @@
+ 			  <property name="max_length">0</property>
+ 			  <property name="text" translatable="yes"></property>
+ 			  <property name="has_frame">True</property>
+-			  <property name="invisible_char">*</property>
++			  <property name="invisible_char">•</property>
+ 			  <property name="activates_default">False</property>
+ 			</widget>
+-			<packing>
+-			  <property name="left_attach">1</property>
+-			  <property name="right_attach">2</property>
+-			  <property name="top_attach">0</property>
+-			  <property name="bottom_attach">1</property>
+-			</packing>
+ 		      </child>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkCheckButton" id="vpnc-use-domain">
++		      <property name="visible">True</property>
++		      <property name="can_focus">True</property>
++		      <property name="label" translatable="yes">Use _domain for authentication</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">False</property>
++		      <property name="fill">False</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkAlignment" id="alignment6">
++		      <property name="visible">True</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xscale">1</property>
++		      <property name="yscale">1</property>
++		      <property name="top_padding">0</property>
++		      <property name="bottom_padding">0</property>
++		      <property name="left_padding">12</property>
++		      <property name="right_padding">3</property>
+ 
+ 		      <child>
+-			<widget class="GtkEntry" id="vpnc-group-name">
++			<widget class="GtkEntry" id="vpnc-domain">
+ 			  <property name="visible">True</property>
+ 			  <property name="can_focus">True</property>
+ 			  <property name="editable">True</property>
+@@ -247,147 +472,82 @@
+ 			  <property name="max_length">0</property>
+ 			  <property name="text" translatable="yes"></property>
+ 			  <property name="has_frame">True</property>
+-			  <property name="invisible_char">*</property>
++			  <property name="invisible_char">•</property>
+ 			  <property name="activates_default">False</property>
+ 			</widget>
+-			<packing>
+-			  <property name="left_attach">1</property>
+-			  <property name="right_attach">2</property>
+-			  <property name="top_attach">1</property>
+-			  <property name="bottom_attach">2</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label7">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">_Gateway:</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">1</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			  <property name="mnemonic_widget">vpnc-gateway</property>
+-			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-			  <property name="width_chars">-1</property>
+-			  <property name="single_line_mode">False</property>
+-			  <property name="angle">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="left_attach">0</property>
+-			  <property name="right_attach">1</property>
+-			  <property name="top_attach">0</property>
+-			  <property name="bottom_attach">1</property>
+-			  <property name="x_options">fill</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label8">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">G_roup Name:</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">1</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			  <property name="mnemonic_widget">vpnc-group-name</property>
+-			  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-			  <property name="width_chars">-1</property>
+-			  <property name="single_line_mode">False</property>
+-			  <property name="angle">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="left_attach">0</property>
+-			  <property name="right_attach">1</property>
+-			  <property name="top_attach">1</property>
+-			  <property name="bottom_attach">2</property>
+-			  <property name="x_options">fill</property>
+-			</packing>
+ 		      </child>
+ 		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
+ 		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-	    </widget>
+-	    <packing>
+-	      <property name="padding">0</property>
+-	      <property name="expand">True</property>
+-	      <property name="fill">True</property>
+-	    </packing>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkExpander" id="vpnc-optional-information-expander">
+-	      <property name="visible">True</property>
+-	      <property name="can_focus">True</property>
+-	      <property name="expanded">False</property>
+-	      <property name="spacing">6</property>
+ 
+-	      <child>
+-		<widget class="GtkAlignment" id="alignment4">
+-		  <property name="visible">True</property>
+-		  <property name="xalign">0.5</property>
+-		  <property name="yalign">0.5</property>
+-		  <property name="xscale">1</property>
+-		  <property name="yscale">1</property>
+-		  <property name="top_padding">0</property>
+-		  <property name="bottom_padding">0</property>
+-		  <property name="left_padding">12</property>
+-		  <property name="right_padding">0</property>
++		  <child>
++		    <widget class="GtkCheckButton" id="vpnc-use-routes">
++		      <property name="visible">True</property>
++		      <property name="can_focus">True</property>
++		      <property name="label" translatable="yes">_Only use VPN connection for these addresses</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">False</property>
++		      <property name="fill">False</property>
++		    </packing>
++		  </child>
+ 
+ 		  <child>
+-		    <widget class="GtkVBox" id="vbox5">
++		    <widget class="GtkAlignment" id="alignment7">
+ 		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">6</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xscale">1</property>
++		      <property name="yscale">1</property>
++		      <property name="top_padding">0</property>
++		      <property name="bottom_padding">3</property>
++		      <property name="left_padding">12</property>
++		      <property name="right_padding">3</property>
+ 
+ 		      <child>
+-			<widget class="GtkCheckButton" id="vpnc-use-alternate-username">
++			<widget class="GtkVBox" id="vbox6">
+ 			  <property name="visible">True</property>
+-			  <property name="can_focus">True</property>
+-			  <property name="label" translatable="yes">Override _user name</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="relief">GTK_RELIEF_NORMAL</property>
+-			  <property name="focus_on_click">True</property>
+-			  <property name="active">False</property>
+-			  <property name="inconsistent">False</property>
+-			  <property name="draw_indicator">True</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
++			  <property name="homogeneous">False</property>
++			  <property name="spacing">6</property>
+ 
+-		      <child>
+-			<widget class="GtkAlignment" id="alignment5">
+-			  <property name="visible">True</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xscale">1</property>
+-			  <property name="yscale">1</property>
+-			  <property name="top_padding">0</property>
+-			  <property name="bottom_padding">0</property>
+-			  <property name="left_padding">12</property>
+-			  <property name="right_padding">0</property>
++			  <child>
++			    <widget class="GtkLabel" id="label14">
++			      <property name="visible">True</property>
++			      <property name="label" translatable="yes">&lt;i&gt;example: 172.16.0.0/16 10.11.12.0/24&lt;/i&gt;</property>
++			      <property name="use_underline">False</property>
++			      <property name="use_markup">True</property>
++			      <property name="justify">GTK_JUSTIFY_LEFT</property>
++			      <property name="wrap">False</property>
++			      <property name="selectable">False</property>
++			      <property name="xalign">0</property>
++			      <property name="yalign">0.5</property>
++			      <property name="xpad">0</property>
++			      <property name="ypad">0</property>
++			      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			      <property name="width_chars">-1</property>
++			      <property name="single_line_mode">False</property>
++			      <property name="angle">0</property>
++			    </widget>
++			    <packing>
++			      <property name="padding">0</property>
++			      <property name="expand">False</property>
++			      <property name="fill">True</property>
++			    </packing>
++			  </child>
+ 
+ 			  <child>
+-			    <widget class="GtkEntry" id="vpnc-username">
++			    <widget class="GtkEntry" id="vpnc-routes">
+ 			      <property name="visible">True</property>
+ 			      <property name="can_focus">True</property>
+ 			      <property name="editable">True</property>
+@@ -395,51 +555,89 @@
+ 			      <property name="max_length">0</property>
+ 			      <property name="text" translatable="yes"></property>
+ 			      <property name="has_frame">True</property>
+-			      <property name="invisible_char">*</property>
++			      <property name="invisible_char">•</property>
+ 			      <property name="activates_default">False</property>
+ 			    </widget>
++			    <packing>
++			      <property name="padding">0</property>
++			      <property name="expand">True</property>
++			      <property name="fill">True</property>
++			    </packing>
+ 			  </child>
+ 			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+ 		      </child>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
+ 
+-		      <child>
+-			<widget class="GtkCheckButton" id="vpnc-use-domain">
+-			  <property name="visible">True</property>
+-			  <property name="can_focus">True</property>
+-			  <property name="label" translatable="yes">Use _domain for authentication</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="relief">GTK_RELIEF_NORMAL</property>
+-			  <property name="focus_on_click">True</property>
+-			  <property name="active">False</property>
+-			  <property name="inconsistent">False</property>
+-			  <property name="draw_indicator">True</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
++		  <child>
++		    <widget class="GtkCheckButton" id="vpnc-use-keepalive">
++		      <property name="visible">True</property>
++		      <property name="can_focus">True</property>
++		      <property name="label" translatable="yes">Use NAT _keepalive packets</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">False</property>
++		      <property name="fill">False</property>
++		    </packing>
++		  </child>
++
++		  <child>
++		    <widget class="GtkAlignment" id="alignment10">
++		      <property name="visible">True</property>
++		      <property name="xalign">0.5</property>
++		      <property name="yalign">0.5</property>
++		      <property name="xscale">1</property>
++		      <property name="yscale">1</property>
++		      <property name="top_padding">0</property>
++		      <property name="bottom_padding">0</property>
++		      <property name="left_padding">12</property>
++		      <property name="right_padding">3</property>
+ 
+ 		      <child>
+-			<widget class="GtkAlignment" id="alignment6">
++			<widget class="GtkHBox" id="hbox8">
+ 			  <property name="visible">True</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xscale">1</property>
+-			  <property name="yscale">1</property>
+-			  <property name="top_padding">0</property>
+-			  <property name="bottom_padding">0</property>
+-			  <property name="left_padding">12</property>
+-			  <property name="right_padding">0</property>
++			  <property name="homogeneous">False</property>
++			  <property name="spacing">12</property>
+ 
+ 			  <child>
+-			    <widget class="GtkEntry" id="vpnc-domain">
++			    <widget class="GtkLabel" id="label21">
++			      <property name="visible">True</property>
++			      <property name="label" translatable="yes">Interval:</property>
++			      <property name="use_underline">False</property>
++			      <property name="use_markup">False</property>
++			      <property name="justify">GTK_JUSTIFY_LEFT</property>
++			      <property name="wrap">False</property>
++			      <property name="selectable">False</property>
++			      <property name="xalign">0</property>
++			      <property name="yalign">0.5</property>
++			      <property name="xpad">0</property>
++			      <property name="ypad">1</property>
++			      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++			      <property name="width_chars">-1</property>
++			      <property name="single_line_mode">False</property>
++			      <property name="angle">0</property>
++			    </widget>
++			    <packing>
++			      <property name="padding">0</property>
++			      <property name="expand">False</property>
++			      <property name="fill">False</property>
++			    </packing>
++			  </child>
++
++			  <child>
++			    <widget class="GtkEntry" id="vpnc-keepalive">
+ 			      <property name="visible">True</property>
+ 			      <property name="can_focus">True</property>
+ 			      <property name="editable">True</property>
+@@ -447,122 +645,77 @@
+ 			      <property name="max_length">0</property>
+ 			      <property name="text" translatable="yes"></property>
+ 			      <property name="has_frame">True</property>
+-			      <property name="invisible_char">*</property>
++			      <property name="invisible_char">•</property>
+ 			      <property name="activates_default">False</property>
+ 			    </widget>
++			    <packing>
++			      <property name="padding">0</property>
++			      <property name="expand">True</property>
++			      <property name="fill">True</property>
++			    </packing>
+ 			  </child>
+ 			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkCheckButton" id="vpnc-use-routes">
+-			  <property name="visible">True</property>
+-			  <property name="can_focus">True</property>
+-			  <property name="label" translatable="yes">_Only use VPN connection for these addresses</property>
+-			  <property name="use_underline">True</property>
+-			  <property name="relief">GTK_RELIEF_NORMAL</property>
+-			  <property name="focus_on_click">True</property>
+-			  <property name="active">False</property>
+-			  <property name="inconsistent">False</property>
+-			  <property name="draw_indicator">True</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+ 		      </child>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
+ 
+-		      <child>
+-			<widget class="GtkAlignment" id="alignment7">
+-			  <property name="visible">True</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xscale">1</property>
+-			  <property name="yscale">1</property>
+-			  <property name="top_padding">0</property>
+-			  <property name="bottom_padding">0</property>
+-			  <property name="left_padding">12</property>
+-			  <property name="right_padding">0</property>
+-
+-			  <child>
+-			    <widget class="GtkVBox" id="vbox6">
+-			      <property name="visible">True</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="spacing">6</property>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label14">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">&lt;i&gt;example: 172.16.0.0/16 10.11.12.0/24&lt;/i&gt;</property>
+-				  <property name="use_underline">False</property>
+-				  <property name="use_markup">True</property>
+-				  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-				  <property name="width_chars">-1</property>
+-				  <property name="single_line_mode">False</property>
+-				  <property name="angle">0</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">True</property>
+-				</packing>
+-			      </child>
++		  <child>
++		    <widget class="GtkCheckButton" id="vpnc-disable-natt">
++		      <property name="visible">True</property>
++		      <property name="label" translatable="yes">Disable NAT Traversal</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
++		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
++		  </child>
+ 
+-			      <child>
+-				<widget class="GtkEntry" id="vpnc-routes">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="editable">True</property>
+-				  <property name="visibility">True</property>
+-				  <property name="max_length">0</property>
+-				  <property name="text" translatable="yes"></property>
+-				  <property name="has_frame">True</property>
+-				  <property name="invisible_char">*</property>
+-				  <property name="activates_default">False</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">True</property>
+-				  <property name="fill">True</property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
++		  <child>
++		    <widget class="GtkCheckButton" id="vpnc-enable-singledes">
++		      <property name="visible">True</property>
++		      <property name="label" translatable="yes">Enable weak single DES encryption</property>
++		      <property name="use_underline">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <property name="active">False</property>
++		      <property name="inconsistent">False</property>
++		      <property name="draw_indicator">True</property>
+ 		    </widget>
++		    <packing>
++		      <property name="padding">0</property>
++		      <property name="expand">True</property>
++		      <property name="fill">True</property>
++		    </packing>
+ 		  </child>
+ 		</widget>
++		<packing>
++		  <property name="tab_expand">False</property>
++		  <property name="tab_fill">True</property>
++		</packing>
+ 	      </child>
+ 
+ 	      <child>
+-		<widget class="GtkLabel" id="label17">
++		<widget class="GtkLabel" id="Optional">
+ 		  <property name="visible">True</property>
+-		  <property name="label" translatable="yes">O_ptional Information</property>
+-		  <property name="use_underline">True</property>
++		  <property name="label" translatable="yes">Optional</property>
++		  <property name="use_underline">False</property>
+ 		  <property name="use_markup">True</property>
+ 		  <property name="justify">GTK_JUSTIFY_LEFT</property>
+ 		  <property name="wrap">False</property>
+ 		  <property name="selectable">False</property>
+-		  <property name="xalign">0.5</property>
++		  <property name="xalign">0</property>
+ 		  <property name="yalign">0.5</property>
+ 		  <property name="xpad">0</property>
+ 		  <property name="ypad">0</property>
+@@ -570,9 +723,12 @@
+ 		  <property name="width_chars">-1</property>
+ 		  <property name="single_line_mode">False</property>
+ 		  <property name="angle">0</property>
++		  <accessibility>
++		    <atkproperty name="AtkObject::accessible_name" translatable="yes">Optional</atkproperty>
++		  </accessibility>
+ 		</widget>
+ 		<packing>
+-		  <property name="type">label_item</property>
++		  <property name="type">tab</property>
+ 		</packing>
+ 	      </child>
+ 	    </widget>
+@@ -590,71 +746,89 @@
+ 	      <property name="spacing">0</property>
+ 
+ 	      <child>
+-		<widget class="GtkButton" id="vpnc-import-button">
++		<widget class="GtkAlignment" id="alignment9">
+ 		  <property name="visible">True</property>
+-		  <property name="can_default">True</property>
+-		  <property name="can_focus">True</property>
+-		  <property name="relief">GTK_RELIEF_NORMAL</property>
+-		  <property name="focus_on_click">True</property>
++		  <property name="xalign">0.5</property>
++		  <property name="yalign">0.5</property>
++		  <property name="xscale">1</property>
++		  <property name="yscale">1</property>
++		  <property name="top_padding">0</property>
++		  <property name="bottom_padding">3</property>
++		  <property name="left_padding">0</property>
++		  <property name="right_padding">3</property>
+ 
+ 		  <child>
+-		    <widget class="GtkAlignment" id="alignment1">
++		    <widget class="GtkButton" id="vpnc-import-button">
+ 		      <property name="visible">True</property>
+-		      <property name="xalign">0.5</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xscale">0</property>
+-		      <property name="yscale">0</property>
+-		      <property name="top_padding">0</property>
+-		      <property name="bottom_padding">0</property>
+-		      <property name="left_padding">0</property>
+-		      <property name="right_padding">0</property>
++		      <property name="tooltip" translatable="yes">Please note that the file you import is not a Cisco VPN or VPNC configuration file. Ask your adminstrator for the file.</property>
++		      <property name="can_default">True</property>
++		      <property name="can_focus">True</property>
++		      <property name="relief">GTK_RELIEF_NORMAL</property>
++		      <property name="focus_on_click">True</property>
++		      <accessibility>
++			<atkproperty name="AtkObject::accessible_description" translatable="yes">Please note that the file you import is not a Cisco VPN or VPNC configuration file. Ask your adminstrator for the file.</atkproperty>
++		      </accessibility>
+ 
+ 		      <child>
+-			<widget class="GtkHBox" id="hbox7">
++			<widget class="GtkAlignment" id="alignment1">
+ 			  <property name="visible">True</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="spacing">2</property>
++			  <property name="xalign">0.5</property>
++			  <property name="yalign">0.5</property>
++			  <property name="xscale">0</property>
++			  <property name="yscale">0</property>
++			  <property name="top_padding">0</property>
++			  <property name="bottom_padding">0</property>
++			  <property name="left_padding">0</property>
++			  <property name="right_padding">0</property>
+ 
+ 			  <child>
+-			    <widget class="GtkImage" id="image1">
++			    <widget class="GtkHBox" id="hbox7">
+ 			      <property name="visible">True</property>
+-			      <property name="stock">gtk-add</property>
+-			      <property name="icon_size">4</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
++			      <property name="homogeneous">False</property>
++			      <property name="spacing">2</property>
+ 
+-			  <child>
+-			    <widget class="GtkLabel" id="label15">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">_Import Saved Configuration...</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			      <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
+-			      <property name="width_chars">-1</property>
+-			      <property name="single_line_mode">False</property>
+-			      <property name="angle">0</property>
++			      <child>
++				<widget class="GtkImage" id="image1">
++				  <property name="visible">True</property>
++				  <property name="stock">gtk-add</property>
++				  <property name="icon_size">4</property>
++				  <property name="xalign">0.5</property>
++				  <property name="yalign">0.5</property>
++				  <property name="xpad">0</property>
++				  <property name="ypad">0</property>
++				</widget>
++				<packing>
++				  <property name="padding">0</property>
++				  <property name="expand">False</property>
++				  <property name="fill">False</property>
++				</packing>
++			      </child>
++
++			      <child>
++				<widget class="GtkLabel" id="label15">
++				  <property name="visible">True</property>
++				  <property name="label" translatable="yes">_Import Saved Configuration...</property>
++				  <property name="use_underline">True</property>
++				  <property name="use_markup">False</property>
++				  <property name="justify">GTK_JUSTIFY_LEFT</property>
++				  <property name="wrap">False</property>
++				  <property name="selectable">False</property>
++				  <property name="xalign">0.5</property>
++				  <property name="yalign">0.5</property>
++				  <property name="xpad">0</property>
++				  <property name="ypad">0</property>
++				  <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++				  <property name="width_chars">-1</property>
++				  <property name="single_line_mode">False</property>
++				  <property name="angle">0</property>
++				</widget>
++				<packing>
++				  <property name="padding">0</property>
++				  <property name="expand">False</property>
++				  <property name="fill">False</property>
++				</packing>
++			      </child>
+ 			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+ 			  </child>
+ 			</widget>
+ 		      </child>
