@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# All rights reserved
+#
+ 
+class Sudo(CPackageRecipe):
+    name = 'sudo'
+    version = '1.6.8p9'
+    
+    buildRequires = [ 'pam:devel', 'groff:runtime' ]
+
+    def setup(r):
+        r.addArchive('http://probsd.org/sudoftp/%(name)s-%(version)s.tar.gz')
+        r.addSource('sudo.pam', dest='%(sysconfdir)s/pam.d/sudo', use=Use.pam)
+        r.addPatch('wheel.patch')
+
+        if Use.pie:
+            r.macros.cflags += ' -fpie'
+            r.macros.ldflags += ' -pie'
+
+        extraConfig = ''
+        if Use.pam: extraConfig = ' --with-pam' 
+        r.Configure('--with-logging=syslog --with-logfac=authpriv'
+                    ' --with-editor=%(essentialbindir)s/vi'
+                    ' --with-env-editor --with-ignore-dot'
+                    ' --with-tty-tickets --without-interfaces'
+                    + extraConfig)
+
+        r.Make()
+
+        r.MakeInstall('install_uid=0 install_gid=0'
+                      ' sudoers_uid=0 sudoers_gid=0')
+        r.Install('%(localstatedir)s/run/sudo/', mode=0700)
+
+        r.SetModes('%(bindir)s/sudo{edit,}', 04511)
+        r.SetModes('%(sysconfdir)s/sudoers', 0440)
+
+        r.Doc('RUNSON', 'TROUBLESHOOTING', 'UPGRADE', '*.pod')
+
+        # bison is used only in a commented-out section of the Makefile
+        r.EnforceConfigLogBuildRequirements(exceptions='%(bindir)s/bison')
