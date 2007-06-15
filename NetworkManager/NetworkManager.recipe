@@ -1,0 +1,58 @@
+loadSuperClass('gnomepackage')
+class NetworkManager(GnomePackageRecipe):
+   buildRequires = [ 'hal:devel','dbus:devel', 'gtk:devel','libgnomeui:devel',
+        'wireless-tools:devel','glib:devel', 'openssl:devel','libglade:devel',
+        'gnome-panel:devel','gnome-keyring:devel', 'gettext:devel',
+        'GConf:devel', 'ORBit2:devel', 'atk:devel', 'cairo:devel',
+        'fontconfig:devel', 'freetype:devel', 'gnome-vfs:devel',
+        'libart_lgpl:devel', 'libbonobo:devel', 'libbonoboui:devel',
+        'libgnome:devel', 'libgnomecanvas:devel', 'dhcdbd:runtime',
+        'libpng:devel', 'libxml2:devel', 'pango:devel', 'popt:devel',
+        'dbus-glib:devellib', 'libgcrypt:devel', 'libgpg-error:devel',
+        'libpng:devel', 'libxml2:devel', 'pango:devel', 'popt:devel',
+        'wpa_supplicant:runtime', 'libnl:devel', 'libgpg-error:devel',
+        'libgcrypt:devel', 'dbus-glib:devellib', 'libnotify:devel',
+        'chkconfig:runtime', 'gettext:runtime', 'gtk:runtime', 'perl:runtime',
+        'iproute:runtime', 'expat:devel' ]
+        
+   name = "NetworkManager"
+   version = "0.6.5"
+
+   extraConfig = ' --with-distro=redhat --enable-notification-icon --with-named=/usr/sbin/named --with-named-user=named --with-named-dir=%(localstatedir)s/named --with-wpa_supplicant=/usr/sbin/wpa_supplicant localstatedir=%(localstatedir)s'
+
+   def unpack(r):
+      r.addArchive('http://ftp.gnome.org/pub/GNOME/sources/NetworkManager/0.6/%(name)s-%(version)s.tar.bz2')
+      for patch in [
+         '01-supplicant_timeout.patch',
+         '02-dbus_access_network_manager.patch',
+         '04-if_fix.patch',
+         '05-debian_backend.patch',
+         '06-dispatch_more_events.patch',
+         '09_fix_bigendian_words.patch',
+         '10-po_fr.patch',
+         '11-man_page_sh_name.patch',
+         '12_dbus1.0.patch',
+         '13-rml-wpa-workarounds.patch',
+         '14-j-hostap-supplicant-driver.patch',
+         '16_undefined_macros.patch',
+         '17_avahi_autoipd.patch',
+         '18_static_network-admin.patch',
+         '19_interfaces_can_have_more_than_one_instance.patch',
+         '20_do_not_take_over_dhcpv4iface_when_v6_is_configured.patch'
+      ]:
+         r.addPatch(patch)
+
+      r.macros.foodir='initscript/RedHat'
+      r.Replace('chkconfig: - 98 02','chkconfig: 5 98 02','%(foodir)s/NetworkManager', '%(foodir)s/NetworkManager.in','%(foodir)s/NetworkManagerDispatcher.in','%(foodir)s/NetworkManagerDispatcher')
+      r.Replace(' -p \$pidfile','','%(foodir)s/NetworkManager','%(foodir)s/NetworkManager.in')
+      r.addSource('ntpd.dispatch')
+
+   def install(r):
+      GnomePackageRecipe.install(r)
+      r.MakeDirs('%(localstatedir)s/run/%(name)s')
+      r.ExcludeDirectories(exceptions='%(localstatedir)s/run/%(name)s')
+      r.Install('ntpd.dispatch', '%(sysconfdir)s/NetworkManager/dispatcher.d/ntpd')
+
+   def policy(r):
+      r.Requires('libnl:lib','%(sbindir)s/NetworkManager')
+      r.Requires('wpa_supplicant:runtime','%(sbindir)s/NetworkManager')
