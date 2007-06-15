@@ -1,0 +1,58 @@
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage=conary.rpath.com@rpl:devel')
+class WpaSupplicant(RPMPackageRecipe, CPackageRecipe):
+
+   name = 'wpa_supplicant'
+   version = '0.5.7'
+   rpmRelease = '1.fc7'
+
+   rpmPatches = [
+      'wpa_supplicant-assoc-timeout.patch',
+      'wpa_supplicant-driver-wext-debug.patch',
+      'wpa_supplicant-wep-key-fix.patch',
+      'wpa_supplicant-fix-deprecated-dbus-function.patch']
+
+
+   buildRequires = ['openssl:devel', 'glibc:devel',
+                    'chkconfig:runtime', 'dbus:devel']
+
+
+
+   def setup(r):
+      # PLEASE READ THIS!
+      # Needed because wpa_supplicant needs madwifi headers to
+      # support this card
+      r.addArchive('%(name)s-%(version)s.tar.gz', rpm=r.srpm)
+      r.addArchive('madwifi-headers-r1475.tar.bz2',
+                   rpm=r.srpm, dir='%(name)s-%(version)s')
+
+      for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
+
+      # Our .config file, needed for compilation
+      r.addSource('wpa_supplicant.config')
+      r.addAction('cp wpa_supplicant.config .config')
+      r.addSource('wpa_supplicant.sysconfig', rpm=r.srpm)
+      r.addSource('wpa_supplicant.init.d', rpm=r.srpm)
+      # Our .conf file
+      #r.addSource('wpa_supplicant_foresight.conf')
+      r.addSource('wpa_supplicant.conf', rpm=r.srpm)
+
+      r.Make()
+
+      # No make install, so we copy manually
+      for x in ['wpa_cli', 'wpa_passphrase', 'wpa_supplicant']:
+         r.Install(x, '%(sbindir)s/')
+
+      r.Install('wpa_supplicant.init.d','%(initdir)s/wpa_supplicant', mode=0755)
+      r.MakeDirs('%(localstatedir)s/run/wpa_supplicant')
+      r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/wpa_supplicant'])
+      r.Install('wpa_supplicant.sysconfig','%(sysconfdir)s/sysconfig/wpa_supplicant')
+      r.Install('wpa_supplicant.conf','%(sysconfdir)s/wpa_supplicant/')
+      r.Install('doc/docbook/*.8','%(mandir)s/man8/')
+      r.Install('doc/docbook/*.5','%(mandir)s/man5/')
+
