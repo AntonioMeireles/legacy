@@ -5,79 +5,54 @@
 #
 
 loadSuperClass('rpmpackage')
-class Freetype(RPMPackageRecipe, AutoPackageRecipe):
+class Freetype(RPMPackageRecipe,AutoPackageRecipe):
     name = 'freetype'
     version = '2.3.4'
+    rpmName = 'freetype2'
+    rpmRelease = '22'
+    isOPENsuse = True
 
     buildRequires = [ 'libX11:devel', 'zlib:devel' ]
 
-    rpmRelease = '1.fc7'
     rpmPatches = [
-        # Enable otvalid and gxvalid modules
-        'freetype-2.2.1-enable-valid.patch',
-        # Fix multilib conflicts
-        'freetype-multilib.patch',
-        # Fix crash https://bugs.freedesktop.org/show_bug.cgi?id=6841
-        'freetype-2.2.1-memcpy-fix.patch',
-        # Enable the native hint interpreter
-        'freetype-2.1.10-enable-ft2-bci.patch',
-        'freetype-2.3.0-enable-spr.patch'
+        'freetype2-bitmap-foundry.patch',
+        'ft2-stream-compat.diff',
+        'bugzilla-273714-savannah-19859.patch',
+        'bugzilla-275072-check-for-negative-points-in-contours.patch',
+        'freetype2-bc.patch',
+        'freetype2-subpixel.patch',
     ]
 
     def unpack(r):
-
-        r.macros.site = 'mirror://sourceforge/%(name)s'
-
-        r.addArchive('%(site)s/')
-        r.addArchive('%(site)s/freetype-doc-%(version)s.tar.bz2')
-        r.addArchive('%(site)s/ft2demos-%(version)s.tar.bz2', dir=r.theMainDir)
-        r.addSource('ftconfig-multilib.h')
+        r.addArchive('freetype-%(version)s.tar.bz2', rpm=r.srpm)
+        r.addArchive('freetype-doc-%(version)s.tar.bz2', rpm=r.srpm)
 
         for patch in r.rpmPatches:
             r.addPatch(patch, rpm=r.srpm)
 
-        # CVE-2007-2754 (RPL-1390)
-        r.addPatch('http://cvs.savannah.nongnu.org/viewvc/freetype2/src/truetype/ttgload.c?root=freetype&r1=1.177&r2=1.178&view=patch', dir='src/truetype/')
-
-        # Add -lm when linking X demos
-        r.addPatch('ft2demos-2.1.9-mathlib.patch',
-                   dir='ft2demos-%(version)s', rpm=r.srpm)
-        r.addPatch('http://aur.archlinux.org/packages/freetype2-cleartype/freetype2-cleartype/freetype-2.2.1-subpixel-disable-quantization.diff')
-
     def configure(r):
+        r.Run('chmod 755 autogen.sh')
+        r.Configure('--disable-static ',
+                    configureName='autogen.sh')
 
-        r.Configure('--disable-static')
 
     def make(r):
+        r.Make(""" setup CFG="--prefix=%(prefix)s --libdir=%(libdir)s --with-zlib" """)
+        r.Make('')
 
-        r.Make()
-
-        # Make demos
-        r.Make('TOP_DIR=".."', dir='ft2demos-%(version)s')
+        # FIXME: demos are out. have they real use ? 
 
     def makeinstall(r):
-
         r.MakeInstall()
 
-        # Install demos
-        demos = (
-            # X11
-            'ftgamma', 'ftmulti', 'ftstring', 'fttimer', 'ftview',
-            # Console
-            'ftbench', 'ftchkwd', 'ftdump', 'ftlint', 'ftmemchk', 'ftvalid',
-        )
-        for ftdemo in demos:
-            r.Run('builds/unix/libtool --mode=install install -m 755 '
-                    'ft2demos-%(version)s/bin/'+ftdemo+' %(destdir)s/%(bindir)s/')
-
         # Fix multilib issues
+        r.addSource('ftconfig-multilib.h')
         r.macros.wordsize = '32'
         if Arch.x86_64:
             r.macros.wordsize = '64'
 
         r.Move('%(includedir)s/freetype2/freetype/config/ftconfig.h',
                '%(includedir)s/freetype2/freetype/config/ftconfig-%(wordsize)s.h')
-
         r.Install('ftconfig-multilib.h',
                   '%(includedir)s/freetype2/freetype/config/ftconfig.h',
                   component='devellib')
