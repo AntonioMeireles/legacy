@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Setup(RPMPackageRecipe):
+    name = 'setup'
+    version = '2.5.55'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+
+    def setup(r):
+        r.unpack()
+        r.addPatch('openvpn.services.patch')
+        # Until we move to X11R7, we still need /usr/X11R6/bin in the path
+        r.addPatch('profile.patch')
+        r.addPatch('profile.xpath.patch')
+        r.addSource("passwd")
+        r.addSource("group")
+
+        # do not depend on net-tools being installed for profile to work
+        r.Replace('^HOSTNAME.*',
+                  'HOSTNAME=`[ -x /bin/hostname ] && /bin/hostname || echo localhost.localdomain`',
+                  'profile')
+        r.Install('*', '%(sysconfdir)s/')
+
+        # since conary has a method to add users and groups as packages
+        # need them, the version contained here in the setup package
+        # should just be considered an example.  Therefore we'll mark
+        # them as initialcontents since conary might have added some
+        # users and groups before setup gets installed for the first time
+        # and we don't want to cause a file conflict. printcap is marked
+        # initialcontents because cups generates a copy on its own
+        r.InitialContents('%(sysconfdir)s/(passwd|shadow|group|gshadow|printcap)')
+        r.Remove('%(sysconfdir)s/shell.tag*')
+        r.Create('%(sysconfdir)s/{shadow,gshadow}', mode=0400)
+        r.Create('%(localstatedir)s/log/lastlog', mode=0400)
+        r.Remove('/etc/uidgid', '/etc/serviceslint', '/etc/aliases',
+                 '/etc/setup.spec', '/etc/Makefile')
+        r.Doc('uidgid')
+
+        r.addSource('shell.tagdescription', macros=True)
+        r.addSource('shell.taghandler', macros=True)
+        r.Install('shell.tagdescription', '%(tagdescriptiondir)s/shell')
+        r.Install('shell.taghandler', '%(taghandlerdir)s/shell', mode=0755)
