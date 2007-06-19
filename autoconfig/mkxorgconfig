@@ -98,8 +98,8 @@ COMPLETE=""
 RC=""
 
 
-#MONITOR="$(ddcxinfo -monitor-noml)"
-MONITOR="$(ddcxinfo -monitor)"
+MONITOR="$(ddcxinfo -monitor-noml)"
+#MONITOR="$(ddcxinfo -monitor)"
 RC="$?"
 COMPLETE="$(awk '/EndSection/{print}' <<EOF
 $MONITOR
@@ -141,20 +141,6 @@ VREFRESH="$(awk '/^[  ]*VertRefresh/{print $2 $3 $4; exit}'<<EOF
 $MONITOR
 EOF
 )"
-
-# Build line of allowed modes
-MODES=""
-ADDMODE=""
-# Use commandline modes if specified
-[ -n "$XSCREEN" ] && ADDMODE="-firstmode $XSCREEN"
-if [ -z "$NODDC" ]; then
-MODES="$(ddcxinfo -modes $ADDMODE)"
-fi
-if [ "$?" != "0" -o -z "$MODES" ]; then
-MODES="Modes "
-[ -n "$XSCREEN" ] && MODES="$MODES \"$XSCREEN\""
-MODES="$MODES \"1024x768\" \"800x600\" \"640x480\""
-fi
 
 # Use commandline vertical refresh rate if specified
 if [ -n "$XVREFRESH" ]; then
@@ -216,6 +202,37 @@ fi
 rm -f "$MONITORTMP"
 echo "$MONITOR" >"$MONITORTMP"
 
+# Detect Intel
+vidintel=`lspci | grep "Intel Corp" |grep "Graphics"`
+vidintel2=`lspci | grep "915GM/GMS"`
+if [ -n "$vidintel" -o -n "$vidintel2" ]; then
+    cp /etc/X11/xorg.conf.i810 /etc/X11/xorg.conf.in
+fi
+
+# Detect ATI
+vidati=`lspci | grep "Radeon"`
+vidati2=`lspci | grep "VGA compatible controller: ATI Technologies"`
+if [ -n "$vidati" -o -n "$vidati2" ]; then
+    cp /etc/X11/xorg.conf.radeon /etc/X11/xorg.conf.in
+fi
+
+# Detect nvidia
+nvfree=`lspci | grep VGA | grep nVidia`
+modprobe nvidia 2> /dev/null
+nvbin=`lsmod |grep nvidia`
+if [ -n "$nvfree" ]; then
+    if [ -n "$nvbin" ];then
+        cp /etc/X11/xorg.conf.nvidia /etc/X11/xorg.conf.in
+    else
+        cp /etc/X11/xorg.conf.nv /etc/X11/xorg.conf.in
+    fi
+fi
+
+if [ ! -f /etc/X11/xorg.conf.in ];then
+    cp /etc/X11/xorg.conf.vesa /etc/X11/xorg.conf.in
+fi
+
+
 # /etc/X11/xorg.conf.in is the "default" config.
 if [ ! -f /etc/X11/xorg.conf ]; then
 # Remove it, just in case it's a link to CD
@@ -223,7 +240,6 @@ rm -f /etc/X11/xorg.conf 2>/dev/null
 sed -e 's|@@PROTOCOL@@|'"$PROTO"'|g;'"$NOEMU" \
     -e '/@@MONITOR@@/r '"$MONITORTMP" \
     -e 's|@@MONITOR@@||g' \
-    -e 's|@@MODES@@|'"$MODES"'|g;'"$DEPTH" \
     /etc/X11/xorg.conf.in > /etc/X11/xorg.conf.tmp
 fi
 
@@ -249,7 +265,6 @@ sed -e 's|@@PROTOCOL@@|'"$PROTO"'|g;'"$NOEMU" \
     -e 's|@@MONITOR@@||g' \
     -e 's|@@NOPM@@|'"$NOPM"'|g' \
     -e 's|@@XMODULE@@|'"$XMODULE"'|g;'"$VMWARE""$SERIALMOUSE""$USBMOUSE""$PSMOUSE""$SWCURSOR""$WHEEL""$TOUCHPAD" \
-    -e 's|@@MODES@@|'"$MODES"'|g;'"$DEPTH" \
     -e 's|"XkbLayout" *"[^"]*"|"XkbLayout" "'"$XKEYBOARD"'"|g;'"$DEADKEYS" \
     /etc/X11/xorg.conf.in >/etc/X11/xorg.conf
 
@@ -271,7 +286,6 @@ echo " Server${NORMAL}"
 echo -n " ${GREEN}Monitor: ${YELLOW}${MODEL:-Generic Monitor}${NORMAL}"
 [ -n "$HREFRESH" -a -n "$VREFRESH" ] && echo "${GREEN}, ${GREEN}H:${YELLOW}${HREFRESH}kHz${GREEN}, V:${YELLOW}${VREFRESH}Hz${NORMAL}" || echo ""
 [ -n "$XVREFRESH" ] && echo " ${GREEN}Trying specified vrefresh rate of ${YELLOW}${XVREFRESH}Hz.${NORMAL}"
-[ -n "$MODES" ] && echo " ${GREEN}Modes: ${YELLOW}${MODES##Modes }${NORMAL}"
 
 # Correção para mouses Synaptic 
 mousesynaptics=`cat /proc/bus/input/devices | grep Synaptics`
@@ -294,25 +308,6 @@ vidtrid=`cat /etc/X11/xorg.conf | sed -r 's/ +/ /g' | grep 'Driver "trident"'`
 if [ -n "$vidtrid" ]; then
   sed -i -e 's/trident/vesa/g' /etc/X11/xorg.conf
 fi
-
-# Detecta as Intel Extreme
-vidintel=`lspci | grep "Intel Corp" |grep "Graphics"`
-vidintel2=`lspci | grep "915GM/GMS"`
-if [ -n "$vidintel" -o -n "$vidintel2" ]; then
-  sed -i -e 's/vesa/i810/g' /etc/X11/xorg.conf
-  sed -i -e 's/Videocard vendor/Intel/' /etc/X11/xorg.conf
-  sed -i -e 's/Generic Video card/Intel i810/' /etc/X11/xorg.conf
-fi
-
-# Detecta placas ATI
-vidati=`lspci | grep "Radeon"`
-vidati2=`lspci | grep "VGA compatible controller: ATI Technologies"`
-if [ -n "$vidati" -o -n "$vidati2" ]; then
-  sed -i -e 's/vesa/radeon/g' /etc/X11/xorg.conf
-  sed -i -e 's/Videocard vendor/ATI/' /etc/X11/xorg.conf
-  sed -i -e 's/Generic Video card/ATI Radeon/' /etc/X11/xorg.conf
-fi
-
 
 
 # Desativa o GLX em drivers que não suportam 3D
@@ -358,15 +353,3 @@ if [ -n "$vidvia" ]; then
   modprobe via
 fi
 
-# Placas nvidia, não detectadas corretamente:
-nvlost=`lspci | grep VGA | grep nVidia`
-if [ -n "$nvlost" ]; then
-  sed -i -e 's/Driver      "vesa"/Driver      "nv"/' /etc/X11/xorg.conf
-  sed -i -e 's/Videocard vendor/nVidia/' /etc/X11/xorg.conf
-  sed -i -e 's/Generic Video card/nVidia Graphics/' /etc/X11/xorg.conf
-fi
-
-
-if checkbootparam "xvrefresh=60"; then
-  sed -i -e 's/ModeLine "1024x768"   65.0 1024 1048 1184 1344    768  771  777  806 -hsync -vsync/ModeLine "1024x768"   65.0 1024 1032 1176 1344    768  771  777  806 -hsync -vsync/' /etc/X11/xorg.conf 
-fi
