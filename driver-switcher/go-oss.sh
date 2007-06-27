@@ -23,7 +23,7 @@ if [ $confirm == "Y" ] || [ $confirm == "y" ];# || $confirm == "y" ];
 then
     echo "Switching to the open source video driver"
     echo "This could a few minutes before providing feedback, please be patient"
-    `conary update --interactive group-dist['!nvidia,!ati']`
+    exec conary update --interactive group-dist['!nvidia,!ati']
     sed -i s/NO/YES/g /etc/sysconfig/reconfig
 else
     echo "Cancelled"
