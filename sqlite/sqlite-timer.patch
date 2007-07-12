@@ -1,0 +1,84 @@
+--- sqlite-3.3.8/src/shell.c.timer	2006-09-25 09:09:23.000000000 -0400
++++ sqlite-3.3.8/src/shell.c	2006-12-07 17:37:12.000000000 -0500
+@@ -26,6 +26,7 @@
+ # include <pwd.h>
+ # include <unistd.h>
+ # include <sys/types.h>
++# include <sys/time.h>
+ #endif
+ 
+ #ifdef __MACOS__
+@@ -239,6 +240,7 @@
+                          ** .explain ON */
+   char outfile[FILENAME_MAX]; /* Filename for *out */
+   const char *zDbFilename;    /* name of the database file */
++  int timer;		 /* Print timings after each query */
+ };
+ 
+ /*
+@@ -788,6 +790,7 @@
+   ".separator STRING      Change separator used by output mode and .import\n"
+   ".show                  Show the current values for various settings\n"
+   ".tables ?PATTERN?      List names of tables matching a LIKE pattern\n"
++  ".timer ON|OFF          Print out query execution times after results\n"
+   ".timeout MS            Try opening locked tables for MS milliseconds\n"
+   ".width NUM NUM ...     Set column widths for \"column\" mode\n"
+ ;
+@@ -1407,6 +1410,21 @@
+     sqlite3_free_table(azResult);
+   }else
+ 
++  if( c=='t' && strncmp(azArg[0], "timer", n)==0 && nArg>1 ){
++    int j;
++    char *z = azArg[1];
++    int val = atoi(azArg[1]);
++    for(j=0; z[j]; j++){
++      z[j] = tolower((unsigned char)z[j]);
++    }
++    if( strcmp(z,"on")==0 ){
++      val = 1;
++    }else if( strcmp(z,"yes")==0 ){
++      val = 1;
++    }
++    p->timer = val;
++  }else
++
+   if( c=='t' && n>1 && strncmp(azArg[0], "timeout", n)==0 && nArg>=2 ){
+     open_db(p);
+     sqlite3_busy_timeout(p->db, atoi(azArg[1]));
+@@ -1530,9 +1548,15 @@
+     }
+     free(zLine);
+     if( zSql && _ends_with_semicolon(zSql, nSql) && sqlite3_complete(zSql) ){
++      struct timeval st_time;
++      struct timeval en_time;
+       p->cnt = 0;
+       open_db(p);
++      if (p->timer)
++	  gettimeofday(&st_time, NULL);
+       rc = sqlite3_exec(p->db, zSql, callback, p, &zErrMsg);
++      if (p->timer)
++	  gettimeofday(&en_time, NULL);
+       if( rc || zErrMsg ){
+         /* if( in!=0 && !p->echoOn ) printf("%s\n",zSql); */
+         if( zErrMsg!=0 ){
+--- sqlite-3.3.10/src/shell.c.old	2007-01-18 21:56:15.000000000 -0500
++++ sqlite-3.3.10/src/shell.c	2007-01-18 21:56:39.000000000 -0500
+@@ -1641,6 +1641,17 @@
+           zErrMsg = 0;
+         }else{
+           printf("%s %s\n", zPrefix, sqlite3_errmsg(p->db));
++            if (p->timer) {
++                struct timeval elapsed;
++                elapsed.tv_sec = en_time.tv_sec - st_time.tv_sec;
++                elapsed.tv_usec = en_time.tv_usec - st_time.tv_usec;
++                if (elapsed.tv_usec < 0) {
++                    --elapsed.tv_sec;
++                    elapsed.tv_usec += 1000000;
++                }
++                printf("%d rows, %d.%03d sec\n", p->cnt,
++                       elapsed.tv_sec, elapsed.tv_usec/1000);
++            }
+         }
+         errCnt++;
+       }

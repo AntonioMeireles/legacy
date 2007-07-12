@@ -1,0 +1,57 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Sqlite(CPackageRecipe):
+    name = 'sqlite'
+    version = '3.4.0'
+
+    extraConfig = '--enable-threadsafe'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+        extraConfig = ' --disable-tcl'
+        buildRequires = [ 'cross-gcc', 'glibc' ]
+    else:
+        buildRequires = [ 'ncurses:devel', 'readline:devel',
+                          'tcl:runtime', 'tcl:devel', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('http://sqlite.org/')
+        r.addPatch('sqlite-3.1.2-Makefile.patch')
+        r.addPatch('sqlite-timer.patch')
+        r.ComponentProvides('addcolumn')
+        r.ComponentProvides('threadsafe')
+
+        r.macros.cflags += ' -DNDEBUG=1'
+        if Use.bootstrap:
+            # add hints for autoconf 1.13 -- otherwise it can't figure
+            # out which compilers to use for builing files to be run
+            # during the build process vs. files to be installed
+            r.Environment('config_BUILD_CC', '%(buildcc)s')
+            r.Environment('config_TARGET_CC', '%(cc)s')
+            r.Environment('config_TARGET_CXX', '%(cxx)s')
+            # this skips past a test that fails when cross compiling
+            r.Environment('config_TARGET_READLINE_INC',
+                          '%(sysroot)s%(includedir)s')
+        r.Configure(r.extraConfig)
+
+        if Use.bootstrap:
+            mflags = 'READLINE_FLAGS= ' # Suppress readline.
+        else:
+            mflags = ''
+
+        r.Make(mflags)
+
+        if not Use.bootstrap:
+            # docs require tcl to build
+            r.Make('doc')
+
+        r.MakeInstall('prefix=%(prefix)s')
+
+        r.Doc('doc/*')
+        # don't package the tcl extension for now
+        r.Remove('%(datadir)s/tcl*', recursive=True)
