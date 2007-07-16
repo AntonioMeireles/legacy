@@ -1,68 +1,77 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-
-class Dhcp(CPackageRecipe):
-    buildRequires = [ 'groff:runtime' ]
-
+loadSuperClass('rpmpackage', label='conary.rpath.com@rpl:devel')
+class Dhcp(RPMPackageRecipe, CPackageRecipe):
     name = 'dhcp'
     version = '3.0.5'
-    
+    rpmRelease = '35.fc7'
+
+    buildRequires = [ 'groff:runtime', 'openldap:devel' ]
+
+    rpmPatches = [
+        #Begin ours
+        'dhcp-3.0.5-Makefile.patch',
+        'dhcp-3.0.5-warnings.patch',
+        'dhcp-3.0.5-extended-new-option-info.patch',
+        'dhcp-3.0.5-errwarn-message.patch',
+        # We don't care for ldap and the patch doesn't apply :)
+        #'dhcp-3.0.5-ldap-configuration.patch',
+        'dhcp-3.0.5-memory.patch',
+        'dhcp-3.0.5-options.patch',
+        'dhcp-3.0.5-release-by-ifup.patch',
+        'dhcp-3.0.5-dhclient-decline-backoff.patch',
+        'dhcp-3.0.5-enable-timeout-functions.patch',
+        'dhcp-3.0.5-inherit-leases.patch',
+        'dhcp-3.0.5-selinux.patch',
+        'dhcp-3.0.5-unicast-bootp.patch',
+        'dhcp-3.0.5-fast-timeout.patch',
+        'dhcp-3.0.5-failover-ports.patch',
+        'dhcp-3.0.5-dhclient-usage.patch',
+        'dhcp-3.0.5-default-requested-options.patch',
+        'dhcp-3.0.5-prototypes.patch',
+        'dhcp-3.0.5-manpages.patch',
+        'dhcp-3.0.5-libdhcp4client.patch',
+        'dhcp-3.0.5-xen-checksum.patch',
+    ]
+
+    rpmSources = [
+        'libdhcp4client.pc',
+        'linux.dbus-example',
+    ]
+
     def setup(r):
-        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/releases/7/Fedora/source/SRPMS/dhcp-3.0.5-35.fc7.src.rpm'
-
-        r.addArchive('dhcp-%(version)s.tar.gz', rpm=srpm)
-
-        r.addSource('linux.dbus-example', rpm=srpm, dest='client/scripts/linux')
-        r.addSource('Makefile.dist', rpm=srpm, dest='libdhcp4client/')
-        r.addSource('dhcp4client.h', rpm=srpm, dest='libdhcp4client/')
-        r.addSource('libdhcp_control.h', rpm=srpm, dest='libdhcp4client/')
+        r.macros.cflags = '-fPIC -Dlint -DEXTENDED_NEW_OPTION_INFO'
+        r.unpack()
         r.addSource('dhcpd.conf.sample')
         r.addSource('dhcpd.init')
         r.addSource('dhcpd.sysconfig')
         r.addSource('dhcrelay.init')
         r.addSource('dhcrelay.sysconfig')
         r.addSource('dhcpd.leases')
+
         r.addSource('site.conf', macros=True)
-        r.addSource('site.h', macros=True,
-                    apply='cat site.h >> includes/site.h; rm site.h')
         r.addSource('findptrsize.c')
 
-        r.addPatch('dhcp-3.0.5-version.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-Makefile.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-warnings.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-extended-new-option-info.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-errwarn-message.patch', rpm=srpm)
-        # We don't care for ldap and the patch doesn't apply :)
-        #r.addPatch('dhcp-3.0.5-ldap-configuration.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-memory.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-options.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-release-by-ifup.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-dhclient-decline-backoff.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-enable-timeout-functions.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-inherit-leases.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-selinux.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-unicast-bootp.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-fast-timeout.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-failover-ports.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-dhclient-usage.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-default-requested-options.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-prototypes.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-manpages.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-libdhcp4client.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-xen-checksum.patch', rpm=srpm)
+        for source in r.rpmSources:
+            r.addSource(source, rpm=r.srpm)
+
+        for file in 'Makefile.dist', 'dhcp4client.h', 'libdhcp_control.h':
+            r.addSource(file, rpm=r.srpm, dest='libdhcp4client/')
+
+        r.Move('linux.dbus-example', 'client/scripts/linux')
 
         r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
                   'includes/cf/linux.h')
         r.Replace('\/bin\/dbus-send', '%(bindir)s/dbus-send', 'client/scripts/linux')
-        # Don't build libdhcp4client, we have a separate package for that
-        r.Replace('libdhcp4client', '', 'work.linux-2.2/Makefile')
+        r.Replace('@DHCP_VERSION@', '%(version)s', 'libdhcp4client.pc')
+        r.Install('libdhcp4client.pc', '%(datadir)s/pkgconfig/')
 
         r.Make('findptrsize')
-        r.ManualConfigure('--copts "%(cflags)s -DEXTENDED_NEW_OPTION_INFO'
+        r.ManualConfigure('--copts "%(cflags)s'
             ' $([ $(./findptrsize) -ge 8 ] && echo -DPTRSIZE_64BIT)"')
         r.Make()
         r.MakeInstall()
@@ -79,13 +88,19 @@ class Dhcp(CPackageRecipe):
 
         r.SetModes('%(essentialsbindir)s/dhclient-script', 0755)
         r.Requires('initscripts:runtime', '/sbin/dhclient-script')
-
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/(lib|run)/dhcp')
         r.MakeDirs('%(localstatedir)s/lib/dhclient')
-        r.PackageSpec('dhclient', '%(localstatedir)s/lib/dhcp',
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/dhclient')
+        r.Move('%(prefix)s/lib/pkgconfig/*', '%(libdir)s/pkgconfig/')
+
+        r.PackageSpec('dhclient', '%(localstatedir)s/lib/dhcp/',
             '%(localstatedir)s/lib/dhclient',
             '%(essentialsbindir)s/dhclient.*',
             '%(mandir)s/man.*/dhclient.*',
             '%(mandir)s/man5/dhcp-options.5.*')
-        r.TagSpec('initscript', '%(initdir)s/')
 
-        r.ExcludeDirectories(exceptions='/var/(lib|run)/(dhcp|dhclient)')
+        r.PackageSpec('libdhcp4client', '%(includedir)s/dhcp4client/.*',
+            '%(libdir)s/libdhcp4client.*',
+            '%(libdir)s/pkgconfig/libdhcp4client.pc')
+
+        r.TagSpec('initscript', '%(initdir)s/')
