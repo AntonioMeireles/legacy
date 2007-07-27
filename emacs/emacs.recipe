@@ -1,0 +1,110 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# Portions (c) 2006 Antonio Meireles
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Emacs(CPackageRecipe):
+    name = 'emacs'
+    version = '23.0.0cvs20070423'
+    versionsitelisp = ''.join(('%(datadir)s/emacs/', version, '/site-lisp/'))
+
+    buildRequires = [ 'alsa-lib:devel', 'atk:devel', 'cairo:devel',
+        'expat:devel', 'fontconfig:devel', 'freetype:devel', 'glib:devel',
+        'gtk:devel', 'install-info:runtime', 'libjpeg:devel', 'libpng:devel',
+        'libtiff:devel', 'giflib:devel', 'ncurses:devel', 'pango:devel',
+        'perl:lib', 'pkgconfig:devel', 'zlib:devel', 'texinfo:runtime',
+        'libtermcap:devel', 'libXft:devel',
+        'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXext:devel',
+        'libXmu:devel', 'libXpm:devel', 'libXt:devel', 'libXau:devel',
+        'libXdmcp:devel', 'libXrender:devel', ]
+
+    if Arch.x86:
+        buildRequires.append('setarch:runtime')
+
+    def setup(r):
+        #  cvs -d:pserver:anonymous@cvs.savannah.gnu.org:/sources/emacs co emacs
+        #  cd emacs
+        #  cvs up -Pd -r emacs-unicode-2
+        r.addArchive('ftp://download.rpath.com/autosource/')
+        r.addSource('site-start.el', dest='%(datadir)s/%(name)s/site-lisp/',
+                    macros=True)
+        r.disableParallelMake()
+        r.Configure(' --with-x-toolkit=gtk --enable-font-backend '
+                    ' --with-xft  --with-xpm'
+                    ' --with-jpeg  --with-tiff'
+                    ' --with-pop --with-sound'
+                    ' --with-gif  --with-png  --with-freetype ')
+
+        r.macros.cflags += ' -DMAIL_USE_LOCKF'
+        r.macros.mflags = ''
+
+        r.Make('bootstrap')
+        r.Make()
+
+        r.macros.emacsbatch = '%(builddir)s/src/emacs -batch --no-init-file --no-site-file'
+
+        # servicedir for mail
+        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+            'man/gnus.texi', 'lisp/paths.el', 'lisp/eshell/esh-var.el',
+            'lisp/mail/rmail.el')
+
+        r.Run('%(emacsbatch)s -f batch-byte-recompile-directory lisp')
+
+        r.Make('-C lisp updates')
+        r.MakePathsInstall()
+
+        # make sure movemail isn't setgid
+        r.SetModes('%(libexecdir)s/emacs/%(version)s/*/movemail', 0755)
+
+        r.Remove('%(infodir)s/dir')
+
+        r.macros.site_lisp = '%(datadir)s/emacs/site-lisp'
+        r.macros.version_site_lisp = r.versionsitelisp
+
+        r.Move('%(bindir)s/etags', '%(bindir)s/etags.emacs')
+        r.Move('%(bindir)s/ctags', '%(bindir)s/ctags.emacs')
+        r.Move('%(mandir)s/man1/ctags.1', '%(mandir)s/man1/gctags.1')
+        r.Symlink('ctags.emacs', '%(bindir)s/gctags')
+
+        r.NonBinariesInBindirs(exceptions='.*')
+
+        r.PackageSpec('emacs',
+            '%(bindir)s/(emacs|emacs-%(version)s)',
+            '%(datadir)s/emacs/%(version)s/etc/DOC-%(version)s.1',
+            '%(libexecdir)s/emacs/%(version)s/.*/fns-%(version)s.1.el')
+
+        # not everyone wants the input method
+        r.PackageSpec('emacs-leim',
+            '%(datadir)s/emacs/%(version)s/leim/leim-list.el',
+            '%(datadir)s/emacs/%(version)s/leim/.*\.elc')
+
+        # el files that go in :runtime instead of :elisp for some reason
+        # FIXME find out if this is really necessary by deleting these
+        # .el files from a running system and see if emacs breaks
+        for file in (
+            '(cus-load|cus-start|finder-inf|forms-d2|forms-pass|generic-x|loaddefs|loadup|patcomp|paths|subdirs|version)',
+            'emacs-lisp/cl-specs',
+            'eshell/(esh-groups|esh-maint)',
+            'international/(latin-.*|mule-conf)',
+            'mail/blessmail',
+            'play/bruce',
+            'term/(AT386|apollo|bobcat|internal|iris-ansi|keyswap|linux|lk201|news|vt[234-].*|vt102.*|vt12.*|vt-control|wyse50|xterm)'):
+            r.ComponentSpec('runtime',
+                '%(datadir)s/emacs/%(version)s/lisp/' + file + '\.el')
+
+        for file in (
+            '(default|site-start|subdirs)',
+            'Mule-UCS/un-trbase',
+            'site-start.d/.*'):
+            r.ComponentSpec('runtime',
+                '%(datadir)s/emacs/site-lisp/' + file + '\.el')
+
+        r.ComponentSpec('runtime', '%(version_site_lisp)s/subdirs\.el')
+
+        # all the rest of the elisp files go in the elisp component
+        r.ComponentSpec('elisp', '%(datadir)s/emacs/.*\.el')
+
+        # override default :emacs component, which we do not want in emacs:
+        r.ComponentSpec('runtime', '%(datadir)s/emacs/site-lisp/.*')
