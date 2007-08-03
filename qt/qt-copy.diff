@@ -462,7 +462,6 @@ diff -rNu qt-x11-free/examples/qwerty/latin1.txt qt-copy/examples/qwerty/latin1.
 +??????
  ??????
 \ No newline at end of file
-Files qt-x11-free/examples/qwerty/msunicode.txt and qt-copy/examples/qwerty/msunicode.txt differ
 diff -rNu qt-x11-free/include/private/qgl_x11_p.h qt-copy/include/private/qgl_x11_p.h
 --- qt-x11-free/include/private/qgl_x11_p.h	2007-02-02 17:01:17.000000000 +0300
 +++ qt-copy/include/private/qgl_x11_p.h	2007-02-22 23:30:42.021290000 +0300
@@ -3253,6 +3252,1021 @@ diff -rNu qt-x11-free/patches/0077-utf8-decoder-fixes.diff qt-copy/patches/0077-
 + 	    } else {
 + 	        // Error
 +                 qch = addOne(qch, result);
+diff -rNu qt-x11-free/patches/0078-argb-visual-hack.patch qt-copy/patches/0078-argb-visual-hack.patch
+--- qt-x11-free/patches/0078-argb-visual-hack.patch	1970-01-01 03:00:00.000000000 +0300
++++ qt-copy/patches/0078-argb-visual-hack.patch	2007-05-29 18:31:54.737751000 +0400
+@@ -0,0 +1,71 @@
++qt-bugs@ issue : none
++bugs.kde.org number : 83974
++applied: no
++author: Lubos Lunak <l.lunak@kde.org>
++
++An ugly hack to get real transparency in Konsole working somehow, with Qt not having
++any support for the ARGB visual. QApplication has one ctor that allows passing
++any X connection and X visual, but that has some side effects, so this patch
++adds a magic flag to turn the side effects off.
++
++
++--- src/kernel/qapplication.cpp.sav	2007-02-23 14:01:19.000000000 +0100
+++++ src/kernel/qapplication.cpp	2007-05-29 15:42:39.000000000 +0200
++@@ -317,6 +317,7 @@ void qt_init( int *, char **, QApplicati
++ void qt_cleanup();
++ #if defined(Q_WS_X11)
++ void qt_init( Display* dpy, Qt::HANDLE, Qt::HANDLE );
+++void qt_init( int *, char **, Display* dpy, Qt::HANDLE, Qt::HANDLE );
++ #endif
++ Q_EXPORT bool qt_tryModalHelper( QWidget *widget, QWidget **rettop );
++ 
++@@ -905,7 +906,7 @@ QApplication::QApplication(Display *dpy,
++ 
++ 	qt_init( &argc, argv, GuiClient );
++     } else {
++-	qt_init(dpy, visual, colormap);
+++	qt_init( &argc, argv, dpy, visual, colormap);
++     }
++ 
++     process_cmdline( &argc, argv );
++--- src/kernel/qapplication_x11.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/kernel/qapplication_x11.cpp	2007-05-29 16:24:58.000000000 +0200
++@@ -196,6 +196,7 @@ static bool	noxim		= FALSE;	// connect t
++ static Display *appDpy		= 0;		// X11 application display
++ static char    *appDpyName	= 0;		// X11 display name
++ static bool	appForeignDpy	= FALSE;        // we didn't create display
+++Q_EXPORT bool qt_no_foreign_hack = false;
++ static bool	appSync		= FALSE;	// X11 synchronization
++ #if defined(QT_DEBUG)
++ static bool	appNoGrab	= FALSE;	// X11 grabbing enabled
++@@ -1541,7 +1542,7 @@ void qt_init_internal( int *argcptr, cha
++     setlocale( LC_ALL, "" );		// use correct char set mapping
++     setlocale( LC_NUMERIC, "C" );	// make sprintf()/scanf() work
++ 
++-    if ( display ) {
+++    if ( display && !qt_no_foreign_hack ) {
++ 	// Qt part of other application
++ 
++ 	appForeignDpy = TRUE;
++@@ -1698,7 +1699,9 @@ void qt_init_internal( int *argcptr, cha
++ 	// Connect to X server
++ 
++ 	if( qt_is_gui_used ) {
++-	    if ( ( appDpy = XOpenDisplay(appDpyName) ) == 0 ) {
+++            if( display != NULL && qt_no_foreign_hack )
+++                appDpy = display;
+++	    else if ( ( appDpy = XOpenDisplay(appDpyName) ) == 0 ) {
++ 		qWarning( "%s: cannot connect to X server %s", appName,
++ 			  XDisplayName(appDpyName) );
++ 		qApp = 0;
++@@ -2345,6 +2348,10 @@ void qt_init( Display *display, Qt::HAND
++     qt_init_internal( 0, 0, display, visual, colormap );
++ }
++ 
+++void qt_init( int *argcptr, char **argv, Display *display, Qt::HANDLE visual, Qt::HANDLE colormap )
+++{
+++    qt_init_internal( argcptr, argv, display, visual, colormap );
+++}
++ 
++ /*****************************************************************************
++   qt_cleanup() - cleans up when the application is finished
+diff -rNu qt-x11-free/patches/0079-compositing-types.patch qt-copy/patches/0079-compositing-types.patch
+--- qt-x11-free/patches/0079-compositing-types.patch	1970-01-01 03:00:00.000000000 +0300
++++ qt-copy/patches/0079-compositing-types.patch	2007-05-31 13:12:09.094167000 +0400
+@@ -0,0 +1,424 @@
++qt-bugs@ issue : none
++bugs.kde.org number : none
++applied: no
++author: Lubos Lunak <l.lunak@kde.org>
++
++This patch adds support for window types used for compositing (popup menu, dropdown menu,
++tooltip, combobox, dnd).
++
++--- src/kernel/qdnd_x11.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/kernel/qdnd_x11.cpp	2007-05-31 10:30:58.000000000 +0200
++@@ -261,6 +261,7 @@ public:
++ 	QWidget(QApplication::desktop()->screen( screen ),
++ 		0, WStyle_Customize | WStyle_Tool | WStyle_NoBorder | WX11BypassWM ), oldpmser( 0 ), oldbmser( 0 )
++     {
+++    x11SetWindowType( X11WindowTypeDND );
++     }
++ 
++     void setPixmap(QPixmap pm, QPoint hot)
++@@ -1221,6 +1222,7 @@ void QDragManager::move( const QPoint & 
++ 	// recreate the pixmap on the new screen...
++ 	delete qt_xdnd_deco;
++ 	qt_xdnd_deco = new QShapedPixmapWidget( screen );
+++        qt_xdnd_deco->x11SetWindowTransient( dragSource->topLevelWidget());
++ 	if (!QWidget::mouseGrabber()) {
++ 	    updatePixmap();
++ 	    qt_xdnd_deco->grabMouse();
++@@ -1774,6 +1776,7 @@ bool QDragManager::drag( QDragObject * o
++ 
++     dragSource = (QWidget *)(object->parent());
++ 
+++    qt_xdnd_deco->x11SetWindowTransient( dragSource->topLevelWidget());
++     qApp->installEventFilter( this );
++     qt_xdnd_source_current_time = qt_x_time;
++     XSetSelectionOwner( QPaintDevice::x11AppDisplay(), qt_xdnd_selection,
++--- src/kernel/qapplication_x11.cpp.sav	2007-05-29 16:24:58.000000000 +0200
+++++ src/kernel/qapplication_x11.cpp	2007-05-31 10:30:58.000000000 +0200
++@@ -268,6 +268,11 @@ Atom		qt_net_wm_window_type_menu	= 0;
++ Atom		qt_net_wm_window_type_utility	= 0;
++ Atom            qt_net_wm_window_type_splash    = 0;
++ Atom            qt_net_wm_window_type_override	= 0;	// KDE extension
+++Atom            qt_net_wm_window_type_dropdown_menu = 0;
+++Atom            qt_net_wm_window_type_popup_menu    = 0;
+++Atom            qt_net_wm_window_type_tooltip   = 0;
+++Atom            qt_net_wm_window_type_combo     = 0;
+++Atom            qt_net_wm_window_type_dnd       = 0;
++ Atom		qt_net_wm_frame_strut		= 0;	// KDE extension
++ Atom		qt_net_wm_state_stays_on_top	= 0;	// KDE extension
++ Atom		qt_net_wm_pid		= 0;
++@@ -1920,6 +1925,11 @@ void qt_init_internal( int *argcptr, cha
++ 	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_UTILITY", &qt_net_wm_window_type_utility );
++ 	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_SPLASH", &qt_net_wm_window_type_splash );
++ 	qt_x11_intern_atom( "_KDE_NET_WM_WINDOW_TYPE_OVERRIDE", &qt_net_wm_window_type_override );
+++	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU", &qt_net_wm_window_type_dropdown_menu );
+++	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_POPUP_MENU", &qt_net_wm_window_type_popup_menu );
+++	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_TOOLTIP", &qt_net_wm_window_type_tooltip );
+++	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_COMBO", &qt_net_wm_window_type_combo );
+++	qt_x11_intern_atom( "_NET_WM_WINDOW_TYPE_DND", &qt_net_wm_window_type_dnd );
++ 	qt_x11_intern_atom( "_KDE_NET_WM_FRAME_STRUT", &qt_net_wm_frame_strut );
++ 	qt_x11_intern_atom( "_NET_WM_STATE_STAYS_ON_TOP",
++ 			    &qt_net_wm_state_stays_on_top );
++--- src/kernel/qwidget_x11.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/kernel/qwidget_x11.cpp	2007-05-31 10:30:58.000000000 +0200
++@@ -125,6 +125,11 @@ extern Atom qt_net_wm_window_type_menu;
++ extern Atom qt_net_wm_window_type_utility;
++ extern Atom qt_net_wm_window_type_splash;
++ extern Atom qt_net_wm_window_type_override;
+++extern Atom qt_net_wm_window_type_dropdown_menu;
+++extern Atom qt_net_wm_window_type_popup_menu;
+++extern Atom qt_net_wm_window_type_combo;
+++extern Atom qt_net_wm_window_type_dnd;
+++extern Atom qt_net_wm_window_type_tooltip;
++ extern Atom qt_net_wm_pid;
++ extern Atom qt_net_wm_user_time;
++ extern Atom qt_enlightenment_desktop;
++@@ -448,10 +453,6 @@ void QWidget::create( WId window, bool i
++ 					 x11Colormap() );
++ #endif // QT_NO_XFTFREETYPE
++ 
++-    // NET window types
++-    long net_wintypes[7] = { 0, 0, 0, 0, 0, 0, 0 };
++-    int curr_wintype = 0;
++-
++     // NET window states
++     long net_winstates[6] = { 0, 0, 0, 0, 0, 0 };
++     int curr_winstate = 0;
++@@ -473,7 +474,6 @@ void QWidget::create( WId window, bool i
++ 	if ( testWFlags(WStyle_Splash) ) {
++             if (qt_net_supports(qt_net_wm_window_type_splash)) {
++                 clearWFlags( WX11BypassWM );
++-                net_wintypes[curr_wintype++] = qt_net_wm_window_type_splash;
++ 	    } else {
++ 		setWFlags( WX11BypassWM | WStyle_Tool | WStyle_NoBorder );
++ 	    }
++@@ -482,27 +482,22 @@ void QWidget::create( WId window, bool i
++ 	    mwmhints.decorations = 0L;
++ 	    mwmhints.flags |= (1L << 1); // MWM_HINTS_DECORATIONS
++ 
++-	    if ( testWFlags( WStyle_NoBorder ) ) {
++-		// override netwm type - quick and easy for KDE noborder
++-		net_wintypes[curr_wintype++] = qt_net_wm_window_type_override;
++-	    } else {
++-		if ( testWFlags( WStyle_NormalBorder | WStyle_DialogBorder ) ) {
++-		    mwmhints.decorations |= (1L << 1); // MWM_DECOR_BORDER
++-		    mwmhints.decorations |= (1L << 2); //  MWM_DECOR_RESIZEH
++-		}
+++	    if ( testWFlags( WStyle_NormalBorder | WStyle_DialogBorder ) ) {
+++		mwmhints.decorations |= (1L << 1); // MWM_DECOR_BORDER
+++		mwmhints.decorations |= (1L << 2); //  MWM_DECOR_RESIZEH
+++	    }
++ 
++-		if ( testWFlags( WStyle_Title ) )
++-		    mwmhints.decorations |= (1L << 3); // MWM_DECOR_TITLE
+++	    if ( testWFlags( WStyle_Title ) )
+++		mwmhints.decorations |= (1L << 3); // MWM_DECOR_TITLE
++ 
++-		if ( testWFlags( WStyle_SysMenu ) )
++-		    mwmhints.decorations |= (1L << 4); // MWM_DECOR_MENU
+++	    if ( testWFlags( WStyle_SysMenu ) )
+++		mwmhints.decorations |= (1L << 4); // MWM_DECOR_MENU
++ 
++-		if ( testWFlags( WStyle_Minimize ) )
++-		    mwmhints.decorations |= (1L << 5); // MWM_DECOR_MINIMIZE
+++	    if ( testWFlags( WStyle_Minimize ) )
+++		mwmhints.decorations |= (1L << 5); // MWM_DECOR_MINIMIZE
++ 
++-		if ( testWFlags( WStyle_Maximize ) )
++-		    mwmhints.decorations |= (1L << 6); // MWM_DECOR_MAXIMIZE
++-	    }
+++	    if ( testWFlags( WStyle_Maximize ) )
+++		mwmhints.decorations |= (1L << 6); // MWM_DECOR_MAXIMIZE
++ 
++ 	    if (testWFlags(WStyle_Tool)) {
++ 		wsa.save_under = True;
++@@ -522,23 +517,6 @@ void QWidget::create( WId window, bool i
++ 	    }
++ 	}
++ 
++-	// ### need a better way to do this
++-	if (inherits("QPopupMenu")) {
++-	    // menu netwm type
++-	    net_wintypes[curr_wintype++] = qt_net_wm_window_type_menu;
++-	} else if (inherits("QToolBar")) {
++-	    // toolbar netwm type
++-	    net_wintypes[curr_wintype++] = qt_net_wm_window_type_toolbar;
++-	} else if (testWFlags(WStyle_Customize) && testWFlags(WStyle_Tool)) {
++-	    // utility netwm type
++-	    net_wintypes[curr_wintype++] = qt_net_wm_window_type_utility;
++-	}
++-
++-	if (dialog) // dialog netwm type
++-            net_wintypes[curr_wintype++] = qt_net_wm_window_type_dialog;
++-	// normal netwm type - default
++-	net_wintypes[curr_wintype++] = qt_net_wm_window_type_normal;
++-
++ 	// stays on top
++ 	if (testWFlags(WStyle_StaysOnTop)) {
++ 	    net_winstates[curr_winstate++] = qt_net_wm_state_above;
++@@ -573,6 +551,7 @@ void QWidget::create( WId window, bool i
++ 	wsa.save_under = True;
++ 	XChangeWindowAttributes( dpy, id, CWOverrideRedirect | CWSaveUnder,
++ 				 &wsa );
+++	x11SetWindowType();
++     } else if ( topLevel && !desktop ) {	// top-level widget
++ 	QWidget *p = parentWidget();	// real parent
++ 	if (p)
++@@ -632,12 +611,7 @@ void QWidget::create( WId window, bool i
++         else
++             XDeleteProperty(dpy, id, qt_xa_motif_wm_hints);
++ 
++-	// set _NET_WM_WINDOW_TYPE
++-	if (curr_wintype > 0)
++-	    XChangeProperty(dpy, id, qt_net_wm_window_type, XA_ATOM, 32, PropModeReplace,
++-			    (unsigned char *) net_wintypes, curr_wintype);
++-        else
++-            XDeleteProperty(dpy, id, qt_net_wm_window_type);
+++	x11SetWindowType();
++ 
++ 	// set _NET_WM_WINDOW_STATE
++ 	if (curr_winstate > 0)
++@@ -896,6 +870,64 @@ void QWidget::reparentSys( QWidget *pare
++ 	setMouseTracking(mouse_tracking);
++ }
++ 
+++// Sets the EWMH (netwm) window type. Needed as a separate function
+++// because create() may be too soon in some cases.
+++void QWidget::x11SetWindowType( X11WindowType type )
+++{
+++    // NET window types
+++    long net_wintypes[7] = { 0, 0, 0, 0, 0, 0, 0 };
+++    int curr_wintype = 0;
+++    if( testWFlags(WType_Desktop))
+++        return;
+++    if( type == X11WindowTypeSelect ) {
+++        if ( testWFlags(WStyle_Splash)) {
+++            if (qt_net_supports(qt_net_wm_window_type_splash)) {
+++                net_wintypes[curr_wintype++] = qt_net_wm_window_type_splash;
+++            }
+++        } else if (inherits("QToolBar")) {
+++	    // toolbar netwm type
+++	    net_wintypes[curr_wintype++] = qt_net_wm_window_type_toolbar;
+++        } else if (testWFlags(WStyle_Customize) && testWFlags(WStyle_Tool)) {
+++	    // utility netwm type
+++	    net_wintypes[curr_wintype++] = qt_net_wm_window_type_utility;
+++        } else if (testWFlags(WType_Dialog)) {
+++            // dialog netwm type
+++            net_wintypes[curr_wintype++] = qt_net_wm_window_type_dialog;
+++        }
+++    } else if( type == X11WindowTypeCombo ) {
+++        // combo netwm type
+++	net_wintypes[curr_wintype++] = qt_net_wm_window_type_combo;
+++    } else if( type == X11WindowTypeDND ) {
+++        // dnd netwm type
+++    	net_wintypes[curr_wintype++] = qt_net_wm_window_type_dnd;
+++    } else if( type == X11WindowTypeDropdown ) {
+++        // dropdown netwm type
+++    	net_wintypes[curr_wintype++] = qt_net_wm_window_type_dropdown_menu;
+++    } else if( type == X11WindowTypePopup ) {
+++        // popup netwm type
+++    	net_wintypes[curr_wintype++] = qt_net_wm_window_type_popup_menu;
+++    } else if( type == X11WindowTypeMenu ) {
+++        // menu netwm type
+++	net_wintypes[curr_wintype++] = qt_net_wm_window_type_menu;
+++    } else if( type == X11WindowTypeTooltip ) {
+++        // tooltip netwm type
+++    	net_wintypes[curr_wintype++] = qt_net_wm_window_type_tooltip;
+++    }
+++
+++    // normal netwm type - default
+++    net_wintypes[curr_wintype++] = qt_net_wm_window_type_normal;
+++    // set _NET_WM_WINDOW_TYPE
+++    if (curr_wintype > 0)
+++        XChangeProperty(x11Display(), winId(), qt_net_wm_window_type, XA_ATOM, 32, PropModeReplace,
+++			(unsigned char *) net_wintypes, curr_wintype);
+++    else
+++        XDeleteProperty(x11Display(), winId(), qt_net_wm_window_type);
+++}
+++
+++void QWidget::x11SetWindowTransient( QWidget* parent )
+++{
+++    XSetTransientForHint( x11Display(), winId(), parent->winId());
+++}
++ 
++ /*!
++     Translates the widget coordinate \a pos to global screen
++--- src/kernel/qwidget.h.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/kernel/qwidget.h	2007-05-31 10:30:58.000000000 +0200
++@@ -464,7 +464,19 @@ public:
++     CGContextRef macCGContext(bool clipped=TRUE) const;
++ #endif
++ #endif
++-
+++#if defined(Q_WS_X11)
+++    enum X11WindowType {
+++        X11WindowTypeSelect,
+++        X11WindowTypeCombo,
+++        X11WindowTypeDND,
+++        X11WindowTypeTooltip,
+++        X11WindowTypeMenu, // torn-off
+++        X11WindowTypeDropdown,
+++        X11WindowTypePopup
+++    };
+++    void x11SetWindowType( X11WindowType type = X11WindowTypeSelect );
+++    void x11SetWindowTransient( QWidget* parent );
+++#endif
++     void setWindowOpacity(double level);
++     double windowOpacity() const;
++ 
++--- src/dialogs/qdialog.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/dialogs/qdialog.cpp	2007-05-31 10:30:58.000000000 +0200
++@@ -668,10 +668,6 @@ bool QDialog::event( QEvent *e )
++   Geometry management.
++  *****************************************************************************/
++ 
++-#if defined(Q_WS_X11)
++-extern "C" { int XSetTransientForHint( Display *, unsigned long, unsigned long ); }
++-#endif // Q_WS_X11
++-
++ /*!
++     Shows the dialog as a \link #modeless modeless \endlink dialog.
++     Control returns immediately to the calling code.
++@@ -705,7 +701,7 @@ void QDialog::show()
++ 	&& qApp->mainWidget() && qApp->mainWidget()->isVisible()
++ 	&& !qApp->mainWidget()->isMinimized()) {
++ 	// make sure the transient for hint is set properly for modal dialogs
++-        XSetTransientForHint( x11Display(), winId(), qApp->mainWidget()->winId() );
+++        x11SetWindowTransient( qApp->mainWidget());
++     }
++ #endif // Q_WS_X11
++ 
++--- src/widgets/qtooltip.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/widgets/qtooltip.cpp	2007-05-31 10:30:58.000000000 +0200
++@@ -72,6 +72,7 @@ public:
++ 	polish();
++ 	setText(text);
++ 	adjustSize();
+++        x11SetWindowType( X11WindowTypeTooltip );
++     }
++     void setWidth( int w ) { resize( sizeForWidth( w ) ); }
++ };
++@@ -528,6 +529,10 @@ void QTipManager::showTip()
++     if (!widget)
++ 	return;
++ 
+++#ifdef Q_WS_X11
+++    label->x11SetWindowTransient( widget->topLevelWidget());
+++#endif
+++
++ #ifdef Q_WS_MAC
++     QRect screen = QApplication::desktop()->availableGeometry( scr );
++ #else
++--- src/widgets/qcombobox.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/widgets/qcombobox.cpp	2007-05-31 10:49:13.000000000 +0200
++@@ -389,12 +389,8 @@ public:
++     inline QListBox * listBox() { return lBox; }
++     inline QComboBoxPopup * popup() { return pop; }
++     void updateLinedGeometry();
++-
++-    void setListBox( QListBox *l ) { lBox = l ; usingLBox = TRUE;
++-				l->setMouseTracking( TRUE );}
++-
++-    void setPopupMenu( QComboBoxPopup * pm, bool isPopup=TRUE )
++-	{ pop = pm; if(isPopup) usingLBox = FALSE; }
+++    void setListBox( QListBox *l );
+++    void setPopupMenu( QComboBoxPopup * pm, bool isPopup=TRUE );
++ 
++     int		current;
++     int		maxCount;
++@@ -440,6 +436,30 @@ void QComboBoxData::updateLinedGeometry(
++ 	ed->setGeometry( r );
++ }
++ 
+++void QComboBoxData::setListBox( QListBox *l )
+++{
+++    lBox = l;
+++    usingLBox = TRUE;
+++    l->setMouseTracking( TRUE );
+++#ifdef Q_WS_X11
+++    l->x11SetWindowType( QWidget::X11WindowTypeCombo );
+++    l->x11SetWindowTransient( combo->topLevelWidget());
+++#endif
+++}
+++
+++void QComboBoxData::setPopupMenu( QComboBoxPopup * pm, bool isPopup )
+++{
+++    pop = pm;
+++    if(isPopup)
+++        usingLBox = FALSE;
+++#ifdef Q_WS_X11
+++    if( pm ) {
+++        pm->x11SetWindowType( QWidget::X11WindowTypeCombo );
+++        pm->x11SetWindowTransient( combo->topLevelWidget());
+++    }
+++#endif
+++}
+++
++ static inline bool checkInsertIndex( const char *method, const char * name,
++ 				     int count, int *index)
++ {
++--- src/widgets/qpopupmenu.cpp.sav	2007-05-25 18:56:23.000000000 +0200
+++++ src/widgets/qpopupmenu.cpp	2007-05-31 11:09:22.000000000 +0200
++@@ -298,6 +298,9 @@ QPopupMenu::QPopupMenu( QWidget *parent,
++     connectModalRecursionSafety = 0;
++ 
++     setFocusPolicy( StrongFocus );
+++#ifdef Q_WS_X11
+++    x11SetWindowType( X11WindowTypePopup );
+++#endif
++ }
++ 
++ /*!
++@@ -537,6 +540,29 @@ void QPopupMenu::popup( const QPoint &po
++ 	emit aboutToShow();
++ 	updateSize(TRUE);
++     }
+++#ifdef Q_WS_X11
+++#ifndef QT_NO_MENUBAR
+++    QMenuData *top = this;		// find top level
+++    while ( top->parentMenu )
+++	top = top->parentMenu;
+++    if( top->isMenuBar )
+++        x11SetWindowType( X11WindowTypeDropdown );
+++    if( parentMenu && parentMenu->isMenuBar )
+++        x11SetWindowTransient( static_cast< QMenuBar* >( parentMenu )->topLevelWidget());
+++#endif
+++    if( parentMenu && !parentMenu->isMenuBar )
+++        x11SetWindowTransient( static_cast< QPopupMenu* >( parentMenu ));
+++    if( !parentMenu ) {
+++        // hackish ... try to find the main window related to this popup
+++        QWidget* parent = parentWidget() ? parentWidget()->topLevelWidget() : NULL;
+++        if( parent == NULL )
+++            parent = QApplication::widgetAt( pos );
+++        if( parent == NULL )
+++            parent = qApp->activeWindow();
+++        if( parent != NULL )
+++            x11SetWindowTransient( parent );
+++    }
+++#endif
++ 
++     int sw = screen.width();			// screen width
++     int sh = screen.height();			// screen height
++@@ -1390,6 +1416,13 @@ void QPopupMenu::hide()
++ #if defined(QT_ACCESSIBILITY_SUPPORT)
++     QAccessible::updateAccessibility( this, 0, QAccessible::PopupMenuEnd );
++ #endif
+++#ifndef QT_NO_MENUBAR
+++    QMenuData *top = this;		// find top level
+++    while ( top->parentMenu )
+++	top = top->parentMenu;
+++    if( top->isMenuBar )
+++        x11SetWindowType( X11WindowTypePopup ); // reset
+++#endif
++     parentMenu = 0;
++     hidePopups();
++     QWidget::hide();
++@@ -2713,6 +2746,9 @@ void QPopupMenu::toggleTearOff()
++ 		     geometry().topLeft(), FALSE );
++ 	p->mitems->setAutoDelete( FALSE );
++ 	p->tornOff = TRUE;
+++#ifdef Q_WS_X11
+++        p->x11SetWindowType( X11WindowTypeMenu );
+++#endif
++ 	for ( QMenuItemListIt it( *mitems ); it.current(); ++it ) {
++ 	    if ( it.current()->id() != QMenuData::d->aInt && !it.current()->widget() )
++ 		p->mitems->append( it.current() );
+diff -rNu qt-x11-free/patches/0080-net-wm-sync-request.patch qt-copy/patches/0080-net-wm-sync-request.patch
+--- qt-x11-free/patches/0080-net-wm-sync-request.patch	1970-01-01 03:00:00.000000000 +0300
++++ qt-copy/patches/0080-net-wm-sync-request.patch	2007-06-25 12:38:45.685036000 +0400
+@@ -0,0 +1,307 @@
++qt-bugs@ issue : none
++bugs.kde.org number : none
++applied: no
++author: Lubos Lunak <l.lunak@kde.org>
++
++Support for _NET_WM_SYNC_REQUEST - allows the WM to find out when the app
++finished one redraw - less flicker during resize and with compositing
++also when opening a window.
++
++--- src/kernel/qwidget.h.sav	2007-06-22 14:14:05.000000000 +0200
+++++ src/kernel/qwidget.h	2007-06-23 11:53:39.000000000 +0200
++@@ -586,6 +586,14 @@ private:
++     void	 destroyInputContext();
++     void	 focusInputContext();
++     void	 checkChildrenDnd();
+++
+++#ifndef QT_NO_XSYNC
+++    void        createSyncCounter();
+++    void        destroySyncCounter();
+++    void        incrementSyncCounter();
+++    void        handleSyncRequest( void* ev );
+++#endif
+++
++ #elif defined(Q_WS_MAC)
++     uint    own_id : 1, macDropEnabled : 1;
++     EventHandlerRef window_event;
++@@ -962,6 +970,10 @@ struct Q_EXPORT QTLWExtra {
++     uint     uspos : 1;				// User defined position
++     uint     ussize : 1;			// User defined size
++     void    *xic;				// XIM Input Context
+++#ifndef QT_NO_XSYNC
+++    ulong    syncCounter;
+++    uint     syncRequestValue[2];
+++#endif
++ #endif
++ #if defined(Q_WS_MAC)
++     WindowGroupRef group;
++--- src/kernel/qt_x11_p.h.sav	2007-02-23 14:01:18.000000000 +0100
+++++ src/kernel/qt_x11_p.h	2007-06-23 11:53:39.000000000 +0200
++@@ -174,6 +174,11 @@ extern "C" {
++ #endif // QT_NO_XRENDER
++ 
++ 
+++#ifndef QT_NO_XSYNC
+++#  include <X11/extensions/sync.h>
+++#endif // QT_NO_XSYNC
+++
+++
++ #ifndef QT_NO_XKB
++ #  include <X11/XKBlib.h>
++ #endif // QT_NO_XKB
++--- src/kernel/qwidget_x11.cpp.sav	2007-04-16 13:47:26.000000000 +0200
+++++ src/kernel/qwidget_x11.cpp	2007-06-23 19:48:44.000000000 +0200
++@@ -87,6 +87,12 @@ static QWidget *keyboardGrb = 0;
++ extern Time qt_x_time;
++ extern Time qt_x_user_time;
++ 
+++#ifndef QT_NO_XSYNC
+++extern Atom qt_net_wm_sync_request_counter;
+++extern Atom qt_net_wm_sync_request;
+++extern bool qt_use_xsync;
+++#endif
+++
++ // defined in qfont_x11.cpp
++ extern bool qt_has_xft;
++ 
++@@ -595,11 +601,14 @@ void QWidget::create( WId window, bool i
++ 
++ 	XResizeWindow( dpy, id, crect.width(), crect.height() );
++ 	XStoreName( dpy, id, qAppName() );
++-	Atom protocols[4];
+++	Atom protocols[5];
++ 	int n = 0;
++ 	protocols[n++] = qt_wm_delete_window;	// support del window protocol
++ 	protocols[n++] = qt_wm_take_focus;	// support take focus window protocol
++ 	protocols[n++] = qt_net_wm_ping;	// support _NET_WM_PING protocol
+++#ifndef QT_NO_XSYNC
+++	protocols[n++] = qt_net_wm_sync_request;// support the _NET_WM_SYNC_REQUEST protocol
+++#endif
++ 	if ( testWFlags( WStyle_ContextHelp ) )
++ 	    protocols[n++] = qt_net_wm_context_help;
++ 	XSetWMProtocols( dpy, id, protocols, n );
++@@ -625,6 +634,14 @@ void QWidget::create( WId window, bool i
++ 	XChangeProperty(dpy, id, qt_net_wm_pid, XA_CARDINAL, 32, PropModeReplace,
++ 			(unsigned char *) &curr_pid, 1);
++ 
+++#ifndef QT_NO_XSYNC
+++        // set _NET_WM_SYNC_COUNTER
+++        createSyncCounter();
+++        long counterVal = topData()->syncCounter;
+++        XChangeProperty( dpy, id, qt_net_wm_sync_request_counter, XA_CARDINAL, 32, PropModeReplace,
+++                         (unsigned char*) &counterVal, 1);
+++#endif
+++
++ 	// when we create a toplevel widget, the frame strut should be dirty
++ 	fstrut_dirty = 1;
++ 
++@@ -720,6 +737,9 @@ void QWidget::destroy( bool destroyWindo
++ 	    if ( destroyWindow )
++ 		qt_XDestroyWindow( this, x11Display(), winid );
++ 	}
+++#ifndef QT_NO_XSYNC
+++        destroySyncCounter();
+++#endif
++ 	setWinId( 0 );
++ 
++ 	extern void qPRCleanup( QWidget *widget ); // from qapplication_x11.cpp
++@@ -769,6 +789,10 @@ void QWidget::reparentSys( QWidget *pare
++         destroyInputContext();
++     }
++ 
+++#ifndef QT_NO_XSYNC
+++    destroySyncCounter();
+++#endif
+++
++     if ( isTopLevel() || !parent ) // we are toplevel, or reparenting to toplevel
++         topData()->parentWinId = 0;
++ 
++@@ -2456,6 +2480,11 @@ void QWidget::createTLSysExtra()
++ {
++     // created lazily
++     extra->topextra->xic = 0;
+++#ifndef QT_NO_XSYNC
+++    extra->topextra->syncCounter = 0;
+++    extra->topextra->syncRequestValue[0] = 0;
+++    extra->topextra->syncRequestValue[1] = 0;
+++#endif
++ }
++ 
++ void QWidget::deleteTLSysExtra()
++@@ -2501,6 +2530,51 @@ void QWidget::checkChildrenDnd()
++     }
++ }
++ 
+++
+++#ifndef QT_NO_XSYNC
+++// create a window's XSyncCounter
+++void QWidget::createSyncCounter()
+++{
+++    if( !qt_use_xsync || !isTopLevel() || topData()->syncCounter )
+++        return;
+++    XSyncValue zero;
+++    XSyncIntToValue( &zero, 0 );
+++    topData()->syncCounter = XSyncCreateCounter( x11Display(), zero );
+++}
+++
+++// destroy a window's XSyncCounter
+++void QWidget::destroySyncCounter()
+++{
+++    if( !qt_use_xsync || !extra || !extra->topextra
+++        || !extra->topextra->syncCounter )
+++        return;
+++    XSyncDestroyCounter( x11Display(), extra->topextra->syncCounter );
+++    extra->topextra->syncCounter = 0;
+++}
+++
+++// increment a window's XSyncCounter
+++void QWidget::incrementSyncCounter()
+++{
+++    if( qt_use_xsync && topData()->syncCounter &&
+++        !(topData()->syncRequestValue[0] == 0 &&
+++         topData()->syncRequestValue[1] == 0) ) {
+++        XSyncValue val;
+++        XSyncIntsToValue( &val, topData()->syncRequestValue[ 0 ], topData()->syncRequestValue[ 1 ] );
+++        XSyncSetCounter( x11Display(), topData()->syncCounter, val );
+++        topData()->syncRequestValue[0] = topData()->syncRequestValue[1] = 0;
+++    }
+++}
+++
+++// handle _NET_WM_SYNC_REQUEST
+++void QWidget::handleSyncRequest( void* ev )
+++{
+++    XEvent* xev = (XEvent*)ev;
+++    topData()->syncRequestValue[ 0 ] = xev->xclient.data.l[ 2 ];
+++    topData()->syncRequestValue[ 1 ] = xev->xclient.data.l[ 3 ];
+++}
+++#endif  // QT_NO_XSYNC
+++
+++
++ /*!
++     \property QWidget::acceptDrops
++     \brief whether drop events are enabled for this widget
++--- src/kernel/qapplication_x11.cpp.sav	2007-04-16 13:47:26.000000000 +0200
+++++ src/kernel/qapplication_x11.cpp	2007-06-23 19:49:15.000000000 +0200
++@@ -285,6 +285,11 @@ Atom		*qt_net_supported_list	= 0;
++ Window		*qt_net_virtual_root_list	= 0;
++ 
++ 
+++// X11 SYNC support
+++#ifndef QT_NO_XSYNC
+++Atom		qt_net_wm_sync_request_counter	= 0;
+++Atom		qt_net_wm_sync_request     	= 0;
+++#endif
++ 
++ // client leader window
++ Window qt_x11_wm_client_leader = 0;
++@@ -309,6 +314,13 @@ static int xrandr_eventbase;
++ // Display
++ Q_EXPORT bool qt_use_xrender = FALSE;
++ 
+++#ifndef QT_NO_XSYNC
+++// True if SYNC extension exists on the connected display
+++bool qt_use_xsync = FALSE;
+++static int xsync_eventbase;
+++static int xsync_errorbase;
+++#endif
+++
++ // modifier masks for alt/meta - detected when the application starts
++ static long qt_alt_mask = 0;
++ static long qt_meta_mask = 0;
++@@ -1938,6 +1950,11 @@ void qt_init_internal( int *argcptr, cha
++ 	qt_x11_intern_atom( "UTF8_STRING", &qt_utf8_string );
++         qt_x11_intern_atom( "_SGI_DESKS_MANAGER", &qt_sgi_desks_manager );
++ 
+++#ifndef QT_NO_XSYNC
+++	qt_x11_intern_atom( "_NET_WM_SYNC_REQUEST_COUNTER", &qt_net_wm_sync_request_counter );
+++	qt_x11_intern_atom( "_NET_WM_SYNC_REQUEST", &qt_net_wm_sync_request );
+++#endif
+++
++ 	qt_xdnd_setup();
++ 	qt_x11_motifdnd_init();
++ 
++@@ -1974,6 +1991,15 @@ void qt_init_internal( int *argcptr, cha
++ 	}
++ #endif // QT_NO_XRENDER
++ 
+++#ifndef QT_NO_XSYNC
+++	// Try to initialize SYNC extension on the connected display
+++	int xsync_major, xsync_minor;
+++	if ( XSyncQueryExtension( appDpy, &xsync_eventbase, &xsync_errorbase ) && 
+++	     XSyncInitialize( appDpy, &xsync_major,  &xsync_minor ) ) {
+++	     qt_use_xsync = TRUE;
+++	}
+++#endif 
+++
++ #ifndef QT_NO_XKB
++ 	// If XKB is detected, set the GrabsUseXKBState option so input method
++ 	// compositions continue to work (ie. deadkeys)
++@@ -3141,6 +3167,10 @@ int QApplication::x11ClientMessage(QWidg
++ 		    XSendEvent( event->xclient.display, event->xclient.window,
++ 				False, SubstructureNotifyMask|SubstructureRedirectMask, event );
++ 		}
+++#ifndef QT_NO_XSYNC
+++	    } else if (a == qt_net_wm_sync_request ) {
+++		    widget->handleSyncRequest( event );
+++#endif
++ 	    }
++ 	} else if ( event->xclient.message_type == qt_qt_scrolldone ) {
++ 	    widget->translateScrollDoneEvent(event);
++@@ -5681,6 +5711,21 @@ bool QETWidget::translateScrollDoneEvent
++     return FALSE;
++ }
++ 
+++#if defined(Q_C_CALLBACKS)
+++extern "C" {
+++#endif
+++#ifndef QT_NO_XSYNC
+++static Bool qt_net_wm_sync_request_scanner(Display*, XEvent* event, XPointer arg)
+++{
+++    return (event->type == ClientMessage && event->xclient.window == *(Window*)arg
+++        && event->xclient.message_type == qt_wm_protocols
+++        && event->xclient.data.l[ 0 ] == qt_net_wm_sync_request );
+++}
+++#endif
+++
+++#if defined(Q_C_CALLBACKS)
+++}
+++#endif
++ 
++ //
++ // ConfigureNotify (window move and resize) event translation
++@@ -5712,6 +5757,7 @@ bool QETWidget::translateConfigEvent( co
++         if (! extra || extra->compress_events) {
++             // ConfigureNotify compression for faster opaque resizing
++             XEvent otherEvent;
+++            int compressed_configs = 0;
++             while ( XCheckTypedWindowEvent( x11Display(), winId(), ConfigureNotify,
++                                             &otherEvent ) ) {
++                 if ( qt_x11EventFilter( &otherEvent ) )
++@@ -5732,7 +5778,18 @@ bool QETWidget::translateConfigEvent( co
++                     newCPos.ry() = otherEvent.xconfigure.y +
++                                    otherEvent.xconfigure.border_width;
++                 }
+++                ++compressed_configs;
+++            }
+++#ifndef QT_NO_XSYNC
+++            // _NET_WM_SYNC_REQUEST compression 
+++            Window wid = winId();
+++            while ( compressed_configs &&
+++                    XCheckIfEvent( x11Display(), &otherEvent,
+++                    qt_net_wm_sync_request_scanner, (XPointer)&wid ) ) {
+++                handleSyncRequest( (void*)&otherEvent );
+++                --compressed_configs;
++             }
+++#endif
++         }
++ 
++ 	QRect cr ( geometry() );
++@@ -5786,6 +5843,8 @@ bool QETWidget::translateConfigEvent( co
++ 	repaint( !testWFlags(WResizeNoErase) || transbg );
++     }
++ 
+++    incrementSyncCounter();
+++
++     return TRUE;
++ }
++ 
+diff -rNu qt-x11-free/patches/0081-format-string-fixes.diff qt-copy/patches/0081-format-string-fixes.diff
+--- qt-x11-free/patches/0081-format-string-fixes.diff	1970-01-01 03:00:00.000000000 +0300
++++ qt-copy/patches/0081-format-string-fixes.diff	2007-07-30 13:44:00.522079000 +0400
+@@ -0,0 +1,197 @@
++qt-bugs@ issue : none
++bugs.kde.org number : none
++applied: no
++author: Dirk Mueller/TT
++
++Fixes various, partially exploitable format string errors on Qt 3.x code base.
++
++
++--- src/widgets/qtextedit.cpp	Mon Jul 16 10:44:40 CEST 2007
+++++ src/widgets/qtextedit.cpp	Mon Jul 16 10:44:40 CEST 2007
++
++@@ -6349,7 +6349,7 @@
++ 		    cur = tag->prev;
++ 		    if ( !cur ) {
++ #ifdef QT_CHECK_RANGE
++-			qWarning( "QTextEdit::optimParseTags: no left-tag for '<" + tag->tag + ">' in line %d.", tag->line + 1 );
+++			qWarning( "QTextEdit::optimParseTags: no left-tag for '<%s>' in line %d.", tag->tag.ascii(), tag->line + 1 );
++ #endif
++ 			return; // something is wrong - give up
++ 		    }
++@@ -6372,7 +6372,7 @@
++ 				    break;
++ 				} else if ( !cur->leftTag ) {
++ #ifdef QT_CHECK_RANGE
++-				    qWarning( "QTextEdit::optimParseTags: mismatching %s-tag for '<" + cur->tag + ">' in line %d.", cur->tag[0] == '/' ? "left" : "right", cur->line + 1 );
+++				    qWarning( "QTextEdit::optimParseTags: mismatching %s-tag for '<%s>' in line %d.", cur->tag[0] == '/' ? "left" : "right", cur->tag.ascii(), cur->line + 1 );
++ #endif
++ 				    return; // something is amiss - give up
++ 				}
++--- src/sql/qdatatable.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/sql/qdatatable.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -1043,8 +1043,8 @@
++ 	return FALSE;
++     if ( !sqlCursor()->canInsert() ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning("QDataTable::insertCurrent: insert not allowed for " +
++-		 sqlCursor()->name() );
+++	qWarning("QDataTable::insertCurrent: insert not allowed for %s",
+++		 sqlCursor()->name().latin1() );
++ #endif
++ 	endInsert();
++ 	return FALSE;
++@@ -1117,16 +1117,16 @@
++ 	return FALSE;
++     if ( sqlCursor()->primaryIndex().count() == 0 ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning("QDataTable::updateCurrent: no primary index for " +
++-		 sqlCursor()->name() );
+++	qWarning("QDataTable::updateCurrent: no primary index for %s",
+++		 sqlCursor()->name().latin1() );
++ #endif
++ 	endUpdate();
++ 	return FALSE;
++     }
++     if ( !sqlCursor()->canUpdate() ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning("QDataTable::updateCurrent: updates not allowed for " +
++-		 sqlCursor()->name() );
+++	qWarning("QDataTable::updateCurrent: updates not allowed for %s",
+++		 sqlCursor()->name().latin1() );
++ #endif
++ 	endUpdate();
++ 	return FALSE;
++@@ -1191,8 +1191,8 @@
++ 	return FALSE;
++     if ( sqlCursor()->primaryIndex().count() == 0 ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning("QDataTable::deleteCurrent: no primary index " +
++-		 sqlCursor()->name() );
+++	qWarning("QDataTable::deleteCurrent: no primary index %s",
+++		 sqlCursor()->name().latin1() );
++ #endif
++ 	return FALSE;
++     }
++
++--- src/sql/qsqldatabase.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/sql/qsqldatabase.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -234,7 +234,8 @@
++ 	db->open();
++ #ifdef QT_CHECK_RANGE
++ 	if ( !db->isOpen() )
++-	    qWarning("QSqlDatabaseManager::database: unable to open database: " + db->lastError().databaseText() + ": " + db->lastError().driverText() );
+++	    qWarning("QSqlDatabaseManager::database: unable to open database: %s: %s",
+++                    db->lastError().databaseText().latin1(), db->lastError().driverText().latin1() );
++ #endif
++     }
++     return db;
++@@ -686,7 +687,7 @@
++     if ( !d->driver ) {
++ #ifdef QT_CHECK_RANGE
++ 	qWarning( "QSqlDatabase: %s driver not loaded", type.latin1() );
++-	qWarning( "QSqlDatabase: available drivers: " + drivers().join(" ") );
+++	qWarning( "QSqlDatabase: available drivers: %s", drivers().join(" ").latin1() );
++ #endif
++ 	d->driver = new QNullDriver();
++ 	d->driver->setLastError( QSqlError( "Driver not loaded", "Driver not loaded" ) );
++
++--- src/sql/qsqlindex.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/sql/qsqlindex.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -273,7 +273,7 @@
++ 	if ( field )
++ 	    newSort.append( *field, desc );
++ 	else
++-	    qWarning( "QSqlIndex::fromStringList: unknown field: '" + f + "'" );
+++	    qWarning( "QSqlIndex::fromStringList: unknown field: '%s'", f.latin1());
++     }
++     return newSort;
++ }
++
++--- src/sql/qsqlrecord.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/sql/qsqlrecord.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -298,7 +298,7 @@
++ 	    return i;
++     }
++ #ifdef QT_CHECK_RANGE
++-    qWarning( "QSqlRecord::position: unable to find field " + name );
+++    qWarning( "QSqlRecord::position: unable to find field %s", name.latin1() );
++ #endif
++     return -1;
++ }
++@@ -313,7 +313,7 @@
++     checkDetach();
++     if ( !sh->d->contains( i ) ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning( "QSqlRecord::field: index out of range: " + QString::number( i ) );
+++	qWarning( "QSqlRecord::field: index out of range: %d", i );
++ #endif
++ 	return 0;
++     }
++@@ -344,7 +344,7 @@
++ {
++     if ( !sh->d->contains( i ) ) {
++ #ifdef QT_CHECK_RANGE
++-	qWarning( "QSqlRecord::field: index out of range: " + QString::number( i ) );
+++	qWarning( "QSqlRecord::field: index out of range: %d", i  );
++ #endif // QT_CHECK_RANGE
++ 	return 0;
++     }
++
++--- src/tools/qglobal.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/tools/qglobal.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -680,7 +680,7 @@
++     if ( code != -1 )
++ 	qWarning( "%s\n\tError code %d - %s", msg, code, strerror( code ) );
++     else
++-	qWarning( msg );
+++	qWarning( "%s", msg );
++ #endif
++ #else
++     Q_UNUSED( msg );
++
++--- src/xml/qsvgdevice.cpp	Mon Jul 16 10:45:03 CEST 2007
+++++ src/xml/qsvgdevice.cpp	Mon Jul 16 10:45:03 CEST 2007
++
++@@ -978,7 +978,7 @@
++ 		// ### catch references to embedded .svg files
++ 		QPixmap pix;
++ 		if ( !pix.load( href ) ) {
++-		    qWarning( "QSvgDevice::play: Couldn't load image "+href );
+++		    qWarning( "QSvgDevice::play: Couldn't load image %s", href.latin1() );
++ 		    break;
++ 		}
++ 		pt->drawPixmap( QRect( x1, y1, w, h ), pix );
++@@ -1024,8 +1024,8 @@
++                 break;
++ 	    }
++ 	case InvalidElement:
++-	    qWarning( "QSvgDevice::play: unknown element type " +
++-		      node.nodeName() );
+++	    qWarning( "QSvgDevice::play: unknown element type %s",
+++		      node.nodeName().latin1() );
++ 	    break;
++ 	};
++ 
++@@ -1111,7 +1111,7 @@
++ {
++     QRegExp reg( QString::fromLatin1("([+-]?\\d*\\.*\\d*[Ee]?[+-]?\\d*)(em|ex|px|%|pt|pc|cm|mm|in|)$") );
++     if ( reg.search( str ) == -1 ) {
++-	qWarning( "QSvgDevice::parseLen: couldn't parse " + str );
+++	qWarning( "QSvgDevice::parseLen: couldn't parse %s ", str.latin1() );
++ 	if ( ok )
++ 	    *ok = FALSE;
++ 	return 0.0;
++@@ -1140,7 +1140,7 @@
++ 	else if ( u == "pc" )
++ 	    dbl *= m.logicalDpiX() / 6.0;
++ 	else
++-	    qWarning( "QSvgDevice::parseLen: Unknown unit " + u );
+++	    qWarning( "QSvgDevice::parseLen: Unknown unit %s",  u.latin1() );
++     }
++     if ( ok )
++ 	*ok = TRUE;
 diff -rNu qt-x11-free/patches/DISABLED qt-copy/patches/DISABLED
 --- qt-x11-free/patches/DISABLED	1970-01-01 03:00:00.000000000 +0300
 +++ qt-copy/patches/DISABLED	2006-01-27 13:52:46.560582000 +0300
@@ -3479,10 +4493,10 @@ diff -rNu qt-x11-free/patches/notsafe/0025-tenfold_qstring_multiarg.patch qt-cop
 + inline int QString::find( char c, int index, bool cs ) const
 diff -rNu qt-x11-free/patches/README qt-copy/patches/README
 --- qt-x11-free/patches/README	1970-01-01 03:00:00.000000000 +0300
-+++ qt-copy/patches/README	2007-03-29 19:28:19.824529000 +0400
++++ qt-copy/patches/README	2007-07-30 13:44:00.522079000 +0400
 @@ -0,0 +1,38 @@
 +Please assign the numbers incrementally, and don't reuse them. The next one:
-+#0078
++#0082
 +
 +This directory contains patches for Qt that haven't been accepted by TrollTech
 +yet. All patches in this directory itself shouldn't make qt-copy incompatible
