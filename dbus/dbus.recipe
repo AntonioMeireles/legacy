@@ -4,44 +4,44 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Dbus(AutoPackageRecipe):
+loadRecipe('rpmpackage')
+class Dbus(RPMPackageRecipe,AutoPackageRecipe):
     name = 'dbus'
-    version = '1.1.0'
+    version = '1.1.2'
+    rpmRelease = '2.fc8'
+    rpmPatches = ['dbus-0.60-start-early.patch',
+                  'dbus-1.0.1-generate-xml-docs.patch',
+                  'dbus-1.0.2-lsb.patch']
 
-    buildRequires = [ 'expat:devel', 'pkgconfig:devel',
-        'file:runtime', 'libX11:devel', 'imake:runtime', 'libICE:devel',
-        'libSM:devel', ]
+    buildRequires = [
+        'doxygen:runtime', 'expat:devel', 'pkgconfig:devel', 'xmlto:runtime', 'libICE:devel', 'libSM:devel', 'libX11:devel' , 'audit:devel', 'libcap:devel']
 
-    def unpack(r):
-        r.macros.dbus_user = 'dbus'
-        r.addArchive('http://dbus.freedesktop.org/releases/dbus/')
-        r.addSource('dbus.sh')
-
-        r.Replace('<user>.*</user>', '<user>%(dbus_user)s</user>',
-                  'bus/system.conf*')
-        r.Replace('# chkconfig: 345 97 03', '# chkconfig: 345 08 03',
-                  'bus/messagebus.in')
 
     def configure(r):
-        r.Configure('--disable-tests --disable-asserts --disable-verbose-mode '
-            '--with-init-scripts=redhat '
-            '--with-system-pid-file=%(localstatedir)s/run/messagebus.pid '
-            '--disable-xml-docs --disable-doxygen-docs')
+        r.Run('autoreconf -f -i')
+        # rPL's default dbus user is dbus. we mantain that for compatibility.
+        # should be 'messagebus' ?.
+
+        r.macros.dbus_user = 'dbus'
+        r.Configure(' --disable-selinux'
+                    ' --disable-tests '
+                    ' --with-dbus-user=%(dbus_user)s'
+                    ' --disable-asserts '
+                    ' --disable-verbose-mode '
+                    ' --with-init-scripts=redhat '
+                    ' --with-system-pid-file=%(localstatedir)s/run/messagebus.pid')
 
     def policy(r):
 
         r.MakeDirs('%(localstatedir)s/run/dbus')
-        r.MakeDirs('%(localstatedir)s/lib/dbus')
         r.MakeDirs('%(datadir)s/dbus-1/services')
-        r.Install('dbus.sh', '%(sysconfdir)s/X11/xinit/xinitrc.d/dbus.sh')
+        r.MakeDirs('%(sysconfdir)s/dbus-1/session.d')
 
         r.ExcludeDirectories(exceptions=['%(datadir)s/dbus-1/services'])
         r.ExcludeDirectories(exceptions=['%(sysconfdir)s/dbus-1/system.d'])
         r.ExcludeDirectories(exceptions=['%(sysconfdir)s/dbus-1/session.d'])
         r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/dbus'])
         r.ExcludeDirectories(exceptions=['%(localstatedir)s/lib/dbus'])
-        # /var/lib/dbus gets put into :lib causing path conflicts on multiarch
-        r.ComponentSpec('runtime', '%(localstatedir)s/lib/dbus')
 
         r.TagSpec('initscript', '%(initdir)s/')
         r.UtilizeUser('dbus', '%(sysconfdir)s/.*/system.conf')
