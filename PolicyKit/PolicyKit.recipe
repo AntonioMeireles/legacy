@@ -1,20 +1,39 @@
 #
-# Copyright (c) 2006 rPath, Inc.
+# Copyright (c) 2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class PolicyKit(AutoPackageRecipe):
+loadRecipe('rpmpackage')
+class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
     name = 'PolicyKit'
-    version = '20061204'
+    version = '0.5'
+    rpmRelease = '1.git20070731.fc8'
+    tarballName = '%(name)s-%(version)s.git20070731.tar.gz'
+
     buildRequires = [ 'libtool:runtime', 'automake:runtime',
-        'autoconf:runtime', 'dbus:devel', 'pkgconfig:devel',
-        'glib:devel', 'dbus-glib:devel', 'dbus-glib:runtime',
-        'pam:devel', 'xmlto:runtime',
-    ]
+                      'autoconf:runtime', 'dbus:devel', 'pkgconfig:devel',
+                      'glib:devel', 'dbus-glib:devel', 'dbus-glib:runtime',
+                      'pam:devel', 'xmlto:runtime', 'expat:devel'
+                      ]
 
-    def unpack(r):
-        # git clone git://anongit.freedesktop.org/git/PolicyKit
-        r.addArchive('http://people.rpath.com/~smithj/')
-        r.Run('./autogen.sh')
+    def configure(r):
+        r.Configure('--with-os-type=redhat')
+    def policy(r):
+        r.ExcludeDirectories(exceptions='%(datadir)s/PolicyKit/policy')
 
+        # NOTE: /usr/libexec/polkit-grant-helper will be owned by group
+        # 'polkituser', and installed with mode 2755 (setgid binary).
+        # The directories /var/run/PolicyKit and /var/lib/PolicyKit will be
+        # owned by user 'polkituser' and group 'polkituser' and will be of mode 775.
+
+        # NOTE: /usr/libexec/polkit-grant-helper-pam will be setuid root.
+
+        r.Ownership('polkituser','polkituser','%(libexecdir)s/polkit-grant-helper')
+        r.SetModes('%(libexecdir)s/polkit-grant-helper', 02755)
+        r.SetModes('%(libexecdir)s/polkit-grant-helper-pam', 02755)
+
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/run/PolicyKit')
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit')
+        r.SetModes('%(localstatedir)s/run/PolicyKit', 775)
+        r.SetModes('%(localstatedir)s/lib/PolicyKit', 775)
