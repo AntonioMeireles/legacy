@@ -7,25 +7,32 @@
 loadSuperClass('rpmpackage')
 class Udev(RPMPackageRecipe,CPackageRecipe):
     name = 'udev'
-    version = '106'
-    rpmRelease = '1.fc7'
+    version = '114'
+    rpmRelease = '2.fc8'
 
     buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
-                      'bison:runtime', 'pam:devel' ]
+                      'bison:runtime', 'pam:devel', 'chkconfig:config' ]
+
+    rpmPatches = [ 'udev-rules.patch',
+                   'udev-114+git-fcfeda.patch',
+                   'udev-114-strg.patch',
+                   'udev-089-nopie.patch',
+                   'udev-091-lib64.patch',]
 
     def setup(r):
         r.disableParallelMake()
         r.macros.debug = 'false'
 
-        r.addArchive('ftp://ftp.kernel.org/pub/linux/utils/kernel/hotplug/', keyid='517D0F0E')
-
+        r.unpack()
         # addons and extra features
-        r.addSource('start_udev', rpm=r.srpm)
-        r.addSource('firmware_helper.c', rpm=r.srpm)
-        r.addSource('modprobe', rpm=r.srpm)
-        r.addSource('udev.nodes')
-        r.addSource('check-cdrom.sh', dest='/lib/udev/', mode=0755)
 
+        
+        r.addSource('udev-post.init', rpm=r.srpm)
+        r.addSource('start_udev', rpm=r.srpm)
+        r.addSource('fw_unit_symlinks.sh', rpm=r.srpm)
+        r.addSource('udev.nodes')
+
+        r.Run('rm -f etc/udev/redhat/51-hotplug.rules etc/udev/redhat/50* etc/udev/redhat/06*')
 
         # Make the static binaries...
         r.Make('USE_KLIBC=false'
@@ -34,21 +41,28 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
                ' STRIP="%(essentialbindir)s/true"'
                ' udevdir="/dev"'
                ' USE_LOG=false'
+               ' VOLUME_ID_STATIC=true'
                ' DEBUG=%(debug)s'
                ' EXTRAS="extras/scsi_id extras/ata_id extras/usb_id '
-                         'extras/edd_id extras/path_id extras/volume_id"'
+                         'extras/edd_id extras/path_id extras/volume_id '
+                         'extras/cdrom_id extras/floppy"'
                ' all ')
 
-        r.Move('test-udev', 'test-udev.static')
-        r.Move('udevstart', 'udevstart.static')
-        r.Move('udevd', 'udevd.static')
-        r.Move('extras/scsi_id/scsi_id', 'extras/scsi_id/scsi_id.static')
-        r.Move('extras/ata_id/ata_id', 'extras/ata_id/ata_id.static')
-        r.Move('extras/edd_id/edd_id', 'extras/edd_id/edd_id.static')
-        r.Move('extras/usb_id/usb_id', 'extras/usb_id/usb_id.static')
-        r.Move('extras/volume_id/vol_id', 'extras/volume_id/vol_id.static')
+        for t in ['udevd',
+                  'udevtrigger',
+                  'udevsettle',
+                  'extras/scsi_id/scsi_id',
+                  'extras/ata_id/ata_id',
+                  'extras/edd_id/edd_id',
+                  'extras/usb_id/usb_id', 
+                  'extras/cdrom_id/cdrom_id',
+                  'extras/volume_id/vol_id',
+                  'extras/floppy/create_floppy_devices']:
+            r.Move(t,t+'.static')
 
         r.Make('clean')
+        r.Make("""E='@echo' Q='@' -C extras/volume_id/lib clean""")
+
 
         # Make the shared binaries...
         r.Make('CC="gcc %(cflags)s"'
@@ -59,15 +73,26 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
                ' DEBUG=%(debug)s'
                ' STRIP="%(essentialbindir)s/true"'
                ' EXTRAS="extras/scsi_id extras/ata_id extras/usb_id '
-                        'extras/edd_id extras/volume_id extras/run_directory"')
-        # this is from firmware_helper from the srpm
-        r.Run('%(cc)s %(cflags)s -o firmware_helper firmware_helper.c')
+                        'extras/edd_id extras/path_id extras/volume_id '
+                        'extras/cdrom_id extras/floppy extras/rule_generator extras/firmware" all')
 
-        r.Move('extras/scsi_id/scsi_id.static', 'extras/scsi_id/scsi_id')
-        r.Move('extras/ata_id/ata_id.static', 'extras/ata_id/ata_id')
-        r.Move('extras/edd_id/edd_id.static', 'extras/edd_id/edd_id')
-        r.Move('extras/usb_id/usb_id.static', 'extras/usb_id/usb_id')
-        r.Move('extras/volume_id/vol_id.static', 'extras/volume_id/vol_id')
+
+        # copy static over shared instead of fshipping shared and .static ... (FIXME ?)  
+        for t in ['udevd',
+                  'udevtrigger',
+                  'udevsettle', ]:
+            r.Install(t+'.static', '%(essentialsbindir)s/'+ t +'.static')
+
+        for t in [
+                  'extras/scsi_id/scsi_id',
+                  'extras/ata_id/ata_id',
+                  'extras/edd_id/edd_id',
+                  'extras/usb_id/usb_id', 
+                  'extras/cdrom_id/cdrom_id',
+                  'extras/volume_id/vol_id',
+                  'extras/floppy/create_floppy_devices']:
+            r.Install(t + '.static', '/lib/' + t.rsplit('/')[0]+'.static')
+
 
         r.MakeInstall('EXTRAS="'
                'extras/scsi_id'
@@ -76,10 +101,12 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
                ' extras/edd_id'
                ' extras/path_id'
                ' extras/volume_id'
+               ' extras/cdrom_id'
                ' extras/floppy'
-               ' extras/run_directory"')
+               ' extras/rule_generator'
+               ' extras/firmware"')
 
-        # multilib fixes
+        # multilib fixes (still needed ?)
         r.Remove('/usr/lib/libvolume_id.so')
         r.Move('/lib/lib*so*', '%(essentiallibdir)s/')
         r.Symlink('%(essentiallibdir)s/libvolume_id.so.0', '%(libdir)s/libvolume_id.so')
@@ -90,21 +117,39 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         r.MakeDirs('%(sysconfdir)s/dev.d/{default,block}')
         r.MakeDirs('%(datadir)s/udev')
         r.MakeDirs('/lib/firmware')
-        r.ExcludeDirectories(exceptions='%(sysconfdir)s/.*')
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/dev.d/.*')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/udev/.*')
         r.ExcludeDirectories(exceptions='%(datadir)s/udev')
         r.ExcludeDirectories(exceptions='/lib/firmware')
         r.ExcludeDirectories(exceptions='/dev')
 
-        r.Install('test-udev.static', '%(essentialsbindir)s/test-udev.static')
-        r.Install('udevstart.static', '%(essentialsbindir)s/udevstart.static')
         r.Install('udevd.static', '%(essentialsbindir)s/udevd.static')
         r.Install('start_udev', '%(essentialsbindir)s/')
-        r.Install('udev.nodes', '%(sysconfdir)s/udev/makedev.d/50-udev.nodes', mode=0755)
-        r.Install('modprobe', '/lib/udev/', mode=0755)
+ 
+        r.Install('udev.nodes', '%(sysconfdir)s/udev/makedev.d/50-udev.nodes', mode=0644)
 
         for i in ('0', '1', '2', '3'):
             r.MakeDirs('%%(sysconfdir)s/dev.d/fd%s' % i)
 
-        r.Install('firmware_helper', '%(essentialsbindir)s/')
-        # These rules will do for now...
-        r.Install('etc/udev/redhat/*', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/udev.conf', '%(sysconfdir)s/udev/udev.conf')
+        r.MakeDirs('%(initdir)s')
+        r.Install('udev-post.init', '%(initdir)s/udev-post', mode = 0755)
+        r.Install('fw_unit_symlinks.sh', '/lib/udev/fw_unit_symlinks.sh', mode=0755)
+
+        # short-term workaround
+        r.MakeDirs('%(sysconfdir)s/sysconfig/modules')
+        r.Run("""cat > %(destdir)s/%(sysconfdir)s/sysconfig/modules/udev-stw.modules <<EOF
+#!/bin/sh
+exec /sbin/modprobe -a nvram floppy >/dev/null 2>&1 &
+EOF
+""")
+
+        # These rules should do...
+        r.Install('etc/udev/redhat/*.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/rules.d/*.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/suse/64-device-mapper.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/suse/64-md-raid.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/40-alsa.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/40-zaptel.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/64-device-mapper.rules', '%(sysconfdir)s/udev/rules.d/')
