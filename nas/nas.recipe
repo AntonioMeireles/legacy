@@ -4,9 +4,11 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Nas(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Nas(RPMPackageRecipe,CPackageRecipe):
         name = 'nas'
-        version = '1.8b'
+        version = '1.9'
+        rpmRelease = '4.fc8'
 
         buildRequires = [ 'flex:runtime', 'bison:runtime', 'libXaw:devel',
                           'libX11:devel', 'libXau:devel', 'libXext:devel',
@@ -15,8 +17,14 @@ class Nas(CPackageRecipe):
                           'imake:runtime', 'gccmakedep:runtime', ]
 
         def setup(r):
-            r.addArchive('http://nas.codebrilliance.com/%(name)s/%(name)s-%(version)s.src.tar.gz')
-            r.Configure(dir='config/')
+            r.addArchive('%(name)s-%(version)s.src.tar.gz', rpm=r.srpm)
+            r.addPatch('nasd_250453.patch', rpm=r.srpm)
+            r.addPatch('nasd_245712.patch', rpm=r.srpm)
             r.Run('xmkmf')
+            r.Run(""" find . -name Makefile | xargs sed -i -e 's/^\(\s*CDEBUGFLAGS\s*=.*\)/\1 %(cflags)s/' """)
             r.Make('World LIBDIR=%(libdir)s/X11')
-            r.MakeInstall('LIBDIR=%(libdir)s/X11')
+            r.Make('DESTDIR=%(destdir)s LIBDIR=%(libdir)s/X11 install install.man')
+
+            # NOTE: we have this for strict *legacy* purposes (some packages still link against it)
+            # with the above stated we don't want to have it loaded *ever*, so initscripts are not 
+            # installed. 
