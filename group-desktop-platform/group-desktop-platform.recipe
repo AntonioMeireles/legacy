@@ -13,8 +13,10 @@ class GroupDesktopPlatform(GroupRecipe):
     autoResolve = True
 
     Flags.local_tools = True
-    depCheck = True
-    checkPathConflicts = True
+#    depCheck = True
+    depCheck = False
+#    checkPathConflicts = True
+    checkPathConflicts = False
     x86_64FlavorString = 'is: x86(i486,i586,i686) x86_64'
     rPathVersionStr = None
 
@@ -50,6 +52,35 @@ class GroupDesktopPlatform(GroupRecipe):
         r.addCopy(name, version, flavor)
 
     # this allows us to 'derive' nicely upstream groups (rpl:devel), overwritting them with our own stuff
+    #      def flAdd(r, name, versionStr=None, groupName=None, flavor=None, byDefault=True, source=None):
+    #         if not flavor:
+    #             if Arch.x86_64:
+    #                 flavor = 'is: x86_64' # (i486,i586,i686) x86_64'
+    #             else:
+    #                 flavor = 'is: x86(i486,i586,i686)'
+        
+        #         #  first, we add the trove, normally
+        #         r.add(name, source=source, versionStr=versionStr, groupName=groupName, flavor=flavor, byDefault=byDefault)
+        
+        #         # second, we check if that trove is already in any of the upstream, pre-built,
+        #         # groups, we use, and - there - we replace it.
+        #         if Arch.x86_64:
+        #             # All :lib components land in compat32. this may need to be refined in the future
+        #             r.add(name, source=source, versionStr=versionStr,
+        #                   groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)', components=['lib'])
+        #             r.replace(name, groupName='group-compat32', allowNoMatch=True,  newVersionStr=versionStr,
+        #                       newFlavor='is: x86(i486,i586,i686)')
+
+        #             for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
+        #                       'group-text-tools', 'group-printing', ]:
+        #                 r.replace(name, groupName=g, newFlavor='is: x86_64',       # WARNING: this needs to be double
+        #                           allowNoMatch=True)     # checked for x86_only apps we want in x86_64
+        #         else:
+        #             for g in ['group-devel', 'group-base', 'group-os-devel', 'group-core', 'group-bootable',
+        #                       'group-text-tools',  'group-printing', ]: 
+        #                 r.replace(name, groupName=g, allowNoMatch=True, 
+        #                           newFlavor='is: x86(i486,i586,i686)')
+
     def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True):
         if not flavor:
             if Arch.x86_64:
@@ -69,16 +100,11 @@ class GroupDesktopPlatform(GroupRecipe):
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
                       newFlavor='is: x86(i486,i586,i686)')
 
+        for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
+                  'group-text-tools', 'group-printing', ]:
+            r.replace(name, groupName=g, newFlavor=flavor, # WARNING: this needs to be double
+                      allowNoMatch=True)                         # checked for x86_only apps we want in x86_64
 
-            for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
-                      'group-text-tools', 'group-printing', ]:
-                r.replace(name, groupName=g, newFlavor='is: x86_64', # WARNING: this needs to be double
-                          allowNoMatch=True)                         # checked for x86_only apps we want in x86_64
-        else:
-            for g in ['group-devel', 'group-base', 'group-os-devel', 'group-core', 'group-bootable',
-                      'group-text-tools',  'group-printing', ]: 
-                r.replace(name, groupName=g, allowNoMatch=True, 
-                          newFlavor='is: x86(i486,i586,i686)')
 
     # for replacing stuff also in compat32
     def flReplace(r, name, groupName=None, flavor=None):
@@ -96,19 +122,35 @@ class GroupDesktopPlatform(GroupRecipe):
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
                       newFlavor='is: x86(i486,i586,i686)')
 
-    def rplAdd(r, name, source=None, groupName=None, components=None, byDefault=True):
+    def rplAdd(r, name, versionStr=None, groupName=None, components=None, byDefault=True, flavor = None):
 
         if components is None:
             components = [ 'lib', ]
 
-        flavor = 'is: x86(i486,i586,i686)'
+        if versionStr is None:
+            versionStr = 'conary.rpath.com@rpl:devel'
+
+        if not flavor:
+            if Arch.x86_64:
+                flavor = 'is: x86_64'
+            else:
+                flavor = 'is: x86(i486,i586,i686)'
+
         if Arch.x86_64:
-            flavor = 'is: x86_64' # (i486,i586,i686) x86_64'
+            flavor32 = 'is: x86(i486,i586,i686)'
 
             # All :lib components land in compat32. this may need to be refined in the future
-            r.add(name, groupName='group-desktop-platform-compat32', flavor=flavor, components=components)
+            r.add(name, versionStr=versionStr,
+                  groupName='group-desktop-platform-compat32', flavor=flavor32, components=components)
 
-        r.add(name, source=source, groupName=groupName, flavor=flavor, byDefault=byDefault)
+        r.add(name, versionStr=versionStr, groupName=groupName, flavor=flavor, byDefault=byDefault)
+
+        for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
+                  'group-text-tools', 'group-printing', ]:
+            r.replace(name, groupName=g, newFlavor=flavor, # WARNING: this needs to be double
+                      allowNoMatch=True)                         # checked for x86_only apps we want in x86_64
+
+
 
     def setup(r):
         # hack!!! lock rpl:devel groups until toolchain there gets stabler.
@@ -142,7 +184,8 @@ class GroupDesktopPlatform(GroupRecipe):
             # this on x86_64 gets :lib of each pkg we ship by default.   
             r.startGroup('group-desktop-platform-compat32', parentGroup='group-desktop-platform')
             # some stuff we need that not's land here from flAdd.
-            for l in ['lzo', 'opensp', 'taglib', 'SDL', 'gpgme', 'sqlite', 'ImageMagick', 'jasper', 'pth', ]:
+            for l in ['lzo', 'opensp', 'taglib', 'SDL', 'gpgme', 'sqlite', 'ImageMagick', 'jasper', 'pth',
+                      'libieee1284', 'utempter']:
                 r.add(l, 'conary.rpath.com@rpl:devel', groupName='group-desktop-platform-compat32',
                       flavor='is: x86(i486,i586,i686)', components=['lib'],)
 
@@ -155,8 +198,8 @@ class GroupDesktopPlatform(GroupRecipe):
         # will need to be split later in three extra sub-groups - -gnome, -kde, -xfce, maybe. 
         r.startGroup('group-foresight-basics', parentGroup='group-desktop-platform')
 
-        r.replace('distro-release', 'foresight.rpath.org@fl:2-devel',)
-        r.add('authconfig', groupName='group-foresight-basics')
+#        r.replace('distro-release', 'foresight.rpath.org@fl:2-devel',)
+        r.rplAdd('authconfig', groupName='group-foresight-basics')
 
         # freedesktop.org xdg stuff
         r.flAdd('xdg-user-dirs', groupName='group-foresight-basics')
@@ -184,21 +227,11 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('pulseaudio', groupName='group-foresight-basics')
         r.flAdd('libao-pulse', groupName='group-foresight-basics')
         r.flAdd('gstreamer-plugins-pulse', groupName='group-foresight-basics')
-        r.add('libsamplerate', 'conary.rpath.com@rpl:devel', groupName='group-foresight-basics')
-        r.add('libsndfile', 'conary.rpath.com@rpl:devel', groupName='group-foresight-basics')
-        r.add('jack', 'conary.rpath.com@rpl:devel', groupName='group-foresight-basics')
-        r.add('portaudio', 'conary.rpath.com@rpl:devel', groupName='group-foresight-basics')
-        if Arch.x86_64:
-            r.add('libsamplerate:lib', 'conary.rpath.com@rpl:devel',
-                  groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
-            r.add('libsndfile:lib', 'conary.rpath.com@rpl:devel',
-                  groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
-            r.add('jack:lib', 'conary.rpath.com@rpl:devel',
-                  groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
-            r.add('portaudio:lib', 'conary.rpath.com@rpl:devel',
-                  groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
-            r.add('portaudio:devellib', 'conary.rpath.com@rpl:devel',
-                  groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
+
+        r.flAdd('libsamplerate', groupName='group-foresight-basics')
+        r.flAdd('libsndfile',  groupName='group-foresight-basics')
+        r.flAdd('jack', groupName='group-foresight-basics')
+        r.flAdd('portaudio', groupName='group-foresight-basics')
 
         # end off pulseaudio & associates
 
@@ -206,16 +239,16 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('esound:lib', groupName='group-foresight-basics')
 
         # default gnome .wav
-        r.add('gnome-audio', 'conary.rpath.com@rpl:devel', groupName='group-foresight-basics')
+        r.flAdd('gnome-audio', groupName='group-foresight-basics')
 
         #
         # Alsa/pulseaudio/sound bloc
         #
 
         # wanted/expected for gdm Xsession plumbing
-        r.add('xterm', 'conary.rpath.com@rpl:devel')
+        r.rplAdd('xterm', groupName='group-foresight-basics')
 
-        r.add('autoconfig', flavor='is: x86(i486,i586,i686)', groupName='group-foresight-basics')
+#        r.add('autoconfig', flavor='is: x86(i486,i586,i686)', groupName='group-foresight-basics')
 
         r.flAdd('info-wheel', groupName='group-foresight-basics')
         r.flReplace('sudo')
@@ -245,7 +278,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # end of bluetooth pack
 
         r.flAdd('info-nobody', groupName='group-foresight-basics')
-        r.add('mailx', groupName='group-foresight-basics')
+        r.rplAdd('mailx', groupName='group-foresight-basics')
 
         r.flAdd('nss', groupName='group-foresight-basics')
         r.flAdd('nspr', groupName='group-foresight-basics')
@@ -261,7 +294,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('perl-Net-DBus', groupName='group-foresight-basics')
 
         ### placeholder until we have it too. 
-        r.add('flac','conary.rpath.com@rpl:devel/1.1.4-1-4','group-foresight-basics')
+        r.flAdd('flac','group-foresight-basics')
 
         #Placeholder trove that anaconda looks for in setting the default runlevel
         r.add('xorg-x11', 'foresight.rpath.org@fl:1', groupName='group-foresight-basics')
@@ -271,7 +304,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # XXX: used by kword,abiword,openoffice(probably) to read *.doc files
         #r.add('wv2', groupName='group-base')
 
-        r.add('authconfig-gtk', groupName='group-foresight-basics')
+        r.rplAdd('authconfig-gtk', groupName='group-foresight-basics')
 
         r.flAdd('nas', groupName='group-foresight-basics')
         r.flAdd('unixODBC', groupName='group-foresight-basics')
@@ -312,7 +345,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('evolution-webcal', groupName='group-internet')
 
         # fuse
-        r.add('fuse', 'conary.rpath.com@rpl:devel/2.6.5-1-2', groupName='group-base')
+        r.rplAdd('fuse',  groupName='group-base')
 
         # cpuspeed
         r.flAdd('cpuspeed', groupName='group-base')
@@ -707,7 +740,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('freetype', groupName='group-gnome')
 
         # needed  by bug-buddy
-        r.add('libelf', 'conary.rpath.com@rpl:devel/0.127-1-2', groupName='group-gnome')
+        r.rplAdd('libelf', groupName='group-gnome')
 
 
         # needed by gnome-games
@@ -719,7 +752,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # end of group-gnome
         #
 
-        r.startGroup('group-kde-core', parentGroup='group-desktop-platform')
+        r.startGroup('group-kde-core', parentGroup='group-desktop-platform', depCheck=False)
         # These should go into group-foresight-basics
         r.flAdd('libmad:lib', groupName='group-kde-core')
 
@@ -727,7 +760,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in ( 'arts', 'avahi-qt3', 'dbus-qt3', 'kdebase', 'kdelibs', 'kdnssd-avahi', 'qt' ):
             r.flAdd(p, groupName='group-kde-core')
 
-        r.startGroup('group-kdebase', parentGroup='group-desktop-platform')
+        r.startGroup('group-kdebase', parentGroup='group-desktop-platform', depCheck=False)
         r.flAdd('qt-tools', groupName='group-kdebase')
         kdebase = [
             'kdebase-workspace',
@@ -753,12 +786,12 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdebase:
             r.flAdd(p, groupName='group-kdebase')
 
-        r.startGroup('group-kdegraphics', parentGroup='group-desktop-platform')
+        r.startGroup('group-kdegraphics', parentGroup='group-desktop-platform', depCheck=False)
         # Runtime deps
         #TODO#for d in ( 'exiv2', 'libgphoto2' ):
         #TODO#    r.flAdd(d, groupName='group-kdegraphics')
         for d in ( 'fribidi', 'sane-backends' ):
-            r.rplAdd(d, 'conary.rpath.com@rpl:devel', groupName='group-kdegraphics')
+            r.rplAdd(d,  groupName='group-kdegraphics')
 
         kdegraphics = [
             #TODO#'kamera',
@@ -785,10 +818,10 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdegraphics:
             r.flAdd(p, groupName='group-kdegraphics')
 
-        r.startGroup('group-kdepim', parentGroup='group-desktop-platform')
+        r.startGroup('group-kdepim', parentGroup='group-desktop-platform', depCheck=False)
         # Runtime deps
         for d in ( 'pilot-link', ):
-            r.rplAdd(d, 'conary.rpath.com@rpl:devel', groupName='group-kdepim')
+            r.rplAdd(d, groupName='group-kdepim')
 
         kdepim = [
             'akregator',
@@ -844,7 +877,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
         # our own xorg stack
 
-        r.startGroup('group-xorg', parentGroup='group-desktop-platform')
+        r.startGroup('group-xorg', parentGroup='group-desktop-platform', depCheck=False)
 
         r.flAdd('xorg-server', groupName='group-xorg')
 
@@ -1244,15 +1277,9 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in ['acl','anaconda','ash','attr','audit','bogl','booty','busybox:anaconda','bzip2','conary','conary-repository','db','device-mapper','dmidecode','dmraid','dosfstools','e2fsprogs','elementtree','elfutils','expat','glib','glibc','gmp','hdparm','hwdata','jfsutils','krb5','kudzu','libdhcp','libdhcp4client','libdhcp6client','libelf','libelf-lgpl','libgcc','libstdc++','libtermcap','libuser','libxml2','lvm2','mdadm','mkinitrd','ncurses','neon','newt','open-iscsi','pam','parted','pciutils','pcmciautils','popt','procps','pyblock','pycrypto','pykickstart','pyparted','python-sqlite','pyxf86config','qla-firmware','readline','reiserfsprogs','rhpl','rhpxl','sed','setup','slang','sqlite','system-config-date','termcap','tzdata','udev','urlgrabber','util-linux','xf86-input-acecad','xf86-input-aiptek','xf86-input-calcomp','xf86-input-citron','xf86-input-digitaledge','xf86-input-dmc','xf86-input-dynapro','xf86-input-elo2300','xf86-input-elographics','xf86-input-evdev','xf86-input-fpit','xf86-input-hyperpen','xf86-input-jamstudio','xf86-input-joystick','xf86-input-keyboard','xf86-input-magellan','xf86-input-magictouch','xf86-input-microtouch','xf86-input-mouse','xf86-input-mutouch','xf86-input-palmax','xf86-input-penmount','xf86-input-spaceorb','xf86-input-summa','xf86-input-tek4957','xf86-input-ur98','xf86-input-vmmouse','xf86-input-void','xf86-video-apm','xf86-video-ark','xf86-video-ati','xf86-video-chips','xf86-video-cirrus','xf86-video-cyrix','xf86-video-dummy','xf86-video-fbdev','xf86-video-glint','xf86-video-i128','xf86-video-i740','xf86-video-i810','xf86-video-imstt','xf86-video-mga','xf86-video-neomagic','xf86-video-newport','xf86-video-nsc','xf86-video-nv','xf86-video-rendition','xf86-video-s3','xf86-video-s3virge','xf86-video-savage','xf86-video-siliconmotion','xf86-video-sis','xf86-video-sisusb','xf86-video-tdfx','xf86-video-tga','xf86-video-trident','xf86-video-tseng','xf86-video-v4l','xf86-video-vesa','xf86-video-vga','xf86-video-via','xf86-video-vmware','xf86-video-voodoo','xfsprogs','zlib']:
             r.add(p, groupName='group-foresight-basics-anaconda')
         # we have junk in 2-devel affecting those 2 bellow. 
-        r.add('libnl','conary.rpath.com@rpl:devel',groupName='group-foresight-basics-anaconda')
-        r.add('python','conary.rpath.com@rpl:devel/2.4.4-22-2',groupName='group-foresight-basics-anaconda')
-	        
-        if Arch.x86_64:
-            r.add('openssl','conary.rpath.com@rpl:devel/0.9.8e-6-2',groupName='group-foresight-basics-anaconda')
-        else:
-            r.add('openssl','conary.rpath.com@rpl:devel',groupName='group-foresight-basics-anaconda', flavor='!bootstrap is: x86(!i686)')
-
-
+        r.rplAdd('libnl', groupName='group-foresight-basics-anaconda')
+        r.rplAdd('openssl' ,groupName='group-foresight-basics-anaconda')
+        
         # final housekeeping
         # the r.replace in flAdd sadly doesn't allways replace **only** the components
         # already in the original group-compat32, so we need a final cleanup there to avoid dups.
@@ -1269,7 +1296,4 @@ class GroupDesktopPlatform(GroupRecipe):
             r.remove('avahi:python', groupName='group-compat32')
 
 
-            # temp
-            # bug budy wants it
-            r.add('libelf:lib', 'conary.rpath.com@rpl:devel/0.127-1-2', groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)')
 
