@@ -1,42 +1,98 @@
 loadSuperClass('gnomepackage')
-class NetworkManager(GnomePackageRecipe):
-   buildRequires = ['GConf:devel', 'ORBit2:devel', 'chkconfig:runtime', 'dhcdbd:runtime', 'gnome-keyring:devel', 'gnome-vfs:devel', 'hal:devel', 'iproute:runtime', 'libart_lgpl:devel', 'libbonobo:devel', 'libbonoboui:devel', 'libgcrypt:devel', 'libglade:devel', 'libgnome:devel', 'libgnomecanvas:devel', 'libgnomeui:devel', 'libgpg-error:devel', 'libnl:devel', 'popt:devel', 'wireless-tools:devel', 'dbus:devel', 'dbus-glib:devellib', 'glib:devel', 'pango:devel']
-        
+loadSuperClass('rpmpackage')
+class NetworkManager(RPMPackageRecipe,GnomePackageRecipe):
+
+   buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'chkconfig:runtime',
+                     'dhcdbd:runtime', 'gnome-keyring:devel', 'gnome-vfs:devel',
+                     'hal:devel', 'iproute:runtime', 'libart_lgpl:devel',
+                     'libbonobo:devel', 'libbonoboui:devel', 'libgcrypt:devel',
+                     'libglade:devel', 'libgnome:devel', 'libgnomecanvas:devel',
+                     'libgnomeui:devel', 'libgpg-error:devel', 'libnl:devel',
+                     'popt:devel', 'wireless-tools:devel', 'dbus:devel',
+                     'dbus-glib:devellib', 'glib:devel', 'pango:devel',
+                     'autoconf:runtime', 'automake:runtime', 'libtool:devel',
+                     'desktop-file-utils:config', 'libnotify:devel',
+                     'intltool:runtime', 'autoconf:data', 'libtool:runtime',
+                     'pkgconfig:devel', 'intltool:devel', 'gettext:runtime', 'gettext:devel']
+
    name = "NetworkManager"
    version = "0.6.5"
+   isOPENsuse = True
+   rpmRelease = '35'
+   rpmArchives = [ 'network-manager-applet-%(version)s.tar.bz2',
+                   'nm-editor.tgz',
+                   'nm-icons.tar.gz'
+                   ]
 
-   extraConfig = ' --with-distro=redhat --enable-notification-icon --with-named=/usr/sbin/named --with-named-user=named --with-named-dir=%(localstatedir)s/named --with-wpa_supplicant=/usr/sbin/wpa_supplicant localstatedir=%(localstatedir)s'
+   rpmPatches = [
+      'nm-wireless-driver-workarounds-rml.patch',
+      'nm-resolv-conf-header-rml.patch',
+      'nm-fallback.patch',
+      'nm-222902.patch',
+      'nm-191251.patch',
+#      'nm-0.6.5-killswitch-fix.patch',
+      'nm-271757.patch',
+      'nm-applet-0.6.5-build.patch',
+      'nm-make-wireless-menu-item-inactive-rml.patch',
+      'nm-configure-networking-rml.patch',
+      'nm-never-restart-nm-applet-rml.patch',
+      'nm-fix-adhoc-icon-rml.patch',
+      'nm-applet-disconnect-on-exit.patch',
+      'nm-243959.patch',
+      'nm-applet-fallback.patch',
+      'nm-save-passwds-in-keyring.patch',
 
+#      'nm-applet-editor.patch',
+      ]
+  
+   extraConfig = ' --with-distro=redhat --with-gcrypto=yes --enable-notification-icon --with-named=/usr/sbin/named --with-named-user=named --with-named-dir=%(localstatedir)s/named --with-wpa_supplicant=/usr/sbin/wpa_supplicant localstatedir=%(localstatedir)s --libexecdir=%(prefix)s/lib/NetworkManager'
+   
    def unpack(r):
-      GnomePackageRecipe.unpack(r)
-      r.addPatch('http://archive.ubuntu.com/ubuntu/pool/main/n/network-manager/network-manager_0.6.5-0ubuntu5.diff.gz')
-      for patch in [
-         '01-supplicant_timeout.patch',
-         '02-dbus_access_network_manager.patch',
-         '04-if_fix.patch',
-         '05-debian_backend.patch',
-         '06-dispatch_more_events.patch',
-         '11-man_page_sh_name.patch',
-         '13-rml-wpa-workarounds.patch',
-         '14-j-hostap-supplicant-driver.patch',
-         '16_undefined_macros.patch',
-         '17_avahi_autoipd.patch',
-         '19_interfaces_can_have_more_than_one_instance.patch',
-         '20_do_not_take_over_dhcpv4iface_when_v6_is_configured.patch',
-         '21_manual_means_always_online.diff',
-      ]:
-         r.Run(""" patch -p1 < debian/patches/%s """ % patch)
+
+      RPMPackageRecipe.unpack(r)
+      r.addAction('mv editor nm-applet-0.6.5/')
+      r.addPatch('nm-applet-editor.patch', rpm = r.srpm)
 
       r.macros.foodir='initscript/RedHat'
       r.Replace('chkconfig: - 98 02','chkconfig: 5 98 02','%(foodir)s/NetworkManager', '%(foodir)s/NetworkManager.in','%(foodir)s/NetworkManagerDispatcher.in','%(foodir)s/NetworkManagerDispatcher')
       r.Replace(' -p \$pidfile','','%(foodir)s/NetworkManager','%(foodir)s/NetworkManager.in')
       r.addSource('ntpd.dispatch')
 
+      r.addAction('intltoolize --force')
+      r.addAction('autoreconf')
+
+   def build(r):
+      r.Configure( r.extraConfig,
+                   configureName = r.configureName,
+                   preConfigure = r.preConfigure)
+
+      r.Make(r.makeArgs, preMake=r.preMake)
+
+      r.Replace(' --sm-disable','  ','nm-applet-0.6.5/nm-applet.desktop')
+      r.Run('(cd nm-applet-0.6.5/  ; autoreconf -i; intltoolize --force)')
+
+      r.Configure('--disable-static --with-notify', dir = 'nm-applet-0.6.5')
+
+      r.Make(dir = 'nm-applet-0.6.5')
+
+
    def install(r):
-      GnomePackageRecipe.install(r)
+      r.MakeInstall()
+      r.MakeInstall('DESTDIR=%(destdir)s', dir = 'nm-applet-0.6.5', package='network-manager-applet')
+
+      r.MakeDirs('%(datadir)s/icons/hicolor')
+      r.Run('cp -r nm-icons/* %(destdir)s/%(datadir)s/icons/hicolor')
+
+      r.Install('test/nm-tool', '%(bindir)s/')
+      r.Install('test/nm-online', '%(bindir)s/')
+
       r.MakeDirs('%(localstatedir)s/run/%(name)s')
       r.ExcludeDirectories(exceptions='%(localstatedir)s/run/%(name)s')
       r.Install('ntpd.dispatch', '%(sysconfdir)s/NetworkManager/dispatcher.d/ntpd')
+
+      r.addSource('nfs','%(sysconfdir)s/NetworkManager/dispatcher.d/nfs', rpm = r.srpm)
+
+      r.addSource('nm-disconnect-wireless-on-exit.sh', '%(datadir)s/NetworkManager/', rpm = r.srpm)
 
    def policy(r):
       r.Requires('libnl:lib','%(sbindir)s/NetworkManager')
