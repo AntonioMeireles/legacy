@@ -1,34 +1,37 @@
 #
 # Copyright (c) 2004-2005 rPath, Inc.
+# Copyright (c) 2007 Foresight Linux
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class SaneBackends(AutoPackageRecipe):
+class SaneBackends(CPackageRecipe):
     name = 'sane-backends'
     version = '1.0.18'
-    buildRequires = [ 'libjpeg:devel', 'libusb:devel', 'libieee1284:devel', 'gettext:runtime', 'pkgconfig:devel', 'tetex-dvips:runtime', 'tetex-latex:runtime', 'tetex:runtime', 'gphoto-suite:devel', 'libtiff:devel' ]
+    buildRequires = [ 'gettext:runtime', 'gphoto-suite:devel',
+'libieee1284:devel', 'libjpeg:devel', 'libusb:devel', 'libtiff:devel', 
+'makedepend:runtime', 'pkgconfig:devel', 'tetex-dvips:runtime',
+'tetex-latex:runtime', 'tetex:runtime' ]
 
-    def unpack(r):
-        r.addArchive('ftp://ftp.sane-project.org/pub/sane/sane-backends-%(version)s/sane-backends-%(version)s.tar.gz')
+
+    def setup(r):
+        r.addArchive('ftp://ftp.sane-project.org/pub/sane/%(name)s-%(version)s/')
         r.Run('echo >> backend/hpsj5s.conf')
         r.Replace('sane\/snapscan\/your-firmwarefile.bin', 'iscan/esfw41.bin', 'backend/snapscan.conf.in')
-
-    def configure(r):
         # do not attempt to build sane.ps; it does not build right now
         # this workaround can be removed when latex builds sane.ps
-        r.Configure('ac_cv_path_LATEX=no')
+        r.Configure('ac_cv_path_LATEX=no --with-docdir=%(thisdocdir)s --with-group=plugdev')
 
-    def policy(r):
+        r.Make()
+        r.MakeInstall()
+        r.MakeDirs('%(sysconfdir)s/udev/rules.d')
+        r.Install('tools/udev/libsane.rules',
+'%(sysconfdir)s/udev/rules.d/99-libsane.rule')
+
         # These belong in %(thisdocdir)s
         r.Move('%(prefix)s/doc/*/*', '%(thisdocdir)s/')
         r.Remove('%(prefix)s/doc', recursive=True)
 
         # Plugins
         r.ComponentSpec('lib', r'.*\.so$')
-
         r.Requires('iscan:data', '%(sysconfdir)s/sane.d/snapscan.conf')
-
-    def install(r):
-        AutoPackageRecipe.install(r)
-        r.Install('tools/udev/libsane.rules', '%(sysconfdir)s/udev/rules.d/')
