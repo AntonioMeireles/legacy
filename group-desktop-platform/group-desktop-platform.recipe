@@ -19,7 +19,18 @@ class GroupDesktopPlatform(GroupRecipe):
     x86_64FlavorString = 'is: x86(i486,i586,i686) x86_64'
     rPathVersionStr = None
 
-    unwantedComponents = [ 'supdoc', ] # ? 'devel', 'devellib']
+    supDocComponents = [ 'supdoc', ]
+    develComponents  = [ 'devel', 'devellib']
+
+    rplGroups = [ 'bootable',
+                  'base',
+                  'core',
+                  'printing',
+                  'text-tools',
+                  'devel',
+                  'os-devel',
+                  'anaconda-deps'
+                  ]
 
     def startGroup(r, name, parentGroup, depCheck=False, byDefault=True, autoResolve = False):
         # creates group named 'name', adds it to the toplevel group,
@@ -39,7 +50,13 @@ class GroupDesktopPlatform(GroupRecipe):
         if parentGroup:
             r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
         r.setDefaultGroup(name)
-        r.removeComponents(r.unwantedComponents)
+
+        # (20:59:42) mkj_wk: instead of doing something like r.moveComponents to move :supdoc into group-extra-docs
+        # (20:59:56) mkj_wk: and I'd say :devel and :devellib should be moveComonents to move into group-devel
+
+        r.moveComponents(r.supDocComponents, name, 'group-extra-docs')
+        if not name == 'group-devel':
+            r.moveComponents(r.develComponents,  name, 'group-devel')
 
     def flAddCopy(r, name, version, flavor=None):
         if not flavor:
@@ -49,36 +66,6 @@ class GroupDesktopPlatform(GroupRecipe):
                 flavor = 'is: x86(i486,i586,i686)'
 
         r.addCopy(name, version, flavor)
-
-    # this allows us to 'derive' nicely upstream groups (rpl:devel), overwritting them with our own stuff
-    #      def flAdd(r, name, versionStr=None, groupName=None, flavor=None, byDefault=True, source=None):
-    #         if not flavor:
-    #             if Arch.x86_64:
-    #                 flavor = 'is: x86_64' # (i486,i586,i686) x86_64'
-    #             else:
-    #                 flavor = 'is: x86(i486,i586,i686)'
-
-        #         #  first, we add the trove, normally
-        #         r.add(name, source=source, versionStr=versionStr, groupName=groupName, flavor=flavor, byDefault=byDefault)
-
-        #         # second, we check if that trove is already in any of the upstream, pre-built,
-        #         # groups, we use, and - there - we replace it.
-        #         if Arch.x86_64:
-        #             # All :lib components land in compat32. this may need to be refined in the future
-        #             r.add(name, source=source, versionStr=versionStr,
-        #                   groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)', components=['lib'])
-        #             r.replace(name, groupName='group-compat32', allowNoMatch=True,  newVersionStr=versionStr,
-        #                       newFlavor='is: x86(i486,i586,i686)')
-
-        #             for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
-        #                       'group-text-tools', 'group-printing', ]:
-        #                 r.replace(name, groupName=g, newFlavor='is: x86_64',       # WARNING: this needs to be double
-        #                           allowNoMatch=True)     # checked for x86_only apps we want in x86_64
-        #         else:
-        #             for g in ['group-devel', 'group-base', 'group-os-devel', 'group-core', 'group-bootable',
-        #                       'group-text-tools',  'group-printing', ]: 
-        #                 r.replace(name, groupName=g, allowNoMatch=True, 
-        #                           newFlavor='is: x86(i486,i586,i686)')
 
     def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True):
         if not flavor:
@@ -99,10 +86,9 @@ class GroupDesktopPlatform(GroupRecipe):
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
                       newFlavor='is: x86(i486,i586,i686)')
 
-        for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
-                  'group-text-tools', 'group-printing', 'group-anaconda-deps']:
-            r.replace(name, groupName=g, newFlavor=flavor, # WARNING: this needs to be double
-                      allowNoMatch=True)                         # checked for x86_only apps we want in x86_64
+        for g in r.rplGroups:
+            r.replace(name, groupName = 'group-'+ g, newFlavor=flavor, # WARNING: this needs to be refactored
+                      allowNoMatch=True)                               # to cover x86 only apps we want in x86_64
 
 
     # for replacing stuff also in compat32
@@ -144,12 +130,9 @@ class GroupDesktopPlatform(GroupRecipe):
 
         r.add(name, versionStr=versionStr, groupName=groupName, flavor=flavor, byDefault=byDefault)
 
-        for g in ['group-devel', 'group-base', 'group-core', 'group-os-devel', 'group-bootable',
-                  'group-text-tools', 'group-printing', 'group-anaconda-deps']:
-            r.replace(name, groupName=g, newFlavor=flavor, # WARNING: this needs to be double
-                      allowNoMatch=True)                         # checked for x86_only apps we want in x86_64
-
-
+        for g in r.rplGroups:
+            r.replace(name, groupName = 'group-' + g, newFlavor=flavor, # WARNING: this needs to be refactored
+                      allowNoMatch=True)                                # to cover x86 only apps we want in x86_64
 
     def setup(r):
         # hack!!! lock rpl:devel groups until toolchain there gets stabler.
@@ -164,33 +147,25 @@ class GroupDesktopPlatform(GroupRecipe):
         r.setSearchPath('foresight.rpath.org@fl:2-devel', groupOs, 'conary.rpath.com@rpl:1-compat')
 
         # stuff we reuse from upstream (rpl:devel)
-        for groupName in ('bootable',
-                          'base',
-                          'core',
-                          'printing',
-                          'text-tools',
-                          'devel',
-                          'os-devel',
-                          'anaconda-deps'
-                          ):
-            r.flAddCopy('group-'+groupName, rplBranch)
 
-#empty atm!!!!!!!!!
+
+
+
+        for groupName in r.rplGroups:
+            r.flAddCopy('group-' + groupName, rplBranch)
+
         if Arch.x86_64:
-#            r.flAddCopy('group-compat32', rplBranch)
-            r.startGroup('group-compat32', parentGroup='group-desktop-platform')
+            r.flAddCopy('group-compat32', rplBranch)
+
+        r.startGroup('group-extra-docs', parentGroup='group-desktop-platform')
 
         # we need to create this one before we call flAdd first time.
         if Arch.x86_64:
-            # this on x86_64 gets :lib of each pkg we ship by default.   
+            # this on x86_64 gets :lib of each pkg we ship by default.
             r.startGroup('group-desktop-platform-compat32', parentGroup='group-desktop-platform')
-            # some stuff we need that not's land here from flAdd.
-            for l in ['lzo', 'opensp', 'taglib', 'SDL', 'gpgme', 'sqlite', 'ImageMagick', 'jasper', 'pth',
-                      'libieee1284', 'utempter', 'expat', 'libpng', 'popt', 'zlib', 'openldap', 'krb5',
-                      'libgssapi', 'cyrus-sasl', 'ncurses', 'e2fsprogs', 'libogg', 'libjpeg', 'libtiff',
-                      'acl', 'attr', 'zlib', 'bzip2', 'ncurses', 'readline', 'db', 'pam', 'libusb', 'pcre',
-                      'samba', 'libtermcap', 'gdbm', 'cracklib', 'cups', 'aspell', 'libmng', 'libcap',
-                      'libtool', 'tcp_wrappers', 'python', 'openssl', 'libidn', 'perl']:
+            # some stuff we need from rpl:devel that not's land here directly.
+            for l in  [ 'sqlite', 'gpgme', 'lzo', 'libnl',
+                        'opensp', 'jasper', 'ImageMagick', 'SDL', 'libieee1284', 'taglib']:
                 r.add(l, 'conary.rpath.com@rpl:devel', groupName='group-compat32',
                       flavor='is: x86(i486,i586,i686)', components=['lib'],)
 
@@ -1324,12 +1299,14 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             r.removeComponents(['devel', 'doc', 'data', 'runtime', 'supdoc', 'locale', 'config', 'devellib'], groupName='group-compat32')
 
-            for p in ['udev', 'compiz', 'xorg-server', 'mono', 'avahi-sharp', 'gmime', 'gsf-sharp', 'pidgin', 'pidgin-plugin_pack', 'evolution', 'evolution-sharp', 'gnome-sharp', 'gtk-sharp', 'beagle', 'evolution', 'evolution-exchange', 'dhclient:lib', 'gst-plugins-good',  'NetworkManager', 'perl']:
+            for p in ['pidgin', 'pidgin-plugin_pack', 'NetworkManager', 'evolution', 'evolution-data-server', 'evolution-exchange', 'evolution-webcal',  'evolution-sharp', 'libxml2', 'udev', 'avahi', 'xorg-server', 'dhclient']:
                 r.remove(p, groupName='group-desktop-platform-compat32')
 
-        # FIXME:
-#        r.remove('wvdial', groupName='group-desktop-platform')
-#        r.remove('gnome-python-desktop', groupName='group-desktop-platform')
+            # FIXME:
 
             r.remove('perl:lib', groupName='group-compat32')
-            r.add('libnl:lib', groupName='group-compat32')
+            r.remove('avahi:python', groupName='group-compat32')
+            r.remove('libxml2:python', groupName='group-compat32')
+
+
+
