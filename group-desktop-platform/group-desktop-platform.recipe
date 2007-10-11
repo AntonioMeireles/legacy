@@ -65,7 +65,10 @@ class GroupDesktopPlatform(GroupRecipe):
             else:
                 flavor = 'is: x86(i486,i586,i686)'
 
-        r.addCopy(name, version, flavor)
+        if name == 'group-devel':
+            r.addCopy(name, version, flavor, groupName='group-all')
+        else:
+            r.addCopy(name, version, flavor)
 
     def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True):
         if not flavor:
@@ -134,6 +137,7 @@ class GroupDesktopPlatform(GroupRecipe):
             r.replace(name, groupName = 'group-' + g, newFlavor=flavor, # WARNING: this needs to be refactored
                       allowNoMatch=True)                                # to cover x86 only apps we want in x86_64
 
+
     def setup(r):
         # hack!!! lock rpl:devel groups until toolchain there gets stabler.
         rplBranch = 'conary.rpath.com@rpl:devel'
@@ -146,10 +150,11 @@ class GroupDesktopPlatform(GroupRecipe):
 
         r.setSearchPath('foresight.rpath.org@fl:2-devel', groupOs, 'conary.rpath.com@rpl:1-compat')
 
+        # Create a out shell group for all the belong to 
+        r.createGroup('group-all', checkPathConflicts=False, depCheck=False)
+        r.addNewGroup('group-desktop-platform', groupName='group-all')
+
         # stuff we reuse from upstream (rpl:devel)
-
-
-
 
         for groupName in r.rplGroups:
             r.flAddCopy('group-' + groupName, rplBranch)
@@ -157,7 +162,7 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             r.flAddCopy('group-compat32', rplBranch)
 
-        r.startGroup('group-extra-docs', parentGroup='group-desktop-platform')
+        r.startGroup('group-extra-docs', parentGroup='group-all')
 
         # we need to create this one before we call flAdd first time.
         if Arch.x86_64:
@@ -338,7 +343,7 @@ class GroupDesktopPlatform(GroupRecipe):
 #        r.flAdd('sun-jre', flavor='!gcj', groupName='group-base')
 #        r.flAdd('sun-jdk', flavor='!gcj', groupName='group-devel')
 
-        r.startGroup('group-gnome', depCheck=False)
+        r.startGroup('group-gnome', parentGroup='group-all', depCheck=False)
 
         #r.flAdd('gst-plugins-ugly')
         #r.flAdd('gst-plugins-bad') #Doesn't build yet...
@@ -762,7 +767,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
 
         # Create group-kde, which all other kde groups become children of
-        r.startGroup('group-kde', depCheck=False)
+        r.startGroup('group-kde', parentGroup='group-all', depCheck=False)
 
         r.startGroup('group-kde-core', parentGroup='group-kde', depCheck=False)
 
@@ -899,7 +904,9 @@ class GroupDesktopPlatform(GroupRecipe):
         # using locally the gem version, for now
 #        r.flAdd('rake', groupName='group-devel')
         # now it is on rpl:devel ... 
-        r.remove('rake')
+        # remove these, broken dep
+        r.remove('rake', groupName='group-devel')
+        r.remove('rails', groupName='group-devel')
 
         # end of ruby stack
 
@@ -1319,16 +1326,17 @@ class GroupDesktopPlatform(GroupRecipe):
         # Everything below here define official foresight editions (gnome,kde,xfce,etc)
 
         # Define GNOME Edition
-        r.createGroup('group-gnome-dist', depCheck=True)
-        r.addNewGroup('group-desktop-platform')
-        r.addNewGroup('group-gnome')
+        r.startGroup('group-gnome-dist', parentGroup='group-all', depCheck=True, autoResolve=True)
+        r.addNewGroup('group-desktop-platform', groupName='group-gnome-dist')
+        r.addNewGroup('group-gnome', groupName='group-gnome-dist')
+        #r.remove('group-devel', groupName='group-desktop-platform')
 
         # Define KDE Edition
-        r.createGroup('group-kde-dist', depCheck=True)
-        r.addNewGroup('group-desktop-platform')
-        r.addNewGroup('group-kde')
+        #r.startGroup('group-kde-dist', parentGroup='group-all', depCheck=True)
+        #r.addNewGroup('group-desktop-platform')
+        #r.addNewGroup('group-kde')
 
         # Define XFCE Edition
-        #r.startGroup('group-xfce-dist', depCheck=True)
+        #r.startGroup('group-xfce-dist', parentGroup='group-all', depCheck=True)
         #r.add('group-desktop-platform')
         #r.add('group-xfce')
