@@ -1,38 +1,41 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2005 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Initscripts(CPackageRecipe):
+loadSuperClass('rpmpackage.recipe')
+class Initscripts(RPMPackageRecipe, CPackageRecipe):
     name = 'initscripts'
-    version = '8.54.3'
+    version = '8.33'
 
-    if Use.bootstrap:
-        clearBuildReqs()
-        buildRequires = [ 'setup:runtime' ]
-    else:
-        buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
+    buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
                       'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel' ]
-    buildRequires.extend(['mercurial:runtime'])
-
-    # Add sysvinit:runtime to work around rMake bug RMK-580
-    buildRequires.append('sysvinit:runtime')
 
     def setup(r):
-        if Use.bootstrap:
-            # we only need this to prevent build req loops when trying to build
-            # the real initscripts - kudzu requires /etc/init.d/functions to
-            # install and we require kudzu to build initscripts, so we just
-            # create a dummy
-            r.Create('%(initdir)s/functions', mode=0755)
-            r.TagSpec('initscript', exceptions='%(initdir)s/functions')
-            r.RequireChkconfig(exceptions='%(initdir)s/functions')
-            return
+        r.unpack()
+        r.addPatch('noprefdm.patch')
+        r.addPatch('initscripts-custom-distro-name.patch')
+        r.addPatch('initscripts-pidof.patch', level=1)
+        r.addPatch('rm.patch', level=1)
+        r.addSource('rplCopyDirs')
 
-        r.addMercurialSnapshot('http://hg.rpath.com/initscripts',
-            tag='rpl-'+r.version)
-        r.addPatch('splashy.patch')
+        # don't re-make initscripts.pot
+        r.addAction("sed -i '/^all: /s/$(NLSPACKAGE).pot//' po/Makefile")
+        # add a newline to the end of rc.d/rc
+        r.addAction("echo >> rc.d/rc")
+        r.addAction("sed -i '/# chkconfig:/s/ 10/ 06/g' rc.d/init.d/network")
+        r.addAction("sed -i '/# chkconfig:/s/ 25/ 11/g' rc.d/init.d/netfs")
+
+        # Make 5 the default runlevel
+        r.Replace('id:3:initdefault:','id:5:initdefault:','inittab')
+
+        r.addPatch('initscripts-with-livecd.patch')
+        r.addPatch('kernel-version-specific-modules.patch')
+
+        if not Use.pie:
+            r.Replace('-fPIE', '', 'src/Makefile')
+            r.Replace('-pie', '', 'src/Makefile')
 
         r.Make()
         r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
