@@ -1,0 +1,284 @@
+diff -r f7c96233e71b rc.d/init.d/functions
+--- a/rc.d/init.d/functions	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/init.d/functions	Tue Sep 25 17:32:52 2007 -0400
+@@ -577,3 +577,117 @@ is_ignored_file() {
+ }
+ # A sed expression to filter out the files that is_ignored_file recognizes
+ __sed_discard_ignored_files='/\(~\|\.bak\|\.orig\|\.rpmnew\|\.rpmorig\|\.rpmsave\)$/d'
++
++# Functions to support splash integration.
++
++splash_add() {
++    echo $1 $2 | awk '{print $1 + $2}'
++    return $?
++}
++
++splash_div() {
++    echo $1 $2 | awk '{print $1/$2}'
++    return $?
++}
++
++splash_enabled() {
++    cmdline=$(cat /proc/cmdline)
++    strstr "$cmdline" "splash"
++    return $?
++}
++
++splash_log() {
++    splash_enabled || return 0
++    local log_dir="/dev/.initramfs"
++    local log_file="$log_dir/splash.log"
++    [ ! -d $log_dir ] && mkdir -p $log_dir
++    echo -n `date` >> $log_file
++    echo ": $*" >> $log_file
++    return 0
++}
++
++splash_running() {
++    running=$(ps aux | grep splashy | grep -v grep)
++    if [ "$running" != "" ] ; then
++        return 0
++    else
++        splash_log "Splash Failed: $*"
++        return 1
++    fi
++}
++
++splash_get_slice_size() {
++    local runlevel=$(runlevel | cut -d ' ' -f 2)
++    if [ "$runlevel" = "0" ] || [ "$runlevel" = "6" ] ; then
++        total=100
++    else
++        total=82
++    fi
++    rc_count=$(ls -l /etc/rc$runlevel.d/{K,S}* | wc -l)
++    splash_div $total $rc_count
++    return $?
++}
++
++splash_update() {
++    ret=0
++    if [ -x /usr/sbin/splashy_update ] && splash_running "$*" ; then
++        /usr/sbin/splashy_update "$*"
++        ret=$?
++        splash_log "running splashy_update $*"
++    fi
++    return $ret
++}
++
++splash_ping() {
++    splash_update repaint
++    return $?
++}
++
++splash_timeout() {
++    splash_update timeout $1
++    return $?
++}
++
++splash_progress() {
++    splash_update progress $1
++    return $?
++}
++
++splash_boot() {
++    splash_enabled || return 0
++    splash_running && return 0
++    splash_log "starting splashy(boot)"
++    if [ -x /usr/sbin/splashy ] ; then
++        if [ ! -e /dev/fb0 ] ; then
++            mknod /dev/fb0 c 29 0
++        fi
++        /usr/sbin/splashy boot
++        sleep .5
++    fi
++    return $?
++}
++
++splash_shutdown() {
++    splash_enabled || return 0
++    splash_running && return 0
++    splash_log "starting splashy(shutdown)"
++    if [ -x /usr/sbin/splashy ] ; then
++        /usr/sbin/splashy shutdown
++        sleep .5
++    fi
++    return $?
++}
++
++splash_quit() {
++    splash_running || return 0
++    splash_progress 100
++    sleep .5
++    splash_update QUIT
++    sleep .5
++    if [ $(runlevel | cut -d ' ' -f 2) = "5" ] && [ -e /var/lock/subsys/xdm ] ; then
++        splashy_chvt 7
++    else
++        splashy_chvt 1
++    fi
++    return $?
++}
+diff -r f7c96233e71b rc.d/init.d/halt
+--- a/rc.d/init.d/halt	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/init.d/halt	Wed Sep 19 17:41:35 2007 -0400
+@@ -65,6 +65,8 @@ esac
+ # Kill all processes.
+ [ "${BASH+bash}" = bash ] && enable kill
+ 
++splash_quit
++
+ action $"Sending all processes the TERM signal..." /sbin/killall5 -15
+ sleep 5
+ action $"Sending all processes the KILL signal..."  /sbin/killall5 -9
+diff -r f7c96233e71b rc.d/rc
+--- a/rc.d/rc	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/rc	Thu Sep 20 10:49:52 2007 -0400
+@@ -49,8 +49,24 @@ if [ -f /etc/sysconfig/i18n -a -z "${NOL
+   export LANGSH_SOURCED=1
+ fi
+ 
++# Only start splash on shutdown or reboot.
++if [ "$runlevel" = "0" ] || [ "$runlevel" = "6" ] ; then
++    splash_shutdown
++fi
++
++slice_size=$(splash_get_slice_size)
++# Assume that rc.sysinit is around 5% of boot time.
++if [ "$runlevel" != "0" ] && [ "$runlevel" != "6" ] ; then
++    percent_complete=15
++else
++    percent_complete=0
++fi
++
+ # First, run the KILL scripts.
+ for i in /etc/rc$runlevel.d/K* ; do
++	percent_complete=$(splash_add $percent_complete $slice_size)
++	splash_progress $percent_complete
++
+ 	check_runlevel "$i" || continue
+ 
+ 	# Check if the subsystem is already up.
+@@ -68,6 +84,9 @@ done
+ 
+ # Now run the START scripts.
+ for i in /etc/rc$runlevel.d/S* ; do
++	percent_complete=$(splash_add $percent_complete $slice_size)
++	splash_progress $percent_complete
++
+ 	check_runlevel "$i" || continue
+ 
+ 	# Check if the subsystem is already up.
+@@ -99,3 +118,4 @@ if [ -x /usr/bin/rhgb-client ] && /usr/b
+   /usr/bin/rhgb-client --quit
+ fi
+ 
++splash_quit "rc exiting"
+diff -r f7c96233e71b rc.d/rc.sysinit
+--- a/rc.d/rc.sysinit	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/rc.sysinit	Tue Sep 25 17:32:34 2007 -0400
+@@ -29,6 +29,14 @@ fi
+ fi
+  
+ . /etc/init.d/functions
++
++# Start splash if it wasn't started in the initramfs.
++splash_boot
++splash_progress 3
++
++# set timeout to 2 minutes
++splash_timeout 120
++splash_log "starting rc.sysinit"
+ 
+ # Check SELinux status
+ selinuxfs="$(fstab_decode_str `LC_ALL=C awk '/ selinuxfs / { print $2 }' /proc/mounts`)"
+@@ -251,6 +259,7 @@ fi
+ 
+ # Set the system clock.
+ update_boot_stage RCclock
++splash_progress 4
+ ARC=0
+ SRM=0
+ UTC=0
+@@ -352,6 +361,7 @@ fi
+ 
+ # Configure kernel parameters
+ update_boot_stage RCkernelparam
++splash_progress 6
+ sysctl -e -p /etc/sysctl.conf >/dev/null 2>&1
+ 
+ if [ -x /bin/loadkeys ]; then
+@@ -385,6 +395,7 @@ fi
+ 
+ # Set the hostname.
+ update_boot_stage RChostname
++splash_progress 7
+ action $"Setting hostname ${HOSTNAME}: " hostname ${HOSTNAME}
+ 
+ # Initialize ACPI bits
+@@ -398,6 +409,7 @@ fi
+ 
+ # RAID setup
+ update_boot_stage RCraid
++splash_progress 8
+ if [ -f /etc/mdadm.conf ]; then
+     /sbin/mdadm -A -s --auto=yes
+ fi
+@@ -478,6 +490,8 @@ else
+ else
+ 	fsckoptions="-V $fsckoptions"
+ fi
++
++splash_progress 10
+ 
+ READONLY=
+ if [ -f /etc/sysconfig/readonly-root ]; then
+@@ -627,6 +641,8 @@ if ! [[ " $fsckoptions" =~ " -y" ]]; the
+     	fsckoptions="-a $fsckoptions"
+ fi
+ 
++splash_progress 13
++
+ _RUN_QUOTACHECK=0
+ if [ -f /forcequotacheck ] || strstr "$cmdline" forcequotacheck ; then
+ 	_RUN_QUOTACHECK=1
+@@ -635,6 +651,9 @@ if [ -z "$fastboot" -a "$READONLY" != "y
+ 
+         STRING=$"Checking filesystems"
+ 	echo $STRING
++	# set timeout to something a bit longer for fsck (5 minutes)
++	splash_timeout 300
++    
+ 	if [ "${RHGB_STARTED}" != "0" -a -w /etc/rhgb/temp/rhgb-console ]; then
+ 		fsck -T -t noopts=_netdev -A $fsckoptions > /etc/rhgb/temp/rhgb-console
+ 	else
+@@ -662,6 +681,8 @@ if [ -z "$fastboot" -a "$READONLY" != "y
+ 		    chvt 1
+ 		fi
+ 
++		splash_quit
++
+ 		failure "$STRING"
+ 		echo
+ 		echo
+@@ -690,6 +711,7 @@ fi
+ 
+ # Remount the root filesystem read-write.
+ update_boot_stage RCmountfs
++splash_progress 15
+ state="$(LC_ALL=C awk '/ \/ / && ($3 !~ /rootfs/) { print $4 }' /proc/mounts | sed -e 's/,.*//')"
+ [ "$state" != "rw" -a "$READONLY" != "yes" ] && \
+   action $"Remounting root filesystem in read-write mode: " mount -n -o remount,rw /
+@@ -936,6 +958,7 @@ chown root:root /tmp/.ICE-unix
+ 
+ # Start up swapping.
+ update_boot_stage RCswap
++splash_progress 18
+ action $"Enabling /etc/fstab swaps: " swapon -a -e
+ if [ "$AUTOSWAP" = "yes" ]; then
+ 	curswap=$(awk '/^\/dev/ { print $1 }' /proc/swaps | while read x; do get_numeric_dev dec $x ; echo -n " "; done)
+@@ -1005,3 +1028,4 @@ if [ -x /usr/bin/rhgb-client ] && /usr/b
+     /usr/bin/rhgb-client --sysinit
+ fi
+ 
++splash_ping "exit rc.sysinit"

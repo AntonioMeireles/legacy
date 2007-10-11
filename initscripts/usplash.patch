@@ -1,0 +1,129 @@
+diff -r f7c96233e71b rc.d/init.d/functions
+--- a/rc.d/init.d/functions	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/init.d/functions	Sat Jul 28 01:04:54 2007 -0400
+@@ -577,3 +577,68 @@ is_ignored_file() {
+ }
+ # A sed expression to filter out the files that is_ignored_file recognizes
+ __sed_discard_ignored_files='/\(~\|\.bak\|\.orig\|\.rpmnew\|\.rpmorig\|\.rpmsave\)$/d'
++
++# Functions to support usplash integration.
++
++usplash_enabled() {
++    cmdline=$(cat /proc/cmdline)
++    strstr "$cmdline" "splash"
++    return $?
++}
++
++usplash_log() {
++    usplash_enabled || return 0
++    usplash_log_dir="/dev/.initramfs"
++    usplash_log_file="$usplash_log_dir/usplash.log"
++    [ ! -d $usplash_log_dir ] && mkdir -p $usplash_log_dir
++    echo -n `date` >> $usplash_log_file
++    echo ": $*" >> $usplash_log_file
++    return 0
++}
++
++usplash_running() {
++    usplash_enabled || return 0
++    running=$(ps aux | grep usplash | grep -v grep)
++    if [ "$running" != "" ] ; then
++        return 0
++    else
++        usplash_log "Usplash Failed: $*"
++        return 1
++    fi
++}
++
++usplash_ping() {
++    usplash_enabled || return 0
++    if [ -x /sbin/usplash_write ] && usplash_running "$*" ; then
++        /sbin/usplash_write PULSATE
++        usplash_log "running usplash_write PULSATE"
++        usplash_log "$*"
++    fi
++    return 0
++}
++
++usplash_start() {
++    usplash_enabled || return 0
++    usplash_running && return 0
++    usplash_log "starting usplash"
++    if [ -f /sbin/usplash-start ] ; then
++        /sbin/usplash-start
++    fi
++    return $?
++}
++
++usplash_quit() {
++    usplash_enabled || return 0
++    usplash_running || return 0
++    if [ $(runlevel | cut -d ' ' -f 2) = "5" ] ; then
++        chvt 7
++    else
++        chvt 1
++    fi
++
++    if [ -x /sbin/usplash_write ] ; then
++        /sbin/usplash_write QUIT
++        usplash_log "quit message: $*"
++    fi
++    return 0
++}
+diff -r f7c96233e71b rc.d/rc
+--- a/rc.d/rc	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/rc	Wed Jul 25 17:12:40 2007 -0400
+@@ -58,6 +58,13 @@ for i in /etc/rc$runlevel.d/K* ; do
+ 	[ -f /var/lock/subsys/$subsys -o -f /var/lock/subsys/$subsys.init ] \
+ 		|| continue
+ 
++	# Only start usplash on shutdown or reboot.
++	if [ "$runlevel" = "0" ] || [ "$runlevel" = "6" ] ; then
++		usplash_start
++	fi
++
++	usplash_ping "$i"
++
+ 	# Bring the subsystem down.
+ 	if LC_ALL=C egrep -q "^..*init.d/functions" $i ; then
+ 		$i stop
+@@ -81,6 +88,8 @@ for i in /etc/rc$runlevel.d/S* ; do
+ 		test $? = 1 && continue
+ 	fi
+ 
++	usplash_ping "$subsys"
++
+ 	update_boot_stage "$subsys"
+ 	# Bring the subsystem up.
+ 	if [ "$subsys" = "halt" -o "$subsys" = "reboot" ]; then
+@@ -99,3 +108,4 @@ if [ -x /usr/bin/rhgb-client ] && /usr/b
+   /usr/bin/rhgb-client --quit
+ fi
+ 
++usplash_quit "rc exiting"
+diff -r f7c96233e71b rc.d/rc.sysinit
+--- a/rc.d/rc.sysinit	Mon Jul 23 01:13:05 2007 -0400
++++ b/rc.d/rc.sysinit	Wed Jul 25 11:39:11 2007 -0400
+@@ -29,6 +29,8 @@ fi
+ fi
+  
+ . /etc/init.d/functions
++
++usplash_ping "start rc.sysinit"
+ 
+ # Check SELinux status
+ selinuxfs="$(fstab_decode_str `LC_ALL=C awk '/ selinuxfs / { print $2 }' /proc/mounts`)"
+@@ -662,6 +664,8 @@ if [ -z "$fastboot" -a "$READONLY" != "y
+ 		    chvt 1
+ 		fi
+ 
++		usplash_quit
++
+ 		failure "$STRING"
+ 		echo
+ 		echo
+@@ -1005,3 +1009,4 @@ if [ -x /usr/bin/rhgb-client ] && /usr/b
+     /usr/bin/rhgb-client --sysinit
+ fi
+ 
++usplash_ping "exit rc.sysinit"
