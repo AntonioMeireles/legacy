@@ -1,0 +1,6 @@
+#define GNOMELOCALEDIR "/usr/share"
+#define PACKAGE_DATA_DIR "/usr/share/camorama"
+#define PACKAGE_VERSION "0.18"
+#define PACKAGE_NAME "camorama"
+#define GETTEXT_PACKAGE "camorama"
+#define version "0.18" 
