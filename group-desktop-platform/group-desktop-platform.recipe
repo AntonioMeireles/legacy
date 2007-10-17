@@ -16,7 +16,11 @@ class GroupDesktopPlatform(GroupRecipe):
     depCheck = True
     checkPathConflicts = True
 
-    x86_64FlavorString = 'is: x86(i486,i586,i686) x86_64'
+    x86_64rplGroupsFlavorString = 'is: x86(i486,i586,i686) x86_64'
+    x86_64FlavorString = 'is: x86_64'
+    x86FlavorString  = 'is: x86(i486,i586,i686)'
+    x86rplGroupsFlavorString = x86FlavorString
+
     rPathVersionStr = None
 
     supDocComponents = [ 'supdoc', ]
@@ -61,9 +65,9 @@ class GroupDesktopPlatform(GroupRecipe):
     def rplAddGroup(r, name, version, flavor=None):
         if not flavor:
             if Arch.x86_64:
-                flavor = 'is: x86_64' # 'is: x86(i486,i586,i686) x86_64'
+                flavor = r.x86_64rplGroupsFlavorString
             else:
-                flavor = 'is: x86(i486,i586,i686)'
+                flavor = r.x86rplGroupsFlavorString
 
         r.addCopy(name, version, flavor)
 
@@ -78,9 +82,9 @@ class GroupDesktopPlatform(GroupRecipe):
     def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True):
         if not flavor:
             if Arch.x86_64:
-                flavor = 'is: x86_64' # (i486,i586,i686) x86_64'
+                flavor = r.x86_64rplGroupsFlavorString
             else:
-                flavor = 'is: x86(i486,i586,i686)'
+                flavor = r.x86rplGroupsFlavorString
 
         #  first, we add the trove, normally
         r.add(name, source=source, groupName=groupName, flavor=flavor, byDefault=byDefault)
@@ -90,9 +94,9 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64 and not name == 'anaconda':
             # All :lib components land in compat32. this may need to be refined in the future
 
-            r.add(name, groupName='group-desktop-platform-compat32', flavor='is: x86(i486,i586,i686)', components=['lib'])
+            r.add(name, groupName='group-desktop-platform-compat32', flavor=r.x86FlavorString, components=['lib'])
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
-                      newFlavor='is: x86(i486,i586,i686)')
+                      newFlavor = r.x86FlavorString)
 
         for g in r.rplGroups:
             r.replace(name, groupName = 'group-'+ g, newFlavor=flavor, # WARNING: this needs to be refactored
@@ -103,17 +107,17 @@ class GroupDesktopPlatform(GroupRecipe):
     def flReplace(r, name, groupName=None, flavor=None):
         if not flavor:
             if Arch.x86_64:
-                flavor = 'is: x86_64'
+                flavor = r.x86_64FlavorString
             else:
-                flavor = 'is: x86(i486,i586,i686)'
+                flavor = r.x86FlavorString
 
         r.replace(name, groupName=groupName, newFlavor=flavor)
 
         if Arch.x86_64:
             r.remove(name, groupName='group-compat32', allowNoMatch=True, 
-                      flavor='is: x86_64')
+                      flavor=r.x86_64FlavorString)
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
-                      newFlavor='is: x86(i486,i586,i686)')
+                      newFlavor=r.x86FlavorString)
 
     def rplAdd(r, name, versionStr=None, groupName=None, components=None, byDefault=True, flavor = None):
 
@@ -125,12 +129,12 @@ class GroupDesktopPlatform(GroupRecipe):
 
         if not flavor:
             if Arch.x86_64:
-                flavor = 'is: x86_64'
+                flavor = r.x86_64FlavorString
             else:
-                flavor = 'is: x86(i486,i586,i686)'
+                flavor = r.x86FlavorString
 
         if Arch.x86_64:
-            flavor32 = 'is: x86(i486,i586,i686)'
+            flavor32 = r.x86FlavorString
 
             # All :lib components land in compat32. this may need to be refined in the future
             r.add(name, versionStr=versionStr,
@@ -144,14 +148,13 @@ class GroupDesktopPlatform(GroupRecipe):
 
 
     def setup(r):
-        # hack!!! lock rpl:devel groups until toolchain there gets stabler.
         rplBranch = 'conary.rpath.com@rpl:devel'
         groupOs = 'group-os=' + rplBranch + '[%s]'
 
         if Arch.x86_64:
-            groupOs = groupOs % 'is: x86(i486,i586,i686) x86_64'
+            groupOs = groupOs % r.x86_64rplGroupsFlavorString
         else:
-            groupOs = groupOs % 'is: x86(i486,i586,i686)'
+            groupOs = groupOs % r.x86rplGroupsFlavorString
 
         r.setSearchPath('foresight.rpath.org@fl:2-devel', groupOs, 'conary.rpath.com@rpl:1-compat')
 
@@ -184,7 +187,7 @@ class GroupDesktopPlatform(GroupRecipe):
             for l in  [ 'sqlite', 'gpgme', 'lzo', 'libnl',
                         'opensp', 'jasper', 'ImageMagick', 'SDL', 'libieee1284', 'taglib']:
                 r.add(l, 'conary.rpath.com@rpl:devel', groupName='group-compat32',
-                      flavor='is: x86(i486,i586,i686)', components=['lib'],)
+                      flavor=r.x86FlavorString, components=['lib'],)
 
                 # we should have not need to specicy ref above. but since  we have an arch dependent searchPath (regarding 
                 # the stuff we import from rpl:devel), if we don't use it conary will never find rpl:devel x86 troves due to 
@@ -1328,7 +1331,7 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             r.removeComponents(['devel', 'doc', 'data', 'runtime', 'supdoc', 'locale', 'config', 'devellib'], groupName='group-compat32')
 
-            for p in ['pidgin', 'pidgin-plugin_pack', 'NetworkManager', 'evolution', 'evolution-data-server', 'evolution-exchange', 'evolution-webcal',  'evolution-sharp', 'libxml2', 'udev', 'avahi', 'xorg-server', 'dhclient', 'kfile-plugins-graphics']:
+            for p in ['pidgin', 'pidgin-plugin_pack', 'NetworkManager', 'evolution', 'evolution-data-server', 'evolution-exchange', 'evolution-webcal',  'evolution-sharp', 'libxml2', 'udev', 'avahi', 'xorg-server', 'dhclient', 'kfile-plugins-graphics', 'PackageKit']:
                 r.remove(p, groupName='group-desktop-platform-compat32')
 
             # FIXME:
