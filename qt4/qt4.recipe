@@ -1,0 +1,187 @@
+#
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Qt4(AutoPackageRecipe):
+
+    name = 'qt4'
+    version = '4.3.2+r728128'
+
+    buildRequires = [
+        'cups:devel', 'dbus:devel', 'fontconfig:devel', 'freetype:devel',
+        'glib:devel', 'libICE:devel', 'libjpeg:devel', 'libmng:devel',
+        'libpng:devel', 'libSM:devel', 'libstdc++:devel', 'libtiff:devel',
+        'libX11:devel', 'libXcursor:devel', 'libXext:devel', 'libXfixes:devel',
+        'libXi:devel', 'libXinerama:devel', 'libXrandr:devel',
+        'libXrender:devel', 'libXt:devel', 'Mesa:devel', 'mysql:devel',
+        'openssl:devel', 'pkgconfig:devel', 'postgresql:devel', 'sqlite:devel',
+        'unixODBC:devel', 'zlib:devel'
+    ]
+
+    def unpack(r):
+
+        if r.macros.lib == 'lib64':
+            r.macros.platform = 'linux-g++-64'
+        else:
+            r.macros.platform = 'linux-g++'
+
+        r.macros.qt = 'qt4'
+        r.addSvnSnapshot('svn://anonsvn.kde.org/home/kde/trunk/qt-copy')
+        r.addPatch('assistant-qt4.patch')
+        r.addPatch('qdbuscpp2xml-moc-qt4.patch')
+
+        r.addSource('environment.conf', dir='mkspecs/common/')
+        r.addSource('rpath.conf', dir='mkspecs/common/', macros=True)
+
+        # Use CC, CXX, CFLAGS, CXXFLAGS from environment
+        r.Replace('load\(qt_config\)',
+                  'include(../common/rpath.conf)\nload(qt_config)',
+                  'mkspecs/linux-g++{,-32,-64}/qmake.conf')
+
+        r.Replace('link_prl', '',
+                  'mkspecs/linux-g++{,-32,-64}/qmake.conf')
+
+        # Disable patches that already applied
+        r.Run('echo -e "0172\n0118\n0181\n0186\n0188\n0189\n0193\n0196\n" >> patches/DISABLED')
+
+        r.Run('./apply_patches')
+
+    def configure(r):
+
+        conf  = (' -prefix         %(prefix)s'
+                 ' -sysconfdir     %(sysconfdir)s/%(qt)s'
+                 ' -libdir         %(libdir)s'
+                 ' -datadir        %(datadir)s/%(qt)s'
+                 ' -headerdir      %(includedir)s/%(qt)s'
+                 ' -docdir         %(datadir)s/%(qt)s/doc'
+                 ' -plugindir      %(libdir)s/%(qt)s/plugins'
+                 ' -translationdir %(datadir)s/%(qt)s/translations')
+
+        conf += (' -no-rpath'
+                 ' -no-exceptions'
+                 ' -nomake demos'
+                 ' -nomake examples'
+                 ' -platform %(platform)s'
+                 ' -no-separate-debug-info')
+
+        conf += (' -system-zlib'
+                 ' -system-libpng'
+                 ' -system-libjpeg'
+                 ' -no-nas-sound'
+                 ' -qdbus'
+                 ' -qvfb'
+                 ' -qt-gif'
+                 ' -plugin-sql-psql'
+                 ' -plugin-sql-odbc'
+                 ' -plugin-sql-mysql'
+                 ' -plugin-sql-sqlite'
+#                 ' -qt-sql-psql'
+#                 ' -qt-sql-odbc'
+#                 ' -qt-sql-mysql'
+#                 ' -qt-sql-sqlite'
+                 ' -system-sqlite')
+
+        conf +=  ' -v -confirm-license'
+
+        r.ManualConfigure(conf)
+
+    def make(r):
+
+        r.Make()
+
+        # We don't install XOrg in separate dir now
+        r.Replace('/X11R6', '',
+                  'mkspecs/common/linux.conf',
+                  'mkspecs/linux-g++-64/qmake.conf')
+
+        # Add '-qt4'
+        r.Replace(
+            ('^QMAKE_MOC\s*=.+', 'QMAKE_MOC = %(bindir)s/moc-qt4'),
+            ('^QMAKE_UIC\s*=.+', 'QMAKE_UIC = %(bindir)s/uic-qt4'),
+            'mkspecs/common/linux.conf')
+
+    def makeinstall(r):
+
+        r.MakeDirs('%(sysconfdir)s/%(qt)s')
+
+        r.MakePathsInstall('INSTALL_ROOT=%(destdir)s')
+
+        # We really need this!
+        r.Replace('/.+/%(maindir)s/lib', '%(libdir)s',
+                  '%(libdir)s/*.la', allowNoChange=True)
+        r.Replace(('/.+/%(maindir)s/lib', '%(libdir)s'),
+                  ('/.+/%(maindir)s/bin/moc', '%(bindir)s/moc-qt4'),
+                  ('/.+/%(maindir)s/bin/uic', '%(bindir)s/uic-qt4'),
+                  '%(libdir)s/pkgconfig/*.{la,pc}', allowNoChange=True)
+
+        # Respect CC, CXX, CFLAGS, CXXFLAGS from environment
+        r.Replace('rpath.conf', 'environment.conf',
+                  '%(datadir)s/%(qt)s/mkspecs/linux-g++{,-32,-64}/qmake.conf')
+
+        # Rename files
+        files = (
+            'assistant', 'designer', 'linguist',
+            'lrelease', 'lupdate', 'moc', 'qmake', 'qtconfig', 'uic' )
+        for file in files:
+            r.Move('%%(bindir)s/%s' % file, '%%(bindir)s/%s-qt4' % file)
+
+    def policy(r):
+
+        r.Doc('demos')
+        r.Doc('examples')
+        r.Doc('README', 'OPENSOURCE-NOTICE.TXT',
+              'LICENSE.GPL', 'LICENSE.QPL', 'changes-'+r.version.split('+')[0])
+
+        r.AutoDoc(exceptions='/')
+        r.RemoveNonPackageFiles(exceptions='.*\.la')
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/%(qt)s')
+
+        r.PackageSpec('%(qt)s-core',
+                      '%(bindir)s/qdbus',
+                      '%(datadir)s/%(qt)s/translations/.+.qm',
+                      '%(libdir)s/libQt(Core|Network|Xml|Test|DBus).(la|so.+)')
+
+        r.PackageSpec('%(qt)s-gui',
+                      '%(libdir)s/libQt(Gui|OpenGL|Svg|Designer.*|AssistantClient).(la|so.+)',
+                      '%(libdir)s/%(qt)s/plugins/(imageformats|iconengines|inputmethods|codecs)/.+.so',
+                      '%(libdir)s/%(qt)s/plugins/accessible/libqtaccessiblewidgets.so')
+
+        r.PackageSpec('%(qt)s-qt3support',
+                      '%(libdir)s/libQt3Support.(la|so.+)',
+                      '%(libdir)s/%(qt)s/plugins/accessible/libqtaccessiblecompatwidgets.so')
+
+        r.PackageSpec('%(qt)s-sql',
+                      '%(libdir)s/%(qt)s/plugins/sqldrivers/',
+                      '%(libdir)s/libQtSql.(la|so.+)')
+
+        r.ComponentSpec('sqlite',
+                        '%(libdir)s/%(qt)s/plugins/sqldrivers/libqsqlite.so')
+
+        for plugin in ('mysql', 'odbc', 'psql'):
+            r.ComponentSpec(plugin,
+                '%%(libdir)s/%%(qt)s/plugins/sqldrivers/libqsql%s.so' % plugin)
+
+        r.PackageSpec('%(qt)s-designer',
+                      '%(bindir)s/designer-qt4',
+                      '%(libdir)s/%(qt)s/plugins/designer/.+.so')
+
+        r.PackageSpec('%(qt)s-tools',
+                      '%(datadir)s/%(qt)s/phrasebooks/',
+                      '%(bindir)s/(assistant|linguist)-qt4')
+
+        r.ComponentSpec('locale',
+                        '%(datadir)s/%(qt)s/translations/.+.qm')
+
+        r.ComponentSpec('devel',
+                        '%(datadir)s/%(qt)s/mkspecs/',
+                        '%(datadir)s/%(qt)s/q3porting.xml',
+                        '%(bindir)s/(qmake|lupdate|lrelease|uic|moc)-qt4',
+                        '%(bindir)s/(qt3to4|rcc|uic3|pixeltool|qtdemo|qdbusxml2cpp|qdbuscpp2xml)')
+
+        r.ComponentSpec('apidox', '%(datadir)s/%(qt)s/doc/')
+
+        r.ComponentSpec('develdoc',
+                        '%(thisdocdir)s/(demos|examples)/')
+
