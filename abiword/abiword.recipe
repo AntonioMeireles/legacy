@@ -1,44 +1,49 @@
-class AbiWord(CPackageRecipe):
+#
+# Copyright (c) 2007 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
 
-    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'aiksaurus:devel', 'atk:devel',
-        'bzip2:devel', 'cairo:devel', 'enchant:devel', 'expat:devel',
-        'fontconfig:devel', 'freetype:devel', 'fribidi:devel',
-        'glib:devel', 'glibc:devel', 'gnome-keyring:devel', 'gnome-vfs:devel',
-        'goffice:devel', 'gtk:devel', 'gucharmap:devel', 'libart_lgpl:devel',
-        'libbonobo:devel', 'libbonoboui:devel', 'libglade:devel', 'libgnome:devel',
-        'libgnomecanvas:devel', 'libgnomeprint:devel', 'libgnomeprintui:devel',
-        'libgnomeui:devel', 'libgsf:devel', 'libjpeg:devel', 'libpng:devel',
-        'librsvg:devel', 'libtermcap:devel', 'libwmf:devel', 'libxml2:devel',
-        'pango:devel', 'poppler:devel', 'popt:devel', 'readline:devel',
-        'zlib:devel', 'binutils:runtime', 'desktop-file-utils:runtime',
-        'gawk:runtime', 'gtk:runtime', 'libgcc:devellib', 'libstdc++:devel',
-        'perl:lib', 'perl:runtime', 'pkgconfig:devel', 'psiconv:devel', 
-	'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXau:devel', 
-	'libXdmcp:devel', 'libXft:devel', 'libXrender:devel' ] 
+loadRecipe('gnomepackage.recipe')
+class AbiWord(GnomePackageRecipe):
+
 
     name = 'abiword'
     version = '2.4.6'
 
+    buildRequires = ['GConf:devel', 'ORBit2:devel', 'aiksaurus:devel', 
+'autoconf:runtime',  'automake:runtime', 'libtool:devel', 'libtool:runtime',
+'bzip2:devel', 'desktop-file-utils:runtime', 'enchant:devel', 'esound:devel', 
+'expat:devel', 'fribidi:devel', 'gail:devel', 'gnome-keyring:devel', 'gnome-vfs:devel', 
+'gucharmap:devel', 'libXft:devel', 'libart_lgpl:devel', 'libbonobo:devel', 
+'libbonoboui:devel', 'libglade:devel', 'libgnome:devel', 'libgnomecanvas:devel', 
+'libgnomeprint:devel', 'libgnomeprintui:devel', 'libgnomeui:devel', 
+'libgsf:devel', 'libjpeg:devel', 'libstdc++:devel', 'libtermcap:devel', 
+'libwmf:devel', 'popt:devel', 'psiconv:devel','pkgconfig:devel' ,
+'m4:runtime', 'readline:devel']
+
     def setup(r):
         r.addArchive('http://www.abisource.org/downloads/%(name)s/%(version)s/source/%(name)s-%(version)s.tar.gz')
-        r.Replace('Categories=Application;','Categories=GNOME;Application;','abi/abiword.desktop')
-        r.Replace('72, 72, 0', '72, 72, 0, gTrue', 'abiword-plugins/wp/impexp/pdf/xp/ie_imp_PDF.cpp')
-        
-        r.Configure('--enable-gnome --with-builtin-plugins', dir='abi')
-        r.Configure('--enable-all', dir='abiword-plugins')
-	r.Make(dir='wv/libole2')  # needs to be this way. otherwise cook breaks.
-	r.Make(dir='abi')
-        r.Make(dir='abiword-plugins')
-	
-        r.MakeInstall(dir='abi')
-        r.MakeInstall(dir='abiword-plugins')
-
-        r.MakeDirs("%(datadir)s/AbiSuite-2.4/AbiWord")
-        r.Run("ABI_DOC_PROG=%(builddir)s/abi/src/wp/main/unix/AbiWord-2.4 ./make-html.sh",
-              dir="abiword-docs/")
-        r.Move("abiword-docs/help", "%(datadir)s/AbiSuite-2.4/AbiWord/")
-        # some of the help directories have bad permissions
-        r.Run("find %(destdir)s%(datadir)s/AbiSuite-2.4/AbiWord/help/ -type d -exec chmod -c o+rx {} \;")
-
-        r.ComponentSpec('runtime', '%(libdir)s/AbiWord-2.4/plugins/')
+        r.macros.extraConfig= ' --enable-gnome'
+        r.macros.abidir     = 'abi'
+        r.macros.pluginsdir = 'abiword-plugins'       
+        # Configure and make Abiword core:
+        r.Configure(' --enable-extra-optimization --with-pspell=yes %(extraConfig)s', dir='%(abidir)s')
+        r.Make(dir='%(abidir)s')
+        r.MakeInstall(dir='%(abidir)s')
+        # Configure and make Abiword Plugins 
+        # see  also http://www.abisource.com/twiki/bin/view/Abiword/PluginMatrix
+        r.Run('./nextgen.sh', dir='%(pluginsdir)s')
+        r.Configure(' --disable-all'
+        ' --enable-abicommand --enable-abicapi --enable-abidash --enable-abigimp'
+        ' --enable-abigochart  --enable-abigrammar --enable-aiksaurus'
+        ' --enable-abimathview --enable-babelfish --enable-bz2abw --enable-docbook'
+        ' --enable-eml --enable-gda --enable-gdict --enable-google --enable-hrtext --enable-html'
+        ' --enable-kword --enable-ots --enable-psion --enable-mswrite --enable-OpenDocument'
+        ' --enable-pdb --enable-sdw --enable-shell --enable-t602 --enable-wmf'
+        ' --enable-wordperfect  --enable-xhtml --enable-xsl-fo %(extraConfig)s', 
+         dir='%(pluginsdir)s')
+        r.Make(dir='%(pluginsdir)s')
+        r.MakeInstall(dir='%(pluginsdir)s')
+        r.ComponentSpec('lib', '%(libdir)s/AbiWord-2.4/plugins/')
         r.ComponentSpec('doc', '%(datadir)s/AbiSuite-2.4/AbiWord/help/')
