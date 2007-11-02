@@ -1,0 +1,484 @@
+diff -u -r -N NetworkManager-vpnc-0.6.4.orig/properties/nm-vpnc.c NetworkManager-vpnc-0.6.4/properties/nm-vpnc.c
+--- NetworkManager-vpnc-0.6.4.orig/properties/nm-vpnc.c	2006-04-11 22:44:14.000000000 +0200
++++ NetworkManager-vpnc-0.6.4/properties/nm-vpnc.c	2007-02-17 08:17:41.000000000 +0100
+@@ -1,5 +1,5 @@
+ /***************************************************************************
+- * CVSID: $Id: nm-vpnc.c,v 1.5.2.1 2006/04/10 20:34:25 rml Exp $
++ * CVSID: $Id: nm-vpnc.c,v 1.5.2.3 2006/11/01 16:33:28 tambeti Exp $
+  *
+  * nm-vpnc.c : GNOME UI dialogs for configuring vpnc VPN connections
+  *
+@@ -31,6 +31,7 @@
+ #define NM_VPN_API_SUBJECT_TO_CHANGE
+ 
+ #include <NetworkManager/nm-vpn-ui-interface.h>
++#include "pcf-file.h"
+ 
+ typedef struct _NetworkManagerVpnUIImpl NetworkManagerVpnUIImpl;
+ 
+@@ -478,95 +479,85 @@
+ static gboolean
+ import_from_file (NetworkManagerVpnUIImpl *impl, const char *path)
+ {
+-	char *basename;
+-	GKeyFile *keyfile;
+-	gboolean file_is_good;
+-
+-	/*printf ("path='%s'\n", path);*/
+-
+-	file_is_good = FALSE;
+-	basename = g_path_get_basename (path);
+-
+-	keyfile = g_key_file_new ();
+-	if (g_key_file_load_from_file (keyfile, path, 0, NULL)) {
+-		char *connectionname = NULL;
+-		char *gateway = NULL;
+-		char *groupname = NULL;
+-		char *username = NULL;
+-		char *domain = NULL;
+-		char *tunneling_mode = NULL;
+-		char *routes = NULL;
+-		gboolean should_expand;
+-
+-		if ((connectionname = g_key_file_get_string (keyfile, "main", "Description", NULL)) == NULL)
+-			goto error;
+-		if ((gateway = g_key_file_get_string (keyfile, "main", "Host", NULL)) == NULL)
+-			goto error;
+-		if ((groupname = g_key_file_get_string (keyfile, "main", "GroupName", NULL)) == NULL)
+-			goto error;
+-		if ((username = g_key_file_get_string (keyfile, "main", "Username", NULL)) == NULL)
+-			goto error;
+-		if ((domain = g_key_file_get_string (keyfile, "main", "NTDomain", NULL)) == NULL)
+-			goto error;
+-		if ((tunneling_mode = g_key_file_get_string (keyfile, "main", "TunnelingMode", NULL)) == NULL)
+-			goto error;
+-
+-		/* may not exist */
+-		if ((routes = g_key_file_get_string (keyfile, "main", "X-NM-Routes", NULL)) == NULL)
+-			routes = g_strdup ("");
+-
+-		/* sanity check data */
+-		if (! (strlen (gateway) > 0 &&
+-		       strlen (groupname) > 0))
+-			goto error;
+-
+-		gtk_entry_set_text (impl->w_connection_name, connectionname);
+-		gtk_entry_set_text (impl->w_gateway, gateway);
+-		gtk_entry_set_text (impl->w_group_name, groupname);
+-
+-		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username), strlen (username) > 0);
+-		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_routes), strlen (routes) > 0);
+-		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_domain), strlen (domain) > 0);
+-		gtk_entry_set_text (impl->w_username, username);
+-		gtk_entry_set_text (impl->w_routes, routes);
+-		gtk_entry_set_text (impl->w_domain, domain);
+-		gtk_widget_set_sensitive (GTK_WIDGET (impl->w_username), strlen (username) > 0);
+-		gtk_widget_set_sensitive (GTK_WIDGET (impl->w_routes), strlen (routes) > 0);
+-		gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), strlen (username) > 0);
++	GHashTable *pcf;
++	const char *buf;
++	gboolean have_value;
++	char *basename = NULL;
++	gboolean expand = FALSE;
++	gboolean success = FALSE;
++
++	pcf = pcf_file_load (path);
++	if (pcf == NULL)
++		return FALSE;
+ 
+-		should_expand = (strlen (username) > 0) || (strlen (domain) > 0) || (strlen (routes) > 0);
+-		gtk_expander_set_expanded (impl->w_opt_info_expander, should_expand);
++	/* Connection name */
++	if ((buf = pcf_file_lookup_value (pcf, "main", "Description")) == NULL || strlen (buf) < 1)
++		goto error;
++	gtk_entry_set_text (impl->w_connection_name, buf);
++
++	/* Gateway */
++	if ((buf = pcf_file_lookup_value (pcf, "main", "Host")) == NULL || strlen (buf) < 1)
++		goto error;
++	gtk_entry_set_text (impl->w_gateway, buf);
++
++	/* Group name */
++	if ((buf = pcf_file_lookup_value (pcf, "main", "GroupName")) == NULL || strlen (buf) < 1)
++		goto error;
++	gtk_entry_set_text (impl->w_group_name, buf);
++
++	/* Optional settings */
++
++	if ((buf = pcf_file_lookup_value (pcf, "main", "UserName")))
++		gtk_entry_set_text (impl->w_username, buf);
++	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
++	expand |= have_value;
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_alternate_username), have_value);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_username), have_value);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_domain), have_value);
++
++	if ((buf = pcf_file_lookup_value (pcf, "main", "NTDomain")))
++		gtk_entry_set_text (impl->w_domain, buf);
++	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
++	expand |= have_value;
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_domain), have_value);
++
++	if ((buf = pcf_file_lookup_value (pcf, "main", "X-NM-Routes")))
++		gtk_entry_set_text (impl->w_routes, buf);
++	have_value = buf == NULL ? FALSE : strlen (buf) > 0;
++	expand |= have_value;
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (impl->w_use_routes), have_value);
++	gtk_widget_set_sensitive (GTK_WIDGET (impl->w_routes), have_value);
++
++	gtk_expander_set_expanded (impl->w_opt_info_expander, expand);
+ 
++	if ((buf = pcf_file_lookup_value (pcf, "main", "TunnelingMode"))) {
+ 		/* If applicable, put up warning that TCP tunneling will be disabled */
+-		if (strcmp (tunneling_mode, "1") == 0) {
++
++		if (strncmp (buf, "1", 1) == 0) {
+ 			GtkWidget *dialog;
+ 
+-			dialog = gtk_message_dialog_new (NULL,
+-							 GTK_DIALOG_DESTROY_WITH_PARENT,
+-							 GTK_MESSAGE_WARNING,
+-							 GTK_BUTTONS_CLOSE,
+-							 _("TCP tunneling not supported"));
++			basename = g_path_get_basename (path);
++			dialog = gtk_message_dialog_new (NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
++											 GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,
++											 _("TCP tunneling not supported"));
+ 			gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
+-								  _("The VPN settings file '%s' specifies that VPN traffic should be tunneled through TCP which is currently not supported in the vpnc software.\n\nThe connection can still be created, with TCP tunneling disabled, however it may not work as expected."), basename);
++													  _("The VPN settings file '%s' specifies that VPN traffic should be tunneled through TCP which is currently not supported in the vpnc software.\n\nThe connection can still be created, with TCP tunneling disabled, however it may not work as expected."), basename);
+ 			gtk_dialog_run (GTK_DIALOG (dialog));
+ 			gtk_widget_destroy (dialog);
+ 		}
++	}
+ 
+-		file_is_good = TRUE;
++	success = TRUE;
+ 
+-	error:
+-		g_free (connectionname);
+-		g_free (gateway);
+-		g_free (groupname);
+-		g_free (username);
+-		g_free (domain);
+-		g_free (tunneling_mode);
+-	}
+-	g_key_file_free (keyfile);
++ error:	
++	g_hash_table_destroy (pcf);
+ 
+-	if (!file_is_good) {
++	if (!success) {
+ 		GtkWidget *dialog;
+-		
++
++		if (!basename)
++			basename = g_path_get_basename (path);
++
+ 		dialog = gtk_message_dialog_new (NULL,
+ 						 GTK_DIALOG_DESTROY_WITH_PARENT,
+ 						 GTK_MESSAGE_WARNING,
+@@ -580,7 +571,7 @@
+ 
+ 	g_free (basename);
+ 
+-	return file_is_good;
++	return success;
+ }
+ 
+ static void
+diff -u -r -N NetworkManager-vpnc-0.6.4.orig/properties/pcf-file.c NetworkManager-vpnc-0.6.4/properties/pcf-file.c
+--- NetworkManager-vpnc-0.6.4.orig/properties/pcf-file.c	1970-01-01 01:00:00.000000000 +0100
++++ NetworkManager-vpnc-0.6.4/properties/pcf-file.c	2006-11-28 11:23:14.000000000 +0100
+@@ -0,0 +1,184 @@
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++#include <ctype.h>
++
++#include "pcf-file.h"
++
++static void
++pcf_entry_free (PcfEntry *entry)
++{
++	if (entry) {
++		g_free (entry->key);
++		g_free (entry->value);
++		g_free (entry);
++	}
++}
++
++/* Stolen from gaim */
++
++static char *
++pcf_utf8_try_convert (const char *str)
++{
++	char *utf8;
++	gsize converted;
++
++	if (!str)
++		return NULL;
++
++	if (g_utf8_validate (str, -1, NULL))
++		return g_strdup (str);
++
++	utf8 = g_locale_to_utf8 (str, -1, NULL, NULL, NULL);
++	if (utf8)
++		return utf8;
++
++	utf8 = g_convert (str, -1, "UTF-8", "ISO-8859-15", &converted, NULL, NULL);
++	if (utf8 && converted == strlen (str))
++		return utf8;
++
++	g_free (utf8);
++	return NULL;
++}
++
++/*
++  The main reader loop here is based on the simple .ini file
++  parser from avahi/avahi-daemon/ini-file-parser.c
++*/
++
++GHashTable *
++pcf_file_load (const char *fname)
++{
++	FILE *fo;
++	unsigned line;
++    GHashTable *pcf;
++	GHashTable *group = NULL;
++    
++    g_return_val_if_fail (fname != NULL, NULL);
++
++    if (!(fo = fopen (fname, "r"))) {
++        g_warning ("Failed to open file '%s': %s", fname, strerror (errno));
++        return NULL;
++    }
++
++	pcf = g_hash_table_new_full (g_str_hash, g_str_equal,
++								 g_free,
++								 (GDestroyNotify) g_hash_table_destroy);
++
++    line = 0;
++    while (!feof (fo)) {
++        char ln[256], *s, *e;
++        
++        if (!(fgets (ln, sizeof (ln), fo)))
++            break;
++
++        line++;
++
++        s = ln + strspn (ln, " \t");
++        s[strcspn (s, "\r\n")] = 0;
++
++        /* Skip comments and empty lines */
++        if (*s == ';' || *s == 0)
++            continue;
++
++        if (*s == '[') {
++            /* new group */
++            
++            if (!(e = strchr (s, ']'))) {
++                g_warning ("Unclosed group header in %s:%u: <%s>", fname, line, s);
++                goto fail;
++            }
++
++            *e = 0;
++
++			group = g_hash_table_new_full (g_str_hash, g_str_equal, NULL,
++										   (GDestroyNotify) pcf_entry_free);
++
++			g_hash_table_insert (pcf, g_utf8_strdown (s+1, -1), group);
++        } else {
++			PcfEntry *entry;
++
++            /* Normal assignment */
++            if (!(e = strchr (s, '='))) {
++                g_warning ("Missing assignment in %s:%u: <%s>", fname, line, s);
++                goto fail;
++            }
++            
++            if (!group) {
++                g_warning ("Assignment outside group in %s:%u <%s>", fname, line, s);
++                goto fail;
++            }
++            
++            /* Split the key and the value */
++            *(e++) = 0;
++
++			entry = g_new (PcfEntry, 1);
++			entry->value = pcf_utf8_try_convert (e);
++
++			if (*s == '!') {
++				entry->key = g_utf8_strdown (s+1, -1);
++				entry->read_only = TRUE;
++			} else {
++				entry->key = g_utf8_strdown (s, -1);
++				entry->read_only = FALSE;
++			}
++
++			g_hash_table_insert (group, entry->key, entry);
++        }
++    }
++    
++    fclose (fo);
++        
++    return pcf;
++
++fail:
++
++    if (fo)
++        fclose (fo);
++
++    if (pcf)
++        g_hash_table_destroy (pcf);
++
++    return NULL;
++}
++
++PcfEntry *
++pcf_file_lookup (GHashTable *pcf_file,
++				 const char *group,
++				 const char *key)
++{
++	gpointer section;
++	PcfEntry *entry = NULL;
++	char *group_lower = NULL;
++	char *key_lower = NULL;
++
++	g_return_val_if_fail (pcf_file != NULL, NULL);
++	g_return_val_if_fail (group != NULL, NULL);
++	g_return_val_if_fail (key != NULL, NULL);
++
++	group_lower = g_utf8_strdown (group, -1);
++	section = g_hash_table_lookup (pcf_file, group_lower);
++	if (section) {
++		key_lower = g_utf8_strdown (key, -1);
++		entry = (PcfEntry *) g_hash_table_lookup ((GHashTable *) section, key_lower);
++	}
++
++	g_free (group_lower);
++	g_free (key_lower);
++
++	return entry;
++}
++
++const char *
++pcf_file_lookup_value (GHashTable *pcf_file,
++					   const char *group,
++					   const char *key)
++{
++	PcfEntry *entry;
++
++	entry = pcf_file_lookup (pcf_file, group, key);
++	if (entry)
++		return entry->value;
++
++	return NULL;
++}
+diff -u -r -N NetworkManager-vpnc-0.6.4.orig/properties/pcf-file.h NetworkManager-vpnc-0.6.4/properties/pcf-file.h
+--- NetworkManager-vpnc-0.6.4.orig/properties/pcf-file.h	1970-01-01 01:00:00.000000000 +0100
++++ NetworkManager-vpnc-0.6.4/properties/pcf-file.h	2006-11-01 17:33:28.000000000 +0100
+@@ -0,0 +1,23 @@
++#ifndef PCF_FILE_H
++#define PCF_FILE_H
++
++#include <glib.h>
++
++typedef struct PcfEntry PcfEntry;
++
++struct PcfEntry {
++	char *key;
++	char *value;
++	gboolean read_only;
++};
++
++GHashTable  *pcf_file_load        (const char *fname);
++PcfEntry    *pcf_file_lookup      (GHashTable *pcf_file,
++								   const char *group,
++								   const char *key);
++
++const char *pcf_file_lookup_value (GHashTable *pcf_file,
++								   const char *group,
++								   const char *key);
++
++#endif /* PCF_FILE_H */
+diff -u -r -N NetworkManager-vpnc-0.6.4.orig/src/nm-vpnc-service.c NetworkManager-vpnc-0.6.4/src/nm-vpnc-service.c
+--- NetworkManager-vpnc-0.6.4.orig/src/nm-vpnc-service.c	2006-07-13 18:02:36.000000000 +0200
++++ NetworkManager-vpnc-0.6.4/src/nm-vpnc-service.c	2007-02-17 08:17:41.000000000 +0100
+@@ -492,18 +492,19 @@
+ static gboolean nm_vpnc_config_options_validate (char **data_items, int num_items)
+ {
+ 	Option	allowed_opts[] = {
+-		{ "IPSec gateway",            OPT_TYPE_ADDRESS },
+-		{ "IPSec ID",                 OPT_TYPE_ASCII },
+-		{ "IPSec secret",             OPT_TYPE_ASCII },
+-		{ "Xauth username",           OPT_TYPE_ASCII },
+-		{ "UDP Encapsulate",          OPT_TYPE_NONE },
+-		{ "UDP Encapsulation Port",   OPT_TYPE_ASCII },
+-		{ "Domain",                   OPT_TYPE_ASCII },
+-		{ "IKE DH Group",             OPT_TYPE_ASCII },
+-		{ "Perfect Forward Secrecy",  OPT_TYPE_ASCII },
+-		{ "Application Version",      OPT_TYPE_ASCII },
+-		{ "Rekeying interval",        OPT_TYPE_ASCII },
+-		{ NULL,                       OPT_TYPE_UNKNOWN }
++		{ "IPSec gateway",                 OPT_TYPE_ADDRESS },
++		{ "IPSec ID",                      OPT_TYPE_ASCII },
++		{ "IPSec secret",                  OPT_TYPE_ASCII },
++		{ "Xauth username",                OPT_TYPE_ASCII },
++		{ "UDP Encapsulate",               OPT_TYPE_NONE },
++		{ "UDP Encapsulation Port",        OPT_TYPE_ASCII },
++		{ "Domain",                        OPT_TYPE_ASCII },
++		{ "IKE DH Group",                  OPT_TYPE_ASCII },
++		{ "Perfect Forward Secrecy",       OPT_TYPE_ASCII },
++		{ "Application Version",           OPT_TYPE_ASCII },
++		{ "Rekeying interval",             OPT_TYPE_ASCII },
++		{ "NAT-Keepalive packet interval", OPT_TYPE_ASCII },
++		{ NULL,                            OPT_TYPE_UNKNOWN }
+ 	};
+ 
+ 	unsigned int	i;
+--- NetworkManager-vpnc-0.6.4/properties/Makefile.in~	2006-07-14 21:06:09.000000000 +0200
++++ NetworkManager-vpnc-0.6.4/properties/Makefile.in	2007-02-17 10:49:35.000000000 +0100
+@@ -61,7 +61,8 @@
+ 	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
+ 	$(am__DEPENDENCIES_1)
+ am_libnm_vpnc_properties_la_OBJECTS =  \
+-	libnm_vpnc_properties_la-nm-vpnc.lo
++	libnm_vpnc_properties_la-nm-vpnc.lo \
++	libnm_vpnc_properties_la-pcf-file.lo
+ libnm_vpnc_properties_la_OBJECTS =  \
+ 	$(am_libnm_vpnc_properties_la_OBJECTS)
+ DEFAULT_INCLUDES = -I. -I$(srcdir) -I$(top_builddir)
+@@ -254,7 +255,9 @@
+ target_alias = @target_alias@
+ lib_LTLIBRARIES = libnm-vpnc-properties.la
+ libnm_vpnc_properties_la_SOURCES = \
+-				nm-vpnc.c
++				nm-vpnc.c		\
++				pcf-file.c		\
++				pcf-file.h
+ 
+ gladedir = $(datadir)/gnome-vpn-properties/vpnc
+ glade_DATA = nm-vpnc-dialog.glade
+@@ -351,6 +354,7 @@
+ 	-rm -f *.tab.c
+ 
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libnm_vpnc_properties_la-nm-vpnc.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libnm_vpnc_properties_la-pcf-file.Plo@am__quote@
+ 
+ .c.o:
+ @am__fastdepCC_TRUE@	depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`; \
+@@ -383,6 +387,13 @@
+ @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+ @am__fastdepCC_FALSE@	$(LIBTOOL) --tag=CC --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libnm_vpnc_properties_la_CFLAGS) $(CFLAGS) -c -o libnm_vpnc_properties_la-nm-vpnc.lo `test -f 'nm-vpnc.c' || echo '$(srcdir)/'`nm-vpnc.c
+ 
++libnm_vpnc_properties_la-pcf-file.lo: pcf-file.c
++@am__fastdepCC_TRUE@	if $(LIBTOOL) --tag=CC --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libnm_vpnc_properties_la_CFLAGS) $(CFLAGS) -MT libnm_vpnc_properties_la-pcf-file.lo -MD -MP -MF "$(DEPDIR)/libnm_vpnc_properties_la-pcf-file.Tpo" -c -o libnm_vpnc_properties_la-pcf-file.lo `test -f 'pcf-file.c' || echo '$(srcdir)/'`pcf-file.c; \
++@am__fastdepCC_TRUE@	then mv -f "$(DEPDIR)/libnm_vpnc_properties_la-pcf-file.Tpo" "$(DEPDIR)/libnm_vpnc_properties_la-pcf-file.Plo"; else rm -f "$(DEPDIR)/libnm_vpnc_properties_la-pcf-file.Tpo"; exit 1; fi
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='pcf-file.c' object='libnm_vpnc_properties_la-pcf-file.lo' libtool=yes @AMDEPBACKSLASH@
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
++@am__fastdepCC_FALSE@	$(LIBTOOL) --tag=CC --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libnm_vpnc_properties_la_CFLAGS) $(CFLAGS) -c -o libnm_vpnc_properties_la-pcf-file.lo `test -f 'pcf-file.c' || echo '$(srcdir)/'`pcf-file.c
++
+ mostlyclean-libtool:
+ 	-rm -f *.lo
+ 
