@@ -83,7 +83,7 @@ class GroupDesktopPlatform(GroupRecipe):
             r.addNewGroup(name, groupName='group-rpl-derived')
 
 
-    def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True):
+    def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True, singleArch=None, x32on64=False):
         if not flavor:
             if Arch.x86_64:
                 flavor = r.x86_64rplGroupsFlavorString
@@ -91,20 +91,22 @@ class GroupDesktopPlatform(GroupRecipe):
                 flavor = r.x86rplGroupsFlavorString
 
         #  first, we add the trove, normally
-        r.add(name, source=source, groupName=groupName, flavor=flavor, byDefault=byDefault)
+        if not singleArch or (Arch.x86_64 and (not singleArch=='x86' or x32on64==True)) or (Arch.x86 and not singleArch=='x86_64'):
+            r.add(name, source=source, groupName=groupName, flavor=flavor, byDefault=byDefault)
 
         # second, we check if that trove is already in any of the upstream, pre-built,
         # groups, we use, and - there - we replace it.
-        if Arch.x86_64 and not name == 'anaconda':
+        if Arch.x86_64 and not name == 'anaconda' and not singleArch=='x86':
             # All :lib components land in compat32. this may need to be refined in the future
 
             r.add(name, groupName='group-desktop-platform-compat32', flavor=r.x86FlavorString, components=['lib'])
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
                       newFlavor = r.x86FlavorString)
 
-        for g in r.rplGroups:
-            r.replace(name, groupName = 'group-'+ g, newFlavor=flavor, # WARNING: this needs to be refactored
-                      allowNoMatch=True)                               # to cover x86 only apps we want in x86_64
+        if not singleArch or (Arch.x86_64 and (not singleArch=='x86' or x32on64==True)) or (Arch.x86 and not singleArch=='x86_64'):
+            for g in r.rplGroups:
+                r.replace(name, groupName = 'group-'+ g, newFlavor=flavor,
+                          allowNoMatch=True)
 
 
     # for replacing stuff also in compat32
@@ -354,8 +356,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # deps on it (and is expected to take advantage of java or other
         # plugins)
         r.flAdd('firefox', groupName='group-internet')
-        if Arch.x86:
-            r.add('flashplayer', groupName='group-internet')
+        r.flAdd('flashplayer', groupName='group-internet', singleArch='x86', x32on64=True)
 
         r.flAdd('nss', groupName='group-internet')
         r.flAdd('nspr', groupName='group-internet')
