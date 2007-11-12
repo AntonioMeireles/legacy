@@ -24,5 +24,5 @@ class InstallClass(rpathbase.InstallClass):
         rpathbase.InstallClass.setSteps(self, anaconda);
         anaconda.dispatch.skipStep("accounts")
         anaconda.dispatch.skipStep("group-selection")
-        anaconda.dispatch.skipStep("postselection")
+        #anaconda.dispatch.skipStep("postselection")
         #anaconda.dispatch.skipStep("confirminstall")
