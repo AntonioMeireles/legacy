@@ -1,0 +1,107 @@
+Index: libgksu/libgksu.c
+===================================================================
+--- libgksu/libgksu.c	(revisão 754)
++++ libgksu/libgksu.c	(revisão 763)
+@@ -1338,6 +1338,7 @@
+   context->debug = FALSE;
+ 
+   context->sn_context = NULL;
++  context->sn_id = NULL;
+ 
+   get_configuration_options (context);
+   startup_notification_initialize (context);
+@@ -1641,6 +1642,20 @@
+ }
+ 
+ /**
++ * gksu_context_set_launcher_id:
++ * @context: the #GksuContext you want to set the sn id in
++ * @sn_context: the sn_id you want to set, as a #gchar
++ */
++void
++gksu_context_set_launcher_id (GksuContext *context,
++			      gchar *sn_id)
++{
++  if (context->sn_id)
++    g_free (context->sn_id);
++  context->sn_id = g_strdup(sn_id);
++}
++
++/**
+  * gksu_context_launch_initiate:
+  * @context: the #GksuContext you want to initiate the launch for
+  *
+@@ -1650,13 +1665,23 @@
+ static void
+ gksu_context_launch_initiate (GksuContext *context)
+ {
+-  gchar *sid = g_strdup_printf ("%s", sn_launcher_context_get_startup_id (context->sn_context));
++  gchar *sid = NULL;
+   guint32 launch_time = gdk_x11_display_get_user_time ((GdkDisplay*)GDK_DISPLAY());
++  static gboolean initiated = FALSE;
+ 
++  if (!initiated)
++    initiated = TRUE;
++  else
++    return;
++
+   sn_launcher_context_initiate (context->sn_context,
+ 				g_get_prgname (),
+ 				gksu_context_get_command (context),
+ 				launch_time);
++
++  sid = g_strdup_printf ("%s", sn_launcher_context_get_startup_id (context->sn_context));
++  gksu_context_set_launcher_id (context, sid);
++
+   if (context->debug)
+     fprintf (stderr, "STARTUP_ID: %s\n", sid);
+   setenv ("DESKTOP_STARTUP_ID", sid, TRUE);
+@@ -2004,6 +2029,10 @@
+ 	      write (fdpty, line, strlen(line));
+ 	      g_free (line);
+ 
++	      line = g_strdup_printf ("gksu-run: %s\n", context->sn_id);
++	      write (fdpty, line, strlen(line));
++	      g_free (line);
++
+ 	      line = g_strdup_printf ("gksu-run: %s\n", context->xauth);
+ 	      write (fdpty, line, strlen(line));
+ 	      g_free (line);
+Index: libgksu/libgksu.h
+===================================================================
+--- libgksu/libgksu.h	(revisão 754)
++++ libgksu/libgksu.h	(revisão 763)
+@@ -63,6 +63,7 @@
+ 
+   /* startup notification */
+   SnLauncherContext *sn_context;
++  gchar *sn_id;
+ 
+   gboolean debug;
+ } GksuContext;
+Index: libgksu/gksu-run-helper.c
+===================================================================
+--- libgksu/gksu-run-helper.c	(revisão 754)
++++ libgksu/gksu-run-helper.c	(revisão 763)
+@@ -77,6 +77,7 @@
+ 
+   gchar *xauth_display = NULL;
+   gchar *xauth_token = NULL;
++  gchar *sn_id = NULL;
+ 
+   gchar buffer[255];
+ 
+@@ -110,6 +111,13 @@
+   fgets (buffer, 255, stdin);
+   strip (buffer);
+ 
++  sn_id = g_strdup_printf ("%s", buffer + 10);
++  setenv("DESKTOP_STARTUP_ID", sn_id, TRUE);
++
++  bzero (buffer, 255);
++  fgets (buffer, 255, stdin);
++  strip (buffer);
++
+   xauth_token = g_strdup_printf ("%s", buffer + 10);
+ 
+   /* a bit more security is always fine */
