@@ -1,0 +1,113 @@
+Date: Mon, 8 Oct 2007 17:00:29 -0400
+From: Jay Fenlason <fenlason@redhat.com>
+To: linux1394-devel@lists.sourceforge.net
+Message-ID: <20071008210029.GA19900@redhat.com>
+References: <b3998a500710080618t46eddf7ah7e64b3d297ff8218@mail.gmail.com>
+Mime-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <b3998a500710080618t46eddf7ah7e64b3d297ff8218@mail.gmail.com>
+User-Agent: Mutt/1.4.2.2i
+X-loop: fedora-test-list@redhat.com
+Cc: fedora-test-list@redhat.com
+Subject: PATCH Re: Firewire locking problem
+X-BeenThere: fedora-test-list@redhat.com
+X-Mailman-Version: 2.1.5
+Precedence: junk
+Reply-To: For testers of Fedora Core development releases <fedora-test-list@redhat.com>
+List-Id: For testers of Fedora Core development releases
+	<fedora-test-list.redhat.com>
+List-Unsubscribe: <https://www.redhat.com/mailman/listinfo/fedora-test-list>, 
+	<mailto:fedora-test-list-request@redhat.com?subject=unsubscribe>
+List-Archive: <https://www.redhat.com/archives/fedora-test-list>
+List-Post: <mailto:fedora-test-list@redhat.com>
+List-Help: <mailto:fedora-test-list-request@redhat.com?subject=help>
+List-Subscribe: <https://www.redhat.com/mailman/listinfo/fedora-test-list>,
+	<mailto:fedora-test-list-request@redhat.com?subject=subscribe>
+Sender: fedora-test-list-bounces@redhat.com
+Errors-To: fedora-test-list-bounces@redhat.com
+Status: RO
+Content-Length: 2963
+Lines: 80
+
+On Mon, Oct 08, 2007 at 09:18:18AM -0400, Pat Kane wrote:
+> While trying to use dvgrab to input DV from an ADVC-100 Firewire
+> device on my DELL Inspiron 8600 laptop, I got the following
+> console message:
+> 
+>   =============================================
+>   [ INFO: possible recursive locking detected ]
+>   2.6.23-0.222.rc9.git4.fc8 #1
+>   ---------------------------------------------
+>   X/2522 is trying to acquire lock:
+>    (&q->lock){++..}, at: [<c042671c>] __wake_up+0x15/0x42
+> 
+>   but task is already holding lock:
+>    (&q->lock){++..}, at: [<c042671c>] __wake_up+0x15/0x42
+> 
+>   other info that might help us debug this:
+>   2 locks held by X/2522:
+>    #0:  (&client->lock){.+..}, at: [<e0993f51>] queue_event+0x2b/0x68
+> [firewire_core]
+>    #1:  (&q->lock){++..}, at: [<c042671c>] __wake_up+0x15/0x42
+> 
+>   stack backtrace:
+>    [<c0406463>] show_trace_log_lvl+0x1a/0x2f
+>    [<c0406e4d>] show_trace+0x12/0x14
+>    [<c0406e65>] dump_stack+0x16/0x18
+>    [<c0449c56>] __lock_acquire+0x189/0xc67
+>    [<c044abae>] lock_acquire+0x7b/0x9e
+>    [<c0634712>] _spin_lock_irqsave+0x4a/0x77
+>    [<c042671c>] __wake_up+0x15/0x42
+>    [<c04aed7e>] ep_poll_safewake+0x86/0xa8
+>    [<c04afa05>] ep_poll_callback+0x9f/0xaa
+>    [<c042483e>] __wake_up_common+0x32/0x55
+>    [<c0426738>] __wake_up+0x31/0x42
+>    [<e0993f7d>] queue_event+0x57/0x68 [firewire_core]
+>    [<e0994a5a>] handle_request+0xd8/0xe0 [firewire_core]
+>    [<e099269a>] fw_core_handle_request+0x215/0x23c [firewire_core]
+>    [<e0961c42>] handle_ar_packet+0xd7/0xeb [firewire_ohci]
+>    [<e0962bac>] ar_context_tasklet+0xb6/0xc4 [firewire_ohci]
+>    [<c0432b5b>] tasklet_action+0x68/0xd3
+>    [<c0432a39>] __do_softirq+0x78/0xff
+>    [<c04075d4>] do_softirq+0x74/0xf7
+>    =======================
+(snip)
+
+I think this is caused by queue_event() calling
+wake_up_interruptible(&client->wait) with client->lock still held.  I
+don't see a compelling reason to do the wake_up... inside the lock, so
+I propose the following patch.  I tested it out against
+2.6.23-0.222.rc9.git4.fc8, which is the latest fedora rawhide kernel.
+I never reproduced the original problem, but at least this doesn't
+seem to introduce any regressions.
+
+			-- JF
+
+
+Signed-off-by: Jay Fenlason <fenlason@redhat.com>
+
+-----------------------------------------------------------------------------
+--- 1/drivers/firewire/fw-cdev.c	2007-07-08 19:32:17.000000000 -0400
++++ 2/drivers/firewire/fw-cdev.c	2007-10-08 11:21:53.000000000 -0400
+@@ -140,11 +140,10 @@ static void queue_event(struct client *c
+ 	event->v[1].size = size1;
+ 
+ 	spin_lock_irqsave(&client->lock, flags);
+-
+ 	list_add_tail(&event->link, &client->event_list);
+-	wake_up_interruptible(&client->wait);
+-
+ 	spin_unlock_irqrestore(&client->lock, flags);
++
++	wake_up_interruptible(&client->wait);
+ }
+ 
+ static int
+
+-- 
+fedora-test-list mailing list
+fedora-test-list@redhat.com
+To unsubscribe: 
+https://www.redhat.com/mailman/listinfo/fedora-test-list
+

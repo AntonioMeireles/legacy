@@ -1,0 +1,81 @@
+From: Eric Sandeen <sandeen@sandeen.net>
+Date: Thu, 23 Aug 2007 06:19:57 +0000 (+1000)
+Subject: [XFS] optimize dmapi event tests w/o dmapi config
+X-Git-Url: http://oss.sgi.com/cgi-bin/gitweb.cgi?p=xfs%2Fxfs-2.6.git;a=commitdiff_plain;h=c4389058a94b1b9c4be0484ca15368f560fb1ef7;hp=0a0aa86fe08645c72e5fa26770a70428f2c9ae3c
+
+[XFS] optimize dmapi event tests w/o dmapi config
+
+Defining XFS_DM_EVENT* macros to 0 in the absence of
+CONFIG_XFS_DMAPI allows gcc to optimize away tests that
+should never be true. Also wrap one hunk of xfs_unmount
+in #ifdef CONFIG_XFS_DMAPI
+
+Stack deltas on x86, gcc 4.1:
+
+xfs_create              -16
+xfs_free_file_space     -4
+xfs_getbmap             +4
+xfs_link                -8
+xfs_mkidr               -20
+xfs_read                -24
+xfs_remove              -12
+xfs_rename              -8
+xfs_rmdir               -16
+xfs_setattr             -20
+xfs_splice_read         -20
+xfs_splice_write        -20
+xfs_unmount             -48
+xfs_write               -20
+
+SGI-PV: 969372
+SGI-Modid: xfs-linux-melb:xfs-kern:29444a
+
+Signed-off-by: Eric Sandeen <sandeen@sandeen.net>
+Signed-off-by: Vlad Apostolov <vapo@sgi.com>
+Signed-off-by: Tim Shimmin <tes@sgi.com>
+---
+
+Index: linux-2.6.22.i386/fs/xfs/xfs_dmapi.h
+===================================================================
+--- linux-2.6.22.i386.orig/fs/xfs/xfs_dmapi.h
++++ linux-2.6.22.i386/fs/xfs/xfs_dmapi.h
+@@ -67,6 +67,7 @@ typedef enum {
+ #define HAVE_DM_RIGHT_T
+ 
+ /* Defines for determining if an event message should be sent. */
++#ifdef CONFIG_XFS_DMAPI
+ #define	DM_EVENT_ENABLED(vfsp, ip, event) ( \
+ 	unlikely ((vfsp)->vfs_flag & VFS_DMI) && \
+ 		( ((ip)->i_d.di_dmevmask & (1 << event)) || \
+@@ -78,6 +79,10 @@ typedef enum {
+ 		( ((io)->io_dmevmask & (1 << event)) || \
+ 		  ((io)->io_mount->m_dmevmask & (1 << event)) ) \
+ 	)
++#else
++#define DM_EVENT_ENABLED(vfsp, ip, event) (0)
++#define DM_EVENT_ENABLED_IO(vfsp, io, event) (0)
++#endif
+ 
+ #define DM_XFS_VALID_FS_EVENTS		( \
+ 	(1 << DM_EVENT_PREUNMOUNT)	| \
+Index: linux-2.6.22.i386/fs/xfs/xfs_vfsops.c
+===================================================================
+--- linux-2.6.22.i386.orig/fs/xfs/xfs_vfsops.c
++++ linux-2.6.22.i386/fs/xfs/xfs_vfsops.c
+@@ -568,6 +568,7 @@ xfs_unmount(
+ 	rip = mp->m_rootip;
+ 	rvp = XFS_ITOV(rip);
+ 
++#ifdef HAVE_DMAPI
+ 	if (vfsp->vfs_flag & VFS_DMI) {
+ 		error = XFS_SEND_PREUNMOUNT(mp, vfsp,
+ 				rvp, DM_RIGHT_NULL, rvp, DM_RIGHT_NULL,
+@@ -580,7 +581,7 @@ xfs_unmount(
+ 		unmount_event_flags = (mp->m_dmevmask & (1<<DM_EVENT_UNMOUNT))?
+ 					0 : DM_FLAGS_UNWANTED;
+ 	}
+-
++#endif
+ 	/*
+ 	 * First blow any referenced inode from this file system
+ 	 * out of the reference cache, and delete the timer.

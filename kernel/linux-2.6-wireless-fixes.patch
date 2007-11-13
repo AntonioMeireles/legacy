@@ -1,0 +1,967 @@
+diff -up linux-2.6.23.noarch/net/ieee80211/ieee80211_crypt_tkip.c.orig linux-2.6.23.noarch/net/ieee80211/ieee80211_crypt_tkip.c
+--- linux-2.6.23.noarch/net/ieee80211/ieee80211_crypt_tkip.c.orig	2007-10-19 13:18:34.000000000 -0400
++++ linux-2.6.23.noarch/net/ieee80211/ieee80211_crypt_tkip.c	2007-10-19 13:18:40.000000000 -0400
+@@ -584,7 +584,7 @@ static void michael_mic_hdr(struct sk_bu
+ 	if (stype & IEEE80211_STYPE_QOS_DATA) {
+ 		const struct ieee80211_hdr_3addrqos *qoshdr =
+ 			(struct ieee80211_hdr_3addrqos *)skb->data;
+-		hdr[12] = qoshdr->qos_ctl & cpu_to_le16(IEEE80211_QCTL_TID);
++		hdr[12] = le16_to_cpu(qoshdr->qos_ctl) & IEEE80211_QCTL_TID;
+ 	} else
+ 		hdr[12] = 0;		/* priority */
+ 
+diff -up linux-2.6.23.noarch/net/mac80211/ieee80211_ioctl.c.orig linux-2.6.23.noarch/net/mac80211/ieee80211_ioctl.c
+--- linux-2.6.23.noarch/net/mac80211/ieee80211_ioctl.c.orig	2007-10-19 13:18:34.000000000 -0400
++++ linux-2.6.23.noarch/net/mac80211/ieee80211_ioctl.c	2007-10-19 13:18:40.000000000 -0400
+@@ -1320,10 +1320,11 @@ static int ieee80211_ioctl_giwap(struct 
+ 
+ static int ieee80211_ioctl_siwscan(struct net_device *dev,
+ 				   struct iw_request_info *info,
+-				   struct iw_point *data, char *extra)
++				   union iwreq_data *wrqu, char *extra)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
++	struct iw_scan_req *req = NULL;
+ 	u8 *ssid = NULL;
+ 	size_t ssid_len = 0;
+ 
+@@ -1348,6 +1349,14 @@ static int ieee80211_ioctl_siwscan(struc
+ 		return -EOPNOTSUPP;
+ 	}
+ 
++	/* if SSID was specified explicitly then use that */
++	if (wrqu->data.length == sizeof(struct iw_scan_req) &&
++	    wrqu->data.flags & IW_SCAN_THIS_ESSID) {
++		req = (struct iw_scan_req *)extra;
++		ssid = req->essid;
++		ssid_len = req->essid_len;
++	}
++
+ 	return ieee80211_sta_req_scan(dev, ssid, ssid_len);
+ }
+ 
+diff -up linux-2.6.23.noarch/net/mac80211/ieee80211_sta.c.orig linux-2.6.23.noarch/net/mac80211/ieee80211_sta.c
+--- linux-2.6.23.noarch/net/mac80211/ieee80211_sta.c.orig	2007-10-19 13:18:34.000000000 -0400
++++ linux-2.6.23.noarch/net/mac80211/ieee80211_sta.c	2007-10-19 13:18:40.000000000 -0400
+@@ -12,7 +12,6 @@
+  */
+ 
+ /* TODO:
+- * BSS table: use <BSSID,SSID> as the key to support multi-SSID APs
+  * order BSS list by RSSI(?) ("quality of AP")
+  * scan result table filtering (by capability (privacy, IBSS/BSS, WPA/RSN IE,
+  *    SSID)
+@@ -64,7 +63,8 @@
+ static void ieee80211_send_probe_req(struct net_device *dev, u8 *dst,
+ 				     u8 *ssid, size_t ssid_len);
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid);
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len);
+ static void ieee80211_rx_bss_put(struct net_device *dev,
+ 				 struct ieee80211_sta_bss *bss);
+ static int ieee80211_sta_find_ibss(struct net_device *dev,
+@@ -117,14 +117,11 @@ struct ieee802_11_elems {
+ 	u8 tspec_len;
+ };
+ 
+-enum ParseRes { ParseOK = 0, ParseUnknown = 1, ParseFailed = -1 };
+-
+-static enum ParseRes ieee802_11_parse_elems(u8 *start, size_t len,
+-					    struct ieee802_11_elems *elems)
++static void ieee802_11_parse_elems(u8 *start, size_t len,
++				   struct ieee802_11_elems *elems)
+ {
+ 	size_t left = len;
+ 	u8 *pos = start;
+-	int unknown = 0;
+ 
+ 	memset(elems, 0, sizeof(*elems));
+ 
+@@ -135,15 +132,8 @@ static enum ParseRes ieee802_11_parse_el
+ 		elen = *pos++;
+ 		left -= 2;
+ 
+-		if (elen > left) {
+-#if 0
+-			if (net_ratelimit())
+-				printk(KERN_DEBUG "IEEE 802.11 element parse "
+-				       "failed (id=%d elen=%d left=%d)\n",
+-				       id, elen, left);
+-#endif
+-			return ParseFailed;
+-		}
++		if (elen > left)
++			return;
+ 
+ 		switch (id) {
+ 		case WLAN_EID_SSID:
+@@ -243,28 +233,15 @@ static enum ParseRes ieee802_11_parse_el
+ 			elems->tspec_len = elen;
+ 			break;
+ 		default:
+-#if 0
+-			printk(KERN_DEBUG "IEEE 802.11 element parse ignored "
+-				      "unknown element (id=%d elen=%d)\n",
+-				      id, elen);
+-#endif
+-			unknown++;
+ 			break;
+ 		}
+ 
+ 		left -= elen;
+ 		pos += elen;
+ 	}
+-
+-	/* Do not trigger error if left == 1 as Apple Airport base stations
+-	 * send AssocResps that are one spurious byte too long. */
+-
+-	return unknown ? ParseUnknown : ParseOK;
+ }
+ 
+ 
+-
+-
+ static int ecw2cw(int ecw)
+ {
+ 	int cw = 1;
+@@ -452,6 +429,7 @@ static void ieee80211_set_associated(str
+ 				     struct ieee80211_if_sta *ifsta,
+ 				     unsigned int assoc)
+ {
++	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	union iwreq_data wrqu;
+ 
+ 	if (!!(ifsta->flags & IEEE80211_STA_ASSOCIATED) == assoc)
+@@ -467,7 +445,9 @@ static void ieee80211_set_associated(str
+ 		if (sdata->type != IEEE80211_IF_TYPE_STA)
+ 			return;
+ 
+-		bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
++					   local->hw.conf.channel,
++					   ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			if (bss->has_erp_value)
+ 				ieee80211_handle_erp_ie(dev, bss->erp_value);
+@@ -614,7 +594,8 @@ static void ieee80211_send_assoc(struct 
+ 		capab |= WLAN_CAPABILITY_SHORT_SLOT_TIME |
+ 			WLAN_CAPABILITY_SHORT_PREAMBLE;
+ 	}
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel,
++				   ifsta->ssid, ifsta->ssid_len);
+ 	if (bss) {
+ 		if (bss->capability & WLAN_CAPABILITY_PRIVACY)
+ 			capab |= WLAN_CAPABILITY_PRIVACY;
+@@ -1167,6 +1148,7 @@ void ieee80211_send_dls_teardown(struct 
+ static int ieee80211_privacy_mismatch(struct net_device *dev,
+ 				      struct ieee80211_if_sta *ifsta)
+ {
++	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+ 	int res = 0;
+ 
+@@ -1174,7 +1156,8 @@ static int ieee80211_privacy_mismatch(st
+ 	    ifsta->key_management_enabled)
+ 		return 0;
+ 
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel,
++				   ifsta->ssid, ifsta->ssid_len);
+ 	if (!bss)
+ 		return 0;
+ 
+@@ -1368,12 +1351,7 @@ static void ieee80211_auth_challenge(str
+ 
+ 	printk(KERN_DEBUG "%s: replying to auth challenge\n", dev->name);
+ 	pos = mgmt->u.auth.variable;
+-	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+-	    == ParseFailed) {
+-		printk(KERN_DEBUG "%s: failed to parse Auth(challenge)\n",
+-		       dev->name);
+-		return;
+-	}
++	ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems);
+ 	if (!elems.challenge) {
+ 		printk(KERN_DEBUG "%s: no challenge IE in shared key auth "
+ 		       "frame\n", dev->name);
+@@ -1641,15 +1619,10 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	capab_info = le16_to_cpu(mgmt->u.assoc_resp.capab_info);
+ 	status_code = le16_to_cpu(mgmt->u.assoc_resp.status_code);
+ 	aid = le16_to_cpu(mgmt->u.assoc_resp.aid);
+-	if ((aid & (BIT(15) | BIT(14))) != (BIT(15) | BIT(14)))
+-		printk(KERN_DEBUG "%s: invalid aid value %d; bits 15:14 not "
+-		       "set\n", dev->name, aid);
+-	aid &= ~(BIT(15) | BIT(14));
+-
+ 	printk(KERN_DEBUG "%s: RX %sssocResp from " MAC_FMT " (capab=0x%x "
+ 	       "status=%d aid=%d)\n",
+ 	       dev->name, reassoc ? "Rea" : "A", MAC_ARG(mgmt->sa),
+-	       capab_info, status_code, aid);
++	       capab_info, status_code, aid & ~(BIT(15) | BIT(14)));
+ 
+ 	if (status_code != WLAN_STATUS_SUCCESS) {
+ 		printk(KERN_DEBUG "%s: AP denied association (code=%d)\n",
+@@ -1661,13 +1634,13 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 		return;
+ 	}
+ 
++	if ((aid & (BIT(15) | BIT(14))) != (BIT(15) | BIT(14)))
++		printk(KERN_DEBUG "%s: invalid aid value %d; bits 15:14 not "
++		       "set\n", dev->name, aid);
++	aid &= ~(BIT(15) | BIT(14));
++
+ 	pos = mgmt->u.assoc_resp.variable;
+-	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+-	    == ParseFailed) {
+-		printk(KERN_DEBUG "%s: failed to parse AssocResp\n",
+-		       dev->name);
+-		return;
+-	}
++	ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems);
+ 
+ 	if (!elems.supp_rates) {
+ 		printk(KERN_DEBUG "%s: no SuppRates element in AssocResp\n",
+@@ -1679,7 +1652,9 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	 * update our stored copy */
+ 	if (elems.erp_info && elems.erp_info_len >= 1) {
+ 		struct ieee80211_sta_bss *bss
+-			= ieee80211_rx_bss_get(dev, ifsta->bssid);
++			= ieee80211_rx_bss_get(dev, ifsta->bssid,
++					       local->hw.conf.channel,
++					       ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			bss->erp_value = elems.erp_info[0];
+ 			bss->has_erp_value = 1;
+@@ -1709,7 +1684,9 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 			       " AP\n", dev->name);
+ 			return;
+ 		}
+-		bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
++					   local->hw.conf.channel,
++					   ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			sta->last_rssi = bss->rssi;
+ 			sta->last_signal = bss->signal;
+@@ -1847,12 +1824,9 @@ static void sta_parse_tspec(struct net_d
+ 	else
+ 		pos = mgmt->u.action.u.wme_action.variable + prefix;
+ 
+-	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+-	    == ParseFailed) {
+-		printk(KERN_DEBUG "%s: failed to parse TSPEC\n", dev->name);
+-		return;
+-	}
+-	memcpy(tspec, elems.tspec, sizeof(*tspec));
++	ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems);
++	if (elems.tspec)
++		memcpy(tspec, elems.tspec, sizeof(*tspec));
+ }
+ 
+ int dls_link_status(struct ieee80211_local *local, u8 *addr)
+@@ -1889,11 +1863,8 @@ static void sta_process_dls_req(struct n
+ 	if (baselen > len)
+ 		return;
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.action.u.dls_req.variable,
+-				   len - baselen, &elems) == ParseFailed) {
+-		printk(KERN_ERR "DLS Parse support rates failed.\n");
+-		return;
+-	}
++	ieee802_11_parse_elems(mgmt->u.action.u.dls_req.variable,
++			       len - baselen, &elems);
+ 	mode = local->sta_scanning ?
+ 	       local->scan_hw_mode : local->oper_hw_mode;
+ 	rates = mode->rates;
+@@ -1961,11 +1932,8 @@ static void sta_process_dls_resp(struct 
+ 	if (baselen > len)
+ 		return;
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.action.u.dls_resp.variable,
+-				   len - baselen, &elems) == ParseFailed) {
+-		printk(KERN_ERR "DLS Parse support rates failed.\n");
+-		return;
+-	}
++	ieee802_11_parse_elems(mgmt->u.action.u.dls_resp.variable,
++			       len - baselen, &elems);
+ 	mode = local->sta_scanning ?
+ 	       local->scan_hw_mode : local->oper_hw_mode;
+ 	rates = mode->rates;
+@@ -2048,7 +2016,8 @@ static void __ieee80211_rx_bss_hash_del(
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid)
++ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -2059,6 +2028,11 @@ ieee80211_rx_bss_add(struct net_device *
+ 	atomic_inc(&bss->users);
+ 	atomic_inc(&bss->users);
+ 	memcpy(bss->bssid, bssid, ETH_ALEN);
++	bss->channel = channel;
++	if (ssid && ssid_len <= IEEE80211_MAX_SSID_LEN) {
++		memcpy(bss->ssid, ssid, ssid_len);
++		bss->ssid_len = ssid_len;
++	}
+ 
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	/* TODO: order by RSSI? */
+@@ -2070,7 +2044,8 @@ ieee80211_rx_bss_add(struct net_device *
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid)
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -2078,7 +2053,10 @@ ieee80211_rx_bss_get(struct net_device *
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	bss = local->sta_bss_hash[STA_HASH(bssid)];
+ 	while (bss) {
+-		if (memcmp(bss->bssid, bssid, ETH_ALEN) == 0) {
++		if (!memcmp(bss->bssid, bssid, ETH_ALEN) &&
++		    bss->channel == channel &&
++		    bss->ssid_len == ssid_len &&
++		    (ssid_len == 0 || !memcmp(bss->ssid, ssid, ssid_len))) {
+ 			atomic_inc(&bss->users);
+ 			break;
+ 		}
+@@ -2141,7 +2119,7 @@ static void ieee80211_rx_bss_info(struct
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee802_11_elems elems;
+ 	size_t baselen;
+-	int channel, invalid = 0, clen;
++	int channel, clen;
+ 	struct ieee80211_sta_bss *bss;
+ 	struct sta_info *sta;
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+@@ -2185,9 +2163,7 @@ static void ieee80211_rx_bss_info(struct
+ #endif /* CONFIG_MAC80211_IBSS_DEBUG */
+ 	}
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen,
+-				   &elems) == ParseFailed)
+-		invalid = 1;
++	ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen, &elems);
+ 
+ 	if (sdata->type == IEEE80211_IF_TYPE_IBSS && elems.supp_rates &&
+ 	    memcmp(mgmt->bssid, sdata->u.sta.bssid, ETH_ALEN) == 0 &&
+@@ -2245,9 +2221,11 @@ static void ieee80211_rx_bss_info(struct
+ 	else
+ 		channel = rx_status->channel;
+ 
+-	bss = ieee80211_rx_bss_get(dev, mgmt->bssid);
++	bss = ieee80211_rx_bss_get(dev, mgmt->bssid, channel,
++				   elems.ssid, elems.ssid_len);
+ 	if (!bss) {
+-		bss = ieee80211_rx_bss_add(dev, mgmt->bssid);
++		bss = ieee80211_rx_bss_add(dev, mgmt->bssid, channel,
++					   elems.ssid, elems.ssid_len);
+ 		if (!bss)
+ 			return;
+ 	} else {
+@@ -2273,10 +2251,6 @@ static void ieee80211_rx_bss_info(struct
+ 
+ 	bss->beacon_int = le16_to_cpu(mgmt->u.beacon.beacon_int);
+ 	bss->capability = le16_to_cpu(mgmt->u.beacon.capab_info);
+-	if (elems.ssid && elems.ssid_len <= IEEE80211_MAX_SSID_LEN) {
+-		memcpy(bss->ssid, elems.ssid, elems.ssid_len);
+-		bss->ssid_len = elems.ssid_len;
+-	}
+ 
+ 	bss->supp_rates_len = 0;
+ 	if (elems.supp_rates) {
+@@ -2364,7 +2338,6 @@ static void ieee80211_rx_bss_info(struct
+ 	}
+ 
+ 	bss->hw_mode = rx_status->phymode;
+-	bss->channel = channel;
+ 	bss->freq = rx_status->freq;
+ 	if (channel != rx_status->channel &&
+ 	    (bss->hw_mode == MODE_IEEE80211G ||
+@@ -2424,9 +2397,7 @@ static void ieee80211_rx_mgmt_beacon(str
+ 	if (baselen > len)
+ 		return;
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen,
+-				   &elems) == ParseFailed)
+-		return;
++	ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen, &elems);
+ 
+ 	if (elems.erp_info && elems.erp_info_len >= 1)
+ 		ieee80211_handle_erp_ie(dev, elems.erp_info[0]);
+@@ -3296,7 +3267,7 @@ static int ieee80211_sta_create_ibss(str
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+-	struct ieee80211_sub_if_data *sdata;
++	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_hw_mode *mode;
+ 	u8 bssid[ETH_ALEN], *pos;
+ 	int i;
+@@ -3318,18 +3289,17 @@ static int ieee80211_sta_create_ibss(str
+ 	printk(KERN_DEBUG "%s: Creating new IBSS network, BSSID " MAC_FMT "\n",
+ 	       dev->name, MAC_ARG(bssid));
+ 
+-	bss = ieee80211_rx_bss_add(dev, bssid);
++	bss = ieee80211_rx_bss_add(dev, bssid, local->hw.conf.channel,
++				   sdata->u.sta.ssid, sdata->u.sta.ssid_len);
+ 	if (!bss)
+ 		return -ENOMEM;
+ 
+-	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	mode = local->oper_hw_mode;
+ 
+ 	if (local->hw.conf.beacon_int == 0)
+ 		local->hw.conf.beacon_int = 100;
+ 	bss->beacon_int = local->hw.conf.beacon_int;
+ 	bss->hw_mode = local->hw.conf.phymode;
+-	bss->channel = local->hw.conf.channel;
+ 	bss->freq = local->hw.conf.freq;
+ 	bss->last_update = jiffies;
+ 	bss->capability = WLAN_CAPABILITY_IBSS;
+@@ -3387,7 +3357,8 @@ static int ieee80211_sta_find_ibss(struc
+ 	       MAC_FMT "\n", MAC_ARG(bssid), MAC_ARG(ifsta->bssid));
+ #endif /* CONFIG_MAC80211_IBSS_DEBUG */
+ 	if (found && memcmp(ifsta->bssid, bssid, ETH_ALEN) != 0 &&
+-	    (bss = ieee80211_rx_bss_get(dev, bssid))) {
++	    (bss = ieee80211_rx_bss_get(dev, bssid, local->hw.conf.channel,
++					ifsta->ssid, ifsta->ssid_len))) {
+ 		printk(KERN_DEBUG "%s: Selected IBSS BSSID " MAC_FMT
+ 		       " based on configured SSID\n",
+ 		       dev->name, MAC_ARG(bssid));
+diff -up linux-2.6.23.noarch/drivers/net/wireless/ipw2100.h.orig linux-2.6.23.noarch/drivers/net/wireless/ipw2100.h
+--- linux-2.6.23.noarch/drivers/net/wireless/ipw2100.h.orig	2007-10-19 13:03:48.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/ipw2100.h	2007-10-19 13:21:18.000000000 -0400
+@@ -586,6 +586,10 @@ struct ipw2100_priv {
+ 	struct delayed_work wx_event_work;
+ 	struct delayed_work hang_check;
+ 	struct delayed_work rf_kill;
++	struct work_struct scan_event_now;
++	struct delayed_work scan_event_later;
++
++	int user_requested_scan;
+ 
+ 	u32 interrupts;
+ 	int tx_interrupts;
+diff -up linux-2.6.23.noarch/drivers/net/wireless/b43/main.c.orig linux-2.6.23.noarch/drivers/net/wireless/b43/main.c
+--- linux-2.6.23.noarch/drivers/net/wireless/b43/main.c.orig	2007-10-19 13:03:55.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/b43/main.c	2007-10-19 13:21:18.000000000 -0400
+@@ -49,7 +49,6 @@
+ #include "pio.h"
+ #include "sysfs.h"
+ #include "xmit.h"
+-#include "sysfs.h"
+ #include "lo.h"
+ #include "pcmcia.h"
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/zd1211rw/zd_usb.c.orig linux-2.6.23.noarch/drivers/net/wireless/zd1211rw/zd_usb.c
+--- linux-2.6.23.noarch/drivers/net/wireless/zd1211rw/zd_usb.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw/zd_usb.c	2007-10-19 13:21:18.000000000 -0400
+@@ -1044,14 +1044,17 @@ error:
+ static void disconnect(struct usb_interface *intf)
+ {
+ 	struct net_device *netdev = zd_intf_to_netdev(intf);
+-	struct zd_mac *mac = zd_netdev_mac(netdev);
+-	struct zd_usb *usb = &mac->chip.usb;
++	struct zd_mac *mac;
++	struct zd_usb *usb;
+ 
+ 	/* Either something really bad happened, or we're just dealing with
+ 	 * a DEVICE_INSTALLER. */
+ 	if (netdev == NULL)
+ 		return;
+ 
++	mac = zd_netdev_mac(netdev);
++	usb = &mac->chip.usb;
++
+ 	dev_dbg_f(zd_usb_dev(usb), "\n");
+ 
+ 	zd_netdev_disconnect(netdev);
+diff -up linux-2.6.23.noarch/drivers/net/wireless/b43legacy/main.c.orig linux-2.6.23.noarch/drivers/net/wireless/b43legacy/main.c
+diff -up linux-2.6.23.noarch/drivers/net/wireless/rtl8187_dev.c.orig linux-2.6.23.noarch/drivers/net/wireless/rtl8187_dev.c
+--- linux-2.6.23.noarch/drivers/net/wireless/rtl8187_dev.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/rtl8187_dev.c	2007-10-19 13:21:18.000000000 -0400
+@@ -78,7 +78,8 @@ static int rtl8187_tx(struct ieee80211_h
+ 	struct rtl8187_tx_hdr *hdr;
+ 	struct rtl8187_tx_info *info;
+ 	struct urb *urb;
+-	u32 tmp;
++	__le16 rts_dur = 0;
++	u32 flags;
+ 
+ 	urb = usb_alloc_urb(0, GFP_ATOMIC);
+ 	if (!urb) {
+@@ -86,24 +87,24 @@ static int rtl8187_tx(struct ieee80211_h
+ 		return 0;
+ 	}
+ 
+-	hdr = (struct rtl8187_tx_hdr *)skb_push(skb, sizeof(*hdr));
+-	tmp = skb->len - sizeof(*hdr);
+-	tmp |= RTL8187_TX_FLAG_NO_ENCRYPT;
+-	tmp |= control->rts_cts_rate << 19;
+-	tmp |= control->tx_rate << 24;
+-	if (ieee80211_get_morefrag((struct ieee80211_hdr *)skb))
+-		tmp |= RTL8187_TX_FLAG_MORE_FRAG;
++	flags = skb->len;
++	flags |= RTL8187_TX_FLAG_NO_ENCRYPT;
++	flags |= control->rts_cts_rate << 19;
++	flags |= control->tx_rate << 24;
++	if (ieee80211_get_morefrag((struct ieee80211_hdr *)skb->data))
++		flags |= RTL8187_TX_FLAG_MORE_FRAG;
+ 	if (control->flags & IEEE80211_TXCTL_USE_RTS_CTS) {
+-		tmp |= RTL8187_TX_FLAG_RTS;
+-		hdr->rts_duration =
+-			ieee80211_rts_duration(dev, priv->if_id, skb->len, control);
++		flags |= RTL8187_TX_FLAG_RTS;
++		rts_dur = ieee80211_rts_duration(dev, priv->if_id, skb->len, control);
+ 	}
+ 	if (control->flags & IEEE80211_TXCTL_USE_CTS_PROTECT)
+-		tmp |= RTL8187_TX_FLAG_CTS;
+-	hdr->flags = cpu_to_le32(tmp);
++		flags |= RTL8187_TX_FLAG_CTS;
++
++	hdr = (struct rtl8187_tx_hdr *)skb_push(skb, sizeof(*hdr));
++	hdr->flags = cpu_to_le32(flags);
+ 	hdr->len = 0;
+-	tmp = control->retry_limit << 8;
+-	hdr->retry = cpu_to_le32(tmp);
++	hdr->rts_duration = rts_dur;
++	hdr->retry = cpu_to_le32(control->retry_limit << 8);
+ 
+ 	info = (struct rtl8187_tx_info *)skb->cb;
+ 	info->control = kmemdup(control, sizeof(*control), GFP_ATOMIC);
+diff -up linux-2.6.23.noarch/drivers/net/wireless/ipw2100.c.orig linux-2.6.23.noarch/drivers/net/wireless/ipw2100.c
+--- linux-2.6.23.noarch/drivers/net/wireless/ipw2100.c.orig	2007-10-19 13:03:48.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/ipw2100.c	2007-10-19 13:21:18.000000000 -0400
+@@ -2086,12 +2086,46 @@ static void isr_indicate_rf_kill(struct 
+ 	queue_delayed_work(priv->workqueue, &priv->rf_kill, round_jiffies(HZ));
+ }
+ 
++static void send_scan_event(void *data)
++{
++	struct ipw2100_priv *priv = data;
++	union iwreq_data wrqu;
++
++	wrqu.data.length = 0;
++	wrqu.data.flags = 0;
++	wireless_send_event(priv->net_dev, SIOCGIWSCAN, &wrqu, NULL);
++}
++
++static void ipw2100_scan_event_later(struct work_struct *work)
++{
++	send_scan_event(container_of(work, struct ipw2100_priv,
++					scan_event_later.work));
++}
++
++static void ipw2100_scan_event_now(struct work_struct *work)
++{
++	send_scan_event(container_of(work, struct ipw2100_priv,
++					scan_event_now));
++}
++
+ static void isr_scan_complete(struct ipw2100_priv *priv, u32 status)
+ {
+ 	IPW_DEBUG_SCAN("scan complete\n");
+ 	/* Age the scan results... */
+ 	priv->ieee->scans++;
+ 	priv->status &= ~STATUS_SCANNING;
++
++	/* Only userspace-requested scan completion events go out immediately */
++	if (!priv->user_requested_scan) {
++		if (!delayed_work_pending(&priv->scan_event_later))
++			queue_delayed_work(priv->workqueue,
++					&priv->scan_event_later,
++					round_jiffies(msecs_to_jiffies(4000)));
++	} else {
++		priv->user_requested_scan = 0;
++		cancel_delayed_work(&priv->scan_event_later);
++		queue_work(priv->workqueue, &priv->scan_event_now);
++	}
+ }
+ 
+ #ifdef CONFIG_IPW2100_DEBUG
+@@ -4347,6 +4381,7 @@ static void ipw2100_kill_workqueue(struc
+ 		cancel_delayed_work(&priv->wx_event_work);
+ 		cancel_delayed_work(&priv->hang_check);
+ 		cancel_delayed_work(&priv->rf_kill);
++		cancel_delayed_work(&priv->scan_event_later);
+ 		destroy_workqueue(priv->workqueue);
+ 		priv->workqueue = NULL;
+ 	}
+@@ -6089,6 +6124,8 @@ static struct net_device *ipw2100_alloc_
+ 	INIT_DELAYED_WORK(&priv->wx_event_work, ipw2100_wx_event_work);
+ 	INIT_DELAYED_WORK(&priv->hang_check, ipw2100_hang_check);
+ 	INIT_DELAYED_WORK(&priv->rf_kill, ipw2100_rf_kill);
++	INIT_WORK(&priv->scan_event_now, ipw2100_scan_event_now);
++	INIT_DELAYED_WORK(&priv->scan_event_later, ipw2100_scan_event_later);
+ 
+ 	tasklet_init(&priv->irq_tasklet, (void (*)(unsigned long))
+ 		     ipw2100_irq_tasklet, (unsigned long)priv);
+@@ -7398,6 +7435,8 @@ static int ipw2100_wx_set_scan(struct ne
+ 	}
+ 
+ 	IPW_DEBUG_WX("Initiating scan...\n");
++
++	priv->user_requested_scan = 1;
+ 	if (ipw2100_set_scan_options(priv) || ipw2100_start_scan(priv)) {
+ 		IPW_DEBUG_WX("Start scan failed.\n");
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/zd1201.c.orig linux-2.6.23.noarch/drivers/net/wireless/zd1201.c
+--- linux-2.6.23.noarch/drivers/net/wireless/zd1201.c.orig	2007-10-19 13:18:34.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1201.c	2007-10-19 13:18:40.000000000 -0400
+@@ -327,8 +327,8 @@ static void zd1201_usbrx(struct urb *urb
+ 			memcpy(skb_put(skb, 6), &data[datalen-8], 6);
+ 			memcpy(skb_put(skb, 2), &data[datalen-24], 2);
+ 			memcpy(skb_put(skb, len), data, len);
+-			skb->dev->last_rx = jiffies;
+ 			skb->protocol = eth_type_trans(skb, zd->dev);
++			skb->dev->last_rx = jiffies;
+ 			zd->stats.rx_packets++;
+ 			zd->stats.rx_bytes += skb->len;
+ 			netif_rx(skb);
+@@ -384,8 +384,8 @@ static void zd1201_usbrx(struct urb *urb
+ 			memcpy(skb_put(skb, 2), &data[6], 2);
+ 			memcpy(skb_put(skb, len), data+8, len);
+ 		}
+-		skb->dev->last_rx = jiffies;
+ 		skb->protocol = eth_type_trans(skb, zd->dev);
++		skb->dev->last_rx = jiffies;
+ 		zd->stats.rx_packets++;
+ 		zd->stats.rx_bytes += skb->len;
+ 		netif_rx(skb);
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c	2007-10-19 13:21:18.000000000 -0400
+@@ -36,9 +36,6 @@
+ 
+ #include <linux/workqueue.h>
+ 
+-#include <net/mac80211.h>
+-#include <linux/wireless.h>
+-
+ #define IWL 4965
+ 
+ #include "../net/mac80211/ieee80211_rate.h"
+@@ -2021,12 +2018,18 @@ static int open_file_generic(struct inod
+ static void rs_dbgfs_set_mcs(struct iwl_rate_scale_priv *rs_priv,
+ 				struct iwl_rate *mcs, int index)
+ {
+-	const u32 cck_rate = 0x820A;
++	u32 base_rate;
++
++	if (rs_priv->phymode == (u8) MODE_IEEE80211A)
++		base_rate = 0x800D;
++	else
++		base_rate = 0x820A;
++
+ 	if (rs_priv->dbg_fixed.rate_n_flags) {
+ 		if (index < 12)
+ 			mcs->rate_n_flags = rs_priv->dbg_fixed.rate_n_flags;
+ 		else
+-			mcs->rate_n_flags = cck_rate;
++			mcs->rate_n_flags = base_rate;
+ 		IWL_DEBUG_RATE("Fixed rate ON\n");
+ 		return;
+ 	}
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945.c	2007-10-19 13:21:18.000000000 -0400
+@@ -38,7 +38,6 @@
+ #include <net/mac80211.h>
+ 
+ #include <linux/etherdevice.h>
+-#include <linux/delay.h>
+ 
+ #define IWL 3945
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c	2007-10-19 13:21:18.000000000 -0400
+@@ -48,8 +48,6 @@
+ #include <linux/netdevice.h>
+ #include <linux/wireless.h>
+ #include <linux/firmware.h>
+-#include <linux/skbuff.h>
+-#include <linux/netdevice.h>
+ #include <linux/etherdevice.h>
+ #include <linux/if_arp.h>
+ 
+@@ -1800,21 +1798,22 @@ static void iwl_unset_hw_setting(struct 
+  * return : set the bit for each supported rate insert in ie
+  */
+ static u16 iwl_supported_rate_to_ie(u8 *ie, u16 supported_rate,
+-				    u16 basic_rate, int max_count)
++				    u16 basic_rate, int *left)
+ {
+ 	u16 ret_rates = 0, bit;
+ 	int i;
+-	u8 *rates;
+-
+-	rates = &(ie[1]);
++	u8 *cnt = ie;
++	u8 *rates = ie + 1;
+ 
+ 	for (bit = 1, i = 0; i < IWL_RATE_COUNT; i++, bit <<= 1) {
+ 		if (bit & supported_rate) {
+ 			ret_rates |= bit;
+-			rates[*ie] = iwl_rates[i].ieee |
+-			    ((bit & basic_rate) ? 0x80 : 0x00);
+-			*ie = *ie + 1;
+-			if (*ie >= max_count)
++			rates[*cnt] = iwl_rates[i].ieee |
++				((bit & basic_rate) ? 0x80 : 0x00);
++			(*cnt)++;
++			(*left)--;
++			if ((*left <= 0) ||
++			    (*cnt >= IWL_SUPPORTED_RATES_IE_LEN))
+ 				break;
+ 		}
+ 	}
+@@ -1837,7 +1836,7 @@ static u16 iwl_fill_probe_req(struct iwl
+ {
+ 	int len = 0;
+ 	u8 *pos = NULL;
+-	u16 ret_rates;
++	u16 active_rates, ret_rates, cck_rates;
+ 
+ 	/* Make sure there is enough space for the probe request,
+ 	 * two mandatory IEs and the data */
+@@ -1882,19 +1881,27 @@ static u16 iwl_fill_probe_req(struct iwl
+ 	left -= 2;
+ 	if (left < 0)
+ 		return 0;
++
+ 	/* ... fill it in... */
+ 	*pos++ = WLAN_EID_SUPP_RATES;
+ 	*pos = 0;
+-	ret_rates = priv->active_rate = priv->rates_mask;
++
++	priv->active_rate = priv->rates_mask;
++	active_rates = priv->active_rate;
+ 	priv->active_rate_basic = priv->rates_mask & IWL_BASIC_RATES_MASK;
+ 
+-	iwl_supported_rate_to_ie(pos, priv->active_rate,
+-				 priv->active_rate_basic, left);
++	cck_rates = IWL_CCK_RATES_MASK & active_rates;
++	ret_rates = iwl_supported_rate_to_ie(pos, cck_rates,
++			priv->active_rate_basic, &left);
++	active_rates &= ~ret_rates;
++
++	ret_rates = iwl_supported_rate_to_ie(pos, active_rates,
++				 priv->active_rate_basic, &left);
++	active_rates &= ~ret_rates;
++
+ 	len += 2 + *pos;
+ 	pos += (*pos) + 1;
+-	ret_rates = ~ret_rates & priv->active_rate;
+-
+-	if (ret_rates == 0)
++	if (active_rates == 0)
+ 		goto fill_end;
+ 
+ 	/* fill in supported extended rate */
+@@ -1905,7 +1912,8 @@ static u16 iwl_fill_probe_req(struct iwl
+ 	/* ... fill it in... */
+ 	*pos++ = WLAN_EID_EXT_SUPP_RATES;
+ 	*pos = 0;
+-	iwl_supported_rate_to_ie(pos, ret_rates, priv->active_rate_basic, left);
++	iwl_supported_rate_to_ie(pos, active_rates,
++				 priv->active_rate_basic, &left);
+ 	if (*pos > 0)
+ 		len += 2 + *pos;
+ 
+@@ -4493,13 +4501,13 @@ static u8 ratio2dB[100] = {
+  * Conversion assumes that levels are voltages (20*log), not powers (10*log). */
+ int iwl_calc_db_from_ratio(int sig_ratio)
+ {
+-	/* Anything above 1000:1 just report as 60 dB */
+-	if (sig_ratio > 1000)
++	/* 1000:1 or higher just report as 60 dB */
++	if (sig_ratio >= 1000)
+ 		return 60;
+ 
+-	/* Above 100:1, divide by 10 and use table,
++	/* 100:1 or higher, divide by 10 and use table,
+ 	 *   add 20 dB to make up for divide by 10 */
+-	if (sig_ratio > 100)
++	if (sig_ratio >= 100)
+ 		return (20 + (int)ratio2dB[sig_ratio/10]);
+ 
+ 	/* We shouldn't see this */
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c	2007-10-19 13:21:18.000000000 -0400
+@@ -35,9 +35,7 @@
+ #include <linux/netdevice.h>
+ #include <linux/wireless.h>
+ #include <net/mac80211.h>
+-#include <linux/netdevice.h>
+ #include <linux/etherdevice.h>
+-#include <linux/delay.h>
+ 
+ #define IWL 4965
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwlwifi.h.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwlwifi.h
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwlwifi.h.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwlwifi.h	2007-10-19 13:21:18.000000000 -0400
+@@ -39,18 +39,13 @@ struct iwl_priv;
+ /* Hardware specific file defines the PCI IDs table for that hardware module */
+ extern struct pci_device_id iwl_hw_card_ids[];
+ 
++#include "iwl-hw.h"
+ #if IWL == 3945
+-
+ #define DRV_NAME	"iwl3945"
+-#include "iwl-hw.h"
+ #include "iwl-3945-hw.h"
+-
+ #elif IWL == 4965
+-
+ #define DRV_NAME        "iwl4965"
+-#include "iwl-hw.h"
+ #include "iwl-4965-hw.h"
+-
+ #endif
+ 
+ #include "iwl-prph.h"
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c	2007-10-19 13:21:18.000000000 -0400
+@@ -48,8 +48,6 @@
+ #include <linux/netdevice.h>
+ #include <linux/wireless.h>
+ #include <linux/firmware.h>
+-#include <linux/skbuff.h>
+-#include <linux/netdevice.h>
+ #include <linux/etherdevice.h>
+ #include <linux/if_arp.h>
+ 
+@@ -1747,21 +1745,22 @@ static void iwl_unset_hw_setting(struct 
+  * return : set the bit for each supported rate insert in ie
+  */
+ static u16 iwl_supported_rate_to_ie(u8 *ie, u16 supported_rate,
+-				    u16 basic_rate, int max_count)
++				    u16 basic_rate, int *left)
+ {
+ 	u16 ret_rates = 0, bit;
+ 	int i;
+-	u8 *rates;
+-
+-	rates = &(ie[1]);
++	u8 *cnt = ie;
++	u8 *rates = ie + 1;
+ 
+ 	for (bit = 1, i = 0; i < IWL_RATE_COUNT; i++, bit <<= 1) {
+ 		if (bit & supported_rate) {
+ 			ret_rates |= bit;
+-			rates[*ie] = iwl_rates[i].ieee |
+-			    ((bit & basic_rate) ? 0x80 : 0x00);
+-			*ie = *ie + 1;
+-			if (*ie >= max_count)
++			rates[*cnt] = iwl_rates[i].ieee |
++				((bit & basic_rate) ? 0x80 : 0x00);
++			(*cnt)++;
++			(*left)--;
++			if ((*left <= 0) ||
++			    (*cnt >= IWL_SUPPORTED_RATES_IE_LEN))
+ 				break;
+ 		}
+ 	}
+@@ -1778,7 +1777,7 @@ static u16 iwl_fill_probe_req(struct iwl
+ {
+ 	int len = 0;
+ 	u8 *pos = NULL;
+-	u16 ret_rates;
++	u16 active_rates, ret_rates, cck_rates;
+ 
+ 	/* Make sure there is enough space for the probe request,
+ 	 * two mandatory IEs and the data */
+@@ -1823,19 +1822,27 @@ static u16 iwl_fill_probe_req(struct iwl
+ 	left -= 2;
+ 	if (left < 0)
+ 		return 0;
++
+ 	/* ... fill it in... */
+ 	*pos++ = WLAN_EID_SUPP_RATES;
+ 	*pos = 0;
+-	ret_rates = priv->active_rate = priv->rates_mask;
++
++	priv->active_rate = priv->rates_mask;
++	active_rates = priv->active_rate;
+ 	priv->active_rate_basic = priv->rates_mask & IWL_BASIC_RATES_MASK;
+ 
+-	iwl_supported_rate_to_ie(pos, priv->active_rate,
+-				 priv->active_rate_basic, left);
++	cck_rates = IWL_CCK_RATES_MASK & active_rates;
++	ret_rates = iwl_supported_rate_to_ie(pos, cck_rates,
++			priv->active_rate_basic, &left);
++	active_rates &= ~ret_rates;
++
++	ret_rates = iwl_supported_rate_to_ie(pos, active_rates,
++				 priv->active_rate_basic, &left);
++	active_rates &= ~ret_rates;
++
+ 	len += 2 + *pos;
+ 	pos += (*pos) + 1;
+-	ret_rates = ~ret_rates & priv->active_rate;
+-
+-	if (ret_rates == 0)
++	if (active_rates == 0)
+ 		goto fill_end;
+ 
+ 	/* fill in supported extended rate */
+@@ -1846,7 +1853,8 @@ static u16 iwl_fill_probe_req(struct iwl
+ 	/* ... fill it in... */
+ 	*pos++ = WLAN_EID_EXT_SUPP_RATES;
+ 	*pos = 0;
+-	iwl_supported_rate_to_ie(pos, ret_rates, priv->active_rate_basic, left);
++	iwl_supported_rate_to_ie(pos, active_rates,
++				 priv->active_rate_basic, &left);
+ 	if (*pos > 0)
+ 		len += 2 + *pos;
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c	2007-10-19 13:21:18.000000000 -0400
+@@ -37,9 +37,6 @@
+ 
+ #include <linux/workqueue.h>
+ 
+-#include <net/mac80211.h>
+-#include <linux/wireless.h>
+-
+ #define IWL 3945
+ 
+ #include "../net/mac80211/ieee80211_rate.h"
+diff -up linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt2x00dev.c.orig linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt2x00dev.c
+--- linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt2x00dev.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt2x00dev.c	2007-10-19 13:21:18.000000000 -0400
+@@ -505,7 +505,7 @@ void rt2x00lib_write_tx_desc(struct rt2x
+ 			/*
+ 			 * Check if we need to set the Length Extension
+ 			 */
+-			if (bitrate == 110 && residual <= 3)
++			if (bitrate == 110 && residual <= 30)
+ 				desc.service |= 0x80;
+ 		}
+ 
+diff -up linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt73usb.c.orig linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt73usb.c
+--- linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt73usb.c.orig	2007-10-19 13:03:56.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/rt2x00/rt73usb.c	2007-10-19 13:21:18.000000000 -0400
+@@ -2043,6 +2043,7 @@ static struct usb_device_id rt73usb_devi
+ 	{ USB_DEVICE(0x050d, 0x7050), USB_DEVICE_DATA(&rt73usb_ops) },
+ 	{ USB_DEVICE(0x050d, 0x705a), USB_DEVICE_DATA(&rt73usb_ops) },
+ 	{ USB_DEVICE(0x050d, 0x905b), USB_DEVICE_DATA(&rt73usb_ops) },
++	{ USB_DEVICE(0x050d, 0x905c), USB_DEVICE_DATA(&rt73usb_ops) },
+ 	/* Billionton */
+ 	{ USB_DEVICE(0x1631, 0xc019), USB_DEVICE_DATA(&rt73usb_ops) },
+ 	/* Buffalo */

@@ -1,0 +1,119 @@
+--- linux-2.6.18.noarch/arch/x86_64/mm/init.c~	2006-10-16 17:09:56.000000000 -0400
++++ linux-2.6.18.noarch/arch/x86_64/mm/init.c	2006-10-16 17:10:09.000000000 -0400
+@@ -337,10 +337,6 @@ static void __init find_early_table_spac
+ 
+ 	table_start >>= PAGE_SHIFT;
+ 	table_end = table_start;
+-
+-	early_printk("kernel direct mapping tables up to %lx @ %lx-%lx\n",
+-		end, table_start << PAGE_SHIFT,
+-		(table_start << PAGE_SHIFT) + tables);
+ }
+ 
+ /* Setup the direct mapping of the physical memory at PAGE_OFFSET.
+ 
+--- linux-2.6.18.noarch/drivers/pci/setup-res.c~	2006-10-17 17:15:34.000000000 -0400
++++ linux-2.6.18.noarch/drivers/pci/setup-res.c	2006-10-17 17:15:56.000000000 -0400
+@@ -148,7 +148,7 @@ int pci_assign_resource(struct pci_dev *
+ 	}
+ 
+ 	if (ret) {
+-		printk(KERN_ERR "PCI: Failed to allocate %s resource "
++		printk(KERN_DEBUG "PCI: Failed to allocate %s resource "
+ 			"#%d:%llx@%llx for %s\n",
+ 			res->flags & IORESOURCE_IO ? "I/O" : "mem",
+ 			resno, (unsigned long long)size,
+@@ -186,7 +186,7 @@ int pci_assign_resource_fixed(struct pci
+ 	}
+ 
+ 	if (ret) {
+-		printk(KERN_ERR "PCI: Failed to allocate %s resource "
++		printk(KERN_DEBUG "PCI: Failed to allocate %s resource "
+ 				"#%d:%llx@%llx for %s\n",
+ 			res->flags & IORESOURCE_IO ? "I/O" : "mem",
+ 			resno, (unsigned long long)(res->end - res->start + 1),
+--- linux-2.6.19.noarch/arch/i386/pci/i386.c~	2006-12-04 11:21:32.000000000 -0500
++++ linux-2.6.19.noarch/arch/i386/pci/i386.c	2006-12-04 11:22:10.000000000 -0500
+@@ -112,7 +112,7 @@ static void __init pcibios_allocate_bus_
+ 				pr = pci_find_parent_resource(dev, r);
+ 				if (!r->start || !pr ||
+ 				    request_resource(pr, r) < 0) {
+-					printk(KERN_ERR "PCI: Cannot allocate "
++					printk(KERN_DEBUG "PCI: Cannot allocate "
+ 						"resource region %d "
+ 						"of bridge %s\n",
+ 						idx, pci_name(dev));
+@@ -155,7 +155,7 @@ static void __init pcibios_allocate_reso
+ 				    r->start, r->end, r->flags, disabled, pass);
+ 				pr = pci_find_parent_resource(dev, r);
+ 				if (!pr || request_resource(pr, r) < 0) {
+-					printk(KERN_ERR "PCI: Cannot allocate "
++					printk(KERN_DEBUG "PCI: Cannot allocate "
+ 						"resource region %d "
+ 						"of device %s\n",
+ 						idx, pci_name(dev));
+
+Remove noisy PM printk.
+This has served its purpose.
+
+Signed-off-by: Dave Jones <davej@redhat.com>
+
+--- linux-2.6.20.noarch/drivers/pci/pci.c~	2007-04-16 18:14:14.000000000 -0400
++++ linux-2.6.20.noarch/drivers/pci/pci.c	2007-04-16 18:14:33.000000000 -0400
+@@ -664,14 +664,9 @@ pci_restore_state(struct pci_dev *dev)
+ 	 */
+ 	for (i = 15; i >= 0; i--) {
+ 		pci_read_config_dword(dev, i * 4, &val);
+-		if (val != dev->saved_config_space[i]) {
+-			printk(KERN_DEBUG "PM: Writing back config space on "
+-				"device %s at offset %x (was %x, writing %x)\n",
+-				pci_name(dev), i,
+-				val, (int)dev->saved_config_space[i]);
++		if (val != dev->saved_config_space[i])
+ 			pci_write_config_dword(dev,i * 4,
+ 				dev->saved_config_space[i]);
+-		}
+ 	}
+ 	pci_restore_pcix_state(dev);
+ 	pci_restore_msi_state(dev);
+
+
+--- linux-2.6.22.noarch/drivers/base/power/main.c~	2007-07-13 15:44:37.000000000 -0400
++++ linux-2.6.22.noarch/drivers/base/power/main.c	2007-07-13 15:44:44.000000000 -0400
+@@ -37,9 +37,6 @@ int device_pm_add(struct device *dev)
+ {
+ 	int error;
+ 
+-	pr_debug("PM: Adding info for %s:%s\n",
+-		 dev->bus ? dev->bus->name : "No Bus",
+-		 kobject_name(&dev->kobj));
+ 	mutex_lock(&dpm_list_mtx);
+ 	list_add_tail(&dev->power.entry, &dpm_active);
+ 	error = dpm_sysfs_add(dev);
+@@ -51,9 +48,6 @@ int device_pm_add(struct device *dev)
+ 
+ void device_pm_remove(struct device *dev)
+ {
+-	pr_debug("PM: Removing info for %s:%s\n",
+-		 dev->bus ? dev->bus->name : "No Bus",
+-		 kobject_name(&dev->kobj));
+ 	mutex_lock(&dpm_list_mtx);
+ 	dpm_sysfs_remove(dev);
+ 	list_del_init(&dev->power.entry);
+
+16:29 @   pjones| davej: btw, we should apply this patch and get it upstream:
+16:29 @   pjones| http://pastebin.ca/741573
+16:29 @   pjones| (because imacs and such don't have an i8042, so we get that message during quiet boot with them)
+16:29 @   pjones| (warning: not tested.  I'm working on the assumption that we see it because it's KERN_ERR )
+
+--- linux-2.6.23.noarch/drivers/input/serio/i8042.c~	2007-10-18 16:37:06.000000000 -0400
++++ linux-2.6.23.noarch/drivers/input/serio/i8042.c	2007-10-18 16:37:16.000000000 -0400
+@@ -684,7 +684,7 @@ static int __devinit i8042_check_aux(voi
+ static int i8042_controller_check(void)
+ {
+ 	if (i8042_flush() == I8042_BUFFER_SIZE) {
+-		printk(KERN_ERR "i8042.c: No controller found.\n");
++		printk(KERN_INFO "i8042.c: No controller found.\n");
+ 		return -ENODEV;
+ 	}
+ 

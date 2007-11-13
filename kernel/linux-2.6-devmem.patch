@@ -1,0 +1,645 @@
+Index: linux-2.6/arch/i386/mm/init.c
+===================================================================
+--- linux-2.6.orig/arch/i386/mm/init.c
++++ linux-2.6/arch/i386/mm/init.c
+@@ -233,6 +233,25 @@ int page_is_ram(unsigned long pagenr)
+ 	return 0;
+ }
+ 
++/*
++ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
++ * valid. The argument is a physical page number.
++ *
++ *
++ * On x86, access has to be given to the first megabyte of ram because that area
++ * contains bios code and data regions used by X and dosemu and similar apps.
++ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
++ * mmio resources as well as potential bios/acpi data regions.
++ */
++int devmem_is_allowed(unsigned long pagenr)
++{
++   if (pagenr <= 256)
++       return 1;
++   if (!page_is_ram(pagenr))
++       return 1;
++   return 0;
++}
++
+ #ifdef CONFIG_HIGHMEM
+ pte_t *kmap_pte;
+ pgprot_t kmap_prot;
+Index: linux-2.6/arch/ia64/mm/init.c
+===================================================================
+--- linux-2.6.orig/arch/ia64/mm/init.c
++++ linux-2.6/arch/ia64/mm/init.c
+@@ -263,6 +263,13 @@ free_initrd_mem (unsigned long start, un
+ 	}
+ }
+ 
++int page_is_ram(unsigned long pagenr)
++{
++      //FIXME: implement w/efi walk
++      printk("page is ram is called!!!!!\n");	
++      return 1;
++}
++
+ /*
+  * This installs a clean page in the kernel's page table.
+  */
+Index: linux-2.6/arch/powerpc/mm/mem.c
+===================================================================
+--- linux-2.6.orig/arch/powerpc/mm/mem.c
++++ linux-2.6/arch/powerpc/mm/mem.c
+@@ -45,6 +45,7 @@
+ #include <asm/prom.h>
+ #include <asm/lmb.h>
+ #include <asm/sections.h>
++#include <asm/rtas.h>
+ #include <asm/vdso.h>
+ 
+ #include "mmu_decl.h"
+@@ -343,6 +344,19 @@ void __init mem_init(void)
+ 	max_mapnr = max_pfn;
+ 	totalram_pages += free_all_bootmem();
+ #endif
++
++#ifdef CONFIG_PPC_PSERIES
++	/* Mark the RTAS pages as PG_reserved so userspace can mmap them */
++	if (rtas_rmo_buf) {
++		unsigned long pfn, start_pfn, end_pfn;
++
++		start_pfn = rtas_rmo_buf >> PAGE_SHIFT;
++		end_pfn = (rtas_rmo_buf + RTAS_RMOBUF_MAX) >>  PAGE_SHIFT;
++		for (pfn = start_pfn; pfn < end_pfn; pfn++)
++			SetPageReserved(pfn_to_page(pfn));
++	}
++#endif
++
+ 	for_each_online_pgdat(pgdat) {
+ 		for (i = 0; i < pgdat->node_spanned_pages; i++) {
+ 			if (!pfn_valid(pgdat->node_start_pfn + i))
+--- linux-2.6.21.noarch/arch/s390/mm/init.c~	2007-05-27 23:04:09.000000000 -0400
++++ linux-2.6.21.noarch/arch/s390/mm/init.c	2007-05-27 23:04:20.000000000 -0400
+@@ -156,6 +156,11 @@ void __init paging_init(void)
+ 	free_area_init_nodes(max_zone_pfns);
+ }
+ 
++int page_is_ram (unsigned long pagenr)
++{
++	return pagenr < max_mapnr;
++}
++
+ void __init mem_init(void)
+ {
+ 	unsigned long codesize, reservedpages, datasize, initsize;
+Index: linux-2.6/arch/x86_64/mm/init.c
+===================================================================
+--- linux-2.6.orig/arch/x86_64/mm/init.c
++++ linux-2.6/arch/x86_64/mm/init.c
+@@ -452,6 +452,28 @@ void __init clear_kernel_mapping(unsigne
+ 	__flush_tlb_all();
+ } 
+ 
++static int page_is_ram (unsigned long pagenr)
++{
++	int i;
++
++	for (i = 0; i < e820.nr_map; i++) {
++		unsigned long addr, end;
++
++		if (e820.map[i].type != E820_RAM)	/* not usable memory */
++			continue;
++		/*
++		 * !!!FIXME!!! Some BIOSen report areas as RAM that
++		 * are not. Notably the 640->1Mb area. We need a sanity
++		 * check here.
++		 */
++		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
++		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
++		if  ((pagenr >= addr) && (pagenr < end))
++			return 1;
++	}
++	return 0;
++}
++
+ /*
+  * Memory hotplug specific functions
+  */
+@@ -534,6 +556,26 @@ int __add_pages(struct zone *z, unsigned
+ }
+ #endif
+ 
++/*
++ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
++ * valid. The argument is a physical page number.
++ *
++ *
++ * On x86-64, access has to be given to the first megabyte of ram because that area
++ * contains bios code and data regions used by X and dosemu and similar apps.
++ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
++ * mmio resources as well as potential bios/acpi data regions.
++ */
++int devmem_is_allowed(unsigned long pagenr)
++{
++	if (pagenr <= 256)
++		return 1;
++	if (!page_is_ram(pagenr))
++		return 1;
++	return 0;
++}
++
++
+ static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
+ 			 kcore_vsyscall;
+ 
+Index: linux-2.6/drivers/char/mem.c
+===================================================================
+--- linux-2.6.orig/drivers/char/mem.c
++++ linux-2.6/drivers/char/mem.c
+@@ -102,6 +102,22 @@ static inline int valid_mmap_phys_addr_r
+ }
+ #endif
+ 
++static inline int range_is_allowed(unsigned long from, unsigned long to)
++{
++	unsigned long cursor;
++
++	cursor = from >> PAGE_SHIFT;
++	while ((cursor << PAGE_SHIFT) < to) {
++		if (!devmem_is_allowed(cursor)) {
++			printk ("Program %s tried to read /dev/mem between %lx->%lx.\n",
++					current->comm, from, to);
++			return 0;
++		}
++		cursor++;
++	}
++	return 1;
++}
++
+ /*
+  * This funcion reads the *physical* memory. The f_pos points directly to the 
+  * memory location. 
+@@ -151,6 +167,8 @@ static ssize_t read_mem(struct file * fi
+ 		 */
+ 		ptr = xlate_dev_mem_ptr(p);
+ 
++		if (!range_is_allowed(p, p+count))
++			return -EPERM;
+ 		if (copy_to_user(buf, ptr, sz))
+ 			return -EFAULT;
+ 		buf += sz;
+@@ -208,6 +226,8 @@ static ssize_t write_mem(struct file * f
+ 		 */
+ 		ptr = xlate_dev_mem_ptr(p);
+ 
++		if (!range_is_allowed(ptr, ptr+sz))
++			return -EPERM;
+ 		copied = copy_from_user(ptr, buf, sz);
+ 		if (copied) {
+ 			written += sz - copied;
+@@ -357,6 +377,8 @@ static ssize_t read_kmem(struct file *fi
+ 	ssize_t low_count, read, sz;
+ 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
+ 
++	return -EPERM;
++
+ 	read = 0;
+ 	if (p < (unsigned long) high_memory) {
+ 		low_count = count;
+@@ -454,125 +454,6 @@ static ssize_t read_kmem(struct file *fi
+ }
+ 
+ 
+-static inline ssize_t
+-do_write_kmem(void *p, unsigned long realp, const char __user * buf,
+-	      size_t count, loff_t *ppos)
+-{
+-	ssize_t written, sz;
+-	unsigned long copied;
+-
+-	written = 0;
+-#ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
+-	/* we don't have page 0 mapped on sparc and m68k.. */
+-	if (realp < PAGE_SIZE) {
+-		unsigned long sz = PAGE_SIZE - realp;
+-		if (sz > count)
+-			sz = count;
+-		/* Hmm. Do something? */
+-		buf += sz;
+-		p += sz;
+-		realp += sz;
+-		count -= sz;
+-		written += sz;
+-	}
+-#endif
+-
+-	while (count > 0) {
+-		char *ptr;
+-		/*
+-		 * Handle first page in case it's not aligned
+-		 */
+-		if (-realp & (PAGE_SIZE - 1))
+-			sz = -realp & (PAGE_SIZE - 1);
+-		else
+-			sz = PAGE_SIZE;
+-
+-		sz = min_t(unsigned long, sz, count);
+-
+-		/*
+-		 * On ia64 if a page has been mapped somewhere as
+-		 * uncached, then it must also be accessed uncached
+-		 * by the kernel or data corruption may occur
+-		 */
+-		ptr = xlate_dev_kmem_ptr(p);
+-
+-		copied = copy_from_user(ptr, buf, sz);
+-		if (copied) {
+-			written += sz - copied;
+-			if (written)
+-				break;
+-			return -EFAULT;
+-		}
+-		buf += sz;
+-		p += sz;
+-		realp += sz;
+-		count -= sz;
+-		written += sz;
+-	}
+-
+-	*ppos += written;
+-	return written;
+-}
+-
+-
+-/*
+- * This function writes to the *virtual* memory as seen by the kernel.
+- */
+-static ssize_t write_kmem(struct file * file, const char __user * buf, 
+-			  size_t count, loff_t *ppos)
+-{
+-	unsigned long p = *ppos;
+-	ssize_t wrote = 0;
+-	ssize_t virtr = 0;
+-	ssize_t written;
+-	char * kbuf; /* k-addr because vwrite() takes vmlist_lock rwlock */
+-
+-	if (p < (unsigned long) high_memory) {
+-
+-		wrote = count;
+-		if (count > (unsigned long) high_memory - p)
+-			wrote = (unsigned long) high_memory - p;
+-
+-		written = do_write_kmem((void*)p, p, buf, wrote, ppos);
+-		if (written != wrote)
+-			return written;
+-		wrote = written;
+-		p += wrote;
+-		buf += wrote;
+-		count -= wrote;
+-	}
+-
+-	if (count > 0) {
+-		kbuf = (char *)__get_free_page(GFP_KERNEL);
+-		if (!kbuf)
+-			return wrote ? wrote : -ENOMEM;
+-		while (count > 0) {
+-			int len = count;
+-
+-			if (len > PAGE_SIZE)
+-				len = PAGE_SIZE;
+-			if (len) {
+-				written = copy_from_user(kbuf, buf, len);
+-				if (written) {
+-					if (wrote + virtr)
+-						break;
+-					free_page((unsigned long)kbuf);
+-					return -EFAULT;
+-				}
+-			}
+-			len = vwrite(kbuf, (char *)p, len);
+-			count -= len;
+-			buf += len;
+-			virtr += len;
+-			p += len;
+-		}
+-		free_page((unsigned long)kbuf);
+-	}
+-
+- 	*ppos = p;
+- 	return virtr + wrote;
+-}
+-
+ #ifdef CONFIG_DEVPORT
+ static ssize_t read_port(struct file * file, char __user * buf,
+ 			 size_t count, loff_t *ppos)
+@@ -818,7 +720,6 @@ static const struct file_operations mem_
+ static const struct file_operations kmem_fops = {
+ 	.llseek		= memory_lseek,
+ 	.read		= read_kmem,
+-	.write		= write_kmem,
+ 	.mmap		= mmap_kmem,
+ 	.open		= open_kmem,
+ 	.get_unmapped_area = get_unmapped_area_mem,
+@@ -859,7 +859,6 @@ static const struct {
+ 	const struct file_operations	*fops;
+ } devlist[] = { /* list of minor devices */
+ 	{1, "mem",     S_IRUSR | S_IWUSR | S_IRGRP, &mem_fops},
+-	{2, "kmem",    S_IRUSR | S_IWUSR | S_IRGRP, &kmem_fops},
+ 	{3, "null",    S_IRUGO | S_IWUGO,           &null_fops},
+ #ifdef CONFIG_DEVPORT
+ 	{4, "port",    S_IRUSR | S_IWUSR | S_IRGRP, &port_fops},
+Index: linux-2.6/fs/proc/kcore.c
+===================================================================
+--- linux-2.6.orig/fs/proc/kcore.c
++++ linux-2.6/fs/proc/kcore.c
+@@ -25,7 +25,7 @@
+ 
+ static int open_kcore(struct inode * inode, struct file * filp)
+ {
+-	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
++	return -EPERM;
+ }
+ 
+ static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);
+Index: linux-2.6/include/asm-alpha/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-alpha/page.h
++++ linux-2.6/include/asm-alpha/page.h
+@@ -93,6 +93,8 @@ typedef unsigned long pgprot_t;
+ #define VM_DATA_DEFAULT_FLAGS		(VM_READ | VM_WRITE | VM_EXEC | \
+ 					 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+ 
++#define devmem_is_allowed(x) 1
++
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
+Index: linux-2.6/include/asm-arm/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-arm/page.h
++++ linux-2.6/include/asm-arm/page.h
+@@ -192,6 +192,8 @@ typedef unsigned long pgprot_t;
+ 
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif
+Index: linux-2.6/include/asm-cris/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-cris/page.h
++++ linux-2.6/include/asm-cris/page.h
+@@ -76,6 +76,8 @@ typedef struct { unsigned long pgprot; }
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _CRIS_PAGE_H */
+Index: linux-2.6/include/asm-h8300/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-h8300/page.h
++++ linux-2.6/include/asm-h8300/page.h
+@@ -78,6 +78,8 @@ extern unsigned long memory_end;
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _H8300_PAGE_H */
+Index: linux-2.6/include/asm-i386/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-i386/page.h
++++ linux-2.6/include/asm-i386/page.h
+@@ -108,6 +108,8 @@ extern int sysctl_legacy_va_layout;
+ 
+ extern int page_is_ram(unsigned long pagenr);
+ 
++extern int devmem_is_allowed(unsigned long pagenr);
++
+ #endif /* __ASSEMBLY__ */
+ 
+ #ifdef __ASSEMBLY__
+Index: linux-2.6/include/asm-ia64/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-ia64/page.h
++++ linux-2.6/include/asm-ia64/page.h
+@@ -227,5 +227,6 @@ get_order (unsigned long size)
+ 					 (((current->personality & READ_IMPLIES_EXEC) != 0)	\
+ 					  ? VM_EXEC : 0))
+ 
++#define devmem_is_allowed(x) 1
+ # endif /* __KERNEL__ */
+ #endif /* _ASM_IA64_PAGE_H */
+Index: linux-2.6/include/asm-m68k/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-m68k/page.h
++++ linux-2.6/include/asm-m68k/page.h
+@@ -177,6 +177,8 @@ static inline void *__va(unsigned long x
+ 
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _M68K_PAGE_H */
+Index: linux-2.6/include/asm-m68knommu/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-m68knommu/page.h
++++ linux-2.6/include/asm-m68knommu/page.h
+@@ -77,6 +77,8 @@ extern unsigned long memory_end;
+ 
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _M68KNOMMU_PAGE_H */
+Index: linux-2.6/include/asm-mips/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-mips/page.h
++++ linux-2.6/include/asm-mips/page.h
+@@ -178,4 +178,6 @@ typedef struct { unsigned long pgprot; }
+ 
+ #endif /* defined (__KERNEL__) */
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* _ASM_PAGE_H */
+Index: linux-2.6/include/asm-parisc/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-parisc/page.h
++++ linux-2.6/include/asm-parisc/page.h
+@@ -169,6 +169,8 @@ extern int npmem_ranges;
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _PARISC_PAGE_H */
+Index: linux-2.6/include/asm-ppc/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-ppc/page.h
++++ linux-2.6/include/asm-ppc/page.h
+@@ -173,6 +173,8 @@ extern __inline__ int get_order(unsigned
+ /* We do define AT_SYSINFO_EHDR but don't use the gate mechanism */
+ #define __HAVE_ARCH_GATE_AREA		1
+ 
++#define devmem_is_allowed(x) 1
++
+ #include <asm-generic/memory_model.h>
+ #endif /* __KERNEL__ */
+ #endif /* _PPC_PAGE_H */
+Index: linux-2.6/include/asm-powerpc/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-powerpc/page.h
++++ linux-2.6/include/asm-powerpc/page.h
+@@ -191,6 +191,8 @@ extern const char *arch_vma_name(struct 
+ #include <asm-generic/memory_model.h>
+ #endif /* __ASSEMBLY__ */
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _ASM_POWERPC_PAGE_H */
+Index: linux-2.6/include/asm-s390/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-s390/page.h
++++ linux-2.6/include/asm-s390/page.h
+@@ -148,6 +148,8 @@ page_get_storage_key(unsigned long addr)
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _S390_PAGE_H */
+--- linux-2.6.22.noarch/include/asm-sh/page.h~	2007-07-20 14:22:49.000000000 -0400
++++ linux-2.6.22.noarch/include/asm-sh/page.h	2007-07-20 14:22:54.000000000 -0400
+@@ -158,5 +158,7 @@ typedef struct { unsigned long pgd; } pg
+ #define ARCH_KMALLOC_MINALIGN	4
+ #define ARCH_SLAB_MINALIGN	4
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ #endif /* __ASM_SH_PAGE_H */
+Index: linux-2.6/include/asm-sh64/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-sh64/page.h
++++ linux-2.6/include/asm-sh64/page.h
+@@ -115,5 +115,7 @@ typedef struct { unsigned long pgprot; }
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ #endif /* __ASM_SH64_PAGE_H */
+Index: linux-2.6/include/asm-sparc/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-sparc/page.h
++++ linux-2.6/include/asm-sparc/page.h
+@@ -163,6 +163,8 @@ extern unsigned long pfn_base;
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _SPARC_PAGE_H */
+Index: linux-2.6/include/asm-sparc64/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-sparc64/page.h
++++ linux-2.6/include/asm-sparc64/page.h
+@@ -141,6 +141,8 @@ typedef unsigned long pgprot_t;
+ #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
+ 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+ 
++#define devmem_is_allowed(x) 1
++
+ #include <asm-generic/page.h>
+ 
+ #endif /* __KERNEL__ */
+--- linux-2.6.21.noarch/include/asm-um/page.h~	2007-05-27 23:05:22.000000000 -0400
++++ linux-2.6.21.noarch/include/asm-um/page.h	2007-05-27 23:05:34.000000000 -0400
+@@ -114,6 +114,8 @@ extern unsigned long uml_physmem;
+ extern struct page *arch_validate(struct page *page, gfp_t mask, int order);
+ #define HAVE_ARCH_VALIDATE
+ 
++#define devmem_is_allowed(x) 1
++
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
+Index: linux-2.6/include/asm-v850/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-v850/page.h
++++ linux-2.6/include/asm-v850/page.h
+@@ -126,6 +126,8 @@ typedef unsigned long pgprot_t;
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#define devmem_is_allowed(x) 1
++
+ #endif /* KERNEL */
+ 
+ #endif /* __V850_PAGE_H__ */
+Index: linux-2.6/include/asm-x86_64/page.h
+===================================================================
+--- linux-2.6.orig/include/asm-x86_64/page.h
++++ linux-2.6/include/asm-x86_64/page.h
+@@ -138,6 +138,10 @@ typedef struct { unsigned long pgprot; }
+ #include <asm-generic/memory_model.h>
+ #include <asm-generic/page.h>
+ 
++#ifndef __ASSEMBLY__
++extern int devmem_is_allowed(unsigned long pagenr);
++#endif
++
+ #endif /* __KERNEL__ */
+ 
+ #endif /* _X86_64_PAGE_H */
+--- linux-2.6.20.noarch/fs/proc/kcore.c.orig	2007-06-04 15:44:29.000000000 -0400
++++ linux-2.6.20.noarch/fs/proc/kcore.c	2007-06-04 15:48:57.000000000 -0400
+@@ -23,10 +23,10 @@
+ #include <asm/io.h>
+ 
+ #define CORE_STR "CORE"
+-
++unsigned int allow_kcore_access = 0;
+ static int open_kcore(struct inode * inode, struct file * filp)
+ {
+-	return -EPERM;
++	return (capable(CAP_SYS_RAWIO) && allow_kcore_access) ? 0 : -EPERM;
+ }
+ 
+ static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);
+--- linux-2.6.20.noarch/arch/x86_64/kernel/machine_kexec.c.orig	2007-06-04 15:50:52.000000000 -0400
++++ linux-2.6.20.noarch/arch/x86_64/kernel/machine_kexec.c	2007-06-04 15:52:14.000000000 -0400
+@@ -236,10 +236,12 @@
+  * Useful for holding code to do something appropriate
+  * after a kernel panic.
+  */
++extern int allow_kcore_access;
+ static int __init setup_crashkernel(char *arg)
+ {
+ 	unsigned long size, base;
+ 	char *p;
++	allow_kcore_access = 1; /*enable ability to read /proc/kcore*/
+ 	if (!arg)
+ 		return -EINVAL;
+ 	size = memparse(arg, &p);

@@ -1,0 +1,818 @@
+diff -up linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c.orig linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c
+--- linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c.orig	2007-09-27 19:08:16.000000000 -0400
++++ linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965-rs.c	2007-09-27 19:09:01.000000000 -0400
+@@ -115,24 +115,38 @@ struct iwl_rate_scale_priv {
+ 	u8 is_dup;
+ 	u8 phymode;
+ 	u8 ibss_sta_added;
++	u32 supp_rates;
+ 	u16 active_rate;
+ 	u16 active_siso_rate;
+ 	u16 active_mimo_rate;
+ 	u16 active_rate_basic;
+ 	struct iwl_link_quality_cmd lq;
+ 	struct iwl_scale_tbl_info lq_info[LQ_SIZE];
++#ifdef CONFIG_MAC80211_DEBUGFS
++	struct dentry *rs_sta_dbgfs_scale_table_file;
++	struct dentry *rs_sta_dbgfs_stats_table_file;
++	struct iwl_rate dbg_fixed;
++	struct iwl_priv *drv;
++#endif
+ };
+ 
+ static void rs_rate_scale_perform(struct iwl_priv *priv,
+ 				   struct net_device *dev,
+ 				   struct ieee80211_hdr *hdr,
+ 				   struct sta_info *sta);
+-static int rs_fill_link_cmd(struct iwl_rate_scale_priv *lq_data,
++static void rs_fill_link_cmd(struct iwl_rate_scale_priv *lq_data,
+ 			     struct iwl_rate *tx_mcs,
+-			     struct iwl_link_quality_cmd *tbl,
+-			     struct sta_info *sta);
++			     struct iwl_link_quality_cmd *tbl);
+ 
+ 
++#ifdef CONFIG_MAC80211_DEBUGFS
++static void rs_dbgfs_set_mcs(struct iwl_rate_scale_priv *rs_priv,
++				struct iwl_rate *mcs, int index);
++#else
++static void rs_dbgfs_set_mcs(struct iwl_rate_scale_priv *rs_priv,
++				struct iwl_rate *mcs, int index)
++{}
++#endif
+ static s32 expected_tpt_A[IWL_RATE_COUNT] = {
+ 	0, 0, 0, 0, 40, 57, 72, 98, 121, 154, 177, 186, 186
+ };
+@@ -539,14 +553,13 @@ static u16 rs_get_adjacent_rate(u8 index
+ 
+ static int rs_get_lower_rate(struct iwl_rate_scale_priv *lq_data,
+ 			     struct iwl_scale_tbl_info *tbl, u8 scale_index,
+-			     u8 ht_possible, struct iwl_rate *mcs_rate,
+-			     struct sta_info *sta)
++			     u8 ht_possible, struct iwl_rate *mcs_rate)
+ {
+-	u8 is_green = lq_data->is_green;
+ 	s32 low;
+ 	u16 rate_mask;
+ 	u16 high_low;
+ 	u8 switch_to_legacy = 0;
++	u8 is_green = lq_data->is_green;
+ 
+ 	/* check if we need to switch from HT to legacy rates.
+ 	 * assumption is that mandatory rates (1Mbps or 6Mbps)
+@@ -573,9 +586,9 @@ static int rs_get_lower_rate(struct iwl_
+ 	if (is_legacy(tbl->lq_type)) {
+ 		if (lq_data->phymode == (u8) MODE_IEEE80211A)
+ 			rate_mask  = (u16)(rate_mask &
+-			   (sta->supp_rates << IWL_FIRST_OFDM_RATE));
++			   (lq_data->supp_rates << IWL_FIRST_OFDM_RATE));
+ 		else
+-			rate_mask = (u16)(rate_mask & sta->supp_rates);
++			rate_mask = (u16)(rate_mask & lq_data->supp_rates);
+ 	}
+ 
+ 	/* if we did switched from HT to legacy check current rate */
+@@ -619,7 +632,7 @@ static void rs_tx_status(void *priv_rate
+ 	u16 fc = le16_to_cpu(hdr->frame_control);
+ 	s32 tpt = 0;
+ 
+-	IWL_DEBUG_RATE("get frame ack response, update rate scale window\n");
++	IWL_DEBUG_RATE_LIMIT("get frame ack response, update rate scale window\n");
+ 
+ 	if (!ieee80211_is_data(fc) || is_multicast_ether_addr(hdr->addr1))
+ 		return;
+@@ -1388,10 +1401,10 @@ static void rs_rate_scale_perform(struct
+ 	if (is_legacy(tbl->lq_type)) {
+ 		if (lq_data->phymode == (u8) MODE_IEEE80211A)
+ 			rate_scale_index_msk = (u16) (rate_mask &
+-				(sta->supp_rates << IWL_FIRST_OFDM_RATE));
++				(lq_data->supp_rates << IWL_FIRST_OFDM_RATE));
+ 		else
+ 			rate_scale_index_msk = (u16) (rate_mask &
+-						      sta->supp_rates);
++						      lq_data->supp_rates);
+ 
+ 	} else
+ 		rate_scale_index_msk = rate_mask;
+@@ -1431,7 +1444,7 @@ static void rs_rate_scale_perform(struct
+ 		rs_stay_in_table(lq_data);
+ 		if (update_lq) {
+ 			rs_mcs_from_tbl(&mcs_rate, tbl, index, is_green);
+-			rs_fill_link_cmd(lq_data, &mcs_rate, &lq_data->lq, sta);
++			rs_fill_link_cmd(lq_data, &mcs_rate, &lq_data->lq);
+ 			rs_send_lq_cmd(priv, &lq_data->lq, CMD_ASYNC);
+ 		}
+ 		goto out;
+@@ -1555,7 +1568,7 @@ static void rs_rate_scale_perform(struct
+  lq_update:
+ 	if (update_lq) {
+ 		rs_mcs_from_tbl(&mcs_rate, tbl, index, is_green);
+-		rs_fill_link_cmd(lq_data, &mcs_rate, &lq_data->lq, sta);
++		rs_fill_link_cmd(lq_data, &mcs_rate, &lq_data->lq);
+ 		rs_send_lq_cmd(priv, &lq_data->lq, CMD_ASYNC);
+ 	}
+ 	rs_stay_in_table(lq_data);
+@@ -1581,7 +1594,7 @@ static void rs_rate_scale_perform(struct
+ 			IWL_DEBUG_HT("Switch current  mcs: %X index: %d\n",
+ 				     tbl->current_rate.rate_n_flags, index);
+ 			rs_fill_link_cmd(lq_data, &tbl->current_rate,
+-					 &(lq_data->lq), sta);
++					 &lq_data->lq);
+ 			rs_send_lq_cmd(priv, &lq_data->lq, CMD_ASYNC);
+ 		}
+ 		tbl1 = &(lq_data->lq_info[lq_data->active_tbl]);
+@@ -1672,12 +1685,12 @@ static void rs_initialize_lq(struct iwl_
+ 	tbl->antenna_type = ANT_AUX;
+ 	rs_get_tbl_info_from_mcs(&mcs_rate, priv->phymode, tbl, &rate_idx);
+ 	if (!rs_is_ant_connected(priv->valid_antenna, tbl->antenna_type))
+-	    rs_toggle_antenna(&mcs_rate, tbl),
++	    rs_toggle_antenna(&mcs_rate, tbl);
+ 
+ 	rs_mcs_from_tbl(&mcs_rate, tbl, rate_idx, use_green);
+ 	tbl->current_rate.rate_n_flags = mcs_rate.rate_n_flags;
+ 	rs_get_expected_tpt_table(lq, tbl);
+-	rs_fill_link_cmd(lq, &mcs_rate, &(lq->lq), sta);
++	rs_fill_link_cmd(lq, &mcs_rate, &lq->lq);
+ 	rs_send_lq_cmd(priv, &lq->lq, CMD_ASYNC);
+  out:
+ 	return;
+@@ -1714,7 +1727,7 @@ static struct ieee80211_rate *rs_get_rat
+ 	struct iwl_priv *priv = (struct iwl_priv *)priv_rate;
+ 	struct iwl_rate_scale_priv *lq;
+ 
+-	IWL_DEBUG_RATE("rate scale calculate new rate for skb\n");
++	IWL_DEBUG_RATE_LIMIT("rate scale calculate new rate for skb\n");
+ 
+ 	memset(extra, 0, sizeof(*extra));
+ 
+@@ -1775,10 +1788,9 @@ static void *rs_alloc_sta(void *priv, gf
+ 
+ 	if (crl == NULL)
+ 		return NULL;
+-
+-	memset(crl, 0, sizeof(struct iwl_rate_scale_priv));
+ 	crl->lq.sta_id = 0xff;
+ 
++
+ 	for (j = 0; j < LQ_SIZE; j++)
+ 		for (i = 0; i < IWL_RATE_COUNT; i++)
+ 			rs_rate_scale_clear_window(&(crl->lq_info[j].win[i]));
+@@ -1795,10 +1807,8 @@ static void rs_rate_init(void *priv_rate
+ 	struct iwl_priv *priv = (struct iwl_priv *)priv_rate;
+ 	struct iwl_rate_scale_priv *crl = priv_sta;
+ 
+-	memset(crl, 0, sizeof(struct iwl_rate_scale_priv));
+-
+-	crl->lq.sta_id = 0xff;
+ 	crl->flush_timer = 0;
++	crl->supp_rates = sta->supp_rates;
+ 	sta->txrate = 3;
+ 	for (j = 0; j < LQ_SIZE; j++)
+ 		for (i = 0; i < IWL_RATE_COUNT; i++)
+@@ -1864,6 +1874,9 @@ static void rs_rate_init(void *priv_rate
+ 	IWL_DEBUG_HT("MIMO RATE 0x%X SISO MASK 0x%X\n", crl->active_siso_rate,
+ 		     crl->active_mimo_rate);
+ #endif /*CONFIG_IWLWIFI_HT*/
++#ifdef CONFIG_MAC80211_DEBUGFS
++	crl->drv = priv;
++#endif
+ 
+ 	if (priv->assoc_station_added)
+ 		priv->lq_mngr.lq_ready = 1;
+@@ -1871,28 +1884,28 @@ static void rs_rate_init(void *priv_rate
+ 	rs_initialize_lq(priv, sta);
+ }
+ 
+-static int rs_fill_link_cmd(struct iwl_rate_scale_priv *lq_data,
++static void rs_fill_link_cmd(struct iwl_rate_scale_priv *lq_data,
+ 			    struct iwl_rate *tx_mcs,
+-			    struct iwl_link_quality_cmd *lq_cmd,
+-			    struct sta_info *sta)
++			    struct iwl_link_quality_cmd *lq_cmd)
+ {
+ 	int index = 0;
+-	int rc = 0;
+ 	int rate_idx;
++	int repeat_rate = 0;
+ 	u8 ant_toggle_count = 0;
+ 	u8 use_ht_possible = 1;
+-	u8 repeat_cur_rate = 0;
+ 	struct iwl_rate new_rate;
+ 	struct iwl_scale_tbl_info tbl_type = { 0 };
+ 
++	rs_dbgfs_set_mcs(lq_data, tx_mcs, index);
++
+ 	rs_get_tbl_info_from_mcs(tx_mcs, lq_data->phymode,
+ 				  &tbl_type, &rate_idx);
+ 
+ 	if (is_legacy(tbl_type.lq_type)) {
+ 		ant_toggle_count = 1;
+-		repeat_cur_rate = IWL_NUMBER_TRY;
++		repeat_rate = IWL_NUMBER_TRY;
+ 	} else
+-		repeat_cur_rate = IWL_HT_NUMBER_TRY;
++		repeat_rate = IWL_HT_NUMBER_TRY;
+ 
+ 	lq_cmd->general_params.mimo_delimiter =
+ 			is_mimo(tbl_type.lq_type) ? 1 : 0;
+@@ -1906,10 +1919,10 @@ static int rs_fill_link_cmd(struct iwl_r
+ 		lq_cmd->general_params.single_stream_ant_msk = 2;
+ 
+ 	index++;
+-	repeat_cur_rate--;
++	repeat_rate--;
+ 
+ 	while (index < LINK_QUAL_MAX_RETRY_NUM) {
+-		while (repeat_cur_rate && (index < LINK_QUAL_MAX_RETRY_NUM)) {
++		while (repeat_rate > 0 && (index < LINK_QUAL_MAX_RETRY_NUM)) {
+ 			if (is_legacy(tbl_type.lq_type)) {
+ 				if (ant_toggle_count <
+ 				    NUM_TRY_BEFORE_ANTENNA_TOGGLE)
+@@ -1919,9 +1932,11 @@ static int rs_fill_link_cmd(struct iwl_r
+ 					ant_toggle_count = 1;
+ 				}
+ 			}
++
++			rs_dbgfs_set_mcs(lq_data, &new_rate, index);
+ 			lq_cmd->rs_table[index].rate_n_flags =
+ 					cpu_to_le32(new_rate.rate_n_flags);
+-			repeat_cur_rate--;
++			repeat_rate--;
+ 			index++;
+ 		}
+ 
+@@ -1932,7 +1947,7 @@ static int rs_fill_link_cmd(struct iwl_r
+ 			lq_cmd->general_params.mimo_delimiter = index;
+ 
+ 		rs_get_lower_rate(lq_data, &tbl_type, rate_idx,
+-				  use_ht_possible, &new_rate, sta);
++				  use_ht_possible, &new_rate);
+ 
+ 		if (is_legacy(tbl_type.lq_type)) {
+ 			if (ant_toggle_count < NUM_TRY_BEFORE_ANTENNA_TOGGLE)
+@@ -1941,26 +1956,23 @@ static int rs_fill_link_cmd(struct iwl_r
+ 				rs_toggle_antenna(&new_rate, &tbl_type);
+ 				ant_toggle_count = 1;
+ 			}
+-			repeat_cur_rate = IWL_NUMBER_TRY;
++			repeat_rate = IWL_NUMBER_TRY;
+ 		} else
+-			repeat_cur_rate = IWL_HT_NUMBER_TRY;
++			repeat_rate = IWL_HT_NUMBER_TRY;
+ 
+ 		use_ht_possible = 0;
+ 
++		rs_dbgfs_set_mcs(lq_data, &new_rate, index);
+ 		lq_cmd->rs_table[index].rate_n_flags =
+ 				cpu_to_le32(new_rate.rate_n_flags);
+-		/* lq_cmd->rs_table[index].rate_n_flags = 0x800d; */
+ 
+ 		index++;
+-		repeat_cur_rate--;
++		repeat_rate--;
+ 	}
+ 
+-	/* lq_cmd->rs_table[0].rate_n_flags = 0x800d; */
+-
+ 	lq_cmd->general_params.dual_stream_ant_msk = 3;
+ 	lq_cmd->agg_params.agg_dis_start_th = 3;
+ 	lq_cmd->agg_params.agg_time_limit = cpu_to_le16(4000);
+-	return rc;
+ }
+ 
+ static void *rs_alloc(struct ieee80211_local *local)
+@@ -2000,6 +2012,162 @@ static void rs_free_sta(void *priv, void
+ }
+ 
+ 
++#ifdef CONFIG_MAC80211_DEBUGFS
++static int open_file_generic(struct inode *inode, struct file *file)
++{
++	file->private_data = inode->i_private;
++	return 0;
++}
++static void rs_dbgfs_set_mcs(struct iwl_rate_scale_priv *rs_priv,
++				struct iwl_rate *mcs, int index)
++{
++	const u32 cck_rate = 0x820A;
++	if (rs_priv->dbg_fixed.rate_n_flags) {
++		if (index < 12)
++			mcs->rate_n_flags = rs_priv->dbg_fixed.rate_n_flags;
++		else
++			mcs->rate_n_flags = cck_rate;
++		IWL_DEBUG_RATE("Fixed rate ON\n");
++		return;
++	}
++
++	IWL_DEBUG_RATE("Fixed rate OFF\n");
++}
++
++static ssize_t rs_sta_dbgfs_scale_table_write(struct file *file,
++			const char __user *user_buf, size_t count, loff_t *ppos)
++{
++	struct iwl_rate_scale_priv *rs_priv = file->private_data;
++	char buf[64];
++	int buf_size;
++	u32 parsed_rate;
++
++	memset(buf, 0, sizeof(buf));
++	buf_size = min(count, sizeof(buf) -  1);
++	if (copy_from_user(buf, user_buf, buf_size))
++		return -EFAULT;
++
++	if (sscanf(buf, "%x", &parsed_rate) == 1)
++		rs_priv->dbg_fixed.rate_n_flags = parsed_rate;
++	else
++		rs_priv->dbg_fixed.rate_n_flags = 0;
++
++	rs_priv->active_rate = 0x0FFF;
++	rs_priv->active_siso_rate = 0x1FD0;
++	rs_priv->active_mimo_rate = 0x1FD0;
++
++	IWL_DEBUG_RATE("sta_id %d rate 0x%X\n",
++		rs_priv->lq.sta_id, rs_priv->dbg_fixed.rate_n_flags);
++
++	if (rs_priv->dbg_fixed.rate_n_flags) {
++		rs_fill_link_cmd(rs_priv, &rs_priv->dbg_fixed, &rs_priv->lq);
++		rs_send_lq_cmd(rs_priv->drv, &rs_priv->lq, CMD_ASYNC);
++	}
++
++	return count;
++}
++
++static ssize_t rs_sta_dbgfs_scale_table_read(struct file *file,
++			char __user *user_buf, size_t count, loff_t *ppos)
++{
++	char buff[1024];
++	int desc = 0;
++	int i = 0;
++
++	struct iwl_rate_scale_priv *rs_priv = file->private_data;
++
++	desc += sprintf(buff+desc, "sta_id %d\n", rs_priv->lq.sta_id);
++	desc += sprintf(buff+desc, "failed=%d success=%d rate=0%X\n",
++			rs_priv->total_failed, rs_priv->total_success,
++			rs_priv->active_rate);
++	desc += sprintf(buff+desc, "fixed rate 0x%X\n",
++			rs_priv->dbg_fixed.rate_n_flags);
++	desc += sprintf(buff+desc, "general:"
++		"flags=0x%X mimo-d=%d s-ant0x%x d-ant=0x%x\n",
++		rs_priv->lq.general_params.flags,
++		rs_priv->lq.general_params.mimo_delimiter,
++		rs_priv->lq.general_params.single_stream_ant_msk,
++		rs_priv->lq.general_params.dual_stream_ant_msk);
++
++	desc += sprintf(buff+desc, "agg:"
++			"time_limit=%d dist_start_th=%d frame_cnt_limit=%d\n",
++			le16_to_cpu(rs_priv->lq.agg_params.agg_time_limit),
++			rs_priv->lq.agg_params.agg_dis_start_th,
++			rs_priv->lq.agg_params.agg_frame_cnt_limit);
++
++	desc += sprintf(buff+desc,
++			"Start idx [0]=0x%x [1]=0x%x [2]=0x%x [3]=0x%x\n",
++			rs_priv->lq.general_params.start_rate_index[0],
++			rs_priv->lq.general_params.start_rate_index[1],
++			rs_priv->lq.general_params.start_rate_index[2],
++			rs_priv->lq.general_params.start_rate_index[3]);
++
++
++	for (i = 0; i < LINK_QUAL_MAX_RETRY_NUM; i++)
++		desc += sprintf(buff+desc, " rate[%d] 0x%X\n",
++			i, le32_to_cpu(rs_priv->lq.rs_table[i].rate_n_flags));
++
++	return simple_read_from_buffer(user_buf, count, ppos, buff, desc);
++}
++
++static const struct file_operations rs_sta_dbgfs_scale_table_ops = {
++	.write = rs_sta_dbgfs_scale_table_write,
++	.read = rs_sta_dbgfs_scale_table_read,
++	.open = open_file_generic,
++};
++static ssize_t rs_sta_dbgfs_stats_table_read(struct file *file,
++			char __user *user_buf, size_t count, loff_t *ppos)
++{
++	char buff[1024];
++	int desc = 0;
++	int i, j;
++
++	struct iwl_rate_scale_priv *rs_priv = file->private_data;
++	for (i = 0; i < LQ_SIZE; i++) {
++		desc += sprintf(buff+desc, "%s type=%d SGI=%d FAT=%d DUP=%d\n"
++				"rate=0x%X\n",
++				rs_priv->active_tbl == i?"*":"x",
++				rs_priv->lq_info[i].lq_type,
++				rs_priv->lq_info[i].is_SGI,
++				rs_priv->lq_info[i].is_fat,
++				rs_priv->lq_info[i].is_dup,
++				rs_priv->lq_info[i].current_rate.rate_n_flags);
++		for (j = 0; j < IWL_RATE_COUNT; j++) {
++			desc += sprintf(buff+desc,
++					"counter=%d success=%d %%=%d\n",
++					rs_priv->lq_info[i].win[j].counter,
++					rs_priv->lq_info[i].win[j].success_counter,
++					rs_priv->lq_info[i].win[j].success_ratio);
++		}
++	}
++	return simple_read_from_buffer(user_buf, count, ppos, buff, desc);
++}
++
++static const struct file_operations rs_sta_dbgfs_stats_table_ops = {
++	.read = rs_sta_dbgfs_stats_table_read,
++	.open = open_file_generic,
++};
++
++static void rs_add_debugfs(void *priv, void *priv_sta,
++					struct dentry *dir)
++{
++	struct iwl_rate_scale_priv *rs_priv = priv_sta;
++	rs_priv->rs_sta_dbgfs_scale_table_file =
++		debugfs_create_file("rate_scale_table", 0600, dir,
++				rs_priv, &rs_sta_dbgfs_scale_table_ops);
++	rs_priv->rs_sta_dbgfs_stats_table_file =
++		debugfs_create_file("rate_stats_table", 0600, dir,
++			rs_priv, &rs_sta_dbgfs_stats_table_ops);
++}
++
++static void rs_remove_debugfs(void *priv, void *priv_sta)
++{
++	struct iwl_rate_scale_priv *rs_priv = priv_sta;
++	debugfs_remove(rs_priv->rs_sta_dbgfs_scale_table_file);
++	debugfs_remove(rs_priv->rs_sta_dbgfs_stats_table_file);
++}
++#endif
++
+ static struct rate_control_ops rs_ops = {
+ 	.module = NULL,
+ 	.name = RS_NAME,
+@@ -2011,6 +2179,10 @@ static struct rate_control_ops rs_ops = 
+ 	.free = rs_free,
+ 	.alloc_sta = rs_alloc_sta,
+ 	.free_sta = rs_free_sta,
++#ifdef CONFIG_MAC80211_DEBUGFS
++	.add_sta_debugfs = rs_add_debugfs,
++	.remove_sta_debugfs = rs_remove_debugfs,
++#endif
+ };
+ 
+ int iwl_fill_rs_info(struct ieee80211_hw *hw, char *buf, u8 sta_id)
+diff -up linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c
+--- linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig	2007-09-27 19:08:16.000000000 -0400
++++ linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c	2007-09-27 19:09:01.000000000 -0400
+@@ -102,7 +102,7 @@ int iwl_param_queues_num = IWL_MAX_NUM_Q
+ #define VS
+ #endif
+ 
+-#define IWLWIFI_VERSION "0.1.15k" VD VS
++#define IWLWIFI_VERSION "1.1.17k" VD VS
+ #define DRV_COPYRIGHT	"Copyright(c) 2003-2007 Intel Corporation"
+ #define DRV_VERSION     IWLWIFI_VERSION
+ 
+@@ -203,7 +203,7 @@ static void iwl_print_hex_dump(int level
+  * reclaiming packets (on 'tx done IRQ), if free space become > high mark,
+  * Tx queue resumed.
+  *
+- * The IPW operates with six queues, one receive queue in the device's
++ * The IWL operates with six queues, one receive queue in the device's
+  * sram, one transmit queue for sending commands to the device firmware,
+  * and four transmit queues for data.
+  ***************************************************/
+@@ -407,6 +407,7 @@ const u8 BROADCAST_ADDR[ETH_ALEN] = { 0x
+ 
+ /**************************************************************/
+ 
++#if 0 /* temparary disable till we add real remove station */
+ static u8 iwl_remove_station(struct iwl_priv *priv, const u8 *addr, int is_ap)
+ {
+ 	int index = IWL_INVALID_STATION;
+@@ -442,6 +443,7 @@ out:
+ 	spin_unlock_irqrestore(&priv->sta_lock, flags);
+ 	return 0;
+ }
++#endif
+ 
+ static void iwl_clear_stations_table(struct iwl_priv *priv)
+ {
+@@ -851,16 +853,12 @@ int iwl_send_statistics_request(struct i
+ static int iwl_rxon_add_station(struct iwl_priv *priv,
+ 				const u8 *addr, int is_ap)
+ {
+-	u8 rc;
+-
+-	/* Remove this station if it happens to already exist */
+-	iwl_remove_station(priv, addr, is_ap);
+-
+-	rc = iwl_add_station(priv, addr, is_ap, 0);
++	u8 sta_id;
+ 
++	sta_id = iwl_add_station(priv, addr, is_ap, 0);
+ 	iwl4965_add_station(priv, addr, is_ap);
+ 
+-	return rc;
++	return sta_id;
+ }
+ 
+ /**
+@@ -1147,16 +1145,6 @@ static int iwl_commit_rxon(struct iwl_pr
+ 				  "configuration (%d).\n", rc);
+ 			return rc;
+ 		}
+-
+-		/* The RXON bit toggling will have cleared out the
+-		 * station table in the uCode, so blank it in the driver
+-		 * as well */
+-		iwl_clear_stations_table(priv);
+-	} else if (priv->staging_rxon.filter_flags & RXON_FILTER_ASSOC_MSK) {
+-		/* When switching from non-associated to associated, the
+-		 * uCode clears out the station table; so clear it in the
+-		 * driver as well */
+-		iwl_clear_stations_table(priv);
+ 	}
+ 
+ 	IWL_DEBUG_INFO("Sending RXON\n"
+@@ -1176,6 +1164,8 @@ static int iwl_commit_rxon(struct iwl_pr
+ 		return rc;
+ 	}
+ 
++	iwl_clear_stations_table(priv);
++
+ #ifdef CONFIG_IWLWIFI_SENSITIVITY
+ 	if (!priv->error_recovering)
+ 		priv->start_calib = 0;
+@@ -4608,6 +4598,7 @@ static void iwl_rx_handle(struct iwl_pri
+ 		reclaim = !(pkt->hdr.sequence & SEQ_RX_FRAME) &&
+ 			(pkt->hdr.cmd != REPLY_RX_PHY_CMD) &&
+ 			(pkt->hdr.cmd != REPLY_4965_RX) &&
++			(pkt->hdr.cmd != REPLY_COMPRESSED_BA) &&
+ 			(pkt->hdr.cmd != STATISTICS_NOTIFICATION) &&
+ 			(pkt->hdr.cmd != REPLY_TX);
+ 
+@@ -4893,12 +4884,12 @@ static void iwl_dump_nic_event_log(struc
+ 
+ 	/* bail out if nothing in log */
+ 	if (size == 0) {
+-		IWL_ERROR("Start IPW Event Log Dump: nothing in log\n");
++		IWL_ERROR("Start IWL Event Log Dump: nothing in log\n");
+ 		iwl_release_restricted_access(priv);
+ 		return;
+ 	}
+ 
+-	IWL_ERROR("Start IPW Event Log Dump: display count %d, wraps %d\n",
++	IWL_ERROR("Start IWL Event Log Dump: display count %d, wraps %d\n",
+ 		  size, num_wraps);
+ 
+ 	/* if uCode has wrapped back to top of log, start at the oldest entry,
+@@ -7483,9 +7474,8 @@ static void iwl_config_ap(struct iwl_pri
+ 		iwl_activate_qos(priv, 1);
+ #endif
+ 		iwl_rxon_add_station(priv, BROADCAST_ADDR, 0);
+-		iwl_send_beacon_cmd(priv);
+-	} else
+-		iwl_send_beacon_cmd(priv);
++	}
++	iwl_send_beacon_cmd(priv);
+ 
+ 	/* FIXME - we need to add code here to detect a totally new
+ 	 * configuration, reset the AP, unassoc, rxon timing, assoc,
+diff -up linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c.orig linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c
+--- linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c.orig	2007-09-27 19:08:16.000000000 -0400
++++ linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-4965.c	2007-09-27 19:10:39.000000000 -0400
+@@ -183,7 +183,7 @@ u8 iwl_hw_find_station(struct iwl_priv *
+ 			goto out;
+ 		}
+ 
+-	IWL_DEBUG_ASSOC("can not find STA " MAC_FMT " total %d\n",
++	IWL_DEBUG_ASSOC_LIMIT("can not find STA " MAC_FMT " total %d\n",
+ 			MAC_ARG(addr), priv->num_stations);
+ 
+  out:
+diff -up linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-debug.h.orig linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-debug.h
+--- linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-debug.h.orig	2007-09-27 19:08:16.000000000 -0400
++++ linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl-debug.h	2007-09-27 19:09:01.000000000 -0400
+@@ -136,8 +136,11 @@ static inline void IWL_DEBUG_LIMIT(int l
+ #define IWL_DEBUG_TXPOWER(f, a...) IWL_DEBUG(IWL_DL_TXPOWER, f, ## a)
+ #define IWL_DEBUG_IO(f, a...) IWL_DEBUG(IWL_DL_IO, f, ## a)
+ #define IWL_DEBUG_RATE(f, a...) IWL_DEBUG(IWL_DL_RATE, f, ## a)
++#define IWL_DEBUG_RATE_LIMIT(f, a...) IWL_DEBUG_LIMIT(IWL_DL_RATE, f, ## a)
+ #define IWL_DEBUG_NOTIF(f, a...) IWL_DEBUG(IWL_DL_NOTIF, f, ## a)
+ #define IWL_DEBUG_ASSOC(f, a...) IWL_DEBUG(IWL_DL_ASSOC | IWL_DL_INFO, f, ## a)
++#define IWL_DEBUG_ASSOC_LIMIT(f, a...) \
++	IWL_DEBUG_LIMIT(IWL_DL_ASSOC | IWL_DL_INFO, f, ## a)
+ #define IWL_DEBUG_HT(f, a...) IWL_DEBUG(IWL_DL_HT, f, ## a)
+ #define IWL_DEBUG_STATS(f, a...) IWL_DEBUG(IWL_DL_STATS, f, ## a)
+ #define IWL_DEBUG_TX_REPLY(f, a...) IWL_DEBUG(IWL_DL_TX_REPLY, f, ## a)
+diff -up linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c
+--- linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig	2007-09-27 19:08:16.000000000 -0400
++++ linux-2.6.22.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c	2007-09-27 19:10:13.000000000 -0400
+@@ -103,7 +103,7 @@ int iwl_param_queues_num = IWL_MAX_NUM_Q
+ #define VS
+ #endif
+ 
+-#define IWLWIFI_VERSION "0.1.15k" VD VS
++#define IWLWIFI_VERSION "1.1.17k" VD VS
+ #define DRV_COPYRIGHT	"Copyright(c) 2003-2007 Intel Corporation"
+ #define DRV_VERSION     IWLWIFI_VERSION
+ 
+@@ -204,7 +204,7 @@ static void iwl_print_hex_dump(int level
+  * reclaiming packets (on 'tx done IRQ), if free space become > high mark,
+  * Tx queue resumed.
+  *
+- * The IPW operates with six queues, one receive queue in the device's
++ * The IWL operates with six queues, one receive queue in the device's
+  * sram, one transmit queue for sending commands to the device firmware,
+  * and four transmit queues for data.
+  ***************************************************/
+@@ -407,6 +407,7 @@ const u8 BROADCAST_ADDR[ETH_ALEN] = { 0x
+  */
+ 
+ /**************************************************************/
++#if 0 /* temparary disable till we add real remove station */
+ static u8 iwl_remove_station(struct iwl_priv *priv, const u8 *addr, int is_ap)
+ {
+ 	int index = IWL_INVALID_STATION;
+@@ -442,7 +443,7 @@ out:
+ 	spin_unlock_irqrestore(&priv->sta_lock, flags);
+ 	return 0;
+ }
+-
++#endif
+ static void iwl_clear_stations_table(struct iwl_priv *priv)
+ {
+ 	unsigned long flags;
+@@ -462,6 +463,7 @@ u8 iwl_add_station(struct iwl_priv *priv
+ 	int index = IWL_INVALID_STATION;
+ 	struct iwl_station_entry *station;
+ 	unsigned long flags_spin;
++	u8 rate;
+ 
+ 	spin_lock_irqsave(&priv->sta_lock, flags_spin);
+ 	if (is_ap)
+@@ -505,6 +507,15 @@ u8 iwl_add_station(struct iwl_priv *priv
+ 	station->sta.sta.sta_id = index;
+ 	station->sta.station_flags = 0;
+ 
++	rate = (priv->phymode == MODE_IEEE80211A) ? IWL_RATE_6M_PLCP :
++				IWL_RATE_1M_PLCP | priv->hw_setting.cck_flag;
++
++	/* Turn on both antennas for the station... */
++	station->sta.rate_n_flags =
++			iwl_hw_set_rate_n_flags(rate, RATE_MCS_ANT_AB_MSK);
++	station->current_rate.rate_n_flags =
++			le16_to_cpu(station->sta.rate_n_flags);
++
+ 	spin_unlock_irqrestore(&priv->sta_lock, flags_spin);
+ 	iwl_send_add_station(priv, &station->sta, flags);
+ 	return index;
+@@ -834,25 +845,6 @@ int iwl_send_statistics_request(struct i
+ }
+ 
+ /**
+- * iwl_rxon_add_station - add station into station table.
+- *
+- * there is only one AP station with id= IWL_AP_ID
+- * NOTE: mutex must be held before calling the this fnction
+-*/
+-static int iwl_rxon_add_station(struct iwl_priv *priv,
+-				const u8 *addr, int is_ap)
+-{
+-	u8 rc;
+-
+-	/* Remove this station if it happens to already exist */
+-	iwl_remove_station(priv, addr, is_ap);
+-
+-	rc = iwl_add_station(priv, addr, is_ap, 0);
+-
+-	return rc;
+-}
+-
+-/**
+  * iwl_set_rxon_channel - Set the phymode and channel values in staging RXON
+  * @phymode: MODE_IEEE80211A sets to 5.2GHz; all else set to 2.4GHz
+  * @channel: Any channel valid for the requested phymode
+@@ -1121,16 +1113,6 @@ static int iwl_commit_rxon(struct iwl_pr
+ 				  "configuration (%d).\n", rc);
+ 			return rc;
+ 		}
+-
+-		/* The RXON bit toggling will have cleared out the
+-		 * station table in the uCode, so blank it in the driver
+-		 * as well */
+-		iwl_clear_stations_table(priv);
+-	} else if (priv->staging_rxon.filter_flags & RXON_FILTER_ASSOC_MSK) {
+-		/* When switching from non-associated to associated, the
+-		 * uCode clears out the station table; so clear it in the
+-		 * driver as well */
+-		iwl_clear_stations_table(priv);
+ 	}
+ 
+ 	IWL_DEBUG_INFO("Sending RXON\n"
+@@ -1152,6 +1134,8 @@ static int iwl_commit_rxon(struct iwl_pr
+ 
+ 	memcpy(active_rxon, &priv->staging_rxon, sizeof(*active_rxon));
+ 
++	iwl_clear_stations_table(priv);
++
+ 	/* If we issue a new RXON command which required a tune then we must
+ 	 * send a new TXPOWER command or we won't be able to Tx any frames */
+ 	rc = iwl_hw_reg_send_txpower(priv);
+@@ -1161,7 +1145,7 @@ static int iwl_commit_rxon(struct iwl_pr
+ 	}
+ 
+ 	/* Add the broadcast address so we can send broadcast frames */
+-	if (iwl_rxon_add_station(priv, BROADCAST_ADDR, 0) ==
++	if (iwl_add_station(priv, BROADCAST_ADDR, 0, 0) ==
+ 	    IWL_INVALID_STATION) {
+ 		IWL_ERROR("Error adding BROADCAST address for transmit.\n");
+ 		return -EIO;
+@@ -1171,7 +1155,7 @@ static int iwl_commit_rxon(struct iwl_pr
+ 	 * add the IWL_AP_ID to the station rate table */
+ 	if (iwl_is_associated(priv) &&
+ 	    (priv->iw_mode == IEEE80211_IF_TYPE_STA))
+-		if (iwl_rxon_add_station(priv, priv->active_rxon.bssid_addr, 1)
++		if (iwl_add_station(priv, priv->active_rxon.bssid_addr, 1, 0)
+ 		    == IWL_INVALID_STATION) {
+ 			IWL_ERROR("Error adding AP address for transmit.\n");
+ 			return -EIO;
+@@ -4583,12 +4567,12 @@ static void iwl_dump_nic_event_log(struc
+ 
+ 	/* bail out if nothing in log */
+ 	if (size == 0) {
+-		IWL_ERROR("Start IPW Event Log Dump: nothing in log\n");
++		IWL_ERROR("Start IWL Event Log Dump: nothing in log\n");
+ 		iwl_release_restricted_access(priv);
+ 		return;
+ 	}
+ 
+-	IWL_ERROR("Start IPW Event Log Dump: display count %d, wraps %d\n",
++	IWL_ERROR("Start IWL Event Log Dump: display count %d, wraps %d\n",
+ 		  size, num_wraps);
+ 
+ 	/* if uCode has wrapped back to top of log, start at the oldest entry,
+@@ -4650,7 +4634,7 @@ static void iwl_error_recovery(struct iw
+ 	priv->staging_rxon.filter_flags &= ~RXON_FILTER_ASSOC_MSK;
+ 	iwl_commit_rxon(priv);
+ 
+-	iwl_rxon_add_station(priv, priv->bssid, 1);
++	iwl_add_station(priv, priv->bssid, 1, 0);
+ 
+ 	spin_lock_irqsave(&priv->lock, flags);
+ 	priv->assoc_id = le16_to_cpu(priv->staging_rxon.assoc_id);
+@@ -6793,8 +6777,8 @@ static void iwl_bg_post_associate(struct
+ 		/* clear out the station table */
+ 		iwl_clear_stations_table(priv);
+ 
+-		iwl_rxon_add_station(priv, BROADCAST_ADDR, 0);
+-		iwl_rxon_add_station(priv, priv->bssid, 0);
++		iwl_add_station(priv, BROADCAST_ADDR, 0, 0);
++		iwl_add_station(priv, priv->bssid, 0, 0);
+ 		iwl3945_sync_sta(priv, IWL_STA_ID,
+ 				 (priv->phymode == MODE_IEEE80211A)?
+ 				 IWL_RATE_6M_PLCP : IWL_RATE_1M_PLCP,
+@@ -7082,10 +7066,9 @@ static void iwl_config_ap(struct iwl_pri
+ 		/* restore RXON assoc */
+ 		priv->staging_rxon.filter_flags |= RXON_FILTER_ASSOC_MSK;
+ 		iwl_commit_rxon(priv);
+-		iwl_rxon_add_station(priv, BROADCAST_ADDR, 0);
+-		iwl_send_beacon_cmd(priv);
+-	} else
+-		iwl_send_beacon_cmd(priv);
++		iwl_add_station(priv, BROADCAST_ADDR, 0, 0);
++	}
++	iwl_send_beacon_cmd(priv);
+ 
+ 	/* FIXME - we need to add code here to detect a totally new
+ 	 * configuration, reset the AP, unassoc, rxon timing, assoc,
+@@ -7168,8 +7151,8 @@ static int iwl_mac_config_interface(stru
+ 						RXON_FILTER_ASSOC_MSK;
+ 			rc = iwl_commit_rxon(priv);
+ 			if ((priv->iw_mode == IEEE80211_IF_TYPE_STA) && rc)
+-				iwl_rxon_add_station(
+-					priv, priv->active_rxon.bssid_addr, 1);
++				iwl_add_station(priv,
++					priv->active_rxon.bssid_addr, 1, 0);
+ 		}
+ 
+ 	} else {
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c.orig	2007-10-26 11:38:34.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl3945-base.c	2007-10-26 11:44:00.000000000 -0400
+@@ -8428,6 +8428,8 @@ static int iwl_pci_probe(struct pci_dev 
+ 	priv->power_mode = IWL_POWER_AC;
+ 	priv->user_txpower_limit = IWL_DEFAULT_TX_POWER;
+ 
++	iwl_disable_interrupts(priv);
++
+ 	pci_enable_msi(pdev);
+ 
+ 	err = request_irq(pdev->irq, iwl_isr, IRQF_SHARED, DRV_NAME, priv);
+diff -up linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c
+--- linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c.orig	2007-10-26 11:38:34.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/iwlwifi/iwl4965-base.c	2007-10-26 11:44:00.000000000 -0400
+@@ -9026,6 +9026,8 @@ static int iwl_pci_probe(struct pci_dev 
+ 	priv->power_mode = IWL_POWER_AC;
+ 	priv->user_txpower_limit = IWL_DEFAULT_TX_POWER;
+ 
++	iwl_disable_interrupts(priv);
++
+ 	pci_enable_msi(pdev);
+ 
+ 	err = request_irq(pdev->irq, iwl_isr, IRQF_SHARED, DRV_NAME, priv);

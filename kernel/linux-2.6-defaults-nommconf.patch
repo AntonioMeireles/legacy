@@ -1,0 +1,86 @@
+--- linux-2.6.23.noarch/Documentation/kernel-parameters.txt~	2007-10-30 03:53:31.000000000 -0400
++++ linux-2.6.23.noarch/Documentation/kernel-parameters.txt	2007-10-30 03:54:02.000000000 -0400
+@@ -1273,6 +1273,8 @@ and is between 256 and 4096 characters. 
+ 				Mechanism 1.
+ 		conf2		[X86-32] Force use of PCI Configuration
+ 				Mechanism 2.
++		mmconf		[IA-32,X86_64] Enable use of MMCONFIG for PCI
++				Configuration
+ 		nommconf	[X86-32,X86_64] Disable use of MMCONFIG for PCI
+ 				Configuration
+ 		nomsi		[MSI] If the PCI_MSI kernel config parameter is
+--- vanilla/arch/i386/Kconfig	2007-10-09 16:31:38.000000000 -0400
++++ linux-2.6.23.noarch/arch/i386/Kconfig	2007-10-30 12:18:06.000000000 -0400
+@@ -1137,6 +1139,16 @@ config PCI_MMCONFIG
+ 	depends on PCI && ACPI && (PCI_GOMMCONFIG || PCI_GOANY)
+ 	default y
+ 
++config PCI_MMCONFIG_OFF_BY_DEFAULT
++        bool "Disable PCI MMCONFIG by default"
++        depends on PCI_MMCONFIG
++        help
++          A lot of machines have broken BIOS tables which means that kernels
++          built with PCI_MMCONFIG enabled fail to boot.  As a compromise, enabling
++          this option allows the ability to build a kernel capable of using
++	  mmconf PCI accesses if booted with pci=msi
++	  Distribution kernels will likely need this option.
++
+ source "drivers/pci/pcie/Kconfig"
+ 
+ source "drivers/pci/Kconfig"
+--- vanilla/arch/x86_64/Kconfig	2007-10-09 16:31:38.000000000 -0400
++++ linux-2.6.23.noarch/arch/x86_64/Kconfig	2007-10-30 12:18:19.000000000 -0400
+@@ -724,6 +744,16 @@ config PCI_MMCONFIG
+ 	bool "Support mmconfig PCI config space access"
+ 	depends on PCI && ACPI
+ 
++config PCI_MMCONFIG_OFF_BY_DEFAULT
++        bool "Disable PCI MMCONFIG by default"
++        depends on PCI_MMCONFIG
++        help
++          A lot of machines have broken BIOS tables which means that kernels
++          built with PCI_MMCONFIG enabled fail to boot.  As a compromise, enabling
++          this option allows the ability to build a kernel capable of using
++          mmconf PCI accesses if booted with pci=msi
++          Distribution kernels will likely need this option.
++
+ source "drivers/pci/pcie/Kconfig"
+ 
+ source "drivers/pci/Kconfig"
+--- linux-2.6.23.noarch/arch/i386/pci/common.c~	2007-10-30 12:35:05.000000000 -0400
++++ linux-2.6.23.noarch/arch/i386/pci/common.c	2007-10-30 12:35:52.000000000 -0400
+@@ -18,7 +18,7 @@
+ #include "pci.h"
+ 
+ unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2 |
+-				PCI_PROBE_MMCONF;
++				PCI_PROBE_MMCONF_DEFAULT;
+ 
+ static int pci_bf_sort;
+ int pci_routeirq;
+@@ -399,6 +399,10 @@ char * __devinit  pcibios_setup(char *st
+ 		pci_probe &= ~PCI_PROBE_MMCONF;
+ 		return NULL;
+ 	}
++	else if (!strcmp(str, "mmconf")) {
++		pci_probe |= PCI_PROBE_MMCONF;
++		return NULL;
++	}
+ #endif
+ 	else if (!strcmp(str, "noacpi")) {
+ 		acpi_noirq_set();
+--- linux-2.6.23.noarch/arch/i386/pci/pci.h~	2007-10-30 12:36:06.000000000 -0400
++++ linux-2.6.23.noarch/arch/i386/pci/pci.h	2007-10-30 12:36:32.000000000 -0400
+@@ -19,6 +19,12 @@
+ #define PCI_PROBE_MASK		0x000f
+ #define PCI_PROBE_NOEARLY	0x0010
+ 
++#ifdef CONFIG_PCI_MMCONFIG_OFF_BY_DEFAULT
++# define PCI_PROBE_MMCONF_DEFAULT	0
++#else
++# define PCI_PROBE_MMCONF_DEFAULT	PCI_PROBE_MMCONF
++#endif
++
+ #define PCI_NO_SORT		0x0100
+ #define PCI_BIOS_SORT		0x0200
+ #define PCI_NO_CHECKS		0x0400

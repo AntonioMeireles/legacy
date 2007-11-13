@@ -1,0 +1,95 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=b3a706014e56b1356e7b275fd25b833c63175bf0
+Commit:     b3a706014e56b1356e7b275fd25b833c63175bf0
+Parent:     7100819f5f9b99eb7c7dd5597f293388a405bf7b
+Author:     Alan Cox <alan@redhat.com>
+AuthorDate: Tue Oct 2 12:38:26 2007 -0400
+Committer:  Jeff Garzik <jeff@garzik.org>
+CommitDate: Fri Oct 12 14:55:45 2007 -0400
+
+    libata: Add a drivers/ide style DMA disable
+    
+    This is useful when debugging, handling problem systems, or for
+    distributions just to get the system installed so it can be sorted
+    out later.
+    
+    This is a bit smarter than the old IDE one and lets you do
+    
+    libata.dma=0	Disable all PATA DMA like old IDE
+    libata.dma=1	Disk DMA only
+    libata.dma=2	ATAPI DMA only
+    libata.dma=4	CF DMA only
+    
+    (or combinations thereof - 0,1,3 being the useful ones I suspect)
+    
+    (I've split CF as it seems to be a seperate case of pain and suffering
+    different to the others and caused by assorted PIO wired adapters etc)
+    
+    Signed-off-by: Alan Cox <alan@redhat.com>
+    
+    [edited to work on SATA too, changing name from 'pata_dma' to 'dma']
+    Signed-off-by: Jeff Garzik <jgarzik@redhat.com>
+
+    [cebbert@redhat.com: backport to 2.6.23]
+
+diff --git a/drivers/ata/libata-core.c b/drivers/ata/libata-core.c
+index 5532a65..1501d63 100644
+--- a/drivers/ata/libata-core.c
++++ b/drivers/ata/libata-core.c
+@@ -97,6 +97,10 @@ static int ata_ignore_hpa = 0;
+ module_param_named(ignore_hpa, ata_ignore_hpa, int, 0644);
+ MODULE_PARM_DESC(ignore_hpa, "Ignore HPA limit (0=keep BIOS limits, 1=ignore limits, using full disk)");
+ 
++static int libata_dma_mask = ATA_DMA_MASK_ATA|ATA_DMA_MASK_ATAPI|ATA_DMA_MASK_CFA;
++module_param_named(dma, libata_dma_mask, int, 0444);
++MODULE_PARM_DESC(dma, "DMA enable/disable (0x1==ATA, 0x2==ATAPI, 0x4==CF)");
++
+ static int ata_probe_timeout = ATA_TMOUT_INTERNAL / HZ;
+ module_param(ata_probe_timeout, int, 0444);
+ MODULE_PARM_DESC(ata_probe_timeout, "Set ATA probing timeout (seconds)");
+@@ -2917,16 +2921,29 @@ int ata_do_set_mode(struct ata_link *link, struct ata_device **r_failed_dev)
+ 	/* step 1: calculate xfer_mask */
+	for (i = 0; i < ATA_MAX_DEVICES; i++) {
+ 		unsigned int pio_mask, dma_mask;
++		unsigned int mode_mask;
+ 
+ 		dev = &ap->device[i];
+ 
+ 		if (!ata_dev_enabled(dev))
+ 			continue;
+ 
++		mode_mask = ATA_DMA_MASK_ATA;
++		if (dev->class == ATA_DEV_ATAPI)
++			mode_mask = ATA_DMA_MASK_ATAPI;
++		else if (ata_id_is_cfa(dev->id))
++			mode_mask = ATA_DMA_MASK_CFA;
++
+ 		ata_dev_xfermask(dev);
+ 
+ 		pio_mask = ata_pack_xfermask(dev->pio_mask, 0, 0);
+ 		dma_mask = ata_pack_xfermask(0, dev->mwdma_mask, dev->udma_mask);
++
++		if (libata_dma_mask & mode_mask)
++			dma_mask = ata_pack_xfermask(0, dev->mwdma_mask, dev->udma_mask);
++		else
++			dma_mask = 0;
++
+ 		dev->pio_mode = ata_xfer_mask2mode(pio_mask);
+ 		dev->dma_mode = ata_xfer_mask2mode(dma_mask);
+ 
+diff --git a/include/linux/libata.h b/include/linux/libata.h
+index ca296a5..84dfc23 100644
+--- a/include/linux/libata.h
++++ b/include/linux/libata.h
+@@ -331,6 +331,12 @@ enum {
+ 	ATA_HORKAGE_NONCQ	= (1 << 2),	/* Don't use NCQ */
+ 	ATA_HORKAGE_MAX_SEC_128	= (1 << 3),	/* Limit max sects to 128 */
+ 	ATA_HORKAGE_BROKEN_HPA	= (1 << 4),	/* Broken HPA */
++
++	 /* DMA mask for user DMA control: User visible values; DO NOT 
++	    renumber */
++	ATA_DMA_MASK_ATA	= (1 << 0),	/* DMA on ATA Disk */
++	ATA_DMA_MASK_ATAPI	= (1 << 1),	/* DMA on ATAPI */
++	ATA_DMA_MASK_CFA	= (1 << 2),	/* DMA on CF Card */
+ };
+ 
+ enum hsm_task_states {

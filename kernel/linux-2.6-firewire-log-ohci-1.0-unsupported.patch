@@ -1,0 +1,48 @@
+Date: Sun, 21 Oct 2007 10:43:11 +0200 (CEST)
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Subject: firewire: fw-ohci: log a note about unsupported features
+
+because there seems to be more time needed to implement this.
+Also, change related error return values to more appropriate ones.
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+---
+ drivers/firewire/fw-ohci.c |   11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+Index: linux/drivers/firewire/fw-ohci.c
+===================================================================
+--- linux.orig/drivers/firewire/fw-ohci.c
++++ linux/drivers/firewire/fw-ohci.c
+@@ -1472,7 +1472,7 @@ ohci_allocate_iso_context(struct fw_card
+ 	/* FIXME: We need a fallback for pre 1.1 OHCI. */
+ 	if (callback == handle_ir_dualbuffer_packet &&
+ 	    ohci->version < OHCI_VERSION_1_1)
+-		return ERR_PTR(-EINVAL);
++		return ERR_PTR(-ENOSYS);
+ 
+ 	spin_lock_irqsave(&ohci->lock, flags);
+ 	index = ffs(*mask) - 1;
+@@ -1791,7 +1791,7 @@ ohci_queue_iso(struct fw_iso_context *ba
+ 							 buffer, payload);
+ 	else
+ 		/* FIXME: Implement fallback for OHCI 1.0 controllers. */
+-		return -EINVAL;
++		return -ENOSYS;
+ }
+ 
+ static const struct fw_card_driver ohci_driver = {
+@@ -1911,7 +1911,12 @@ pci_probe(struct pci_dev *dev, const str
+ 	ohci->version = reg_read(ohci, OHCI1394_Version) & 0x00ff00ff;
+ 	fw_notify("Added fw-ohci device %s, OHCI version %x.%x\n",
+ 		  dev->dev.bus_id, ohci->version >> 16, ohci->version & 0xff);
+-
++	if (ohci->version < OHCI_VERSION_1_1) {
++		fw_notify("    Isochronous I/O is not yet implemented for "
++			  "OHCI 1.0 chips.\n");
++		fw_notify("    Cameras, audio devices etc. won't work on "
++			  "this controller with this driver version.\n");
++	}
+ 	return 0;
+ 
+  fail_self_id:
