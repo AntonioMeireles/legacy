@@ -1,10 +1,10 @@
 class Nvidia(CPackageRecipe):
 
     name = 'nvidia'
-    version = '100.14.06'
+    version = '100.14.19'
 
-    buildRequires = ['atk:devel', 'chkconfig:runtime', 'glib:devel', 
-                     'gtk:devel', 'libX11:devel', 'libXext:devel', 
+    buildRequires = ['atk:devel', 'chkconfig:runtime', 'glib:devel',
+                     'gtk:devel', 'libX11:devel', 'libXext:devel',
                      'pango:devel', 'desktop-file-utils:runtime', ]
 
     def setup(r):
@@ -13,68 +13,78 @@ class Nvidia(CPackageRecipe):
             r.macros.arch = 'x86'
         else:
             r.macros.arch = 'x86_64'
+            r.macros.lib32 = '/usr/lib'
+            r.FixupMultilibPaths(exceptions='.*')
 
         r.macros.url = 'http://download.nvidia.com/XFree86/Linux-%(arch)s'
-        r.addSource('%(url)s/%(version)s/NVIDIA-Linux-%(arch)s-%(version)s-pkg0.run')
+        r.addSource('%(url)s/%(version)s/NVIDIA-Linux-%(arch)s-%(version)s-pkg2.run')
         r.addSource('nvidia.init')
 
-        r.Run('sh NVIDIA-Linux-%(arch)s-%(version)s-pkg0.run -x') # Extract only
+        r.addAction('sh NVIDIA-Linux-%(arch)s-%(version)s-pkg2.run -x') # Extract only
 
         # Copy the files we need
-        r.macros.root = 'NVIDIA-Linux-%(arch)s-%(version)s-pkg0/usr'
+        r.macros.root = 'NVIDIA-Linux-%(arch)s-%(version)s-pkg2/usr'
 
-        r.Install('%(root)s/lib/*.s*', '%(libdir)s/')
-        r.Install('%(root)s/lib/tls/*.s*', '%(libdir)s/tls/')
+        r.Install('%(root)s/lib/libnvidia-{cfg,tls}.s*', '%(libdir)s/')
+        r.Install('%(root)s/lib/tls/libnvidia-{cfg,tls}.s*', '%(libdir)s/tls/')
+
+        if Arch.x86_64:
+            r.Install('%(root)s/lib32/libnvidia-{cfg,tls}.s*', '%(lib32)s/')
+            r.Install('%(root)s/lib32/tls/libnvidia-{cfg,tls}.s*', '%(lib32)s/tls/')
+
+
+        r.Install('%(root)s/X11R6/lib/modules/libnvidia-wfb.s*', '%(libdir)s/xorg/modules/updates/')
+        r.Install('%(root)s/X11R6/lib/modules/extensions/libglx.s*', '%(libdir)s/xorg/modules/updates/extensions/')
+        r.Install('%(root)s/X11R6/lib/modules/drivers/nvidia_drv.s*', '%(libdir)s/xorg/modules/updates/drivers/')
+
+        r.Install('%(root)s/X11R6/lib/libXvMCNVIDIA.so.*', '%(libdir)s/nvidia/')
+
+        r.Install('%(root)s/lib/libGL*.so.*', '%(libdir)s/nvidia/')
+
+        if Arch.x86_64:
+            r.Install('%(root)s/lib32/libGL*.so.*', '%(lib32)s/nvidia/')
 
         r.Install('%(root)s/share/man/man1/*', '%(datadir)s/man/man1/')
-        r.Remove('/man/man1/nvidia-installer.1.gz')
+        r.Remove('%(destdir)s/%(datadir)s/man/man1/nvidia-installer*')
 
         r.Install('%(root)s/share/doc/*', '%(datadir)s/doc/')
 
-        r.Install('%(root)s/X11R6/lib/lib*', '%(libdir)s/')
-
-        r.Run("""
-	 sed -i %(root)s/share/applications/nvidia-settings.desktop  -e "s,__PIXMAP_PATH__,%(datadir)s/pixmaps,g" -e "s,__UTILS_PATH__,%(bindir)s,g"	-e "s,__DOCS_PATH__,%(datadir)s/pixmaps,g"
-	 sed -i %(root)s/share/applications/nvidia-settings.desktop -e "s/Application;/GNOME;/g" 
-	""")
+        # sanitize .desktop file
+        r.Replace(('__PIXMAP_PATH__','%(datadir)s/pixmaps'),
+                  ('__UTILS_PATH__','%(bindir)s'),
+                  ('__DOCS_PATH__','%(datadir)s/pixmaps'),
+                  '%(root)s/share/applications/nvidia-settings.desktop')
+        r.Replace('Application;','GNOME;', '%(root)s/share/applications/nvidia-settings.desktop')
 
         r.Desktopfile('%(root)s/share/applications/nvidia-settings.desktop')
 
         r.Install('%(root)s/share/pixmaps/nvidia-settings.png', '%(datadir)s/pixmaps/')
 
-        r.Install('%(root)s/X11R6/lib/modules/drivers/*', '%(libdir)s/xorg/modules/drivers/')
-
-        r.Install('%(root)s/X11R6/lib/modules/extensions/*', 
-                  '%(libdir)s/xorg/modules/extensions/')
-
         r.MakeDirs('%(bindir)s')
         r.Install('%(root)s/bin/nvidia-{settings,xconfig,bug-report.sh}', 
                   '%(bindir)s')
 
+        # FIXME: do we ever  want to install headers ? 
 
-        # magic
-        # wrapper to handle transparently closed gfx drivers (ATI/NVidia)
-        r.Move('%(libdir)s/libGL.so.%(version)s', '%(libdir)s/libGL.so.%(version)s.nvidia')
-        r.Move('%(libdir)s/libGLcore.so.%(version)s', '%(libdir)s/libGLcore.so.%(version)s.nvidia')
-        r.Move('%(libdir)s/xorg/modules/extensions/libglx.so.%(version)s', 
-                  '%(libdir)s/xorg/modules/extensions/libglx.so.%(version)s.nvidia')
-
-        r.ComponentSpec(':lib.hidden', '%(libdir)s/libGL.so.1')
-        r.ComponentSpec(':lib.hidden', '%(libdir)s/libGLcore.so.1')
-        r.ComponentSpec(':lib.hidden', '%(libdir)s/xorg/modules/extensions/libglx.so')
-        r.ByDefault(exceptions=[':lib.hidden'])
-
-        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/extensions/')
-        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/drivers/')
+        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/')
+        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/extensions/')
+        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/drivers/')
         r.SharedLibrary(subtrees='%(libdir)s')
+
+        r.SharedLibrary(subtrees='%(libdir)s/nvidia')
         r.SharedLibrary(subtrees='%(libdir)s/tls')
+
+        if Arch.x86_64:
+            r.SharedLibrary(subtrees='%(lib32)s')
+            r.SharedLibrary(subtrees='%(lib32)s/nvidia')
+
         r.ComponentSpec('lib', 'libglx.so')
         r.ComponentSpec('lib', 'libXvMCNVIDIA.a')
 
         # The kernel side is in nvidia-kernel, and we need the kernel
         # modules that match this version exactly
         r.Requires('nvidia-kernel:runtime(%(version)s)', 
-                   '%(libdir)s/xorg/modules/drivers/nvidia_drv.o')
+                   '%(libdir)s/xorg/modules/updates/drivers/nvidia_drv.so')
 
         # We want to make sure that the kernel module can require the
         # matching userspace code
@@ -82,4 +92,3 @@ class Nvidia(CPackageRecipe):
 
         r.Install('nvidia.init', '%(initdir)s/nvidia')
 
-   
