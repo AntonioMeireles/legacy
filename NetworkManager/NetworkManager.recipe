@@ -3,7 +3,7 @@ loadSuperClass('rpmpackage')
 class NetworkManager(RPMPackageRecipe,GnomePackageRecipe):
 
    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'chkconfig:runtime',
-                     'dhcdbd:runtime', 'gnome-keyring:devel', 'gnome-vfs:devel',
+                     'gnome-keyring:devel', 'gnome-vfs:devel', 'ppp:devel',
                      'hal:devel', 'iproute:runtime', 'libart_lgpl:devel',
                      'libbonobo:devel', 'libbonoboui:devel', 'libgcrypt:devel',
                      'libglade:devel', 'libgnome:devel', 'libgnomecanvas:devel',
@@ -16,83 +16,47 @@ class NetworkManager(RPMPackageRecipe,GnomePackageRecipe):
                      'pkgconfig:devel', 'intltool:devel', 'gettext:runtime', 'gettext:devel']
 
    name = "NetworkManager"
-   version = "0.6.5"
-   isOPENsuse = True
-   rpmRelease = '35'
-   rpmArchives = [ 'network-manager-applet-%(version)s.tar.bz2',
-                   'nm-editor.tgz',
-                   'nm-icons.tar.gz'
-                   ]
+   version = "0.7.0"
 
-   rpmPatches = [
-      'nm-wireless-driver-workarounds-rml.patch',
-      'nm-resolv-conf-header-rml.patch',
-      'nm-fallback.patch',
-      'nm-222902.patch',
-      'nm-191251.patch',
-#      'nm-0.6.5-killswitch-fix.patch',
-      'nm-271757.patch',
-      'nm-applet-0.6.5-build.patch',
-      'nm-make-wireless-menu-item-inactive-rml.patch',
-      'nm-configure-networking-rml.patch',
-      'nm-never-restart-nm-applet-rml.patch',
-      'nm-fix-adhoc-icon-rml.patch',
-      'nm-applet-disconnect-on-exit.patch',
-      'nm-243959.patch',
-      'nm-applet-fallback.patch',
-      'nm-save-passwds-in-keyring.patch',
+   tarballName = '%(name)s-%(version)s.svn2983.tar.gz'
+   rpmRelease = '0.4.svn2983.fc9'
+   rpmArchives = [ 'nm-applet-%(version)s.svn261.tar.gz']
 
-#      'nm-applet-editor.patch',
-      ]
-  
-   extraConfig = ' --with-distro=redhat --with-gcrypto=yes --enable-notification-icon --with-named=/usr/sbin/named --with-named-user=named --with-named-dir=%(localstatedir)s/named --with-wpa_supplicant=/usr/sbin/wpa_supplicant localstatedir=%(localstatedir)s --libexecdir=%(prefix)s/lib/NetworkManager'
-   
+   rpmPatches = [ 'NetworkManager-0.6.5-fixup-internal-applet-build.patch',
+                  'nm-applet-0.7.0-disable-stuff.patch'
+                  ]
+
+   extraConfig = ' --disable-static --with-distro=redhat  --with-named=/usr/sbin/named --with-named-user=named --with-named-dir=%(localstatedir)s/named '
+
    def unpack(r):
 
       RPMPackageRecipe.unpack(r)
-      r.addAction('mv editor nm-applet-0.6.5/')
-      r.addPatch('nm-applet-editor.patch', rpm = r.srpm)
-
-      r.macros.foodir='initscript/RedHat'
-      r.Replace('chkconfig: - 98 02','chkconfig: 5 98 02','%(foodir)s/NetworkManager', '%(foodir)s/NetworkManager.in','%(foodir)s/NetworkManagerDispatcher.in','%(foodir)s/NetworkManagerDispatcher')
-      r.Replace(' -p \$pidfile','','%(foodir)s/NetworkManager','%(foodir)s/NetworkManager.in')
       r.addSource('ntpd.dispatch')
 
-      r.addAction('intltoolize --force')
-      r.addAction('autoreconf')
-
    def build(r):
+
+      r.Run('autoreconf -i')
+      r.Configure( r.extraConfig)
+
+
+      r.extraConfig += '--with-notify'
+      r.Run('autoreconf -i', dir = 'nm-applet-%(version)s')
       r.Configure( r.extraConfig,
                    configureName = r.configureName,
-                   preConfigure = r.preConfigure)
+                   preConfigure = r.preConfigure,
+                   dir = 'nm-applet-%(version)s')
 
-      r.Make(r.makeArgs, preMake=r.preMake)
-
-      r.Replace(' --sm-disable','  ','nm-applet-0.6.5/nm-applet.desktop')
-      r.Run('(cd nm-applet-0.6.5/  ; autoreconf -i; intltoolize --force)')
-
-      r.Configure('--disable-static --with-notify', dir = 'nm-applet-0.6.5')
-
-      r.Make(dir = 'nm-applet-0.6.5')
-
+      r.Make()
+      r.Make(dir = 'nm-applet-%(version)s')
 
    def install(r):
       r.MakeInstall()
-      r.MakeInstall('DESTDIR=%(destdir)s', dir = 'nm-applet-0.6.5', package='network-manager-applet')
+      r.MakeInstall('DESTDIR=%(destdir)s', dir = 'nm-applet-%(version)s', package='network-manager-applet')
 
-      r.MakeDirs('%(datadir)s/icons/hicolor')
-      r.Run('cp -r nm-icons/* %(destdir)s/%(datadir)s/icons/hicolor')
-
-      r.Install('test/nm-tool', '%(bindir)s/')
-      r.Install('test/nm-online', '%(bindir)s/')
-
-      r.MakeDirs('%(localstatedir)s/run/%(name)s')
+      r.MakeDirs('%(sysconfdir)s/NetworkManager/VPN')
       r.ExcludeDirectories(exceptions='%(localstatedir)s/run/%(name)s')
+      r.ExcludeDirectories(exceptions='%(sysconfdir)s/NetworkManager/VPN')
       r.Install('ntpd.dispatch', '%(sysconfdir)s/NetworkManager/dispatcher.d/ntpd')
-
-      r.addSource('nfs','%(sysconfdir)s/NetworkManager/dispatcher.d/nfs', rpm = r.srpm)
-
-      r.addSource('nm-disconnect-wireless-on-exit.sh', '%(datadir)s/NetworkManager/', rpm = r.srpm)
 
    def policy(r):
       r.Requires('libnl:lib','%(sbindir)s/NetworkManager')
