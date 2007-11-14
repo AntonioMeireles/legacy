@@ -3,55 +3,62 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage=conary.rpath.com@rpl:devel')
-class WpaSupplicant(RPMPackageRecipe, CPackageRecipe):
-
+loadSuperClass('rpmpackage')
+class WpaSupplicant(RPMPackageRecipe, AutoPackageRecipe):
    name = 'wpa_supplicant'
    version = '0.5.7'
-   rpmRelease = '1.fc7'
+   rpmRelease = '11.fc9'
 
-   rpmPatches = [
-      'wpa_supplicant-assoc-timeout.patch',
-      'wpa_supplicant-driver-wext-debug.patch',
-      'wpa_supplicant-wep-key-fix.patch',
-      'wpa_supplicant-fix-deprecated-dbus-function.patch']
+   rpmPatches = [ 'wpa_supplicant-assoc-timeout.patch',
+                  'wpa_supplicant-driver-wext-debug.patch',
+                  'wpa_supplicant-wep-key-fix.patch',
+                  'wpa_supplicant-fix-deprecated-dbus-function.patch',
+                  'wpa_supplicant-0.5.7-debug-file.patch',
+                  'wpa_supplicant-0.5.7-qmake-location.patch',
+                  'wpa_supplicant-0.5.7-flush-debug-output.patch',
+                  'wpa_supplicant-0.5.7-sigusr1-changes-debuglevel.patch',
+                  'wpa_supplicant-0.5.7-always-scan.patch',
+                  'wpa_supplicant-0.5.7-dbus-iface-segfault-fix.patch',
+                  'wpa_supplicant-0.5.7-dbus-blobs.patch',
+                  'wpa_supplicant-0.5.7-dbus-permissions-fix.patch',
+                  ]
 
+   rpmArchives = ['madwifi-headers-r1475.tar.bz2']
+   rpmSources = [
+      '%(name)s.config',
+      '%(name)s.conf',
+      '%(name)s.init.d',
+      '%(name)s.sysconfig',
+      'fi.epitest.hostap.WPASupplicant.service'
+      ]
 
    buildRequires = ['openssl:devel', 'glibc:devel', 'chkconfig:runtime', 'dbus:devel', 'pkgconfig:devel']
 
+   def configure(r):
+      r.Move('wpa_supplicant.config', '.config')
 
-
-   def setup(r):
-      # PLEASE READ THIS!
-      # Needed because wpa_supplicant needs madwifi headers to
-      # support this card
-      r.addArchive('%(name)s-%(version)s.tar.gz', rpm=r.srpm)
-      r.addArchive('madwifi-headers-r1475.tar.bz2',
-                   rpm=r.srpm, dir='%(name)s-%(version)s')
-
-      for patch in r.rpmPatches:
-            r.addPatch(patch, rpm=r.srpm)
-
-      # Our .config file, needed for compilation
-      r.addSource('wpa_supplicant.config')
-      r.addAction('cp wpa_supplicant.config .config')
-      r.addSource('wpa_supplicant.sysconfig', rpm=r.srpm)
-      r.addSource('wpa_supplicant.init.d', rpm=r.srpm)
-      # Our .conf file
-      #r.addSource('wpa_supplicant_foresight.conf')
-      r.addSource('wpa_supplicant.conf', rpm=r.srpm)
-
+   def make(r):
       r.Make()
 
+   def makeinstall(r):
       # No make install, so we copy manually
-      for x in ['wpa_cli', 'wpa_passphrase', 'wpa_supplicant']:
-         r.Install(x, '%(sbindir)s/')
 
-      r.Install('wpa_supplicant.init.d','%(initdir)s/wpa_supplicant', mode=0755)
+      # init scripts
+      r.Install('%(name)s.init.d', '%(sysconfdir)s/init.d/%(name)s', mode=0755)
+      r.Install('%(name)s.sysconfig', '%(sysconfdir)s/sysconfig/%(name)s', mode=0644)
+
+      # config 
+      r.Install('%(name)s.conf', '%(sysconfdir)s/%(name)s/', mode=0600)
+
+      # binary
+      for x in ['wpa_cli', 'wpa_passphrase', 'wpa_supplicant']:
+         r.Install(x, '%(sbindir)s/', mode=0755)
+
+      r.Install('dbus-wpa_supplicant.conf', '%(sysconfdir)s/dbus-1/system.d/', mode=0644)
+      r.Install('fi.epitest.hostap.WPASupplicant.service', '%(sysconfdir)s/dbus-1/system-services/', mode=0644)
+
       r.MakeDirs('%(localstatedir)s/run/wpa_supplicant')
       r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/wpa_supplicant'])
-      r.Install('wpa_supplicant.sysconfig','%(sysconfdir)s/sysconfig/wpa_supplicant')
-      r.Install('wpa_supplicant.conf','%(sysconfdir)s/wpa_supplicant/')
       r.Install('doc/docbook/*.8','%(mandir)s/man8/')
       r.Install('doc/docbook/*.5','%(mandir)s/man5/')
 
