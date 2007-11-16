@@ -36,6 +36,17 @@ class GroupDesktopPlatform(GroupRecipe):
                   'anaconda-deps'
                   ]
 
+    rplBranch = 'conary.rpath.com@rpl:devel'
+    rplBranchCompat = 'conary.rpath.com@rpl:1-compat'
+
+    groupOs = 'group-os=' + rplBranch + '[%s]'
+
+    if Arch.x86_64:
+        groupOs = groupOs % x86_64rplGroupsFlavorString
+    else:
+        groupOs = groupOs % x86rplGroupsFlavorString
+
+
     def startGroup(r, name, parentGroup=None, depCheck=False, byDefault=True, autoResolve = False):
         # creates group named 'name', adds it to the toplevel group,
         # and sets the current group to that name.  calls to r.add()
@@ -149,13 +160,10 @@ class GroupDesktopPlatform(GroupRecipe):
             r.replace(name, groupName='group-compat32', allowNoMatch=True, 
                       newFlavor=r.x86FlavorString)
 
-    def rplAdd(r, name, versionStr=None, groupName=None, components=None, byDefault=True, flavor = None):
+    def rplAdd(r, name, groupName=None, components=None, byDefault=True, flavor = None, source = None):
 
         if components is None:
             components = [ 'lib', ]
-
-        if versionStr is None:
-            versionStr = 'conary.rpath.com@rpl:devel'
 
         if not flavor:
             if Arch.x86_64:
@@ -167,29 +175,22 @@ class GroupDesktopPlatform(GroupRecipe):
             flavor32 = r.x86FlavorString
 
             # All :lib components land in compat32. this may need to be refined in the future
-            r.add(name, versionStr=versionStr,
-                  groupName='group-compat32', flavor=flavor32, components=components)
+            r.add(name, source = source,
+                  groupName='group-compat32', flavor=flavor32, components=components, 
+                  searchPath=[r.rplBranch, r.rplBranchCompat],)
 
-        r.add(name, versionStr=versionStr, groupName=groupName, flavor=flavor, byDefault=byDefault)
+        r.add(name, source = source, searchPath=[r.rplBranch, r.rplBranchCompat],
+              groupName=groupName, flavor=flavor, byDefault=byDefault)
 
         for g in r.rplGroups:
             r.replace(name, groupName = 'group-' + g, newFlavor=flavor, # WARNING: this needs to be refactored
                       allowNoMatch=True)                                # to cover x86 only apps we want in x86_64
 
-
     def setup(r):
-        rplBranch = 'conary.rpath.com@rpl:devel'
-        groupOs = 'group-os=' + rplBranch + '[%s]'
-
-        if Arch.x86_64:
-            groupOs = groupOs % r.x86_64rplGroupsFlavorString
-        else:
-            groupOs = groupOs % r.x86rplGroupsFlavorString
 
         r.setSearchPath( 'foresight.rpath.org@fl:2-devel-kernel', 
                          'foresight.rpath.org@fl:2-devel',
-                         groupOs,
-                         'conary.rpath.com@rpl:1-compat')
+                         r.groupOs, r.rplBranchCompat)
 
         # Create a out shell group for all the belong to 
         r.createGroup('group-world', checkPathConflicts=False, depCheck=False)
@@ -219,10 +220,10 @@ class GroupDesktopPlatform(GroupRecipe):
 
 
         for groupName in r.rplGroups:
-            r.rplAddGroup('group-' + groupName, rplBranch)
+            r.rplAddGroup('group-' + groupName, r.rplBranch)
 
         if Arch.x86_64:
-            r.rplAddGroup('group-compat32', rplBranch)
+            r.rplAddGroup('group-compat32', r.rplBranch)
 
         # we need to create this one before we call flAdd first time.
         if Arch.x86_64:
@@ -234,7 +235,7 @@ class GroupDesktopPlatform(GroupRecipe):
             # some stuff we need from rpl:devel that not's land here directly.
             for l in  [ 'sqlite', 'gpgme', 'lzo', 'libnl',
                        'opensp', 'jasper', 'ImageMagick', 'libieee1284',]:
-                r.add(l, 'conary.rpath.com@rpl:devel', groupName='group-compat32',
+                r.add(l, r.rplBranch, groupName='group-compat32',
                       flavor=r.x86FlavorString, components=['lib'],)
 
                 # TODO: check regularly if we ever move any off those troves for our own repo 
@@ -290,7 +291,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('device-mapper', groupName='group-anaconda-deps')
         r.rplAdd('dmraid', groupName='group-anaconda-deps')
         r.rplAdd('libdhcp', groupName='group-anaconda-deps')
-        r.flAdd('libdhcp4client', groupName='group-anaconda-deps')
+        r.rplAdd('libdhcp4client', groupName='group-anaconda-deps')
         r.rplAdd('libdhcp6client', groupName='group-anaconda-deps')
         r.rplAdd('pykickstart', groupName='group-anaconda-deps')
         r.rplAdd('pyblock', groupName='group-anaconda-deps')
@@ -310,6 +311,8 @@ class GroupDesktopPlatform(GroupRecipe):
         r.add('ipw2100-fw:lib', groupName='group-drivers')
         r.add('iwlwifi-3945-ucode:lib', groupName='group-drivers')
         r.add('iwlwifi-4965-ucode:lib', groupName='group-drivers')
+        r.add('rt61pci-firmware:lib', groupName='group-drivers')
+
         # end of firmware
         # those  bellow are ALLWAYS byDefault=False
         if Arch.x86_64:
@@ -529,15 +532,23 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('evolution-webcal', groupName='group-gnome')
 
         ## NetworkManager
-        r.flAdd('NetworkManager', groupName='group-gnome')
-        r.flAdd('NetworkManager-OpenVPN', groupName='group-gnome')
-        r.flAdd('NetworkManager-vpnc', groupName='group-gnome')
-        r.flAdd('NetworkManager-pptp', groupName='group-gnome')
-        r.flAdd('network-manager-applet', groupName='group-gnome', source = 'NetworkManager')
-        r.flAdd('wpa_supplicant', groupName='group-gnome')
-        r.flAdd('dhcdbd', groupName='group-gnome')
-        r.flAdd('dhclient', source='dhcp', groupName='group-core')
-        r.flAdd('libdhcp4client', source='dhcp', groupName='group-core')
+        r.flAdd('wpa_supplicant', groupName='group-desktop-common')
+        r.flAdd('NetworkManager', groupName='group-desktop-common')
+        r.flAdd('NetworkManager-OpenVPN', groupName='group-desktop-common')
+        r.flAdd('network-manager-applet', groupName='group-gnome')
+
+        # the ones bellow are atm broken upstream
+        # r.flAdd('NetworkManager-pptp', groupName='group-gnome')
+        # r.flAdd('NetworkManager-vpnc', groupName='group-desktop-common')
+
+        # no more needed
+        # r.flAdd('dhcdbd', groupName='group-gnome')
+
+        # we add those  in 2-devel. meanwhile rpl:devel got those  updated. 
+        # resorting to rpl:devel then.
+        r.rplAdd('dhclient', source='dhcp', groupName='group-desktop-common')
+        r.rplAdd('libdhcp4client', source='dhcp', groupName='group-desktop-common')
+        r.rplAdd('libdhcp6client', source='dhcp', groupName='group-desktop-common')
 
         ## theming / goodlooking stuff
         r.flAdd('gtk-theme-foresight', groupName='group-desktop-common')
@@ -1276,8 +1287,10 @@ class GroupDesktopPlatform(GroupRecipe):
         ]
         r.flAdd('amarok', groupName='group-kdemultimedia')
         r.flAdd('kaffeine', groupName='group-kdemultimedia')
-        r.add('PyQt:python', rplBranch, groupName='group-kdemultimedia')
-        r.add('sip:python', rplBranch, groupName='group-kdemultimedia')
+
+        r.add('PyQt:python', r.rplBranch, groupName='group-kdemultimedia')
+        r.add('sip:python', r.rplBranch, groupName='group-kdemultimedia')
+
         for p in kdemultimedia:
             r.flAdd(p, groupName='group-kdemultimedia')
 
