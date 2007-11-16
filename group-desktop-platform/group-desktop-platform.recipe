@@ -36,6 +36,8 @@ class GroupDesktopPlatform(GroupRecipe):
                   'anaconda-deps'
                   ]
 
+    foresightLinuxBranch = 'foresight.rpath.org@fl:2-devel'
+
     rplBranch = 'conary.rpath.com@rpl:devel'
     rplBranchCompat = 'conary.rpath.com@rpl:1-compat'
 
@@ -118,7 +120,7 @@ class GroupDesktopPlatform(GroupRecipe):
             r.addNewGroup(name, groupName='group-rpl-derived')
 
 
-    def flAdd(r, name, source=None, groupName=None, flavor=None, byDefault=True, singleArch=None, x32on64=False):
+    def flAdd(r, name, components = None, source=None, versionStr=None, groupName=None, flavor=None, byDefault=True, singleArch=None, x32on64=False):
         if not flavor:
             if Arch.x86_64:
                 flavor = r.x86_64rplGroupsFlavorString
@@ -127,20 +129,40 @@ class GroupDesktopPlatform(GroupRecipe):
 
         #  first, we add the trove, normally
         if not singleArch or (Arch.x86_64 and (not singleArch=='x86' or x32on64==True)) or (Arch.x86 and not singleArch=='x86_64'):
-            r.add(name, source=source, groupName=groupName, flavor=flavor, byDefault=byDefault)
+            r.add(name,
+                  components = components,
+                  versionStr = versionStr,
+                  source=source,
+                  groupName=groupName,
+                  flavor=flavor,
+                  byDefault=byDefault)
 
         # second, we check if that trove is already in any of the upstream, pre-built,
         # groups, we use, and - there - we replace it.
         if Arch.x86_64 and not name == 'anaconda' and not singleArch:
             # All :lib components land in compat32. this may need to be refined in the future
 
-            r.add(name, groupName='group-desktop-platform-compat32', flavor=r.x86FlavorString, components=['lib'])
-            r.replace(name, groupName='group-compat32', allowNoMatch=True, 
-                      newFlavor = r.x86FlavorString)
+            r.add(name,
+                  groupName='group-desktop-platform-compat32',
+                  source = source,
+                  versionStr = versionStr,
+                  flavor=r.x86FlavorString,
+                  components=['lib']
+                  )
+
+            r.replace(name,
+                      groupName='group-compat32',
+                      allowNoMatch=True,
+                      newVersionStr = versionStr,
+                      newFlavor = r.x86FlavorString
+                      )
 
         if not singleArch and (Arch.x86_64 and (not singleArch=='x86' or x32on64==True)) or (Arch.x86 and not singleArch=='x86_64'):
             for g in r.rplGroups:
-                r.replace(name, groupName = 'group-'+ g, newFlavor=flavor,
+                r.replace(name,
+                          newVersionStr = versionStr,
+                          groupName = 'group-'+ g,
+                          newFlavor=flavor,
                           allowNoMatch=True)
 
 
@@ -155,15 +177,16 @@ class GroupDesktopPlatform(GroupRecipe):
         r.replace(name, groupName=groupName, newFlavor=flavor)
 
         if Arch.x86_64:
-            r.remove(name, groupName='group-compat32', allowNoMatch=True, 
-                      flavor=r.x86_64FlavorString)
-            r.replace(name, groupName='group-compat32', allowNoMatch=True, 
+            r.remove(name,
+                     groupName='group-compat32',
+                     allowNoMatch=True,
+                     flavor=r.x86_64FlavorString)
+            r.replace(name,
+                      groupName='group-compat32',
+                      allowNoMatch=True,
                       newFlavor=r.x86FlavorString)
 
-    def rplAdd(r, name, groupName=None, components=None, byDefault=True, flavor = None, source = None):
-
-        if components is None:
-            components = [ 'lib', ]
+    def rplAdd(r, name, versionStr=None, groupName=None, components=None, byDefault=True, flavor = None, source = None):
 
         if not flavor:
             if Arch.x86_64:
@@ -175,21 +198,25 @@ class GroupDesktopPlatform(GroupRecipe):
             flavor32 = r.x86FlavorString
 
             # All :lib components land in compat32. this may need to be refined in the future
-            r.add(name, source = source,
-                  groupName='group-compat32', flavor=flavor32, components=components, 
-                  searchPath=[r.rplBranch, r.rplBranchCompat],)
+            r.replace(name,
+                      newVersionStr = versionStr,
+                      groupName='group-compat32',
+                      newFlavor=flavor32,
+                      allowNoMatch=True)
 
-        r.add(name, source = source, searchPath=[r.rplBranch, r.rplBranchCompat],
-              groupName=groupName, flavor=flavor, byDefault=byDefault)
-
-        for g in r.rplGroups:
-            r.replace(name, groupName = 'group-' + g, newFlavor=flavor, # WARNING: this needs to be refactored
-                      allowNoMatch=True)                                # to cover x86 only apps we want in x86_64
+        r.add(name,
+              source = source,
+              versionStr = versionStr,
+              components = components,
+              groupName=groupName,
+              flavor=flavor,
+              byDefault=byDefault,
+              searchPath=[r.rplBranch, r.rplBranchCompat])
 
     def setup(r):
 
-        r.setSearchPath( 'foresight.rpath.org@fl:2-devel-kernel', 
-                         'foresight.rpath.org@fl:2-devel',
+        r.setSearchPath( r.foresightLinuxBranch +'-kernel', 
+                         r.foresightLinuxBranch,
                          r.groupOs, r.rplBranchCompat)
 
         # Create a out shell group for all the belong to 
@@ -307,11 +334,11 @@ class GroupDesktopPlatform(GroupRecipe):
         #r.flAdd('rt2500', groupName='group-drivers')
 
         # firmware is a tricky business. (allways use r.add here)
-        r.add('ipw2200-fw:lib', groupName='group-drivers')
-        r.add('ipw2100-fw:lib', groupName='group-drivers')
-        r.add('iwlwifi-3945-ucode:lib', groupName='group-drivers')
-        r.add('iwlwifi-4965-ucode:lib', groupName='group-drivers')
-        r.add('rt61pci-firmware:lib', groupName='group-drivers')
+        r.add('ipw2200-fw', groupName='group-drivers', components = ['lib'])
+        r.add('ipw2100-fw', groupName='group-drivers', components = ['lib'])
+        r.add('iwlwifi-3945-ucode', groupName='group-drivers', components = ['lib'])
+        r.add('iwlwifi-4965-ucode', groupName='group-drivers', components = ['lib'])
+        r.add('rt61pci-firmware', groupName='group-drivers', components = ['lib'])
 
         # end of firmware
         # those  bellow are ALLWAYS byDefault=False
@@ -357,7 +384,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # end off pulseaudio & associates
 
         ## esound:lib is needed for compat reasons
-        r.flAdd('esound:lib', groupName='group-desktop-common')
+        r.flAdd('esound', groupName='group-desktop-common', components = ['lib'])
         r.flAdd('esound', groupName='group-anaconda-deps')
 
         # default gnome .wav
@@ -1024,7 +1051,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # These should go into group-foresight-basics
 
-        r.flAdd('libmad:lib', groupName='group-kde-core')
+        r.flAdd('libmad', groupName='group-kde-core', components = ['lib'])
 
         # Core kde libs
         for p in ( 'arts', 'avahi-qt3', 'dbus-qt3', 'kdebase', 'kdelibs', 'kdnssd-avahi', 'qt' ):
@@ -1457,6 +1484,8 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('htmlview', groupName='group-devel')
         r.rplAdd('kid', groupName='group-devel')
 
+        # more group-devel stuff
+        r.flAdd('bzr', groupName='group-devel')
         #
         # our own xorg stack
 
@@ -1466,11 +1495,11 @@ class GroupDesktopPlatform(GroupRecipe):
 
         ## packages built by xorg-utils
 
-        utils = [ 'gccmakedep', 
-                  'imake', 
-                  'xorg-cf-files', 
-                  'lndir', 
-                  'makedepend', 
+        utils = [ 'gccmakedep',
+                  'imake',
+                  'xorg-cf-files',
+                  'lndir',
+                  'makedepend',
                   ]
 
         for p in utils:
