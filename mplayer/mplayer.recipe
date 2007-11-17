@@ -1,28 +1,41 @@
-class MPlayer(CPackageRecipe):
-    name = 'mplayer'
-    version = '1.0r21812'
+class MPlayer(AutoPackageRecipe):
 
-    buildRequires = [ 'alsa-lib:devel', 'arts:devel', 'audiofile:devel',
-        'cdparanoia:devel', 'esound:devel', 'fontconfig:devel',
-        'freetype:devel', 'glib:devel', 'lame:devel', 'libdv:devel',
-        'libjpeg:devel', 'libmad:devel', 'libogg:devel', 'libpng:devel',
-        'libtermcap:devel', 'libtheora:devel',
-        'libvorbis:devel', 'lzo:devel', 'samba:devel', 'SDL:devel',
-        'zlib:devel', 'nas:devel', 'Mesa:devel', 'faac:devel',
-        'fribidi:devel', 'giflib:devel', 'jack:devel', 'libX11:devel',
-        'libXext:devel', 'libXinerama:devellib', 'libXt:devel',
-        'libXv:devel', 'libXxf86dga:devel', 'libXxf86vm:devel',
-        'libdvdnav:devel', 'ncurses:devel', 'speex:devel', 'atk:devel',
-        'cairo:devel', 'desktop-file-utils:config', 'gtk:devel',
-        'libXrender:devel', 'libXvMC:devel', 'pango:devel' ]
+    name = 'mplayer'
+    version = '1.0_rc3+r25083'
+
+    buildRequires = [
+        'alsa-lib:devel', 'arts:devel', 'atk:devel', 'audiofile:devel',
+        'cairo:devel', 'cdparanoia:devel', 'desktop-file-utils:config',
+        'esound:devel', 'expat:devel', 'faac:devel', 'fontconfig:devel',
+        'freetype:devel', 'fribidi:devel', 'giflib:devel', 'glib:devel',
+        'gtk:devel', 'jack:devel', 'lame:devel', 'libdv:devel',
+        'libdvdnav:devel', 'libjpeg:devel', 'libmad:devel', 'libmpcdec:devel',
+        'libogg:devel', 'libpng:devel', 'libtermcap:devel', 'libtheora:devel',
+        'libvorbis:devel', 'libX11:devel', 'libXext:devel', 'libXinerama:devel',
+        'libXinerama:devellib', 'libXrender:devel', 'libXt:devel',
+        'libXv:devel', 'libXvMC:devel', 'libXxf86dga:devel', 'libXxf86vm:devel',
+        'lzo:devel', 'Mesa:devel', 'ncurses:devel', 'pango:devel',
+        'pulseaudio:devel', 'samba:devel', 'SDL:devel', 'speex:devel',
+        'x264:devel', 'zlib:devel'
+    ]
     # for CVS snaps, also need libavcodec:devel
 
     Flags.generic = True
     Flags.generic.setShortDoc('build a version to run everywhere')
 
-    def setup(r):
-        r.addSvnSnapshot('svn://svn.mplayerhq.hu/mplayer/trunk')
+    def unpack(r):
 
+        mytag = r.version.split('+')[1].lstrip('r')
+        r.addSvnSnapshot('svn://svn.mplayerhq.hu/mplayer/trunk', revision=mytag)
+
+        r.addArchive(
+            'http://www.mplayerhq.hu/MPlayer/skins/Blue-1.7.tar.bz2',
+            dir='%(datadir)s/mplayer/skins/'
+        )
+
+    def configure(r):
+
+        r.macros.codecsdir = '%(libdir)s/mplayer-codecs'
         if Arch.x86_64:
             r.macros.archenv = 'host_arch=x86_64  proc=x86_64  iproc=x86_64'
             r.macros.extraconf = ''
@@ -33,19 +46,29 @@ class MPlayer(CPackageRecipe):
 
         # mplayer's configure script does not accept a number of standard
         # configure arguments...
-        r.ManualConfigure('--prefix=%(prefix)s --bindir=%(bindir)s',
-                          '--datadir=%(datadir)s --libdir=%(libdir)s',
-                          '--mandir=%(mandir)s --confdir=%(sysconfdir)s',
-                          '--enable-gui --enable-largefiles --enable-joystick',
-                          '--enable-menu --enable-dynamic-plugins --language=all',
-                          '--enable-faad-external --enable-runtime-cpudetection',
-                          '--enable-xvmc --with-xvmclib=XvMCW %(extraconf)s',  
- 
-                          preConfigure='CFLAGS="%(cflags)s" CXXFLAGS="%(cflags)s" %(archenv)s')
+        r.ManualConfigure(
+            ' --prefix=%(prefix)s'
+            ' --confdir=%(sysconfdir)s/mplayer '
+            ' --libdir=%(libdir)s'
+            ' --codecsdir=%(codecsdir)s'
+            ' --win32codecsdir=%(codecsdir)s'
+            ' --xanimcodecsdir=%(codecsdir)s'
+            ' --realcodecsdir=%(codecsdir)s'
+            ' --enable-gui'
+            ' --enable-largefiles'
+            ' --enable-joystick'
+            ' --enable-menu'
+            ' --enable-dynamic-plugins'
+            ' --language=all'
+            ' --enable-faad-external'
+            ' --enable-runtime-cpudetection'
+            ' --enable-xvmc --with-xvmclib=XvMCW %(extraconf)s',
+            preConfigure='%(archenv)s'
+        )
 
-        r.Make()
-        r.MakeInstall()
+    def policy(r):
 
-        r.Install('etc/codecs.conf', '%(sysconfdir)s/')
-        r.ComponentSpec('runtime', '%(libdir)s/mplayer/')
-        r.Requires('MPlayer-codecs:runtime', '%(bindir)s/mplayer')
+        r.Install('etc/codecs.conf', '%(sysconfdir)s/mplayer/')
+
+        r.Requires('mplayer-codecs:lib', '%(bindir)s/mplayer')
+
