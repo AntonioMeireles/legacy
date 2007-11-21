@@ -1,0 +1,144 @@
+#
+# Copyright (c) 2005 Specifix, Inc.
+# All rights reserved
+#
+ 
+class GNUCash(CPackageRecipe):
+    name = 'gnucash'
+    version = '2.2.1'
+    docsVer = '2.2.0'
+
+    buildRequires = [
+                      'aqbanking:devel',
+                      'atk:devel',
+                      'cairo:devel',
+                      'desktop-file-utils:runtime',
+                      'docbook-xsl',
+                      'doxygen:runtime',
+                      'expat:devel',
+                      'fontconfig:devel',
+                      'freetype:devel',
+                      'GConf:devel',
+                      'GConf:runtime',
+                      'gettext:runtime',
+                      'glib:devel',
+                      'gmp:devel',
+                      'gnome-keyring:devel',
+                      'gnome-vfs:devel',
+                      'goffice:devel',
+                      'gtk:devel',
+                      'gtkhtml:devel',
+                      'guile:data',
+                      'guile:devel',
+                      'gwenhywfar:devel',
+                      'install-info:runtime',
+                      'intltool:runtime',
+                      'libart_lgpl:devel',
+                      'libbonobo:devel',
+                      'libbonoboui:devel',
+                      'libglade:devel', 
+                      'libgnomecanvas:devel',
+                      'libgnome:devel',
+                      'libgnomeprint:devel',
+                      'libgnomeprintui:devel',
+                      'libgnomeui:devel',
+                      'libgsf:devel',
+                      'libICE:devel',
+                      'libofx:devel',
+                      'libofx:runtime',
+                      'libpng:devel',
+                      'libSM:devel',
+                      'libtool:devel',
+                      'libtool:runtime',
+                      'libX11:devel',
+                      'libXau:devel',
+                      'libXdmcp:devel',
+                      'libxml2:devel',
+                      'libXrender:devel',
+                      'libxslt:runtime',
+                      'ORBit2:devel',
+                      'pango:devel',
+                      'pcre:devel',
+                      'perl-DateManip:perl',
+                      'perl-Finance-Quote:perl',
+                      'perl:lib',
+                      'perl-XML-Parser:perl',
+                      'pkgconfig:devel',
+                      'popt:devel',
+                      'scrollkeeper:runtime',
+                      'slib:data',
+                      'texinfo:runtime',
+                      'yelp:runtime',
+                      'zlib:devel',
+    ]
+
+    def setup(r):
+        r.macros.docsVer = GNUCash.docsVer
+        #srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core' \
+        #          '/updates/6/SRPMS/gnucash-2.0.2-1.fc6.src.rpm'
+        sourceUrl = 'http://www.gnucash.org/pub/gnucash/sources/stable/'
+        sourceUrlDoc = 'http://www.gnucash.org/pub/gnucash/sources/stable/'
+        r.addArchive(sourceUrl, keyid="18EAD875")
+        r.addArchive(sourceUrlDoc + "%(name)s-docs-%(docsVer)s.tar.gz",
+                     dir="%(name)s-%(version)s/", keyid="18EAD875")
+
+        # Fix for newer libgoffice
+        r.Replace("libgoffice-0.3 >= 0.3.0", "libgoffice-0.5 >= 0.5.0",
+                  "configure")
+        r.Replace('gog-renderer-cairo.h', 'gog-renderer.h',
+                  "configure", "src/gnome-utils/gnc-html-graph-gog.c")
+
+        r.Replace('GOG_RENDERER_CAIRO', 'GOG_RENDERER',
+                  "src/gnome-utils/gnc-html-graph-gog.c")
+        r.Replace('GogRendererCairo', 'GogRenderer',
+                  "src/gnome-utils/gnc-html-graph-gog.c")
+        r.Replace('gog_renderer_cairo_', 'gog_renderer_',
+                  "src/gnome-utils/gnc-html-graph-gog.c")
+
+        r.Replace('gnucash-icon', 'gnucash-icon-48x48',
+                  'src/gnome/gnucash.desktop.in*')
+
+        r.addPatch('gnucash-1.8.12-aq.patch')
+
+        cFlags  = '--disable-sql --enable-error-on-warning=no --enable-ofx '
+        cFlags += '--enable-hbci'
+
+        r.Configure(cFlags)
+        r.Make('LIBTOOL=/usr/bin/libtool')
+        
+        r.Configure(dir="%(name)s-docs-%(docsVer)s")
+        r.Make(dir="%(name)s-docs-%(docsVer)s")
+
+        r.MakeInstall("LIBTOOL=/usr/bin/libtool")
+        r.MakeInstall("LIBTOOL=/usr/bin/libtool", dir="%(name)s-docs-%(docsVer)s")
+
+        # gnucash uses libtool's libltdl, so the la files must be included
+        r.RemoveNonPackageFiles(exceptions='.*\.la')
+
+        # Perl dependencies. Not detected automatically because of the dynamic
+        # imports.
+        r.Requires('perl-libwww-perl:perl', '%(bindir)s/gnc-fq-check')
+        r.Requires('perl-Crypt-SSLeay:perl', '%(bindir)s/gnc-fq-check')
+        r.Requires('perl-Finance-Quote:perl', '%(bindir)s/gnc-fq-check')
+        r.Requires('perl-Finance-QuoteHist:perl', '%(bindir)s/gnc-fq-check')
+        r.Requires('perl-HTML-Parser:perl', '%(bindir)s/gnc-fq-check')
+        r.Requires('perl-HTML-TableExtract:perl', '%(bindir)s/gnc-fq-check')
+
+        r.Requires('perl-libwww-perl:perl', '%(bindir)s/gnc-fq-dump')
+        r.Requires('perl-Crypt-SSLeay:perl', '%(bindir)s/gnc-fq-dump')
+        r.Requires('perl-Finance-Quote:perl', '%(bindir)s/gnc-fq-dump')
+        r.Requires('perl-HTML-TableExtract:perl', '%(bindir)s/gnc-fq-dump')
+
+        r.Requires('perl-libwww-perl:perl', '%(bindir)s/gnc-fq-helper')
+        r.Requires('perl-Crypt-SSLeay:perl', '%(bindir)s/gnc-fq-helper')
+        r.Requires('perl-Finance-Quote:perl', '%(bindir)s/gnc-fq-helper')
+        r.Requires('perl-HTML-TableExtract:perl', '%(bindir)s/gnc-fq-helper')
+
+        # Explicitly require slib
+        r.Requires('slib:data', '%(bindir)s/gnucash-bin')
+        # Explicitly require guile:runtime
+        r.Requires('guile:runtime', '%(bindir)s/gnucash-bin')
+
+        # Everything hbci related goes into its own package, to isolate
+        # aqbanking (which requires qt/kde)
+        r.PackageSpec('%(name)s-hbci', '.*hbci.*')
