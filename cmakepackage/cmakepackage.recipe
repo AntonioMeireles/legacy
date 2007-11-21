@@ -1,0 +1,219 @@
+#
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+from conary.build import use
+from conary.build.build import BuildCommand
+
+class CMakeCommand(BuildCommand):
+    """
+    NAME
+    ====
+
+    B{C{r.CMake()}} - Runs cmake configure script
+
+    SYNOPSIS
+    ========
+
+    C{r.CMake(I{extra args}, [I{objDir},] [I{preCMake},] [I{skipMissingDir},] [I{dir}])}
+
+    DESCRIPTION
+    ===========
+
+    The C{r.CMake()} class is called from within a Conary recipe to run an
+    cmake configure script, giving it the default paths as defined by the
+    macro set: C{r.CMake(extra args)}.
+
+    KEYWORDS
+    ========
+
+    The C{r.CMake()} class accepts the following keywords, with default
+    values shown in parentheses when applicable:
+
+    B{objDir} : (None) Make an object directory before running C{cmake}.
+    This is used for out of source build (srcdir != objdir). It can contain
+    macro references.
+
+    B{preCMake} : (None) Extra shell script which is inserted in front of
+    the C{cmake} command.
+
+    B{skipMissingDir} : (False) Raise an error if C{dir} does not exist,
+    (by default) and if set to C{True} skip the action when C{dir} does not
+    exist.
+
+    B{dir} : (None) Directory in which to run C{cmake}
+
+    B{package} : (None) If set, must be a string that specifies the package
+    (C{package='packagename'}), component (C{package=':componentname'}), or
+    package and component (C{package='packagename:componentname'}) in which
+    to place the files added while executing this command.
+    Previously-specified C{PackageSpec} or C{ComponentSpec} lines will
+    override the package specification, since all package and component
+    specifications are considered in strict order as provided by the recipe.
+
+    EXAMPLES
+    ========
+
+    C{r.CMake('-DUSE_KDE3=NO')}
+
+    Demonstrates calling C{r.CMake()} and specifying C{NO} value for
+    C{USE_KDE3} variable.
+    """
+    # note that template is NOT a tuple, () is used merely to group strings
+    # to avoid trailing \ characters on every line
+    template = (
+        'cd %%(actionDir)s; '
+        '%%(mkObjdir)s '
+        ' CC=%%(cc)s CXX=%%(cxx)s'
+        ' %(preCMake)s cmake'
+        ' -DCMAKE_C_FLAGS:STRING="%%(cflags)s"'
+        ' -DCMAKE_CXX_FLAGS:STRING="%%(cflags)s %%(cxxflags)s"'
+        ' -DCMAKE_EXE_LINKER_FLAGS:STRING="%%(ldflags)s"'
+        ' -DCMAKE_MODULE_LINKER_FLAGS:STRING="%%(ldflags)s"'
+        ' -DCMAKE_SHARED_LINKER_FLAGS:STRING="%%(ldflags)s"'
+        ' -DCMAKE_INSTALL_PREFIX:PATH="%%(prefix)s"'
+        ' %(args)s'
+        ' %%(actionDir)s')
+    keywords = {
+        'preCMake': '',
+        'objDir': '',
+        'dir': '',
+        'subDir': '',
+        'skipMissingDir': False,
+        'skipMissingSubDir': False }
+
+    def __init__(self, recipe, *args, **keywords):
+        """
+        @keyword objDir: Make an object directory before running C{cmake}.
+            This is useful for applications which do not support running
+            configure from the same directory as the sources
+            (srcdir != objdir). It can contain macro references.
+        @keyword preCMake: Extra shell script which is inserted in front
+            of the C{cmake} command.
+        @keyword skipMissingDir: Raise an error if C{dir} does not
+            exist, (by default) and if set to C{True} skip the action when
+            C{dir} does not exist.
+        @keyword dir: Directory in which to run C{cmake}
+        """
+        BuildCommand.__init__(self, recipe, *args, **keywords)
+
+    def do(self, macros):
+        macros = macros.copy()
+        macros.actionDir = action._expandOnePath(self.dir, macros,
+             macros.builddir, error=not self.skipMissingDir)
+        if not os.path.exists(macros.actionDir):
+            assert(self.skipMissingDir)
+            return
+
+        macros.mkObjdir = ''
+        macros.cdObjdir = ''
+        if self.objDir:
+            objDir = self.objDir %macros
+            macros.mkObjdir = 'mkdir -p %s; cd %s;' %(objDir, objDir)
+            macros.cdObjdir = 'cd %s;' %objDir
+
+        try:
+            util.execute(self.command %macros)
+        except RuntimeError, info:
+            if not self.recipe.isatty():
+                # When conary is being scripted, logs might be
+                # redirected to a file, and it might be easier to
+                # see config.log output in that logfile than by
+                # inspecting the build directory
+                # Each file line will have the filename prepended
+                # The "|| :" makes it OK if there is no config.log
+                util.execute('cd %(actionDir)s; %(cdObjdir)s'
+                             'find . -name CMakeCache.txt | xargs grep -H . || :'
+                             %macros)
+            raise
+
+class CMakePackageRecipe(CPackageRecipe):
+    """
+    NAME
+    ====
+
+    B{C{CMakePackageRecipe}} - Build simple packages with cmake
+
+    SYNOPSIS
+    ========
+
+    C{class I{className(CMakePackageRecipe):}}
+
+    DESCRIPTION
+    ===========
+
+    The  C{CMakePackageRecipe} class provides a simple means for the
+    creation of packages from minimal recipes, which are built from source
+    code using the cmake.
+
+    Processing in the C{CMakePackageRecipe} class is a simple workflow modeled
+    after building software from source code, and is essentially comprised of
+    these steps:
+
+        1. Unpack source archive
+        2. C{cmake}
+        3. C{make}
+        4. C{make install}
+        5. Applying Conary policy (optional)
+
+    With C{CMakePackageRecipe} the recipe writer does not necessarily need to
+    define the C{cmake}, C{make}, or C{makeinstall} methods, which allows
+    for very compact, and simple recipes.
+
+    The recipe's child classes should define the C{unpack()} method in order
+    to populate the source list.
+
+    Invoke the C{policy} method, with necessary policy parameters, and
+    keywords in your recipe to enforce Conary policy in the package.
+
+    If the standard C{cmake()}, C{make()}, and C{makeinstall()} methods
+    are insufficient for your package requirements, you should define your own
+    methods to override them.
+
+    Of the three methods, C{configure}, and C{make} are least likely to be
+    insufficient, and require overriding for the majority of recipes using
+    C{CMakePackageRecipe}.
+
+    EXAMPLE
+    =======
+
+    C{class SimIM(CMakePackageRecipe):}
+
+    Defines the class for a SIM Instant Messenger recipe using
+    C{CMakePackageRecipe}.
+    """
+
+    name = 'cmakepackage'
+    version = '1'
+
+    buildRequires = [
+        'cmake:runtime',
+        'pkgconfig:devel', #Needed to interpret CMakeLists.txt PKGCONFIG macros
+    ]
+
+    cmakeArgs = ''
+
+    abstractBaseClass = True
+
+    def setup(r):
+        r.unpack()
+        r.cmake()
+        r.make()
+        r.makeinstall()
+        r.policy()
+
+    def unpack(r):
+        pass
+    def cmake(r):
+        r.CMake(r.cmakeArgs)
+    def make(r):
+        r.Make()
+    def makeinstall(r):
+        r.MakeInstall()
+    def policy(r):
+        pass
+
+    def CMake(r, *args, **keywords):
+        r.extraBuild(CMakeCommand(r, *args, **keywords))
+
