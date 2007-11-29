@@ -1,0 +1,114 @@
+#
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class IcedTea(PackageRecipe):
+
+    name = 'icedtea'
+    version = '1.7.0.0+r381'
+
+    if not Use.bootstrap:
+        buildRequires = [
+            'ant:runtime', 'ant:java',
+            'xalan-j:java[bootstrap]', 'xerces-j:java[bootstrap]',
+            'alsa-lib:devel', 'atk:devel', 'cairo:devel', 'expat:devel',
+            'findutils:runtime', 'fontconfig:devel', 'freetype:devel',
+            'giflib:devel', 'glib:devel', 'glibc:devel', 'glitz:devel', 'gtk:devel',
+            'libgcc:devellib', 'libjpeg:devel', 'libpng:devel', 'libstdc++:devel',
+            'libX11:devel', 'libxcb:devel', 'libXext:devel', 'libXi:devel',
+            'libXrender:devel', 'libXtst:devel', 'nspr:devel', 'nspr:devel',
+            'openmotif:devel', 'pango:devel', 'pkgconfig:devel', 'unzip:runtime',
+            'xcb-util:devel', 'xulrunner:devel', 'zlib:devel'
+        ]
+
+    # For loadInstalled()
+    java_version = version.split('+')[0]
+    java_release = version[:version.rindex('.')]
+
+    java_name = 'java-'+java_release+'-icedtea'
+    java_full_name = java_name+'-'+java_version
+    java_home = '%(libdir)s/jvm/'+java_full_name
+    jre_home = java_home+'/jre'
+
+    def setup(r):
+
+        # For bootstrap
+        centos_version = '0.19.b21'
+        centos_site = 'http://dev.centos.org/centos/5/testing'
+
+        # For cooking
+        openjdk = (
+            'http://download.java.net/openjdk'
+            '/jdk7/promoted/b23/openjdk-7-ea-src-b23-30_oct_2007.zip'
+        )
+
+        rev=r.version.split('+')[1][1:]
+        r.addMercurialSnapshot(
+            'http://icedtea.classpath.org/hg/icedtea', tag=rev,
+            use=(not Use.bootstrap)
+        )
+        r.addSource(openjdk, use=(not Use.bootstrap))
+
+        jarch = ('x86_64','i386')[Arch.x86==True]
+
+        for arch in ('i386', 'x86_64'):
+            for p in ('icedtea', 'icedtea-devel'):
+
+                archive_name = 'java-'+r.java_release+'-'+p
+                archive_version = r.java_version+'-'+centos_version
+
+                carch = arch.replace('3', '5')
+                archive_full_name = \
+                    archive_name+'-'+archive_version+'.snapshot.'+carch+'.rpm'
+
+                rpm = centos_site+'/'+arch+'/RPMS/'+archive_full_name
+
+                r.addArchive(rpm, dir='/', use=(Use.bootstrap and arch == jarch))
+
+
+        if Use.bootstrap:
+
+            if Arch.x86_64:
+                r.Move('%(prefix)s/lib', '%(libdir)s')
+
+            r.Move(r.java_home+'.'+jarch, r.java_home)
+
+            r.Remove('%(libdir)s/jvm/*.'+jarch)
+
+            jceDir = '%(libdir)s/jvm-private/'+r.java_name+'.'+jarch
+            r.Move(jceDir+'/jce/vanilla/*.jar', r.java_home+'/jre/lib/security/')
+
+            r.Move(
+                '%(docdir)s/'+r.java_full_name+'/*', '%(thisdocdir)s/'
+            )
+
+            r.Remove('%(libdir)s/jvm-{exports,private}', recursive=True)
+            r.Remove(
+                '%(docdir)s/'+r.java_name+'-devel-'+r.java_version, recursive=True
+            )
+
+            r.Requires(exceptDeps=r'java\:\ org\.GNOME\..*')
+
+            del(r.EnforceSonameBuildRequirements)
+
+        else:
+
+            # !Use.bootstrap
+            r.Configure(
+                ' --with-icedtea'
+                ' --with-icedtea-home='+r.java_home+''
+                ' --with-xalan2-jar=%(datadir)s/java/xalan.jar'
+                ' --with-xalan2-serializer-jar=%(datadir)s/java/serializer.jar'
+                ' --with-xerces2-jar=%(datadir)s/java/xercesImpl.jar'
+            )
+
+            #r.Make()
+            # XXX: some of our flags break build
+            r.Run('make')
+
+            build_root = 'openjdk/control/build/linux-%s' \
+                    % ('i586', 'amd64')[Arch.x86_64==True]
+
+            r.Install(build_root+'/j2sdk-image/*', r.java_home+'/')
+
