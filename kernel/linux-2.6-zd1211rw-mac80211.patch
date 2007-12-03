@@ -1,11 +1,11 @@
-diff -up linux-2.6.22.noarch/MAINTAINERS.orig linux-2.6.22.noarch/MAINTAINERS
---- linux-2.6.22.noarch/MAINTAINERS.orig	2007-09-27 09:59:49.000000000 -0400
-+++ linux-2.6.22.noarch/MAINTAINERS	2007-09-27 09:59:55.000000000 -0400
+diff -up linux-2.6.23.noarch/MAINTAINERS.orig linux-2.6.23.noarch/MAINTAINERS
+--- linux-2.6.23.noarch/MAINTAINERS.orig	2007-10-19 14:54:06.000000000 -0400
++++ linux-2.6.23.noarch/MAINTAINERS	2007-10-19 14:54:14.000000000 -0400
 @@ -4287,6 +4287,16 @@ W:	http://www.qsl.net/dl1bke/
  L:	linux-hams@vger.kernel.org
  S:	Maintained
  
-+ZD1211RW-MAC80211 WIRELESS DRIVER
++ZD1211-MAC80211 WIRELESS DRIVER
 +P:	Daniel Drake
 +M:	dsd@gentoo.org
 +P:	Ulrich Kunitz
@@ -18,9 +18,9 @@ diff -up linux-2.6.22.noarch/MAINTAINERS.orig linux-2.6.22.noarch/MAINTAINERS
  ZD1211RW WIRELESS DRIVER
  P:	Daniel Drake
  M:	dsd@gentoo.org
-diff -up linux-2.6.22.noarch/drivers/net/wireless/Makefile.orig linux-2.6.22.noarch/drivers/net/wireless/Makefile
---- linux-2.6.22.noarch/drivers/net/wireless/Makefile.orig	2007-09-27 09:59:49.000000000 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/Makefile	2007-09-27 09:59:55.000000000 -0400
+diff -up linux-2.6.23.noarch/drivers/net/wireless/Makefile.orig linux-2.6.23.noarch/drivers/net/wireless/Makefile
+--- linux-2.6.23.noarch/drivers/net/wireless/Makefile.orig	2007-10-19 14:54:06.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/Makefile	2007-10-19 14:54:14.000000000 -0400
 @@ -41,6 +41,7 @@ obj-$(CONFIG_BCM43XX)		+= bcm43xx/
  obj-$(CONFIG_B43)		+= b43/
  obj-$(CONFIG_B43LEGACY)		+= b43legacy/
@@ -29,10 +29,10 @@ diff -up linux-2.6.22.noarch/drivers/net/wireless/Makefile.orig linux-2.6.22.noa
  
  # 16-bit wireless PCMCIA client drivers
  obj-$(CONFIG_PCMCIA_RAYCS)	+= ray_cs.o
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.c	2007-09-27 10:00:45.000000000 -0400
-@@ -0,0 +1,1619 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.c	2007-10-19 14:54:54.000000000 -0400
+@@ -0,0 +1,1621 @@
 +/* zd_chip.c
 + *
 + * This program is free software; you can redistribute it and/or modify
@@ -63,7 +63,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#include "zd_ieee80211.h"
 +#include "zd_mac.h"
 +#include "zd_rf.h"
-+#include "zd_util.h"
 +
 +void zd_chip_init(struct zd_chip *chip,
 +	         struct ieee80211_hw *hw,
@@ -86,7 +85,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +static int scnprint_mac_oui(struct zd_chip *chip, char *buffer, size_t size)
 +{
-+	u8 *addr = zd_chip_to_mac(chip)->hwaddr;
++	u8 *addr = zd_mac_get_perm_addr(zd_chip_to_mac(chip));
 +	return scnprintf(buffer, size, "%02x-%02x-%02x",
 +		         addr[0], addr[1], addr[2]);
 +}
@@ -413,15 +412,18 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +		[1] = { .addr = CR_MAC_ADDR_P2 },
 +	};
 +
-+	reqs[0].value = (mac_addr[3] << 24)
-+		      | (mac_addr[2] << 16)
-+		      | (mac_addr[1] <<  8)
-+		      |  mac_addr[0];
-+	reqs[1].value = (mac_addr[5] <<  8)
-+		      |  mac_addr[4];
-+
-+	dev_dbg_f(zd_chip_dev(chip),
-+		"mac addr " MAC_FMT "\n", MAC_ARG(mac_addr));
++	if (mac_addr) {
++		reqs[0].value = (mac_addr[3] << 24)
++			      | (mac_addr[2] << 16)
++			      | (mac_addr[1] <<  8)
++			      |  mac_addr[0];
++		reqs[1].value = (mac_addr[5] <<  8)
++			      |  mac_addr[4];
++		dev_dbg_f(zd_chip_dev(chip),
++			"mac addr " MAC_FMT "\n", MAC_ARG(mac_addr));
++	} else {
++		dev_dbg_f(zd_chip_dev(chip), "set NULL mac\n");
++	}
 +
 +	mutex_lock(&chip->mutex);
 +	r = zd_iowrite32a_locked(chip, reqs, ARRAY_SIZE(reqs));
@@ -1652,24 +1654,24 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +	return zd_iowrite32a(chip, ioreqs, ARRAY_SIZE(ioreqs));
 +}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/Makefile
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/Makefile	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/Makefile
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/Makefile	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,10 @@
 +obj-$(CONFIG_ZD1211RW_MAC80211) += zd1211rw-mac80211.o
 +
 +zd1211rw-mac80211-objs := zd_chip.o zd_mac.o \
 +		zd_rf_al2230.o zd_rf_rf2959.o \
 +		zd_rf_al7230b.o zd_rf_uw2453.o \
-+		zd_ieee80211.o zd_rf.o zd_usb.o zd_util.o
++		zd_ieee80211.o zd_rf.o zd_usb.o
 +
 +ifeq ($(CONFIG_ZD1211RW_MAC80211_DEBUG),y)
 +EXTRA_CFLAGS += -DDEBUG
 +endif
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_def.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_def.h	2007-09-27 09:59:55.000000000 -0400
-@@ -0,0 +1,57 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_def.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_def.h	2007-10-19 14:54:14.000000000 -0400
+@@ -0,0 +1,56 @@
 +/* zd_def.h
 + *
 + * This program is free software; you can redistribute it and/or modify
@@ -1693,7 +1695,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#include <linux/kernel.h>
 +#include <linux/stringify.h>
 +#include <linux/device.h>
-+#include <linux/kernel.h>
 +
 +typedef u16 __nocast zd_addr_t;
 +
@@ -1727,9 +1728,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#endif
 +
 +#endif /* _ZD_DEF_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.h	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.h	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,108 @@
 +/* zd_rf.h
 + *
@@ -1839,10 +1840,10 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +int zd_rf_init_uw2453(struct zd_rf *rf);
 +
 +#endif /* _ZD_RF_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.h	2007-09-27 09:59:55.000000000 -0400
-@@ -0,0 +1,921 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_chip.h	2007-10-19 14:54:14.000000000 -0400
+@@ -0,0 +1,943 @@
 +/* zd_chip.h
 + *
 + * This program is free software; you can redistribute it and/or modify
@@ -2355,15 +2356,37 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#define CR_UNDERRUN_CNT			CTL_REG(0x0688)
 +
 +#define CR_RX_FILTER			CTL_REG(0x068c)
++#define RX_FILTER_ASSOC_REQUEST		(1 <<  0)
 +#define RX_FILTER_ASSOC_RESPONSE	(1 <<  1)
++#define RX_FILTER_REASSOC_REQUEST	(1 <<  2)
 +#define RX_FILTER_REASSOC_RESPONSE	(1 <<  3)
++#define RX_FILTER_PROBE_REQUEST		(1 <<  4)
 +#define RX_FILTER_PROBE_RESPONSE	(1 <<  5)
++/* bits 6 and 7 reserved */
 +#define RX_FILTER_BEACON		(1 <<  8)
++#define RX_FILTER_ATIM			(1 <<  9)
 +#define RX_FILTER_DISASSOC		(1 << 10)
 +#define RX_FILTER_AUTH			(1 << 11)
++#define RX_FILTER_DEAUTH		(1 << 12)
++#define RX_FILTER_PSPOLL		(1 << 26)
++#define RX_FILTER_RTS			(1 << 27)
++#define RX_FILTER_CTS			(1 << 28)
 +#define RX_FILTER_ACK			(1 << 29)
-+#define AP_RX_FILTER			0x0400feff
-+#define STA_RX_FILTER			0x2000ffff
++#define RX_FILTER_CFEND			(1 << 30)
++#define RX_FILTER_CFACK			(1 << 31)
++
++/* Enable bits for all frames you are interested in. */
++#define STA_RX_FILTER	(RX_FILTER_ASSOC_REQUEST | RX_FILTER_ASSOC_RESPONSE | \
++	RX_FILTER_REASSOC_REQUEST | RX_FILTER_REASSOC_RESPONSE | \
++	RX_FILTER_PROBE_REQUEST | RX_FILTER_PROBE_RESPONSE | \
++	(0x3 << 6) /* vendor driver sets these reserved bits */ | \
++	RX_FILTER_BEACON | RX_FILTER_ATIM | RX_FILTER_DISASSOC | \
++	RX_FILTER_AUTH | RX_FILTER_DEAUTH | \
++	(0x7 << 13) /* vendor driver sets these reserved bits */ | \
++	RX_FILTER_PSPOLL | RX_FILTER_ACK) /* 0x2400ffff */
++
++#define RX_FILTER_CTRL (RX_FILTER_RTS | RX_FILTER_CTS | \
++	RX_FILTER_CFEND | RX_FILTER_CFACK)
 +
 +/* Monitor mode sets filter to 0xfffff */
 +
@@ -2764,9 +2787,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	                       struct zd_mc_hash *hash);
 +
 +#endif /* _ZD_CHIP_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al2230.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al2230.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al2230.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al2230.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,439 @@
 +/* zd_rf_al2230.c: Functions for the AL2230 RF controller
 + *
@@ -3207,128 +3230,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	rf->patch_cck_gain = 1;
 +	return 0;
 +}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_util.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_util.h	2007-09-27 09:59:55.000000000 -0400
-@@ -0,0 +1,29 @@
-+/* zd_util.h
-+ *
-+ * This program is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2 of the License, or
-+ * (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-+ */
-+
-+#ifndef _ZD_UTIL_H
-+#define _ZD_UTIL_H
-+
-+void *zd_tail(const void *buffer, size_t buffer_size, size_t tail_size);
-+
-+#ifdef DEBUG
-+void zd_hexdump(const void *bytes, size_t size);
-+#else
-+#define zd_hexdump(bytes, size)
-+#endif /* DEBUG */
-+
-+#endif /* _ZD_UTIL_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_util.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_util.c	2007-09-27 09:59:55.000000000 -0400
-@@ -0,0 +1,82 @@
-+/* zd_util.c
-+ *
-+ * This program is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2 of the License, or
-+ * (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-+ *
-+ * Utility program
-+ */
-+
-+#include "zd_def.h"
-+#include "zd_util.h"
-+
-+#ifdef DEBUG
-+static char hex(u8 v)
-+{
-+	v &= 0xf;
-+	return (v < 10 ? '0' : 'a' - 10) + v;
-+}
-+
-+static char hex_print(u8 c)
-+{
-+	return (0x20 <= c && c < 0x7f) ? c : '.';
-+}
-+
-+static void dump_line(const u8 *bytes, size_t size)
-+{
-+	char c;
-+	size_t i;
-+
-+	size = size <= 8 ? size : 8;
-+	printk(KERN_DEBUG "zd1211 %p ", bytes);
-+	for (i = 0; i < 8; i++) {
-+		switch (i) {
-+		case 1:
-+		case 5:
-+			c = '.';
-+			break;
-+		case 3:
-+			c = ':';
-+			break;
-+		default:
-+			c = ' ';
-+		}
-+		if (i < size) {
-+			printk("%c%c%c", hex(bytes[i] >> 4), hex(bytes[i]), c);
-+		} else {
-+			printk("  %c", c);
-+		}
-+	}
-+
-+	for (i = 0; i < size; i++)
-+		printk("%c", hex_print(bytes[i]));
-+	printk("\n");
-+}
-+
-+void zd_hexdump(const void *bytes, size_t size)
-+{
-+	size_t i = 0;
-+
-+	do {
-+		dump_line((u8 *)bytes + i, size-i);
-+		i += 8;
-+	} while (i < size);
-+}
-+#endif /* DEBUG */
-+
-+void *zd_tail(const void *buffer, size_t buffer_size, size_t tail_size)
-+{
-+	if (buffer_size < tail_size)
-+		return NULL;
-+	return (u8 *)buffer + (buffer_size - tail_size);
-+}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_rf2959.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_rf2959.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_rf2959.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_rf2959.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,279 @@
 +/* zd_rf_rfmd.c: Functions for the RFMD RF controller
 + *
@@ -3609,9 +3513,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	rf->switch_radio_off = rf2959_switch_radio_off;
 +	return 0;
 +}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.h	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.h	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,75 @@
 +#ifndef _ZD_IEEE80211_H
 +#define _ZD_IEEE80211_H
@@ -3688,9 +3592,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#define ZD_CCK_PLCP_SIGNAL_11M	0x6e
 +
 +#endif /* _ZD_IEEE80211_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/Kconfig
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/Kconfig	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/Kconfig
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/Kconfig	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,18 @@
 +config ZD1211RW_MAC80211
 +	tristate "ZyDAS ZD1211/ZD1211B USB support (mac80211 stack)"
@@ -3710,9 +3614,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/Kc
 +	---help---
 +	  ZD1211 debugging messages. Choosing Y will result in additional debug
 +	  messages being saved to your kernel logs, which may help debug any
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_ieee80211.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,100 @@
 +/* zd_ieee80211.c
 + *
@@ -3814,9 +3718,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	unmask_bg_channels(hw, range, &mac->modes[1]);
 +}
 +
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.h	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.h	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,263 @@
 +/* zd_usb.h: Header for USB interface implemented by ZD1211 chip
 + *
@@ -4081,9 +3985,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +extern struct workqueue_struct *zd_workqueue;
 +
 +#endif /* _ZD_USB_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,178 @@
 +/* zd_rf.c
 + *
@@ -4263,9 +4167,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	return zd_chip_generic_patch_6m_band(zd_rf_to_chip(rf), channel);
 +}
 +
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_uw2453.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_uw2453.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_uw2453.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_uw2453.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,534 @@
 +/* zd_rf_uw2453.c: Functions for the UW2453 RF controller
 + *
@@ -4801,10 +4705,10 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	return 0;
 +}
 +
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.h
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.h	2007-09-27 09:59:55.000000000 -0400
-@@ -0,0 +1,227 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.h	2007-10-19 14:54:14.000000000 -0400
+@@ -0,0 +1,238 @@
 +/* zd_mac.h
 + *
 + * This program is free software; you can redistribute it and/or modify
@@ -4980,12 +4884,12 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	struct housekeeping housekeeping;
 +	struct work_struct set_multicast_hash_work;
 +	struct work_struct set_rts_cts_work;
++	struct work_struct set_rx_filter_work;
 +	struct zd_mc_hash multicast_hash;
 +	u8 regdomain;
 +	u8 default_regdomain;
 +	int type;
 +	int associated;
-+	u8 *hwaddr;
 +	struct sk_buff_head ack_wait_queue;
 +	struct ieee80211_channel channels[14];
 +	struct ieee80211_rate rates[12];
@@ -4996,6 +4900,12 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +	/* flags to indicate update in progress */
 +	unsigned int updating_rts_rate:1;
++
++	/* whether to pass frames with CRC errors to stack */
++	unsigned int pass_failed_fcs:1;
++
++	/* whether to pass control frames to stack */
++	unsigned int pass_ctrl:1;
 +};
 +
 +static inline struct zd_mac *zd_hw_mac(struct ieee80211_hw *hw)
@@ -5011,6 +4921,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +static inline struct zd_mac *zd_usb_to_mac(struct zd_usb *usb)
 +{
 +	return zd_chip_to_mac(zd_usb_to_chip(usb));
++}
++
++static inline u8 *zd_mac_get_perm_addr(struct zd_mac *mac)
++{
++	return mac->hw->wiphy->perm_addr;
 +}
 +
 +#define zd_mac_dev(mac) (zd_chip_dev(&(mac)->chip))
@@ -5032,9 +4947,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#endif /* DEBUG */
 +
 +#endif /* _ZD_MAC_H */
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al7230b.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al7230b.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al7230b.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_rf_al7230b.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,492 @@
 +/* zd_rf_al7230b.c: Functions for the AL7230B RF controller
 + *
@@ -5528,9 +5443,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +	return 0;
 +}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.c	2007-09-27 09:59:55.000000000 -0400
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_usb.c	2007-10-19 14:54:14.000000000 -0400
 @@ -0,0 +1,1528 @@
 +/* zd_usb.c
 + *
@@ -5563,7 +5478,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#include "zd_def.h"
 +#include "zd_mac.h"
 +#include "zd_usb.h"
-+#include "zd_util.h"
 +
 +static struct usb_device_id usb_ids[] = {
 +	/* ZD1211 */
@@ -5609,6 +5523,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	{ USB_DEVICE(0x129b, 0x1667), .driver_info = DEVICE_ZD1211B },
 +	{ USB_DEVICE(0x0cde, 0x001a), .driver_info = DEVICE_ZD1211B },
 +	{ USB_DEVICE(0x0586, 0x340a), .driver_info = DEVICE_ZD1211B },
++	{ USB_DEVICE(0x0471, 0x1237), .driver_info = DEVICE_ZD1211B },
 +	/* "Driverless" devices that need ejecting */
 +	{ USB_DEVICE(0x0ace, 0x2011), .driver_info = DEVICE_INSTALLER },
 +	{ USB_DEVICE(0x0ace, 0x20ff), .driver_info = DEVICE_INSTALLER },
@@ -7060,11 +6975,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	kfree(req);
 +	return r;
 +}
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.c
---- /dev/null	2007-09-27 08:31:24.563724082 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.c	2007-09-27 10:01:28.000000000 -0400
-@@ -0,0 +1,950 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/zd1211rw-mac80211/zd_mac.c	2007-10-19 14:54:54.000000000 -0400
+@@ -0,0 +1,976 @@
 +/* zd_mac.c
++ *
++ * Copyright (c) 2007 Luis R. Rodriguez <mcgrof@winlab.rutgers.edu>
 + *
 + * This program is free software; you can redistribute it and/or modify
 + * it under the terms of the GNU General Public License as published by
@@ -7092,7 +7009,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +#include "zd_mac.h"
 +#include "zd_ieee80211.h"
 +#include "zd_rf.h"
-+#include "zd_util.h"
 +
 +/* This table contains the hardware specific values for the modulation rates. */
 +static const struct ieee80211_rate zd_rates[] = {
@@ -7182,10 +7098,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	if (r)
 +		return r;
 +
-+	spin_lock_irq(&mac->lock);
 +	SET_IEEE80211_PERM_ADDR(hw, addr);
-+	memcpy(mac->hwaddr, addr, ETH_ALEN);
-+	spin_unlock_irq(&mac->lock);
 +
 +	return 0;
 +}
@@ -7236,43 +7149,27 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	ZD_MEMCLEAR(mac, sizeof(struct zd_mac));
 +}
 +
-+/**
-+ * has_monitor_interfaces - have monitor interfaces been enabled?
-+ * @mac: the struct zd_mac pointer
-+ *
-+ * The function returns, whether the device has monitor interfaces attached.
-+ */
-+static int has_monitor_interfaces(struct zd_mac *mac)
-+{
-+	return mac->type == IEEE80211_IF_TYPE_MNTR;
-+}
-+
 +static int set_rx_filter(struct zd_mac *mac)
 +{
-+	u32 filter = has_monitor_interfaces(mac) ? ~0 : STA_RX_FILTER;
++	unsigned long flags;
++	u32 filter = STA_RX_FILTER;
++
++	spin_lock_irqsave(&mac->lock, flags);
++	if (mac->pass_ctrl)
++		filter |= RX_FILTER_CTRL;
++	spin_unlock_irqrestore(&mac->lock, flags);
 +
 +	return zd_iowrite32(&mac->chip, CR_RX_FILTER, filter);
-+}
-+
-+static int set_sniffer(struct zd_mac *mac)
-+{
-+	return zd_iowrite32(&mac->chip, CR_SNIFFER_ON,
-+		has_monitor_interfaces(mac) ? 1 : 0);
-+	return 0;
 +}
 +
 +static int set_mc_hash(struct zd_mac *mac)
 +{
 +	struct zd_mc_hash hash;
-+
 +	zd_mc_clear(&hash);
-+	if (has_monitor_interfaces(mac))
-+		zd_mc_add_all(&hash);
-+
 +	return zd_chip_set_multicast_hash(&mac->chip, &hash);
 +}
 +
-+static int zd_op_open(struct ieee80211_hw *hw)
++static int zd_op_start(struct ieee80211_hw *hw)
 +{
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +	struct zd_chip *chip = &mac->chip;
@@ -7289,16 +7186,10 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	if (r < 0)
 +		goto out;
 +
-+	r = zd_write_mac_addr(chip, mac->hwaddr);
-+	if (r)
-+		goto disable_int;
 +	r = zd_chip_set_basic_rates(chip, CR_RATES_80211B | CR_RATES_80211G);
 +	if (r < 0)
 +		goto disable_int;
 +	r = set_rx_filter(mac);
-+	if (r)
-+		goto disable_int;
-+	r = set_sniffer(mac);
 +	if (r)
 +		goto disable_int;
 +	r = set_mc_hash(mac);
@@ -7356,7 +7247,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	dev_kfree_skb_any(skb);
 +}
 +
-+static int zd_op_stop(struct ieee80211_hw *hw)
++static void zd_op_stop(struct ieee80211_hw *hw)
 +{
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +	struct zd_chip *chip = &mac->chip;
@@ -7379,8 +7270,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +	while ((skb = skb_dequeue(ack_wait_queue)))
 +		kfree_tx_skb(skb);
-+
-+	return 0;
 +}
 +
 +/**
@@ -7668,32 +7557,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	return 0;
 +}
 +
-+static int fill_rx_stats(struct ieee80211_rx_status *stats,
-+	                 const struct rx_status **pstatus,
-+		         struct zd_mac *mac,
-+			 const u8 *buffer, unsigned int length)
-+{
-+	const struct rx_status *status;
-+
-+	*pstatus = status = zd_tail(buffer, length, sizeof(struct rx_status));
-+	if (status->frame_status & ZD_RX_ERROR) {
-+		/* FIXME: update? */
-+		return -EINVAL;
-+	}
-+	memset(stats, 0, sizeof(*stats));
-+
-+	stats->channel = _zd_chip_get_channel(&mac->chip);
-+	stats->freq = zd_channels[stats->channel - 1].freq;
-+	stats->phymode = MODE_IEEE80211G;
-+	stats->ssi = status->signal_strength;
-+	stats->signal = zd_rx_qual_percent(buffer,
-+		                          length - sizeof(struct rx_status),
-+		                          status);
-+	stats->rate = zd_rx_rate(buffer, status);
-+
-+	return 0;
-+}
-+
 +/**
 + * filter_ack - filters incoming packets for acknowledgements
 + * @dev: the mac80211 device
@@ -7705,6 +7568,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 + * the upper layers is informed about the successful transmission. If
 + * mac80211 queues have been stopped and the number of frames still to be
 + * transmitted is low the queues will be opened again.
++ *
++ * Returns 1 if the frame was an ACK, 0 if it was ignored.
 + */
 +static int filter_ack(struct ieee80211_hw *hw, struct ieee80211_hdr *rx_hdr,
 +		      struct ieee80211_rx_status *stats)
@@ -7741,25 +7606,60 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 +{
-+	int r;
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +	struct ieee80211_rx_status stats;
 +	const struct rx_status *status;
 +	struct sk_buff *skb;
++	int bad_frame = 0;
 +
 +	if (length < ZD_PLCP_HEADER_SIZE + 10 /* IEEE80211_1ADDR_LEN */ +
 +	             FCS_LEN + sizeof(struct rx_status))
 +		return -EINVAL;
 +
-+	r = fill_rx_stats(&stats, &status, mac, buffer, length);
-+	if (r)
-+		return r;
++	memset(&stats, 0, sizeof(stats));
++
++	/* Note about pass_failed_fcs and pass_ctrl access below:
++	 * mac locking intentionally omitted here, as this is the only unlocked
++	 * reader and the only writer is configure_filter. Plus, if there were
++	 * any races accessing these variables, it wouldn't really matter.
++	 * If mac80211 ever provides a way for us to access filter flags
++	 * from outside configure_filter, we could improve on this. Also, this
++	 * situation may change once we implement some kind of DMA-into-skb
++	 * RX path. */
++
++	/* Caller has to ensure that length >= sizeof(struct rx_status). */
++	status = (struct rx_status *)
++		(buffer + (length - sizeof(struct rx_status)));
++	if (status->frame_status & ZD_RX_ERROR) {
++		if (mac->pass_failed_fcs &&
++				(status->frame_status & ZD_RX_CRC32_ERROR)) {
++			stats.flag |= RX_FLAG_FAILED_FCS_CRC;
++			bad_frame = 1;
++		} else {
++			return -EINVAL;
++		}
++	}
++
++	stats.channel = _zd_chip_get_channel(&mac->chip);
++	stats.freq = zd_channels[stats.channel - 1].freq;
++	stats.phymode = MODE_IEEE80211G;
++	stats.ssi = status->signal_strength;
++	stats.signal = zd_rx_qual_percent(buffer,
++		                          length - sizeof(struct rx_status),
++		                          status);
++	stats.rate = zd_rx_rate(buffer, status);
 +
 +	length -= ZD_PLCP_HEADER_SIZE + sizeof(struct rx_status);
 +	buffer += ZD_PLCP_HEADER_SIZE;
 +
-+	if (filter_ack(hw, (struct ieee80211_hdr *)buffer, &stats) &&
-+	    !has_monitor_interfaces(mac))
++	/* Except for bad frames, filter each frame to see if it is an ACK, in
++	 * which case our internal TX tracking is updated. Normally we then
++	 * bail here as there's no need to pass ACKs on up to the stack, but
++	 * there is also the case where the stack has requested us to pass
++	 * control frames on up (pass_ctrl) which we must consider. */
++	if (!bad_frame &&
++			filter_ack(hw, (struct ieee80211_hdr *)buffer, &stats)
++			&& !mac->pass_ctrl)
 +		return 0;
 +
 +	skb = dev_alloc_skb(length);
@@ -7776,9 +7676,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +{
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +
-+	/* NOTE: using IEEE80211_IF_TYPE_MGMT to indicate no mode selected */
-+	if (mac->type != IEEE80211_IF_TYPE_MGMT)
-+		return -1;
++	/* using IEEE80211_IF_TYPE_INVALID to indicate no mode selected */
++	if (mac->type != IEEE80211_IF_TYPE_INVALID)
++		return -EOPNOTSUPP;
 +
 +	switch (conf->type) {
 +	case IEEE80211_IF_TYPE_MNTR:
@@ -7789,16 +7689,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +		return -EOPNOTSUPP;
 +	}
 +
-+	mac->hwaddr = conf->mac_addr;
-+
-+	return 0;
++	return zd_write_mac_addr(&mac->chip, conf->mac_addr);
 +}
 +
 +static void zd_op_remove_interface(struct ieee80211_hw *hw,
 +				    struct ieee80211_if_init_conf *conf)
 +{
 +	struct zd_mac *mac = zd_hw_mac(hw);
-+	mac->type = IEEE80211_IF_TYPE_MGMT;
++	mac->type = IEEE80211_IF_TYPE_INVALID;
++	zd_write_mac_addr(&mac->chip, NULL);
 +}
 +
 +static int zd_op_config(struct ieee80211_hw *hw, struct ieee80211_conf *conf)
@@ -7812,7 +7711,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +{
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +
++	spin_lock_irq(&mac->lock);
 +	mac->associated = is_valid_ether_addr(conf->bssid);
++	spin_unlock_irq(&mac->lock);
 +
 +	/* TODO: do hardware bssid filtering */
 +	return 0;
@@ -7831,33 +7732,73 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	zd_chip_set_multicast_hash(&mac->chip, &hash);
 +}
 +
-+static void zd_op_set_multicast_list(struct ieee80211_hw *hw,
-+				      unsigned short dev_flags, int mc_count)
++static void set_rx_filter_handler(struct work_struct *work)
++{
++	struct zd_mac *mac =
++		container_of(work, struct zd_mac, set_rx_filter_work);
++	int r;
++
++	dev_dbg_f(zd_mac_dev(mac), "\n");
++	r = set_rx_filter(mac);
++	if (r)
++		dev_err(zd_mac_dev(mac), "set_rx_filter_handler error %d\n", r);
++}
++
++#define SUPPORTED_FIF_FLAGS \
++	(FIF_PROMISC_IN_BSS | FIF_ALLMULTI | FIF_FCSFAIL | FIF_CONTROL | \
++	FIF_OTHER_BSS)
++static void zd_op_configure_filter(struct ieee80211_hw *hw,
++			unsigned int changed_flags,
++			unsigned int *new_flags,
++			int mc_count, struct dev_mc_list *mclist)
 +{
 +	struct zd_mc_hash hash;
 +	struct zd_mac *mac = zd_hw_mac(hw);
 +	unsigned long flags;
++	int i;
 +
-+	if ((dev_flags & (IFF_PROMISC|IFF_ALLMULTI)) ||
-+	     has_monitor_interfaces(mac))
-+	{
++	/* Only deal with supported flags */
++	changed_flags &= SUPPORTED_FIF_FLAGS;
++	*new_flags &= SUPPORTED_FIF_FLAGS;
++
++	/* changed_flags is always populated but this driver
++	 * doesn't support all FIF flags so its possible we don't
++	 * need to do anything */
++	if (!changed_flags)
++		return;
++
++	if (*new_flags & (FIF_PROMISC_IN_BSS | FIF_ALLMULTI)) {
 +		zd_mc_add_all(&hash);
 +	} else {
-+		struct dev_mc_list *mc = NULL;
-+		void *tmp = NULL;
-+
 +		zd_mc_clear(&hash);
-+		while ((mc = ieee80211_get_mc_list_item(hw, mc, &tmp))) {
++		for (i = 0; i < mc_count; i++) {
++			if (!mclist)
++				break;
 +			dev_dbg_f(zd_mac_dev(mac), "mc addr " MAC_FMT "\n",
-+				  MAC_ARG(mc->dmi_addr));
-+			zd_mc_add_addr(&hash, mc->dmi_addr);
++				  MAC_ARG(mclist->dmi_addr));
++			zd_mc_add_addr(&hash, mclist->dmi_addr);
++			mclist = mclist->next;
 +		}
 +	}
 +
 +	spin_lock_irqsave(&mac->lock, flags);
++	mac->pass_failed_fcs = !!(*new_flags & FIF_FCSFAIL);
++	mac->pass_ctrl = !!(*new_flags & FIF_CONTROL);
 +	mac->multicast_hash = hash;
 +	spin_unlock_irqrestore(&mac->lock, flags);
 +	queue_work(zd_workqueue, &mac->set_multicast_hash_work);
++
++	if (changed_flags & FIF_CONTROL)
++		queue_work(zd_workqueue, &mac->set_rx_filter_work);
++
++	/* no handling required for FIF_OTHER_BSS as we don't currently
++	 * do BSSID filtering */
++	/* FIXME: in future it would be nice to enable the probe response
++	 * filter (so that the driver doesn't see them) until
++	 * FIF_BCN_PRBRESP_PROMISC is set. however due to atomicity here, we'd
++	 * have to schedule work to enable prbresp reception, which might
++	 * happen too late. For now we'll just listen and forward them all the
++	 * time. */
 +}
 +
 +static void set_rts_cts_work(struct work_struct *work)
@@ -7901,13 +7842,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +
 +static const struct ieee80211_ops zd_ops = {
 +	.tx			= zd_op_tx,
-+	.open			= zd_op_open,
++	.start			= zd_op_start,
 +	.stop			= zd_op_stop,
 +	.add_interface		= zd_op_add_interface,
 +	.remove_interface	= zd_op_remove_interface,
 +	.config			= zd_op_config,
 +	.config_interface	= zd_op_config_interface,
-+	.set_multicast_list	= zd_op_set_multicast_list,
++	.configure_filter	= zd_op_configure_filter,
 +	.erp_ie_changed		= zd_op_erp_ie_changed,
 +};
 +
@@ -7929,8 +7870,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	spin_lock_init(&mac->lock);
 +	mac->hw = hw;
 +
-+	mac->type = IEEE80211_IF_TYPE_MGMT;
-+	mac->hwaddr = hw->wiphy->perm_addr;
++	mac->type = IEEE80211_IF_TYPE_INVALID;
 +
 +	memcpy(mac->channels, zd_channels, sizeof(zd_channels));
 +	memcpy(mac->rates, zd_rates, sizeof(zd_rates));
@@ -7967,6 +7907,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	housekeeping_init(mac);
 +	INIT_WORK(&mac->set_multicast_hash_work, set_multicast_hash_handler);
 +	INIT_WORK(&mac->set_rts_cts_work, set_rts_cts_work);
++	INIT_WORK(&mac->set_rx_filter_work, set_rx_filter_handler);
 +
 +	SET_IEEE80211_DEV(hw, &intf->dev);
 +	return hw;
@@ -7989,7 +7930,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +	r = zd_chip_control_leds(chip,
 +		                 is_associated ? LED_ASSOCIATED : LED_SCANNING);
 +	if (r)
-+		dev_err(zd_mac_dev(mac), "zd_chip_control_leds error %d\n", r);
++		dev_dbg_f(zd_mac_dev(mac), "zd_chip_control_leds error %d\n", r);
 +
 +	queue_delayed_work(zd_workqueue, &mac->housekeeping.link_led_work,
 +		           LINK_LED_WORK_DELAY);
@@ -8014,14 +7955,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/zd1211rw-mac80211/zd
 +		&mac->housekeeping.link_led_work);
 +	zd_chip_control_leds(&mac->chip, LED_OFF);
 +}
-diff -up linux-2.6.22.noarch/drivers/net/wireless/Kconfig.orig linux-2.6.22.noarch/drivers/net/wireless/Kconfig
---- linux-2.6.22.noarch/drivers/net/wireless/Kconfig.orig	2007-09-27 09:59:49.000000000 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/Kconfig	2007-09-27 09:59:55.000000000 -0400
-@@ -616,6 +616,7 @@ source "drivers/net/wireless/bcm43xx/Kco
- source "drivers/net/wireless/b43/Kconfig"
- source "drivers/net/wireless/b43legacy/Kconfig"
+diff -up linux-2.6.23.noarch/drivers/net/wireless/Kconfig.orig linux-2.6.23.noarch/drivers/net/wireless/Kconfig
+--- linux-2.6.23.noarch/drivers/net/wireless/Kconfig.orig	2007-10-19 14:54:06.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/Kconfig	2007-10-19 14:54:14.000000000 -0400
+@@ -618,5 +618,6 @@ source "drivers/net/wireless/b43legacy/K
  source "drivers/net/wireless/zd1211rw/Kconfig"
-+source "drivers/net/wireless/zd1211rw-mac80211/Kconfig"
  source "drivers/net/wireless/rt2x00/Kconfig"
  source "drivers/net/wireless/iwlwifi/Kconfig"
++source "drivers/net/wireless/zd1211rw-mac80211/Kconfig"
  
+ endmenu

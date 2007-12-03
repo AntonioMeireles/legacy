@@ -1,0 +1,47 @@
+From kou.ishizaki@toshiba.co.jp Wed Aug 22 10:27:57 2007
+From: Ishizaki Kou <kou.ishizaki@toshiba.co.jp>
+Subject: spidernet: enable poll() before registering interrupts
+Date: Wed, 22 Aug 2007 10:27:57 +1000
+X-Patchwork-ID: 13049
+
+We must not call netif_poll_enable after enabling interrupts,
+because an interrupt might come in and set the __LINK_STATE_RX_SCHED
+bit before we get to clear that bit again. If that happens,
+the next call to the ->poll() function will oops.
+
+Signed-off-by: Arnd Bergmann <arnd.bergmann@de.ibm.com>
+Signed-off-by: Kou Ishizaki <kou.ishizaki@toshiba.co.jp>
+---
+
+I refreshed Arnd-san's patch.
+
+
+---
+Index: linux-powerpc-git/drivers/net/spider_net.c
+===================================================================
+--- linux-powerpc-git.orig/drivers/net/spider_net.c	2007-08-21 16:58:44.000000000 +0900
++++ linux-powerpc-git/drivers/net/spider_net.c	2007-08-21 17:11:07.000000000 +0900
+@@ -2030,6 +2030,7 @@ spider_net_open(struct net_device *netde
+ 	/* further enhancement: setup hw vlan, if needed */
+ 
+ 	result = -EBUSY;
++	netif_poll_enable(netdev);
+ 	if (request_irq(netdev->irq, spider_net_interrupt,
+ 			     IRQF_SHARED, netdev->name, netdev))
+ 		goto register_int_failed;
+@@ -2038,13 +2039,13 @@ spider_net_open(struct net_device *netde
+ 
+ 	netif_start_queue(netdev);
+ 	netif_carrier_on(netdev);
+-	netif_poll_enable(netdev);
+ 
+ 	spider_net_enable_interrupts(card);
+ 
+ 	return 0;
+ 
+ register_int_failed:
++	netif_poll_disable(netdev);
+ 	spider_net_free_rx_chain_contents(card);
+ alloc_skbs_failed:
+ 	spider_net_free_chain(card, &card->rx_chain);
+

@@ -1,0 +1,60 @@
+bz 379971?
+
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=36beb82390235236c60eb97ca526b1cad97e2df3
+Commit:     36beb82390235236c60eb97ca526b1cad97e2df3
+Parent:     152af05cc85119d294b977ab4de07a781795c298
+Author:     Alan Cox <alan@lxorguk.ukuu.org.uk>
+AuthorDate: Mon Nov 5 15:04:40 2007 +0000
+Committer:  Jeff Garzik <jeff@garzik.org>
+CommitDate: Mon Nov 5 18:08:46 2007 -0500
+
+    pata_serverworks: Fix problem with some drive combinations
+    
+    The driver used the channel not the device number for deciding where to
+    load some timing parameters. Also change so that we clear the UDMA field
+    as the old driver did. Not believed neccessary but does no harm.
+    
+    Signed-off-by: Alan Cox <alan@redhat.com>
+    Signed-off-by: Jeff Garzik <jeff@garzik.org>
+---
+ drivers/ata/pata_serverworks.c |   11 +++++------
+ 1 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/ata/pata_serverworks.c b/drivers/ata/pata_serverworks.c
+index df68806..8bed888 100644
+--- a/drivers/ata/pata_serverworks.c
++++ b/drivers/ata/pata_serverworks.c
+@@ -274,28 +274,27 @@ static void serverworks_set_dmamode(struct ata_port *ap, struct ata_device *adev
+ {
+ 	static const u8 dma_mode[] = { 0x77, 0x21, 0x20 };
+ 	int offset = 1 + 2 * ap->port_no - adev->devno;
+-	int devbits = (2 * ap->port_no + adev->devno);
++	int devbits = 2 * ap->port_no + adev->devno;
+ 	u8 ultra;
+ 	u8 ultra_cfg;
+ 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
+ 
+ 	pci_read_config_byte(pdev, 0x54, &ultra_cfg);
++	pci_read_config_byte(pdev, 0x56 + ap->port_no, &ultra);
++	ultra &= ~(0x0F << (adev->devno * 4));
+ 
+ 	if (adev->dma_mode >= XFER_UDMA_0) {
+ 		pci_write_config_byte(pdev, 0x44 + offset,  0x20);
+ 
+-		pci_read_config_byte(pdev, 0x56 + ap->port_no, &ultra);
+-		ultra &= ~(0x0F << (ap->port_no * 4));
+ 		ultra |= (adev->dma_mode - XFER_UDMA_0)
+-					<< (ap->port_no * 4);
+-		pci_write_config_byte(pdev, 0x56 + ap->port_no, ultra);
+-
++					<< (adev->devno * 4);
+ 		ultra_cfg |=  (1 << devbits);
+ 	} else {
+ 		pci_write_config_byte(pdev, 0x44 + offset,
+ 			dma_mode[adev->dma_mode - XFER_MW_DMA_0]);
+ 		ultra_cfg &= ~(1 << devbits);
+ 	}
++	pci_write_config_byte(pdev, 0x56 + ap->port_no, ultra);
+ 	pci_write_config_byte(pdev, 0x54, ultra_cfg);
+ }
+ 

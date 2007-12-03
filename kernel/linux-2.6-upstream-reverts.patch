@@ -1,0 +1,1983 @@
+From stable-bounces@linux.kernel.org Wed Oct 10 06:19:13 2007
+From: Takashi Iwai <tiwai@suse.de>
+Date: Wed, 10 Oct 2007 15:18:45 +0200
+Subject: ALSA: emu10k1 - Fix memory corruption
+To: stable@kernel.org
+Message-ID: <s5hsl4jqf9m.wl%tiwai@suse.de>
+Status: O
+Content-Length: 1231
+Lines: 36
+
+From: Takashi Iwai <tiwai@suse.de>
+
+patch 7583cb51a1e276591f57a2fae05489c878f8ef54 from mainline.
+
+[ALSA] emu10k1 - Fix memory corruption
+
+The number of mixer elements for SPDIF control don't match with the
+actual array size (3).  This may result in a memory corruption that
+overwrites the i2c_capture_source field (ALSA bug#3095).
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/pci/emu10k1/emumixer.c |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/sound/pci/emu10k1/emumixer.c
++++ b/sound/pci/emu10k1/emumixer.c
+@@ -871,7 +871,7 @@ static struct snd_kcontrol_new snd_emu10
+ 	.access =	SNDRV_CTL_ELEM_ACCESS_READ,
+ 	.iface =        SNDRV_CTL_ELEM_IFACE_PCM,
+ 	.name =         SNDRV_CTL_NAME_IEC958("",PLAYBACK,MASK),
+-	.count =	4,
++	.count =	3,
+ 	.info =         snd_emu10k1_spdif_info,
+ 	.get =          snd_emu10k1_spdif_get_mask
+ };
+@@ -880,7 +880,7 @@ static struct snd_kcontrol_new snd_emu10
+ {
+ 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
+ 	.name =         SNDRV_CTL_NAME_IEC958("",PLAYBACK,DEFAULT),
+-	.count =	4,
++	.count =	3,
+ 	.info =         snd_emu10k1_spdif_info,
+ 	.get =          snd_emu10k1_spdif_get,
+ 	.put =          snd_emu10k1_spdif_put
+From stable-bounces@linux.kernel.org Wed Oct 10 06:17:37 2007
+From: Takashi Iwai <tiwai@suse.de>
+Date: Wed, 10 Oct 2007 15:17:17 +0200
+Subject: ALSA: Fix build error without CONFIG_HAS_DMA
+To: stable@kernel.org
+Message-ID: <s5htzozqfc2.wl%tiwai@suse.de>
+Status: O
+Content-Length: 2249
+Lines: 76
+
+From: Takashi Iwai <tiwai@suse.de>
+
+patch 8f11551b1798170dcffdd28475075ca4f1c6c990 in mainline
+
+[ALSA] Fix build error without CONFIG_HAS_DMA
+
+The recent change of include/asm-generic/dma-mapping-broken.h breaks
+the build without CONFIG_HAS_DMA.  This patch is an ad hoc fix.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/core/Makefile   |    3 ++-
+ sound/core/memalloc.c |    6 ++++++
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+--- a/sound/core/Makefile
++++ b/sound/core/Makefile
+@@ -14,7 +14,8 @@ endif
+ snd-pcm-objs := pcm.o pcm_native.o pcm_lib.o pcm_timer.o pcm_misc.o \
+ 		pcm_memory.o
+ 
+-snd-page-alloc-objs := memalloc.o sgbuf.o
++snd-page-alloc-y := memalloc.o
++snd-page-alloc-$(CONFIG_HAS_DMA) += sgbuf.o
+ 
+ snd-rawmidi-objs  := rawmidi.o
+ snd-timer-objs    := timer.o
+--- a/sound/core/memalloc.c
++++ b/sound/core/memalloc.c
+@@ -206,6 +206,7 @@ void snd_free_pages(void *ptr, size_t si
+  *
+  */
+ 
++#ifdef CONFIG_HAS_DMA
+ /* allocate the coherent DMA pages */
+ static void *snd_malloc_dev_pages(struct device *dev, size_t size, dma_addr_t *dma)
+ {
+@@ -239,6 +240,7 @@ static void snd_free_dev_pages(struct de
+ 	dec_snd_pages(pg);
+ 	dma_free_coherent(dev, PAGE_SIZE << pg, ptr, dma);
+ }
++#endif /* CONFIG_HAS_DMA */
+ 
+ #ifdef CONFIG_SBUS
+ 
+@@ -312,12 +314,14 @@ int snd_dma_alloc_pages(int type, struct
+ 		dmab->area = snd_malloc_sbus_pages(device, size, &dmab->addr);
+ 		break;
+ #endif
++#ifdef CONFIG_HAS_DMA
+ 	case SNDRV_DMA_TYPE_DEV:
+ 		dmab->area = snd_malloc_dev_pages(device, size, &dmab->addr);
+ 		break;
+ 	case SNDRV_DMA_TYPE_DEV_SG:
+ 		snd_malloc_sgbuf_pages(device, size, dmab, NULL);
+ 		break;
++#endif
+ 	default:
+ 		printk(KERN_ERR "snd-malloc: invalid device type %d\n", type);
+ 		dmab->area = NULL;
+@@ -383,12 +387,14 @@ void snd_dma_free_pages(struct snd_dma_b
+ 		snd_free_sbus_pages(dmab->dev.dev, dmab->bytes, dmab->area, dmab->addr);
+ 		break;
+ #endif
++#ifdef CONFIG_HAS_DMA
+ 	case SNDRV_DMA_TYPE_DEV:
+ 		snd_free_dev_pages(dmab->dev.dev, dmab->bytes, dmab->area, dmab->addr);
+ 		break;
+ 	case SNDRV_DMA_TYPE_DEV_SG:
+ 		snd_free_sgbuf_pages(dmab);
+ 		break;
++#endif
+ 	default:
+ 		printk(KERN_ERR "snd-malloc: invalid device type %d\n", dmab->dev.type);
+ 	}
+From stable-bounces@linux.kernel.org Wed Oct 10 06:15:38 2007
+From: Russ Cox <rsc@swtch.com>
+Date: Wed, 10 Oct 2007 15:15:12 +0200
+Subject: ALSA: fix selector unit bug affecting some USB speakerphones
+To: stable@kernel.org
+Message-ID: <s5hve9fqffj.wl%tiwai@suse.de>
+Status: O
+Content-Length: 1049
+Lines: 31
+
+From: Russ Cox <rsc@swtch.com>
+
+patch 38977e96cb32e658716e11a05ec7f1fc4618e0f3 in mainline.
+
+[ALSA] fix selector unit bug affecting some USB speakerphones
+
+Following the suggestion in this thread:
+https://bugs.launchpad.net/ubuntu/+source/alsa-lib/+bug/26683
+the correct upper bound on desc[0] is 5 + num_ins not 6 + num_ins,
+because the index used later is 5+i, not 6+i.
+This change makes my Vosky Chatterbox speakerphone work.
+Apparently it also helps with the Minivox MV100.
+
+Signed-off-by: Russ Cox <rsc@swtch.com>
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/usb/usbmixer.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/sound/usb/usbmixer.c
++++ b/sound/usb/usbmixer.c
+@@ -1483,7 +1483,7 @@ static int parse_audio_selector_unit(str
+ 	struct snd_kcontrol *kctl;
+ 	char **namelist;
+ 
+-	if (! num_ins || desc[0] < 6 + num_ins) {
++	if (! num_ins || desc[0] < 5 + num_ins) {
+ 		snd_printk(KERN_ERR "invalid SELECTOR UNIT descriptor %d\n", unitid);
+ 		return -EINVAL;
+ 	}
+From stable-bounces@linux.kernel.org Mon Oct 15 06:05:14 2007
+From: Takashi Iwai <tiwai@suse.de>
+Date: Mon, 15 Oct 2007 14:37:11 +0200
+Subject: ALSA: hda-codec - Add array terminator for dmic in STAC codec
+To: stable@kernel.org
+Message-ID: <s5habqk5zbc.wl%tiwai@suse.de>
+Status: O
+Content-Length: 1812
+Lines: 61
+
+From: Takashi Iwai <tiwai@suse.de>
+
+patch f6e9852ad05fa28301c83d4e2b082620de010358 in mainline.
+
+[ALSA] hda-codec - Add array terminator for dmic in STAC codec
+
+Reported by Jan-Marek Glogowski.
+
+The dmic array is passed to snd_hda_parse_pin_def_config() and
+should be zero-terminated.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/pci/hda/patch_sigmatel.c |   14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+--- a/sound/pci/hda/patch_sigmatel.c
++++ b/sound/pci/hda/patch_sigmatel.c
+@@ -162,8 +162,9 @@ static hda_nid_t stac925x_dac_nids[1] = 
+         0x02,
+ };
+ 
+-static hda_nid_t stac925x_dmic_nids[1] = {
+-	0x15, 
++#define STAC925X_NUM_DMICS	1
++static hda_nid_t stac925x_dmic_nids[STAC925X_NUM_DMICS + 1] = {
++	0x15, 0
+ };
+ 
+ static hda_nid_t stac922x_adc_nids[2] = {
+@@ -190,8 +191,9 @@ static hda_nid_t stac9205_mux_nids[2] = 
+         0x19, 0x1a
+ };
+ 
+-static hda_nid_t stac9205_dmic_nids[2] = {
+-        0x17, 0x18,
++#define STAC9205_NUM_DMICS	2
++static hda_nid_t stac9205_dmic_nids[STAC9205_NUM_DMICS + 1] = {
++        0x17, 0x18, 0
+ };
+ 
+ static hda_nid_t stac9200_pin_nids[8] = {
+@@ -2063,7 +2065,7 @@ static int patch_stac925x(struct hda_cod
+ 	case 0x83847633: /* STAC9202D */
+ 	case 0x83847636: /* STAC9251  */
+ 	case 0x83847637: /* STAC9251D */
+-		spec->num_dmics = 1;
++		spec->num_dmics = STAC925X_NUM_DMICS;
+ 		spec->dmic_nids = stac925x_dmic_nids;
+ 		break;
+ 	default:
+@@ -2307,7 +2309,7 @@ static int patch_stac9205(struct hda_cod
+ 	spec->mux_nids = stac9205_mux_nids;
+ 	spec->num_muxes = ARRAY_SIZE(stac9205_mux_nids);
+ 	spec->dmic_nids = stac9205_dmic_nids;
+-	spec->num_dmics = ARRAY_SIZE(stac9205_dmic_nids);
++	spec->num_dmics = STAC9205_NUM_DMICS;
+ 	spec->dmux_nid = 0x1d;
+ 
+ 	spec->init = stac9205_core_init;
+From stable-bounces@linux.kernel.org Wed Oct 10 06:13:31 2007
+From: Takashi Iwai <tiwai@suse.de>
+Date: Wed, 10 Oct 2007 15:13:07 +0200
+Subject: ALSA: hda-codec - Avoid zero NID in line_out_pins[] of STAC codecs
+To: stable@kernel.org
+Message-ID: <s5hwstvqfj0.wl%tiwai@suse.de>
+Status: O
+Content-Length: 2233
+Lines: 62
+
+From: Takashi Iwai <tiwai@suse.de>
+
+patch c480f79bdca58923e605ff5e4698cfe1779bae70 in mainline
+
+[ALSA] hda-codec - Avoid zero NID in line_out_pins[] of STAC codecs
+
+The STAC codes adds line_out_pins[] for shared mic/line-inputs accordingly.
+But, the current code may give a hole with NID=0 in some setting, which
+results in an error at probe.  This patch fixes the problem.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/pci/hda/patch_sigmatel.c |   15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+--- a/sound/pci/hda/patch_sigmatel.c
++++ b/sound/pci/hda/patch_sigmatel.c
+@@ -1182,7 +1182,8 @@ static int stac92xx_add_dyn_out_pins(str
+ 	case 3:
+ 		/* add line-in as side */
+ 		if (cfg->input_pins[AUTO_PIN_LINE] && num_dacs > 3) {
+-			cfg->line_out_pins[3] = cfg->input_pins[AUTO_PIN_LINE];
++			cfg->line_out_pins[cfg->line_outs] =
++				cfg->input_pins[AUTO_PIN_LINE];
+ 			spec->line_switch = 1;
+ 			cfg->line_outs++;
+ 		}
+@@ -1190,12 +1191,14 @@ static int stac92xx_add_dyn_out_pins(str
+ 	case 2:
+ 		/* add line-in as clfe and mic as side */
+ 		if (cfg->input_pins[AUTO_PIN_LINE] && num_dacs > 2) {
+-			cfg->line_out_pins[2] = cfg->input_pins[AUTO_PIN_LINE];
++			cfg->line_out_pins[cfg->line_outs] =
++				cfg->input_pins[AUTO_PIN_LINE];
+ 			spec->line_switch = 1;
+ 			cfg->line_outs++;
+ 		}
+ 		if (cfg->input_pins[AUTO_PIN_MIC] && num_dacs > 3) {
+-			cfg->line_out_pins[3] = cfg->input_pins[AUTO_PIN_MIC];
++			cfg->line_out_pins[cfg->line_outs] =
++				cfg->input_pins[AUTO_PIN_MIC];
+ 			spec->mic_switch = 1;
+ 			cfg->line_outs++;
+ 		}
+@@ -1203,12 +1206,14 @@ static int stac92xx_add_dyn_out_pins(str
+ 	case 1:
+ 		/* add line-in as surr and mic as clfe */
+ 		if (cfg->input_pins[AUTO_PIN_LINE] && num_dacs > 1) {
+-			cfg->line_out_pins[1] = cfg->input_pins[AUTO_PIN_LINE];
++			cfg->line_out_pins[cfg->line_outs] =
++				cfg->input_pins[AUTO_PIN_LINE];
+ 			spec->line_switch = 1;
+ 			cfg->line_outs++;
+ 		}
+ 		if (cfg->input_pins[AUTO_PIN_MIC] && num_dacs > 2) {
+-			cfg->line_out_pins[2] = cfg->input_pins[AUTO_PIN_MIC];
++			cfg->line_out_pins[cfg->line_outs] =
++				cfg->input_pins[AUTO_PIN_MIC];
+ 			spec->mic_switch = 1;
+ 			cfg->line_outs++;
+ 		}
+From 2a3988f6d2c5be9d02463097775d1c66a8290527 Mon Sep 17 00:00:00 2001
+From: Takashi Iwai <tiwai@suse.de>
+Date: Tue, 16 Oct 2007 14:26:32 +0200
+Subject: ALSA: hdsp - Fix zero division
+Message-ID: <b28811ef0711061446q3eb7330cm31a4c57a9ed00cc3@mail.gmail.com>
+Status: O
+Content-Length: 759
+Lines: 27
+
+From: Takashi Iwai <tiwai@suse.de>
+
+patch 2a3988f6d2c5be9d02463097775d1c66a8290527 in mainline.
+
+Fix zero-division bug in the calculation dds offset.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+Cc: Maarten Bressers <mbressers@gmail.com>
+Cc: gentoo kernel <kernel@gentoo.org>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ sound/pci/rme9652/hdsp.c |    3 +++
+ 1 file changed, 3 insertions(+)
+
+--- a/sound/pci/rme9652/hdsp.c
++++ b/sound/pci/rme9652/hdsp.c
+@@ -3108,6 +3108,9 @@ static int hdsp_dds_offset(struct hdsp *
+ 	unsigned int dds_value = hdsp->dds_value;
+ 	int system_sample_rate = hdsp->system_sample_rate;
+ 
++	if (!dds_value)
++		return 0;
++
+ 	n = DDS_NUMERATOR;
+ 	/*
+ 	 * dds_value = n / rate
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:45 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Fri, 26 Oct 2007 17:04:35 -0400
+Subject: mac80211: make ieee802_11_parse_elems return void
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326823109-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 4841
+Lines: 155
+
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch 67a4cce4a89718d252b61aaf58882c69c0e2f6e3 in mainline.
+
+Some APs send management frames with junk padding after the last IE.
+We already account for a similar problem with some Apple Airport
+devices, but at least one device is known to send more than a single
+extra byte.  The device in question is the Draytek Vigor2900:
+
+	http://www.draytek.com.au/products/Vigor2900.php
+
+The junk in question looks like an IE that runs off the end of the
+frame.  This cause us to return ParseFailed.  Since the frame in
+question is an association response, this causes us to fail to associate
+with this AP.
+
+The return code from ieee802_11_parse_elems is superfluous.
+All callers still check for the presence of the specific IEs that
+interest them anyway.  So, remove the return code so the parse never
+"fails".
+
+Acked-by: Michael Wu <flamingice@sourmilk.net>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_sta.c |   56 ++++++-------------------------------------
+ 1 file changed, 9 insertions(+), 47 deletions(-)
+
+--- a/net/mac80211/ieee80211_sta.c
++++ b/net/mac80211/ieee80211_sta.c
+@@ -108,15 +108,11 @@ struct ieee802_11_elems {
+ 	u8 wmm_param_len;
+ };
+ 
+-typedef enum { ParseOK = 0, ParseUnknown = 1, ParseFailed = -1 } ParseRes;
+-
+-
+-static ParseRes ieee802_11_parse_elems(u8 *start, size_t len,
+-				       struct ieee802_11_elems *elems)
++static void ieee802_11_parse_elems(u8 *start, size_t len,
++				   struct ieee802_11_elems *elems)
+ {
+ 	size_t left = len;
+ 	u8 *pos = start;
+-	int unknown = 0;
+ 
+ 	memset(elems, 0, sizeof(*elems));
+ 
+@@ -127,15 +123,8 @@ static ParseRes ieee802_11_parse_elems(u
+ 		elen = *pos++;
+ 		left -= 2;
+ 
+-		if (elen > left) {
+-#if 0
+-			if (net_ratelimit())
+-				printk(KERN_DEBUG "IEEE 802.11 element parse "
+-				       "failed (id=%d elen=%d left=%d)\n",
+-				       id, elen, left);
+-#endif
+-			return ParseFailed;
+-		}
++		if (elen > left)
++			return;
+ 
+ 		switch (id) {
+ 		case WLAN_EID_SSID:
+@@ -202,28 +191,15 @@ static ParseRes ieee802_11_parse_elems(u
+ 			elems->ext_supp_rates_len = elen;
+ 			break;
+ 		default:
+-#if 0
+-			printk(KERN_DEBUG "IEEE 802.11 element parse ignored "
+-				      "unknown element (id=%d elen=%d)\n",
+-				      id, elen);
+-#endif
+-			unknown++;
+ 			break;
+ 		}
+ 
+ 		left -= elen;
+ 		pos += elen;
+ 	}
+-
+-	/* Do not trigger error if left == 1 as Apple Airport base stations
+-	 * send AssocResps that are one spurious byte too long. */
+-
+-	return unknown ? ParseUnknown : ParseOK;
+ }
+ 
+ 
+-
+-
+ static int ecw2cw(int ecw)
+ {
+ 	int cw = 1;
+@@ -907,12 +883,7 @@ static void ieee80211_auth_challenge(str
+ 
+ 	printk(KERN_DEBUG "%s: replying to auth challenge\n", dev->name);
+ 	pos = mgmt->u.auth.variable;
+-	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+-	    == ParseFailed) {
+-		printk(KERN_DEBUG "%s: failed to parse Auth(challenge)\n",
+-		       dev->name);
+-		return;
+-	}
++	ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems);
+ 	if (!elems.challenge) {
+ 		printk(KERN_DEBUG "%s: no challenge IE in shared key auth "
+ 		       "frame\n", dev->name);
+@@ -1200,12 +1171,7 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	aid &= ~(BIT(15) | BIT(14));
+ 
+ 	pos = mgmt->u.assoc_resp.variable;
+-	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+-	    == ParseFailed) {
+-		printk(KERN_DEBUG "%s: failed to parse AssocResp\n",
+-		       dev->name);
+-		return;
+-	}
++	ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems);
+ 
+ 	if (!elems.supp_rates) {
+ 		printk(KERN_DEBUG "%s: no SuppRates element in AssocResp\n",
+@@ -1434,7 +1400,7 @@ static void ieee80211_rx_bss_info(struct
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee802_11_elems elems;
+ 	size_t baselen;
+-	int channel, invalid = 0, clen;
++	int channel, clen;
+ 	struct ieee80211_sta_bss *bss;
+ 	struct sta_info *sta;
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+@@ -1478,9 +1444,7 @@ static void ieee80211_rx_bss_info(struct
+ #endif /* CONFIG_MAC80211_IBSS_DEBUG */
+ 	}
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen,
+-				   &elems) == ParseFailed)
+-		invalid = 1;
++	ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen, &elems);
+ 
+ 	if (sdata->type == IEEE80211_IF_TYPE_IBSS && elems.supp_rates &&
+ 	    memcmp(mgmt->bssid, sdata->u.sta.bssid, ETH_ALEN) == 0 &&
+@@ -1699,9 +1663,7 @@ static void ieee80211_rx_mgmt_beacon(str
+ 	if (baselen > len)
+ 		return;
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen,
+-				   &elems) == ParseFailed)
+-		return;
++	ieee802_11_parse_elems(mgmt->u.beacon.variable, len - baselen, &elems);
+ 
+ 	if (elems.erp_info && elems.erp_info_len >= 1)
+ 		ieee80211_handle_erp_ie(dev, elems.erp_info[0]);
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:34 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Fri, 26 Oct 2007 17:04:34 -0400
+Subject: mac80211: only honor IW_SCAN_THIS_ESSID in STA, IBSS, and AP modes
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326821301-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1901
+Lines: 66
+
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch d114f399b4da6fa7f9da3bbf1fb841370c11e788 in mainline.
+
+The previous IW_SCAN_THIS_ESSID patch left a hole allowing scan
+requests on interfaces in inappropriate modes.
+
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_ioctl.c |   37 +++++++++++++++++++------------------
+ 1 file changed, 19 insertions(+), 18 deletions(-)
+
+--- a/net/mac80211/ieee80211_ioctl.c
++++ b/net/mac80211/ieee80211_ioctl.c
+@@ -698,29 +698,30 @@ static int ieee80211_ioctl_siwscan(struc
+ 	if (!netif_running(dev))
+ 		return -ENETDOWN;
+ 
++	switch (sdata->type) {
++	case IEEE80211_IF_TYPE_STA:
++	case IEEE80211_IF_TYPE_IBSS:
++		if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
++			ssid = sdata->u.sta.ssid;
++			ssid_len = sdata->u.sta.ssid_len;
++		}
++		break;
++	case IEEE80211_IF_TYPE_AP:
++		if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
++			ssid = sdata->u.ap.ssid;
++			ssid_len = sdata->u.ap.ssid_len;
++		}
++		break;
++	default:
++		return -EOPNOTSUPP;
++	}
++
++	/* if SSID was specified explicitly then use that */
+ 	if (wrqu->data.length == sizeof(struct iw_scan_req) &&
+ 	    wrqu->data.flags & IW_SCAN_THIS_ESSID) {
+ 		req = (struct iw_scan_req *)extra;
+ 		ssid = req->essid;
+ 		ssid_len = req->essid_len;
+-	} else {
+-		switch (sdata->type) {
+-		case IEEE80211_IF_TYPE_STA:
+-		case IEEE80211_IF_TYPE_IBSS:
+-			if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
+-				ssid = sdata->u.sta.ssid;
+-				ssid_len = sdata->u.sta.ssid_len;
+-			}
+-			break;
+-		case IEEE80211_IF_TYPE_AP:
+-			if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
+-				ssid = sdata->u.ap.ssid;
+-				ssid_len = sdata->u.ap.ssid_len;
+-			}
+-			break;
+-		default:
+-			return -EOPNOTSUPP;
+-		}
+ 	}
+ 
+ 	return ieee80211_sta_req_scan(dev, ssid, ssid_len);
+From stable-bounces@linux.kernel.org Fri Oct 26 14:08:18 2007
+From: Bill Moss <bmoss@clemson.edu>
+Date: Fri, 26 Oct 2007 17:04:33 -0400
+Subject: mac80211: honor IW_SCAN_THIS_ESSID in siwscan ioctl
+To: stable@kernel.org
+Cc: Abhijeet Kolekar <abhijeet.kolekar@intel.com>, linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>, Bill Moss <bmoss@clemson.edu>
+Message-ID: <11934326823646-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 2285
+Lines: 76
+
+
+From: Bill Moss <bmoss@clemson.edu>
+
+patch 107acb23ba763197d390ae9ffd347f3e2a524d39 in mainline.
+
+This patch fixes the problem of associating with wpa_secured hidden
+AP.  Please try out.
+
+The original author of this patch is Bill Moss <bmoss@clemson.edu>
+
+Signed-off-by: Abhijeet Kolekar <abhijeet.kolekar@intel.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_ioctl.c |   40 ++++++++++++++++++++++++----------------
+ 1 file changed, 24 insertions(+), 16 deletions(-)
+
+--- a/net/mac80211/ieee80211_ioctl.c
++++ b/net/mac80211/ieee80211_ioctl.c
+@@ -687,32 +687,40 @@ static int ieee80211_ioctl_giwap(struct 
+ 
+ static int ieee80211_ioctl_siwscan(struct net_device *dev,
+ 				   struct iw_request_info *info,
+-				   struct iw_point *data, char *extra)
++				   union iwreq_data *wrqu, char *extra)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
++	struct iw_scan_req *req = NULL;
+ 	u8 *ssid = NULL;
+ 	size_t ssid_len = 0;
+ 
+ 	if (!netif_running(dev))
+ 		return -ENETDOWN;
+ 
+-	switch (sdata->type) {
+-	case IEEE80211_IF_TYPE_STA:
+-	case IEEE80211_IF_TYPE_IBSS:
+-		if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
+-			ssid = sdata->u.sta.ssid;
+-			ssid_len = sdata->u.sta.ssid_len;
+-		}
+-		break;
+-	case IEEE80211_IF_TYPE_AP:
+-		if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
+-			ssid = sdata->u.ap.ssid;
+-			ssid_len = sdata->u.ap.ssid_len;
++	if (wrqu->data.length == sizeof(struct iw_scan_req) &&
++	    wrqu->data.flags & IW_SCAN_THIS_ESSID) {
++		req = (struct iw_scan_req *)extra;
++		ssid = req->essid;
++		ssid_len = req->essid_len;
++	} else {
++		switch (sdata->type) {
++		case IEEE80211_IF_TYPE_STA:
++		case IEEE80211_IF_TYPE_IBSS:
++			if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
++				ssid = sdata->u.sta.ssid;
++				ssid_len = sdata->u.sta.ssid_len;
++			}
++			break;
++		case IEEE80211_IF_TYPE_AP:
++			if (local->scan_flags & IEEE80211_SCAN_MATCH_SSID) {
++				ssid = sdata->u.ap.ssid;
++				ssid_len = sdata->u.ap.ssid_len;
++			}
++			break;
++		default:
++			return -EOPNOTSUPP;
+ 		}
+-		break;
+-	default:
+-		return -EOPNOTSUPP;
+ 	}
+ 
+ 	return ieee80211_sta_req_scan(dev, ssid, ssid_len);
+From stable-bounces@linux.kernel.org Fri Oct 26 14:06:06 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Fri, 26 Oct 2007 17:04:32 -0400
+Subject: mac80211: store SSID in sta_bss_list
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326813245-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 7039
+Lines: 188
+
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch cffdd30d20d163343b1c6de25bcb0cc978a1ebf9 in mainline.
+
+Some AP equipment "in the wild" services multiple SSIDs using the
+same BSSID.  This patch changes the key of sta_bss_list to include
+the SSID as well as the BSSID and the channel so as to prevent one
+SSID from eclipsing another SSID with the same BSSID.
+
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_sta.c |   54 ++++++++++++++++++++++++++-----------------
+ 1 file changed, 33 insertions(+), 21 deletions(-)
+
+--- a/net/mac80211/ieee80211_sta.c
++++ b/net/mac80211/ieee80211_sta.c
+@@ -12,7 +12,6 @@
+  */
+ 
+ /* TODO:
+- * BSS table: use <BSSID,SSID> as the key to support multi-SSID APs
+  * order BSS list by RSSI(?) ("quality of AP")
+  * scan result table filtering (by capability (privacy, IBSS/BSS, WPA/RSN IE,
+  *    SSID)
+@@ -61,7 +60,8 @@
+ static void ieee80211_send_probe_req(struct net_device *dev, u8 *dst,
+ 				     u8 *ssid, size_t ssid_len);
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel);
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len);
+ static void ieee80211_rx_bss_put(struct net_device *dev,
+ 				 struct ieee80211_sta_bss *bss);
+ static int ieee80211_sta_find_ibss(struct net_device *dev,
+@@ -403,7 +403,8 @@ static void ieee80211_set_associated(str
+ 			return;
+ 
+ 		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
+-					   local->hw.conf.channel);
++					   local->hw.conf.channel,
++					   ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			if (bss->has_erp_value)
+ 				ieee80211_handle_erp_ie(dev, bss->erp_value);
+@@ -545,7 +546,8 @@ static void ieee80211_send_assoc(struct 
+ 		capab |= WLAN_CAPABILITY_SHORT_SLOT_TIME |
+ 			WLAN_CAPABILITY_SHORT_PREAMBLE;
+ 	}
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel,
++				   ifsta->ssid, ifsta->ssid_len);
+ 	if (bss) {
+ 		if (bss->capability & WLAN_CAPABILITY_PRIVACY)
+ 			capab |= WLAN_CAPABILITY_PRIVACY;
+@@ -705,7 +707,8 @@ static int ieee80211_privacy_mismatch(st
+ 	    ifsta->key_mgmt != IEEE80211_KEY_MGMT_NONE)
+ 		return 0;
+ 
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel,
++				   ifsta->ssid, ifsta->ssid_len);
+ 	if (!bss)
+ 		return 0;
+ 
+@@ -1215,7 +1218,8 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	if (elems.erp_info && elems.erp_info_len >= 1) {
+ 		struct ieee80211_sta_bss *bss
+ 			= ieee80211_rx_bss_get(dev, ifsta->bssid,
+-					       local->hw.conf.channel);
++					       local->hw.conf.channel,
++					       ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			bss->erp_value = elems.erp_info[0];
+ 			bss->has_erp_value = 1;
+@@ -1246,7 +1250,8 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 			return;
+ 		}
+ 		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
+-					   local->hw.conf.channel);
++					   local->hw.conf.channel,
++					   ifsta->ssid, ifsta->ssid_len);
+ 		if (bss) {
+ 			sta->last_rssi = bss->rssi;
+ 			sta->last_signal = bss->signal;
+@@ -1327,7 +1332,8 @@ static void __ieee80211_rx_bss_hash_del(
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid, int channel)
++ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -1339,6 +1345,10 @@ ieee80211_rx_bss_add(struct net_device *
+ 	atomic_inc(&bss->users);
+ 	memcpy(bss->bssid, bssid, ETH_ALEN);
+ 	bss->channel = channel;
++	if (ssid && ssid_len <= IEEE80211_MAX_SSID_LEN) {
++		memcpy(bss->ssid, ssid, ssid_len);
++		bss->ssid_len = ssid_len;
++	}
+ 
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	/* TODO: order by RSSI? */
+@@ -1350,7 +1360,8 @@ ieee80211_rx_bss_add(struct net_device *
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel)
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel,
++		     u8 *ssid, u8 ssid_len)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -1358,8 +1369,10 @@ ieee80211_rx_bss_get(struct net_device *
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	bss = local->sta_bss_hash[STA_HASH(bssid)];
+ 	while (bss) {
+-		if (memcmp(bss->bssid, bssid, ETH_ALEN) == 0 &&
+-		    bss->channel == channel) {
++		if (!memcmp(bss->bssid, bssid, ETH_ALEN) &&
++		    bss->channel == channel &&
++		    bss->ssid_len == ssid_len &&
++		    (ssid_len == 0 || !memcmp(bss->ssid, ssid, ssid_len))) {
+ 			atomic_inc(&bss->users);
+ 			break;
+ 		}
+@@ -1527,9 +1540,11 @@ static void ieee80211_rx_bss_info(struct
+ 	else
+ 		channel = rx_status->channel;
+ 
+-	bss = ieee80211_rx_bss_get(dev, mgmt->bssid, channel);
++	bss = ieee80211_rx_bss_get(dev, mgmt->bssid, channel,
++				   elems.ssid, elems.ssid_len);
+ 	if (!bss) {
+-		bss = ieee80211_rx_bss_add(dev, mgmt->bssid, channel);
++		bss = ieee80211_rx_bss_add(dev, mgmt->bssid, channel,
++					   elems.ssid, elems.ssid_len);
+ 		if (!bss)
+ 			return;
+ 	} else {
+@@ -1555,10 +1570,6 @@ static void ieee80211_rx_bss_info(struct
+ 
+ 	bss->beacon_int = le16_to_cpu(mgmt->u.beacon.beacon_int);
+ 	bss->capability = le16_to_cpu(mgmt->u.beacon.capab_info);
+-	if (elems.ssid && elems.ssid_len <= IEEE80211_MAX_SSID_LEN) {
+-		memcpy(bss->ssid, elems.ssid, elems.ssid_len);
+-		bss->ssid_len = elems.ssid_len;
+-	}
+ 
+ 	bss->supp_rates_len = 0;
+ 	if (elems.supp_rates) {
+@@ -2339,7 +2350,7 @@ static int ieee80211_sta_create_ibss(str
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+-	struct ieee80211_sub_if_data *sdata;
++	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_hw_mode *mode;
+ 	u8 bssid[ETH_ALEN], *pos;
+ 	int i;
+@@ -2361,11 +2372,11 @@ static int ieee80211_sta_create_ibss(str
+ 	printk(KERN_DEBUG "%s: Creating new IBSS network, BSSID " MAC_FMT "\n",
+ 	       dev->name, MAC_ARG(bssid));
+ 
+-	bss = ieee80211_rx_bss_add(dev, bssid, local->hw.conf.channel);
++	bss = ieee80211_rx_bss_add(dev, bssid, local->hw.conf.channel,
++				   sdata->u.sta.ssid, sdata->u.sta.ssid_len);
+ 	if (!bss)
+ 		return -ENOMEM;
+ 
+-	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	mode = local->oper_hw_mode;
+ 
+ 	if (local->hw.conf.beacon_int == 0)
+@@ -2431,7 +2442,8 @@ static int ieee80211_sta_find_ibss(struc
+ 	       MAC_FMT "\n", MAC_ARG(bssid), MAC_ARG(ifsta->bssid));
+ #endif /* CONFIG_MAC80211_IBSS_DEBUG */
+ 	if (found && memcmp(ifsta->bssid, bssid, ETH_ALEN) != 0 &&
+-	    (bss = ieee80211_rx_bss_get(dev, bssid, local->hw.conf.channel))) {
++	    (bss = ieee80211_rx_bss_get(dev, bssid, local->hw.conf.channel,
++					ifsta->ssid, ifsta->ssid_len))) {
+ 		printk(KERN_DEBUG "%s: Selected IBSS BSSID " MAC_FMT
+ 		       " based on configured SSID\n",
+ 		       dev->name, MAC_ARG(bssid));
+From stable-bounces@linux.kernel.org Fri Oct 26 14:08:07 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Fri, 26 Oct 2007 17:04:31 -0400
+Subject: mac80211: store channel info in sta_bss_list
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326812028-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 6454
+Lines: 172
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch 65c107ab3befc37b21d1c970a6159525bc0121b8 in mainline.
+
+Some AP equipment "in the wild" uses the same BSSID on multiple channels
+(particularly "a" vs. "b/g").  This patch changes the key of sta_bss_list
+to include both the BSSID and the channel so as to prevent a BSSID on
+one channel from eclipsing the same BSSID on another channel.
+
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_sta.c |   35 ++++++++++++++++++++---------------
+ 1 file changed, 20 insertions(+), 15 deletions(-)
+
+--- a/net/mac80211/ieee80211_sta.c
++++ b/net/mac80211/ieee80211_sta.c
+@@ -61,7 +61,7 @@
+ static void ieee80211_send_probe_req(struct net_device *dev, u8 *dst,
+ 				     u8 *ssid, size_t ssid_len);
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid);
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel);
+ static void ieee80211_rx_bss_put(struct net_device *dev,
+ 				 struct ieee80211_sta_bss *bss);
+ static int ieee80211_sta_find_ibss(struct net_device *dev,
+@@ -387,6 +387,7 @@ static void ieee80211_set_associated(str
+ 				     struct ieee80211_if_sta *ifsta, int assoc)
+ {
+ 	union iwreq_data wrqu;
++	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 
+ 	if (ifsta->associated == assoc)
+@@ -401,7 +402,8 @@ static void ieee80211_set_associated(str
+ 		if (sdata->type != IEEE80211_IF_TYPE_STA)
+ 			return;
+ 
+-		bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
++					   local->hw.conf.channel);
+ 		if (bss) {
+ 			if (bss->has_erp_value)
+ 				ieee80211_handle_erp_ie(dev, bss->erp_value);
+@@ -543,7 +545,7 @@ static void ieee80211_send_assoc(struct 
+ 		capab |= WLAN_CAPABILITY_SHORT_SLOT_TIME |
+ 			WLAN_CAPABILITY_SHORT_PREAMBLE;
+ 	}
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel);
+ 	if (bss) {
+ 		if (bss->capability & WLAN_CAPABILITY_PRIVACY)
+ 			capab |= WLAN_CAPABILITY_PRIVACY;
+@@ -695,6 +697,7 @@ static void ieee80211_send_disassoc(stru
+ static int ieee80211_privacy_mismatch(struct net_device *dev,
+ 				      struct ieee80211_if_sta *ifsta)
+ {
++	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+ 	int res = 0;
+ 
+@@ -702,7 +705,7 @@ static int ieee80211_privacy_mismatch(st
+ 	    ifsta->key_mgmt != IEEE80211_KEY_MGMT_NONE)
+ 		return 0;
+ 
+-	bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++	bss = ieee80211_rx_bss_get(dev, ifsta->bssid, local->hw.conf.channel);
+ 	if (!bss)
+ 		return 0;
+ 
+@@ -1211,7 +1214,8 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	 * update our stored copy */
+ 	if (elems.erp_info && elems.erp_info_len >= 1) {
+ 		struct ieee80211_sta_bss *bss
+-			= ieee80211_rx_bss_get(dev, ifsta->bssid);
++			= ieee80211_rx_bss_get(dev, ifsta->bssid,
++					       local->hw.conf.channel);
+ 		if (bss) {
+ 			bss->erp_value = elems.erp_info[0];
+ 			bss->has_erp_value = 1;
+@@ -1241,7 +1245,8 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 			       " AP\n", dev->name);
+ 			return;
+ 		}
+-		bss = ieee80211_rx_bss_get(dev, ifsta->bssid);
++		bss = ieee80211_rx_bss_get(dev, ifsta->bssid,
++					   local->hw.conf.channel);
+ 		if (bss) {
+ 			sta->last_rssi = bss->rssi;
+ 			sta->last_signal = bss->signal;
+@@ -1322,7 +1327,7 @@ static void __ieee80211_rx_bss_hash_del(
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid)
++ieee80211_rx_bss_add(struct net_device *dev, u8 *bssid, int channel)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -1333,6 +1338,7 @@ ieee80211_rx_bss_add(struct net_device *
+ 	atomic_inc(&bss->users);
+ 	atomic_inc(&bss->users);
+ 	memcpy(bss->bssid, bssid, ETH_ALEN);
++	bss->channel = channel;
+ 
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	/* TODO: order by RSSI? */
+@@ -1344,7 +1350,7 @@ ieee80211_rx_bss_add(struct net_device *
+ 
+ 
+ static struct ieee80211_sta_bss *
+-ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid)
++ieee80211_rx_bss_get(struct net_device *dev, u8 *bssid, int channel)
+ {
+ 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+ 	struct ieee80211_sta_bss *bss;
+@@ -1352,7 +1358,8 @@ ieee80211_rx_bss_get(struct net_device *
+ 	spin_lock_bh(&local->sta_bss_lock);
+ 	bss = local->sta_bss_hash[STA_HASH(bssid)];
+ 	while (bss) {
+-		if (memcmp(bss->bssid, bssid, ETH_ALEN) == 0) {
++		if (memcmp(bss->bssid, bssid, ETH_ALEN) == 0 &&
++		    bss->channel == channel) {
+ 			atomic_inc(&bss->users);
+ 			break;
+ 		}
+@@ -1520,9 +1527,9 @@ static void ieee80211_rx_bss_info(struct
+ 	else
+ 		channel = rx_status->channel;
+ 
+-	bss = ieee80211_rx_bss_get(dev, mgmt->bssid);
++	bss = ieee80211_rx_bss_get(dev, mgmt->bssid, channel);
+ 	if (!bss) {
+-		bss = ieee80211_rx_bss_add(dev, mgmt->bssid);
++		bss = ieee80211_rx_bss_add(dev, mgmt->bssid, channel);
+ 		if (!bss)
+ 			return;
+ 	} else {
+@@ -1622,7 +1629,6 @@ static void ieee80211_rx_bss_info(struct
+ 
+ 
+ 	bss->hw_mode = rx_status->phymode;
+-	bss->channel = channel;
+ 	bss->freq = rx_status->freq;
+ 	if (channel != rx_status->channel &&
+ 	    (bss->hw_mode == MODE_IEEE80211G ||
+@@ -2355,7 +2361,7 @@ static int ieee80211_sta_create_ibss(str
+ 	printk(KERN_DEBUG "%s: Creating new IBSS network, BSSID " MAC_FMT "\n",
+ 	       dev->name, MAC_ARG(bssid));
+ 
+-	bss = ieee80211_rx_bss_add(dev, bssid);
++	bss = ieee80211_rx_bss_add(dev, bssid, local->hw.conf.channel);
+ 	if (!bss)
+ 		return -ENOMEM;
+ 
+@@ -2366,7 +2372,6 @@ static int ieee80211_sta_create_ibss(str
+ 		local->hw.conf.beacon_int = 100;
+ 	bss->beacon_int = local->hw.conf.beacon_int;
+ 	bss->hw_mode = local->hw.conf.phymode;
+-	bss->channel = local->hw.conf.channel;
+ 	bss->freq = local->hw.conf.freq;
+ 	bss->last_update = jiffies;
+ 	bss->capability = WLAN_CAPABILITY_IBSS;
+@@ -2426,7 +2431,7 @@ static int ieee80211_sta_find_ibss(struc
+ 	       MAC_FMT "\n", MAC_ARG(bssid), MAC_ARG(ifsta->bssid));
+ #endif /* CONFIG_MAC80211_IBSS_DEBUG */
+ 	if (found && memcmp(ifsta->bssid, bssid, ETH_ALEN) != 0 &&
+-	    (bss = ieee80211_rx_bss_get(dev, bssid))) {
++	    (bss = ieee80211_rx_bss_get(dev, bssid, local->hw.conf.channel))) {
+ 		printk(KERN_DEBUG "%s: Selected IBSS BSSID " MAC_FMT
+ 		       " based on configured SSID\n",
+ 		       dev->name, MAC_ARG(bssid));
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:12 2007
+From: Johannes Berg <johannes@sipsolutions.net>
+Date: Fri, 26 Oct 2007 17:04:30 -0400
+Subject: mac80211: reorder association debug output
+To: stable@kernel.org
+Cc: Johannes Berg <johannes@sipsolutions.net>, linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <1193432681145-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1783
+Lines: 47
+
+
+From: Johannes Berg <johannes@sipsolutions.net>
+
+patch 1dd84aa213d0f98a91a1ec9be2f750f5f48e75a0 in mainline.
+
+There's no reason to warn about an invalid AID field when the
+association was denied.
+
+Signed-off-by: Johannes Berg <johannes@sipsolutions.net>
+Acked-by: Michael Wu <flamingice@sourmilk.net>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211_sta.c |   11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+--- a/net/mac80211/ieee80211_sta.c
++++ b/net/mac80211/ieee80211_sta.c
+@@ -1174,15 +1174,11 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 	capab_info = le16_to_cpu(mgmt->u.assoc_resp.capab_info);
+ 	status_code = le16_to_cpu(mgmt->u.assoc_resp.status_code);
+ 	aid = le16_to_cpu(mgmt->u.assoc_resp.aid);
+-	if ((aid & (BIT(15) | BIT(14))) != (BIT(15) | BIT(14)))
+-		printk(KERN_DEBUG "%s: invalid aid value %d; bits 15:14 not "
+-		       "set\n", dev->name, aid);
+-	aid &= ~(BIT(15) | BIT(14));
+ 
+ 	printk(KERN_DEBUG "%s: RX %sssocResp from " MAC_FMT " (capab=0x%x "
+ 	       "status=%d aid=%d)\n",
+ 	       dev->name, reassoc ? "Rea" : "A", MAC_ARG(mgmt->sa),
+-	       capab_info, status_code, aid);
++	       capab_info, status_code, aid & ~(BIT(15) | BIT(14)));
+ 
+ 	if (status_code != WLAN_STATUS_SUCCESS) {
+ 		printk(KERN_DEBUG "%s: AP denied association (code=%d)\n",
+@@ -1192,6 +1188,11 @@ static void ieee80211_rx_mgmt_assoc_resp
+ 		return;
+ 	}
+ 
++	if ((aid & (BIT(15) | BIT(14))) != (BIT(15) | BIT(14)))
++		printk(KERN_DEBUG "%s: invalid aid value %d; bits 15:14 not "
++		       "set\n", dev->name, aid);
++	aid &= ~(BIT(15) | BIT(14));
++
+ 	pos = mgmt->u.assoc_resp.variable;
+ 	if (ieee802_11_parse_elems(pos, len - (pos - (u8 *) mgmt), &elems)
+ 	    == ParseFailed) {
+From stable-bounces@linux.kernel.org Fri Oct 26 14:06:50 2007
+From: Johannes Berg <johannes@sipsolutions.net>
+Date: Fri, 26 Oct 2007 17:04:29 -0400
+Subject: ieee80211: fix TKIP QoS bug
+To: stable@kernel.org
+Cc: Johannes Berg <johannes@sipsolutions.net>, linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326813508-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 960
+Lines: 26
+
+
+From: Johannes Berg <johannes@sipsolutions.net>
+
+patch e797aa1b7da6bfcb2e19a10ae5ead9aa7aea732b in mainline.
+
+The commit 65b6a277 titled "ieee80211: Fix header->qos_ctl endian issue"
+*introduced* an endianness bug. Partially revert it.
+
+Signed-off-by: Johannes Berg <johannes@sipsolutions.net>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/ieee80211/ieee80211_crypt_tkip.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/net/ieee80211/ieee80211_crypt_tkip.c
++++ b/net/ieee80211/ieee80211_crypt_tkip.c
+@@ -584,7 +584,7 @@ static void michael_mic_hdr(struct sk_bu
+ 	if (stype & IEEE80211_STYPE_QOS_DATA) {
+ 		const struct ieee80211_hdr_3addrqos *qoshdr =
+ 			(struct ieee80211_hdr_3addrqos *)skb->data;
+-		hdr[12] = qoshdr->qos_ctl & cpu_to_le16(IEEE80211_QCTL_TID);
++		hdr[12] = le16_to_cpu(qoshdr->qos_ctl) & IEEE80211_QCTL_TID;
+ 	} else
+ 		hdr[12] = 0;		/* priority */
+ 
+From stable-bounces@linux.kernel.org Fri Oct 26 03:36:47 2007
+From: Johannes Berg <johannes@sipsolutions.net>
+Date: Thu, 25 Oct 2007 22:16:23 +0200
+Subject: softmac: fix wext MLME request reason code endianness
+To: "John W. Linville" <linville@tuxdriver.com>
+Cc: linux-wireless <linux-wireless@vger.kernel.org>, stable <stable@kernel.org>
+Message-ID: <1193343383.4406.30.camel@johannes.berg>
+Status: O
+Content-Length: 1090
+Lines: 28
+
+From: Johannes Berg <johannes@sipsolutions.net>
+
+patch 94e10bfb8a7372df3ef2759c9ec2a37de2f24aca in mainline.
+
+The MLME request reason code is host-endian and our passing
+it to the low level functions is host-endian as well since
+they do the swapping. I noticed that the reason code 768 was
+sent (0x300) rather than 3 when wpa_supplicant terminates.
+This removes the superfluous cpu_to_le16() call.
+
+Signed-off-by: Johannes Berg <johannes@sipsolutions.net>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/ieee80211/softmac/ieee80211softmac_wx.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/net/ieee80211/softmac/ieee80211softmac_wx.c
++++ b/net/ieee80211/softmac/ieee80211softmac_wx.c
+@@ -469,7 +469,7 @@ ieee80211softmac_wx_set_mlme(struct net_
+ {
+ 	struct ieee80211softmac_device *mac = ieee80211_priv(dev);
+ 	struct iw_mlme *mlme = (struct iw_mlme *)extra;
+-	u16 reason = cpu_to_le16(mlme->reason_code);
++	u16 reason = mlme->reason_code;
+ 	struct ieee80211softmac_network *net;
+ 	int err = -EINVAL;
+ 
+From linville@tuxdriver.com  Wed Oct 31 07:40:46 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Tue,  9 Oct 2007 22:46:33 -0400
+Subject: Add get_unaligned to ieee80211_get_radiotap_len
+To: stable@kernel.org
+Cc: warmcat <andy@warmcat.com>, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11919843974140-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 842
+Lines: 27
+
+
+From: Andy Green <andy@warmcat.com>
+
+patch dfe6e81deaa79c85086c0cc8d85b229e444ab97f in mainline.
+
+ieee80211_get_radiotap_len() tries to dereference radiotap length without
+taking care that it is completely unaligned and get_unaligned()
+is required.
+
+Signed-off-by: Andy Green <andy@warmcat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/net/mac80211/ieee80211.c
++++ b/net/mac80211/ieee80211.c
+@@ -350,7 +350,7 @@ static int ieee80211_get_radiotap_len(st
+ 	struct ieee80211_radiotap_header *hdr =
+ 		(struct ieee80211_radiotap_header *) skb->data;
+ 
+-	return le16_to_cpu(hdr->it_len);
++	return le16_to_cpu(get_unaligned(&hdr->it_len));
+ }
+ 
+ #ifdef CONFIG_MAC80211_LOWTX_FRAME_DUMP
+From linville@tuxdriver.com  Wed Oct 31 09:02:49 2007
+From: Andy Green <andy@warmcat.com>
+Date: Tue,  9 Oct 2007 22:46:34 -0400
+Subject: mac80211: Improve sanity checks on injected packets
+To: stable@kernel.org
+Cc: warmcat <andy@warmcat.com>, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11919843971189-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 3090
+Lines: 94
+
+From: Andy Green <andy@warmcat.com>
+
+patch 9b8a74e3482f9fc077a88c13fa0ceca8feb0b772 in mainline.
+
+Michael Wu noticed that the skb length checking is not taken care of enough when
+a packet is presented on the Monitor interface for injection.
+
+This patch improves the sanity checking and removes fake offsets placed
+into the skb network and transport header.
+
+Signed-off-by: Andy Green <andy@warmcat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211.c |   48 +++++++++++++++++++++++++++--------------------
+ 1 file changed, 28 insertions(+), 20 deletions(-)
+
+--- a/net/mac80211/ieee80211.c
++++ b/net/mac80211/ieee80211.c
+@@ -1680,46 +1680,54 @@ int ieee80211_monitor_start_xmit(struct 
+ 	struct ieee80211_tx_packet_data *pkt_data;
+ 	struct ieee80211_radiotap_header *prthdr =
+ 		(struct ieee80211_radiotap_header *)skb->data;
+-	u16 len;
++	u16 len_rthdr;
+ 
+-	/*
+-	 * there must be a radiotap header at the
+-	 * start in this case
+-	 */
+-	if (unlikely(prthdr->it_version)) {
+-		/* only version 0 is supported */
+-		dev_kfree_skb(skb);
+-		return NETDEV_TX_OK;
+-	}
++	/* check for not even having the fixed radiotap header part */
++	if (unlikely(skb->len < sizeof(struct ieee80211_radiotap_header)))
++		goto fail; /* too short to be possibly valid */
++
++	/* is it a header version we can trust to find length from? */
++	if (unlikely(prthdr->it_version))
++		goto fail; /* only version 0 is supported */
++
++	/* then there must be a radiotap header with a length we can use */
++	len_rthdr = ieee80211_get_radiotap_len(skb);
++
++	/* does the skb contain enough to deliver on the alleged length? */
++	if (unlikely(skb->len < len_rthdr))
++		goto fail; /* skb too short for claimed rt header extent */
+ 
+ 	skb->dev = local->mdev;
+ 
+ 	pkt_data = (struct ieee80211_tx_packet_data *)skb->cb;
+ 	memset(pkt_data, 0, sizeof(*pkt_data));
++	/* needed because we set skb device to master */
+ 	pkt_data->ifindex = dev->ifindex;
++
+ 	pkt_data->mgmt_iface = 0;
+ 	pkt_data->do_not_encrypt = 1;
+ 
+-	/* above needed because we set skb device to master */
+-
+ 	/*
+ 	 * fix up the pointers accounting for the radiotap
+ 	 * header still being in there.  We are being given
+ 	 * a precooked IEEE80211 header so no need for
+ 	 * normal processing
+ 	 */
+-	len = le16_to_cpu(get_unaligned(&prthdr->it_len));
+-	skb_set_mac_header(skb, len);
+-	skb_set_network_header(skb, len + sizeof(struct ieee80211_hdr));
+-	skb_set_transport_header(skb, len + sizeof(struct ieee80211_hdr));
+-
++	skb_set_mac_header(skb, len_rthdr);
+ 	/*
+-	 * pass the radiotap header up to
+-	 * the next stage intact
++	 * these are just fixed to the end of the rt area since we
++	 * don't have any better information and at this point, nobody cares
+ 	 */
+-	dev_queue_xmit(skb);
++	skb_set_network_header(skb, len_rthdr);
++	skb_set_transport_header(skb, len_rthdr);
+ 
++	/* pass the radiotap header up to the next stage intact */
++	dev_queue_xmit(skb);
+ 	return NETDEV_TX_OK;
++
++fail:
++	dev_kfree_skb(skb);
++	return NETDEV_TX_OK; /* meaning, we dealt with the skb */
+ }
+ 
+ 
+From linville@tuxdriver.com  Wed Oct 31 07:42:39 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Tue,  9 Oct 2007 22:46:35 -0400
+Subject: mac80211: filter locally-originated multicast frames
+To: stable@kernel.org
+Cc: "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <1191984397477-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1111
+Lines: 35
+
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch b331615722779b078822988843ddffd4eaec9f83 in mainline.
+
+In STA mode, the AP will echo our traffic.  This includes multicast
+traffic.
+
+Receiving these frames confuses some protocols and applications,
+notably IPv6 Duplicate Address Detection.
+
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Johannes Berg <johannes@sipsolutions.net>
+Acked-by: Michael Wu <flamingice@sourmilk.net>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ net/mac80211/ieee80211.c |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+--- a/net/mac80211/ieee80211.c
++++ b/net/mac80211/ieee80211.c
+@@ -2836,9 +2836,10 @@ ieee80211_rx_h_data(struct ieee80211_txr
+ 		memcpy(dst, hdr->addr1, ETH_ALEN);
+ 		memcpy(src, hdr->addr3, ETH_ALEN);
+ 
+-		if (sdata->type != IEEE80211_IF_TYPE_STA) {
++		if (sdata->type != IEEE80211_IF_TYPE_STA ||
++		    (is_multicast_ether_addr(dst) &&
++		     !compare_ether_addr(src, dev->dev_addr)))
+ 			return TXRX_DROP;
+-		}
+ 		break;
+ 	case 0:
+ 		/* DA SA BSSID */
+From stable-bounces@linux.kernel.org Fri Oct 26 14:06:06 2007
+From: Marc Pignat <marc.pignat@hevs.ch>
+Date: Fri, 26 Oct 2007 17:04:39 -0400
+Subject: zd1211rw, fix oops when ejecting install media
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>, Marc Pignat <marc.pignat@hevs.ch>
+Message-ID: <11934326832747-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1178
+Lines: 38
+
+
+From: Marc Pignat <marc.pignat@hevs.ch>
+
+patch e0579d576cb894a4cf3c5af04fbf38e8c1281738 in mainline.
+
+The disconnect function can dereference the net_device structure when it
+is never allocated. This is the case when ejecting the device installer.
+
+Signed-off-by: Marc Pignat <marc.pignat@hevs.ch>
+Acked-by: Daniel Drake <dsd@gentoo.org>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/zd1211rw/zd_usb.c |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/zd1211rw/zd_usb.c
++++ b/drivers/net/wireless/zd1211rw/zd_usb.c
+@@ -1041,14 +1041,17 @@ error:
+ static void disconnect(struct usb_interface *intf)
+ {
+ 	struct net_device *netdev = zd_intf_to_netdev(intf);
+-	struct zd_mac *mac = zd_netdev_mac(netdev);
+-	struct zd_usb *usb = &mac->chip.usb;
++	struct zd_mac *mac;
++	struct zd_usb *usb;
+ 
+ 	/* Either something really bad happened, or we're just dealing with
+ 	 * a DEVICE_INSTALLER. */
+ 	if (netdev == NULL)
+ 		return;
+ 
++	mac = zd_netdev_mac(netdev);
++	usb = &mac->chip.usb;
++
+ 	dev_dbg_f(zd_usb_dev(usb), "\n");
+ 
+ 	zd_netdev_disconnect(netdev);
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:56 2007
+From: Michael Wu <flamingice@sourmilk.net>
+Date: Fri, 26 Oct 2007 17:04:38 -0400
+Subject: rtl8187: Fix more frag bit checking, rts duration calc
+To: stable@kernel.org
+Cc: Michael Wu <flamingice@sourmilk.net>, linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326831563-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 2388
+Lines: 70
+
+
+From: Michael Wu <flamingice@sourmilk.net>
+
+patch 98798f4875b7149db4eb7d0a126fc6dcd9637821 in mainline.
+
+The wrong pointer is passed to ieee80211_get_morefrag. Fix this.
+
+While we're at it, reorder things so they look better and the rts duration
+calculation is done with the right length.
+
+Thanks to Christoph Hellwig for finding the ieee80211_get_morefrag issue.
+
+Signed-off-by: Michael Wu <flamingice@sourmilk.net>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/rtl8187_dev.c |   31 ++++++++++++++++---------------
+ 1 file changed, 16 insertions(+), 15 deletions(-)
+
+--- a/drivers/net/wireless/rtl8187_dev.c
++++ b/drivers/net/wireless/rtl8187_dev.c
+@@ -78,7 +78,8 @@ static int rtl8187_tx(struct ieee80211_h
+ 	struct rtl8187_tx_hdr *hdr;
+ 	struct rtl8187_tx_info *info;
+ 	struct urb *urb;
+-	u32 tmp;
++	__le16 rts_dur = 0;
++	u32 flags;
+ 
+ 	urb = usb_alloc_urb(0, GFP_ATOMIC);
+ 	if (!urb) {
+@@ -86,24 +87,24 @@ static int rtl8187_tx(struct ieee80211_h
+ 		return 0;
+ 	}
+ 
+-	hdr = (struct rtl8187_tx_hdr *)skb_push(skb, sizeof(*hdr));
+-	tmp = skb->len - sizeof(*hdr);
+-	tmp |= RTL8187_TX_FLAG_NO_ENCRYPT;
+-	tmp |= control->rts_cts_rate << 19;
+-	tmp |= control->tx_rate << 24;
+-	if (ieee80211_get_morefrag((struct ieee80211_hdr *)skb))
+-		tmp |= RTL8187_TX_FLAG_MORE_FRAG;
++	flags = skb->len;
++	flags |= RTL8187_TX_FLAG_NO_ENCRYPT;
++	flags |= control->rts_cts_rate << 19;
++	flags |= control->tx_rate << 24;
++	if (ieee80211_get_morefrag((struct ieee80211_hdr *)skb->data))
++		flags |= RTL8187_TX_FLAG_MORE_FRAG;
+ 	if (control->flags & IEEE80211_TXCTL_USE_RTS_CTS) {
+-		tmp |= RTL8187_TX_FLAG_RTS;
+-		hdr->rts_duration =
+-			ieee80211_rts_duration(dev, skb->len, control);
++		flags |= RTL8187_TX_FLAG_RTS;
++		rts_dur = ieee80211_rts_duration(dev, skb->len, control);
+ 	}
+ 	if (control->flags & IEEE80211_TXCTL_USE_CTS_PROTECT)
+-		tmp |= RTL8187_TX_FLAG_CTS;
+-	hdr->flags = cpu_to_le32(tmp);
++		flags |= RTL8187_TX_FLAG_CTS;
++
++	hdr = (struct rtl8187_tx_hdr *)skb_push(skb, sizeof(*hdr));
++	hdr->flags = cpu_to_le32(flags);
+ 	hdr->len = 0;
+-	tmp = control->retry_limit << 8;
+-	hdr->retry = cpu_to_le32(tmp);
++	hdr->rts_duration = rts_dur;
++	hdr->retry = cpu_to_le32(control->retry_limit << 8);
+ 
+ 	info = (struct rtl8187_tx_info *)skb->cb;
+ 	info->control = kmemdup(control, sizeof(*control), GFP_ATOMIC);
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:23 2007
+From: Dan Williams <dcbw@redhat.com>
+Date: Fri, 26 Oct 2007 17:04:37 -0400
+Subject: ipw2100: send WEXT scan events
+To: stable@kernel.org
+Cc: Dan Williams <dcbw@redhat.com>, linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326831029-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 3517
+Lines: 106
+
+
+From: Dan Williams <dcbw@redhat.com>
+
+patch d20c678a450a25c1c12925f60c1b4cc040acc17d in mainline
+
+ipw2100 wasn't sending WEXT scan events at all on scan completion.  And
+like ipw2200, the driver aggressively auto-scans, requiring
+non-user-requested scan events to be batched together and sent at
+specific intervals instead of many times per seconds.
+
+Signed-off-by: Dan Williams <dcbw@redhat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/ipw2100.c |   39 +++++++++++++++++++++++++++++++++++++++
+ drivers/net/wireless/ipw2100.h |    4 ++++
+ 2 files changed, 43 insertions(+)
+
+--- a/drivers/net/wireless/ipw2100.c
++++ b/drivers/net/wireless/ipw2100.c
+@@ -2102,12 +2102,46 @@ static void isr_indicate_rf_kill(struct 
+ 	queue_delayed_work(priv->workqueue, &priv->rf_kill, round_jiffies(HZ));
+ }
+ 
++static void send_scan_event(void *data)
++{
++	struct ipw2100_priv *priv = data;
++	union iwreq_data wrqu;
++
++	wrqu.data.length = 0;
++	wrqu.data.flags = 0;
++	wireless_send_event(priv->net_dev, SIOCGIWSCAN, &wrqu, NULL);
++}
++
++static void ipw2100_scan_event_later(struct work_struct *work)
++{
++	send_scan_event(container_of(work, struct ipw2100_priv,
++					scan_event_later.work));
++}
++
++static void ipw2100_scan_event_now(struct work_struct *work)
++{
++	send_scan_event(container_of(work, struct ipw2100_priv,
++					scan_event_now));
++}
++
+ static void isr_scan_complete(struct ipw2100_priv *priv, u32 status)
+ {
+ 	IPW_DEBUG_SCAN("scan complete\n");
+ 	/* Age the scan results... */
+ 	priv->ieee->scans++;
+ 	priv->status &= ~STATUS_SCANNING;
++
++	/* Only userspace-requested scan completion events go out immediately */
++	if (!priv->user_requested_scan) {
++		if (!delayed_work_pending(&priv->scan_event_later))
++			queue_delayed_work(priv->workqueue,
++					&priv->scan_event_later,
++					round_jiffies(msecs_to_jiffies(4000)));
++	} else {
++		priv->user_requested_scan = 0;
++		cancel_delayed_work(&priv->scan_event_later);
++		queue_work(priv->workqueue, &priv->scan_event_now);
++	}
+ }
+ 
+ #ifdef CONFIG_IPW2100_DEBUG
+@@ -4376,6 +4410,7 @@ static void ipw2100_kill_workqueue(struc
+ 		cancel_delayed_work(&priv->wx_event_work);
+ 		cancel_delayed_work(&priv->hang_check);
+ 		cancel_delayed_work(&priv->rf_kill);
++		cancel_delayed_work(&priv->scan_event_later);
+ 		destroy_workqueue(priv->workqueue);
+ 		priv->workqueue = NULL;
+ 	}
+@@ -6118,6 +6153,8 @@ static struct net_device *ipw2100_alloc_
+ 	INIT_DELAYED_WORK(&priv->wx_event_work, ipw2100_wx_event_work);
+ 	INIT_DELAYED_WORK(&priv->hang_check, ipw2100_hang_check);
+ 	INIT_DELAYED_WORK(&priv->rf_kill, ipw2100_rf_kill);
++	INIT_WORK(&priv->scan_event_now, ipw2100_scan_event_now);
++	INIT_DELAYED_WORK(&priv->scan_event_later, ipw2100_scan_event_later);
+ 
+ 	tasklet_init(&priv->irq_tasklet, (void (*)(unsigned long))
+ 		     ipw2100_irq_tasklet, (unsigned long)priv);
+@@ -7427,6 +7464,8 @@ static int ipw2100_wx_set_scan(struct ne
+ 	}
+ 
+ 	IPW_DEBUG_WX("Initiating scan...\n");
++
++	priv->user_requested_scan = 1;
+ 	if (ipw2100_set_scan_options(priv) || ipw2100_start_scan(priv)) {
+ 		IPW_DEBUG_WX("Start scan failed.\n");
+ 
+--- a/drivers/net/wireless/ipw2100.h
++++ b/drivers/net/wireless/ipw2100.h
+@@ -588,6 +588,10 @@ struct ipw2100_priv {
+ 	struct delayed_work wx_event_work;
+ 	struct delayed_work hang_check;
+ 	struct delayed_work rf_kill;
++	struct work_struct scan_event_now;
++	struct delayed_work scan_event_later;
++
++	int user_requested_scan;
+ 
+ 	u32 interrupts;
+ 	int tx_interrupts;
+From stable-bounces@linux.kernel.org Fri Oct 26 14:07:23 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Fri, 26 Oct 2007 17:04:36 -0400
+Subject: zd1201: avoid null ptr access of skb->dev
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <11934326821662-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1191
+Lines: 35
+
+
+From: John W. Linville <linville@tuxdriver.com>
+
+patch 3ba72b25211217de195e3f528dd36132b38a205b in mainline.
+
+skb->dev is not set until eth_type_trans is called...
+
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/zd1201.c |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/zd1201.c
++++ b/drivers/net/wireless/zd1201.c
+@@ -327,8 +327,8 @@ static void zd1201_usbrx(struct urb *urb
+ 			memcpy(skb_put(skb, 6), &data[datalen-8], 6);
+ 			memcpy(skb_put(skb, 2), &data[datalen-24], 2);
+ 			memcpy(skb_put(skb, len), data, len);
+-			skb->dev->last_rx = jiffies;
+ 			skb->protocol = eth_type_trans(skb, zd->dev);
++			skb->dev->last_rx = jiffies;
+ 			zd->stats.rx_packets++;
+ 			zd->stats.rx_bytes += skb->len;
+ 			netif_rx(skb);
+@@ -384,8 +384,8 @@ static void zd1201_usbrx(struct urb *urb
+ 			memcpy(skb_put(skb, 2), &data[6], 2);
+ 			memcpy(skb_put(skb, len), data+8, len);
+ 		}
+-		skb->dev->last_rx = jiffies;
+ 		skb->protocol = eth_type_trans(skb, zd->dev);
++		skb->dev->last_rx = jiffies;
+ 		zd->stats.rx_packets++;
+ 		zd->stats.rx_bytes += skb->len;
+ 		netif_rx(skb);
+From linville@tuxdriver.com  Wed Oct 31 07:43:56 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Tue,  9 Oct 2007 22:46:36 -0400
+Subject: libertas: fix endianness breakage
+To: stable@kernel.org
+Cc: Al Viro <viro@zeniv.linux.org.uk>, "John W. Linville" <linville@tuxdriver.com>, Al Viro <viro@ftp.linux.org.uk>
+Message-ID: <11919843971952-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 1039
+Lines: 34
+
+
+From: Al Viro <viro@ftp.linux.org.uk>
+
+patch 5707708111ca6c4e9a1160acffdc98a98d95e462 in mainline.
+
+	wep->keytype[] is u8
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+Signed-off-by: Dan Williams <dcbw@redhat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/libertas/cmd.c |    6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+--- a/drivers/net/wireless/libertas/cmd.c
++++ b/drivers/net/wireless/libertas/cmd.c
+@@ -185,14 +185,12 @@ static int wlan_cmd_802_11_set_wep(wlan_
+ 
+ 			switch (pkey->len) {
+ 			case KEY_LEN_WEP_40:
+-				wep->keytype[i] =
+-					cpu_to_le16(cmd_type_wep_40_bit);
++				wep->keytype[i] = cmd_type_wep_40_bit;
+ 				memmove(&wep->keymaterial[i], pkey->key,
+ 				        pkey->len);
+ 				break;
+ 			case KEY_LEN_WEP_104:
+-				wep->keytype[i] =
+-					cpu_to_le16(cmd_type_wep_104_bit);
++				wep->keytype[i] = cmd_type_wep_104_bit;
+ 				memmove(&wep->keymaterial[i], pkey->key,
+ 				        pkey->len);
+ 				break;
+From linville@tuxdriver.com  Wed Oct 31 07:47:33 2007
+From: "John W. Linville" <linville@tuxdriver.com>
+Date: Tue,  9 Oct 2007 22:46:37 -0400
+Subject: libertas: more endianness breakage
+To: stable@kernel.org
+Cc: Al Viro <viro@zeniv.linux.org.uk>, "John W. Linville" <linville@tuxdriver.com>, Al Viro <viro@ftp.linux.org.uk>
+Message-ID: <11919843974173-git-send-email-linville@tuxdriver.com>
+Status: O
+Content-Length: 2220
+Lines: 55
+
+
+From: Al Viro <viro@ftp.linux.org.uk>
+
+based on patch 8362cd413e8116306fafbaf414f0419db0595142 in mainline.
+
+	domain->header.len is le16 and has just been assigned
+cpu_to_le16(arithmetical expression).  And all fields of adapter->logmsg
+are __le32; not a single 16-bit among them...
+	That's incremental to the previous one
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+Signed-off-by: Dan Williams <dcbw@redhat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/libertas/11d.c  |    2 +-
+ drivers/net/wireless/libertas/wext.c |    8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+--- a/drivers/net/wireless/libertas/11d.c
++++ b/drivers/net/wireless/libertas/11d.c
+@@ -562,7 +562,7 @@ int libertas_cmd_802_11d_domain_info(wla
+ 		       nr_subband * sizeof(struct ieeetypes_subbandset));
+ 
+ 		cmd->size = cpu_to_le16(sizeof(pdomaininfo->action) +
+-					     domain->header.len +
++					     le16_to_cpu(domain->header.len) +
+ 					     sizeof(struct mrvlietypesheader) +
+ 					     S_DS_GEN);
+ 	} else {
+--- a/drivers/net/wireless/libertas/wext.c
++++ b/drivers/net/wireless/libertas/wext.c
+@@ -973,7 +973,7 @@ static struct iw_statistics *wlan_get_wi
+ 	/* Quality by TX errors */
+ 	priv->wstats.discard.retries = priv->stats.tx_errors;
+ 
+-	tx_retries = le16_to_cpu(adapter->logmsg.retry);
++	tx_retries = le32_to_cpu(adapter->logmsg.retry);
+ 
+ 	if (tx_retries > 75)
+ 		tx_qual = (90 - tx_retries) * POOR / 15;
+@@ -989,10 +989,10 @@ static struct iw_statistics *wlan_get_wi
+ 		    (PERFECT - VERY_GOOD) / 50 + VERY_GOOD;
+ 	quality = min(quality, tx_qual);
+ 
+-	priv->wstats.discard.code = le16_to_cpu(adapter->logmsg.wepundecryptable);
+-	priv->wstats.discard.fragment = le16_to_cpu(adapter->logmsg.rxfrag);
++	priv->wstats.discard.code = le32_to_cpu(adapter->logmsg.wepundecryptable);
++	priv->wstats.discard.fragment = le32_to_cpu(adapter->logmsg.rxfrag);
+ 	priv->wstats.discard.retries = tx_retries;
+-	priv->wstats.discard.misc = le16_to_cpu(adapter->logmsg.ackfailure);
++	priv->wstats.discard.misc = le32_to_cpu(adapter->logmsg.ackfailure);
+ 
+ 	/* Calculate quality */
+ 	priv->wstats.qual.qual = max(quality, (u32)100);
+From 0b5316769774d1dc2fdd702e095f9e6992af269a Mon Sep 17 00:00:00 2001
+From: Dan Williams <dcbw@redhat.com>
+Date: Tue, 9 Oct 2007 13:55:24 -0400
+Subject: ipw2200: batch non-user-requested scan result notifications
+
+From: Dan Williams <dcbw@redhat.com>
+
+patch 0b5316769774d1dc2fdd702e095f9e6992af269a in mainline.
+
+ipw2200 makes extensive use of background scanning when unassociated or
+down.  Unfortunately, the firmware sends scan completed events many
+times per second, which the driver pushes directly up to userspace.
+This needlessly wakes up processes listening for wireless events many
+times per second.  Batch together scan completed events for
+non-user-requested scans and send them up to userspace every 4 seconds.
+Scan completed events resulting from an SIOCSIWSCAN call are pushed up
+without delay.
+
+Signed-off-by: Dan Williams <dcbw@redhat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Cc: Tobias Powalowski <t.powa@gmx.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/ipw2200.c |   56 +++++++++++++++++++++++++++++++++--------
+ drivers/net/wireless/ipw2200.h |    3 ++
+ 2 files changed, 49 insertions(+), 10 deletions(-)
+
+--- a/drivers/net/wireless/ipw2200.c
++++ b/drivers/net/wireless/ipw2200.c
+@@ -1740,8 +1740,10 @@ static int ipw_radio_kill_sw(struct ipw_
+ 	if (disable_radio) {
+ 		priv->status |= STATUS_RF_KILL_SW;
+ 
+-		if (priv->workqueue)
++		if (priv->workqueue) {
+ 			cancel_delayed_work(&priv->request_scan);
++			cancel_delayed_work(&priv->scan_event);
++		}
+ 		queue_work(priv->workqueue, &priv->down);
+ 	} else {
+ 		priv->status &= ~STATUS_RF_KILL_SW;
+@@ -1992,6 +1994,7 @@ static void ipw_irq_tasklet(struct ipw_p
+ 		wake_up_interruptible(&priv->wait_command_queue);
+ 		priv->status &= ~(STATUS_ASSOCIATED | STATUS_ASSOCIATING);
+ 		cancel_delayed_work(&priv->request_scan);
++		cancel_delayed_work(&priv->scan_event);
+ 		schedule_work(&priv->link_down);
+ 		queue_delayed_work(priv->workqueue, &priv->rf_kill, 2 * HZ);
+ 		handled |= IPW_INTA_BIT_RF_KILL_DONE;
+@@ -4341,6 +4344,37 @@ static void ipw_handle_missed_beacon(str
+ 	IPW_DEBUG_NOTIF("Missed beacon: %d\n", missed_count);
+ }
+ 
++static void ipw_scan_event(struct work_struct *work)
++{
++	union iwreq_data wrqu;
++
++	struct ipw_priv *priv =
++		container_of(work, struct ipw_priv, scan_event.work);
++
++	wrqu.data.length = 0;
++	wrqu.data.flags = 0;
++	wireless_send_event(priv->net_dev, SIOCGIWSCAN, &wrqu, NULL);
++}
++
++static void handle_scan_event(struct ipw_priv *priv)
++{
++	/* Only userspace-requested scan completion events go out immediately */
++	if (!priv->user_requested_scan) {
++		if (!delayed_work_pending(&priv->scan_event))
++			queue_delayed_work(priv->workqueue, &priv->scan_event,
++					 round_jiffies(msecs_to_jiffies(4000)));
++	} else {
++		union iwreq_data wrqu;
++
++		priv->user_requested_scan = 0;
++		cancel_delayed_work(&priv->scan_event);
++
++		wrqu.data.length = 0;
++		wrqu.data.flags = 0;
++		wireless_send_event(priv->net_dev, SIOCGIWSCAN, &wrqu, NULL);
++	}
++}
++
+ /**
+  * Handle host notification packet.
+  * Called from interrupt routine
+@@ -4702,14 +4736,8 @@ static void ipw_rx_notification(struct i
+ 			 * on how the scan was initiated. User space can just
+ 			 * sync on periodic scan to get fresh data...
+ 			 * Jean II */
+-			if (x->status == SCAN_COMPLETED_STATUS_COMPLETE) {
+-				union iwreq_data wrqu;
+-
+-				wrqu.data.length = 0;
+-				wrqu.data.flags = 0;
+-				wireless_send_event(priv->net_dev, SIOCGIWSCAN,
+-						    &wrqu, NULL);
+-			}
++			if (x->status == SCAN_COMPLETED_STATUS_COMPLETE)
++				handle_scan_event(priv);
+ 			break;
+ 		}
+ 
+@@ -9472,6 +9500,10 @@ static int ipw_wx_set_scan(struct net_de
+ 	struct ipw_priv *priv = ieee80211_priv(dev);
+ 	struct iw_scan_req *req = (struct iw_scan_req *)extra;
+ 
++	mutex_lock(&priv->mutex);
++	priv->user_requested_scan = 1;
++	mutex_unlock(&priv->mutex);
++
+ 	if (wrqu->data.length == sizeof(struct iw_scan_req)) {
+ 		if (wrqu->data.flags & IW_SCAN_THIS_ESSID) {
+ 			ipw_request_direct_scan(priv, req->essid,
+@@ -10647,6 +10679,7 @@ static void ipw_link_up(struct ipw_priv 
+ 	}
+ 
+ 	cancel_delayed_work(&priv->request_scan);
++	cancel_delayed_work(&priv->scan_event);
+ 	ipw_reset_stats(priv);
+ 	/* Ensure the rate is updated immediately */
+ 	priv->last_rate = ipw_get_current_rate(priv);
+@@ -10684,7 +10717,8 @@ static void ipw_link_down(struct ipw_pri
+ 	if (!(priv->status & STATUS_EXIT_PENDING)) {
+ 		/* Queue up another scan... */
+ 		queue_delayed_work(priv->workqueue, &priv->request_scan, 0);
+-	}
++	} else
++		cancel_delayed_work(&priv->scan_event);
+ }
+ 
+ static void ipw_bg_link_down(struct work_struct *work)
+@@ -10714,6 +10748,7 @@ static int ipw_setup_deferred_work(struc
+ 	INIT_WORK(&priv->up, ipw_bg_up);
+ 	INIT_WORK(&priv->down, ipw_bg_down);
+ 	INIT_DELAYED_WORK(&priv->request_scan, ipw_request_scan);
++	INIT_DELAYED_WORK(&priv->scan_event, ipw_scan_event);
+ 	INIT_WORK(&priv->request_passive_scan, ipw_request_passive_scan);
+ 	INIT_DELAYED_WORK(&priv->gather_stats, ipw_bg_gather_stats);
+ 	INIT_WORK(&priv->abort_scan, ipw_bg_abort_scan);
+@@ -11746,6 +11781,7 @@ static void ipw_pci_remove(struct pci_de
+ 	cancel_delayed_work(&priv->adhoc_check);
+ 	cancel_delayed_work(&priv->gather_stats);
+ 	cancel_delayed_work(&priv->request_scan);
++	cancel_delayed_work(&priv->scan_event);
+ 	cancel_delayed_work(&priv->rf_kill);
+ 	cancel_delayed_work(&priv->scan_check);
+ 	destroy_workqueue(priv->workqueue);
+--- a/drivers/net/wireless/ipw2200.h
++++ b/drivers/net/wireless/ipw2200.h
+@@ -1288,6 +1288,8 @@ struct ipw_priv {
+ 
+ 	struct iw_public_data wireless_data;
+ 
++	int user_requested_scan;
++
+ 	struct workqueue_struct *workqueue;
+ 
+ 	struct delayed_work adhoc_check;
+@@ -1296,6 +1298,7 @@ struct ipw_priv {
+ 	struct work_struct system_config;
+ 	struct work_struct rx_replenish;
+ 	struct delayed_work request_scan;
++	struct delayed_work scan_event;
+   	struct work_struct request_passive_scan;
+ 	struct work_struct adapter_restart;
+ 	struct delayed_work rf_kill;

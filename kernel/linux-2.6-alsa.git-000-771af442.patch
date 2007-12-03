@@ -1,0 +1,80 @@
+From: Takashi Iwai <tiwai@suse.de>
+Date: Fri, 26 Oct 2007 10:35:56 +0000 (+0200)
+Subject: [ALSA] hda-codec - Disable shared stream on AD1986A
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Fperex%2Falsa.git;a=commitdiff_plain;h=771af44244ae8a2c1c818bb2669429604c655a89
+
+[ALSA] hda-codec - Disable shared stream on AD1986A
+
+AD1986A has a hardware problem that it cannot share a stream with
+multiple pins properly.  The problem occurs e.g. when a volume is changed
+during playback.
+So far, hda-intel driver unconditionally assigns the stream to multiple
+output pins in copy-front mode, and this should be avoided for AD1986A
+codec.
+The original fix patch was by zhejiang <zhe.jiang@intel.com>.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+---
+
+diff --git a/sound/pci/hda/hda_codec.c b/sound/pci/hda/hda_codec.c
+index ad4cb38..b52f56f 100644
+--- a/sound/pci/hda/hda_codec.c
++++ b/sound/pci/hda/hda_codec.c
+@@ -2485,13 +2485,14 @@ int snd_hda_multi_out_analog_prepare(struct hda_codec *codec,
+ 	/* front */
+ 	snd_hda_codec_setup_stream(codec, nids[HDA_FRONT], stream_tag,
+ 				   0, format);
+-	if (mout->hp_nid && mout->hp_nid != nids[HDA_FRONT])
++	if (!mout->no_share_stream &&
++	    mout->hp_nid && mout->hp_nid != nids[HDA_FRONT])
+ 		/* headphone out will just decode front left/right (stereo) */
+ 		snd_hda_codec_setup_stream(codec, mout->hp_nid, stream_tag,
+ 					   0, format);
+ 	/* extra outputs copied from front */
+ 	for (i = 0; i < ARRAY_SIZE(mout->extra_out_nid); i++)
+-		if (mout->extra_out_nid[i])
++		if (!mout->no_share_stream && mout->extra_out_nid[i])
+ 			snd_hda_codec_setup_stream(codec,
+ 						   mout->extra_out_nid[i],
+ 						   stream_tag, 0, format);
+@@ -2501,7 +2502,7 @@ int snd_hda_multi_out_analog_prepare(struct hda_codec *codec,
+ 		if (chs >= (i + 1) * 2) /* independent out */
+ 			snd_hda_codec_setup_stream(codec, nids[i], stream_tag,
+ 						   i * 2, format);
+-		else /* copy front */
++		else if (!mout->no_share_stream) /* copy front */
+ 			snd_hda_codec_setup_stream(codec, nids[i], stream_tag,
+ 						   0, format);
+ 	}
+diff --git a/sound/pci/hda/hda_local.h b/sound/pci/hda/hda_local.h
+index 20c5e62..8c56c9c 100644
+--- a/sound/pci/hda/hda_local.h
++++ b/sound/pci/hda/hda_local.h
+@@ -220,6 +220,7 @@ struct hda_multi_out {
+ 	hda_nid_t dig_out_nid;	/* digital out audio widget */
+ 	int max_channels;	/* currently supported analog channels */
+ 	int dig_out_used;	/* current usage of digital out (HDA_DIG_XXX) */
++	int no_share_stream;	/* don't share a stream with multiple pins */
+ };
+ 
+ int snd_hda_multi_out_dig_open(struct hda_codec *codec,
+diff --git a/sound/pci/hda/patch_analog.c b/sound/pci/hda/patch_analog.c
+index 0ee8ae4..196ad3c 100644
+--- a/sound/pci/hda/patch_analog.c
++++ b/sound/pci/hda/patch_analog.c
+@@ -957,6 +957,14 @@ static int patch_ad1986a(struct hda_codec *codec)
+ 		break;
+ 	}
+ 
++	/* AD1986A has a hardware problem that it can't share a stream
++	 * with multiple output pins.  The copy of front to surrounds
++	 * causes noisy or silent outputs at a certain timing, e.g.
++	 * changing the volume.
++	 * So, let's disable the shared stream.
++	 */
++	spec->multiout.no_share_stream = 1;
++
+ 	return 0;
+ }
+ 

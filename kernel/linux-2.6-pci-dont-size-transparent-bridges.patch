@@ -1,0 +1,40 @@
+From: Gary Hade <garyhade@us.ibm.com>
+Date: Wed, 3 Oct 2007 22:55:51 +0000 (-0700)
+Subject: PCI: remove transparent bridge sizing
+X-Git-Tag: v2.6.24-rc1~1393^2~7
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=8fa5913d54f3b1e09948e6a0db34da887e05ff1f
+
+[bz 375821?]
+
+PCI: remove transparent bridge sizing
+
+Remove transparent bridge sizing.
+
+Due to code in pci_read_bridge_bases() [drivers/pci/probe.c] the child
+bus of a transparent bridge already has access to the parent bus
+resources so transparent bridge sizing appears unnecessary.  The bridge
+sizing includes alignment and granularity adjustments that can cause
+significantly more memory to be reserved from the parant bus than
+required by devices on the child bus and allotted by _CRS.
+
+Signed-off-by: Gary Hade <gary.hade@us.ibm.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+---
+
+diff --git a/drivers/pci/setup-bus.c b/drivers/pci/setup-bus.c
+index 5e5191e..401e03c 100644
+--- a/drivers/pci/setup-bus.c
++++ b/drivers/pci/setup-bus.c
+@@ -472,7 +472,12 @@ void pci_bus_size_bridges(struct pci_bus *bus)
+ 		break;
+ 
+ 	case PCI_CLASS_BRIDGE_PCI:
++		/* don't size subtractive decoding (transparent)
++		 * PCI-to-PCI bridges */
++		if (bus->self->transparent)
++			break;
+ 		pci_bridge_check_ranges(bus);
++		/* fall through */
+ 	default:
+ 		pbus_size_io(bus);
+ 		/* If the bridge supports prefetchable range, size it

@@ -1,0 +1,60 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=f01d5e14e764b14b6bf5512678523d009254b209
+Commit:     f01d5e14e764b14b6bf5512678523d009254b209
+Parent:     8594c15ad226227aaf178b7cf57f2e7291684dd4
+Author:     Steve French <sfrench@us.ibm.com>
+AuthorDate: Thu Aug 30 21:13:31 2007 +0000
+Committer:  Steve French <sfrench@us.ibm.com>
+CommitDate: Thu Aug 30 21:13:31 2007 +0000
+
+    [CIFS] fix for incorrect session reconnects
+    
+    cifs reconnect could end up happening incorrectly due to
+    the small initial tcp recvmsg response. When the socket
+    was within three bytes of being full and the recvmsg
+    returned only 1 to 3 bytes of the initial 4 byte
+    read of the RFC1001 length field. Fortunately this
+    seems to be less common on more current kernels, but
+    this fixes it so cifs tries to retrieve all 4 bytes
+    of the initial tcp read.
+    
+    Signed-off-by: Shirish Pargoankar <shirishp@us.ibm.com>
+    Signed-off-by: Steve French <sfrench@us.ibm.com>
+---
+ fs/cifs/connect.c |   13 +++++++------
+ 1 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/fs/cifs/connect.c b/fs/cifs/connect.c
+index 4af3588..8af993f 100644
+--- a/fs/cifs/connect.c
++++ b/fs/cifs/connect.c
+@@ -400,9 +400,11 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
+ 		iov.iov_len = 4;
+ 		smb_msg.msg_control = NULL;
+ 		smb_msg.msg_controllen = 0;
++		pdu_length = 4; /* enough to get RFC1001 header */
++incomplete_rcv:
+ 		length =
+ 		    kernel_recvmsg(csocket, &smb_msg,
+-				 &iov, 1, 4, 0 /* BB see socket.h flags */);
++				&iov, 1, pdu_length, 0 /* BB other flags? */);
+ 
+ 		if ( kthread_should_stop() ) {
+ 			break;
+@@ -437,13 +439,12 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
+ 			wake_up(&server->response_q);
+ 			continue;
+ 		} else if (length < 4) {
+-			cFYI(1,
+-			    ("Frame under four bytes received (%d bytes long)",
++			cFYI(1, ("less than four bytes received (%d bytes)",
+ 			      length));
++			pdu_length -= length;
+ 			cifs_reconnect(server);
+-			csocket = server->ssocket;
+-			wake_up(&server->response_q);
+-			continue;
++			msleep(1);
++			goto incomplete_rcv;
+ 		}
+ 
+ 		/* The right amount was read from socket - 4 bytes */

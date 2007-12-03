@@ -1,0 +1,120 @@
+rollup:
+
+[ALSA] hda-codec - Add STAC9228 DMIC support
+[ALSA] hda: Add dmux to STAC 9228
+[ALSA] hda: STAC9228 updated DMUX nid
+hda: STAC9228 DMIC
+     add support for several notebooks with 9228
+
+---
+ sound/pci/hda/patch_sigmatel.c |   50 ++++++++++++++++++++++++++++++-----------
+ 1 file changed, 37 insertions(+), 13 deletions(-)
+
+--- linux-2.6.23.noarch.orig/sound/pci/hda/patch_sigmatel.c
++++ linux-2.6.23.noarch/sound/pci/hda/patch_sigmatel.c
+@@ -205,6 +205,11 @@ static hda_nid_t stac927x_mux_nids[3] = 
+         0x15, 0x16, 0x17
+ };
+ 
++#define STAC927X_NUM_DMICS 2
++static hda_nid_t stac927x_dmic_nids[STAC927X_NUM_DMICS + 1] = {
++	0x13, 0x14, 0
++};
++
+ static hda_nid_t stac9205_adc_nids[2] = {
+         0x12, 0x13
+ };
+@@ -425,6 +430,16 @@ static struct hda_verb stac9205_core_ini
+ 	{}
+ };
+ 
++#define STAC_DIGITAL_INPUT_SOURCE(cnt) \
++	{ \
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
++		.name = "Digital Input Source", \
++		.count = cnt, \
++		.info = stac92xx_dmux_enum_info, \
++		.get = stac92xx_dmux_enum_get, \
++		.put = stac92xx_dmux_enum_put,\
++	}
++
+ #define STAC_INPUT_SOURCE(cnt) \
+ 	{ \
+ 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
+@@ -477,14 +492,7 @@ static struct snd_kcontrol_new stac925x_
+ };
+ 
+ static struct snd_kcontrol_new stac9205_mixer[] = {
+-	{
+-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+-		.name = "Digital Input Source",
+-		.count = 1,
+-		.info = stac92xx_dmux_enum_info,
+-		.get = stac92xx_dmux_enum_get,
+-		.put = stac92xx_dmux_enum_put,
+-	},
++	STAC_DIGITAL_INPUT_SOURCE(1),
+ 	STAC_INPUT_SOURCE(2),
+ 	STAC_ANALOG_LOOPBACK(0xFE0, 0x7E0),
+ 	STAC_VOLKNOB(0x24),
+@@ -516,6 +524,7 @@ static struct snd_kcontrol_new stac922x_
+ 
+ 
+ static struct snd_kcontrol_new stac927x_mixer[] = {
++	STAC_DIGITAL_INPUT_SOURCE(1),
+ 	STAC_INPUT_SOURCE(3),
+ 	STAC_ANALOG_LOOPBACK(0xFEB, 0x7EB),
+ 	STAC_VOLKNOB(0x24),
+@@ -2743,9 +2752,8 @@ static int patch_stac927x(struct hda_cod
+ 		spec->adc_nids = stac927x_adc_nids;
+ 		spec->mux_nids = stac927x_mux_nids;
+ 		spec->num_muxes = ARRAY_SIZE(stac927x_mux_nids);
+ 		spec->num_adcs = ARRAY_SIZE(stac927x_adc_nids);
+-		spec->num_dmics = 0;
+ 		spec->init = d965_core_init;
+ 		spec->mixer = stac927x_mixer;
+ 		break;
+ 	case STAC_D965_5ST:
+@@ -2752,7 +2760,6 @@ static int patch_stac927x(struct hda_cod
+ 		spec->mux_nids = stac927x_mux_nids;
+ 		spec->num_muxes = ARRAY_SIZE(stac927x_mux_nids);
+ 		spec->num_adcs = ARRAY_SIZE(stac927x_adc_nids);
+-		spec->num_dmics = 0;
+ 		spec->init = d965_core_init;
+ 		spec->mixer = stac927x_mixer;
+ 		break;
+@@ -2761,14 +2768,31 @@ static int patch_stac927x(struct hda_cod
+ 		spec->mux_nids = stac927x_mux_nids;
+ 		spec->num_muxes = ARRAY_SIZE(stac927x_mux_nids);
+ 		spec->num_adcs = ARRAY_SIZE(stac927x_adc_nids);
+-		spec->num_dmics = 0;
+ 		spec->init = stac927x_core_init;
+ 		spec->mixer = stac927x_mixer;
+ 	}
+ 
++	switch (codec->subsystem_id) {
++	case 0x1028020A: /* STAC 9228 */
++	case 0x10280209: /* STAC 9228 */
++		spec->dmic_nids = stac927x_dmic_nids;
++		spec->num_dmics = STAC927X_NUM_DMICS;
++		spec->dmux_nid = 0x1b;
++
++		/* Enable DMIC0 */
++		stac92xx_set_config_reg(codec, 0x13, 0x90a60040);
++
++		/* GPIO2 High = Enable EAPD */
++		spec->gpio_mask = spec->gpio_data = 0x00000004;
++		break;
++	default:
++		spec->num_dmics = 0;
++
++		/* GPIO0 High = Enable EAPD */
++		spec->gpio_mask = spec->gpio_data = 0x00000001;
++	}
++
+ 	spec->multiout.dac_nids = spec->dac_nids;
+-	/* GPIO0 High = Enable EAPD */
+-	spec->gpio_mask = spec->gpio_data = 0x00000001;
+ 	stac92xx_enable_gpio_mask(codec); 
+ 	
+ 	err = stac92xx_parse_auto_config(codec, 0x1e, 0x20);

@@ -1,0 +1,25 @@
+Duane Griffin noticed a 2.6.23 regression that will cause gdb to hang when
+it tries to access the memory of another process beyond i_size.
+
+This is because the solution to the fault vs invalidate race requires that
+we recheck i_size after the page lock is taken. However in that case, I
+had not accounted for the fact that ptracers are granted an exception to this
+rule.
+
+Cc: Duane Griffin <duaneg@dghda.com>
+Cc: stable@kernel.org
+Signed-off-by: Nick Piggin <npiggin@suse.de
+---
+Index: linux-2.6/mm/filemap.c
+===================================================================
+--- linux-2.6.orig/mm/filemap.c
++++ linux-2.6/mm/filemap.c
+@@ -1374,7 +1374,7 @@ retry_find:
+ 
+ 	/* Must recheck i_size under page lock */
+ 	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+-	if (unlikely(vmf->pgoff >= size)) {
++	if (unlikely(vmf->pgoff >= size) && vma->vm_mm == current->mm) {
+ 		unlock_page(page);
+ 		page_cache_release(page);
+ 		goto outside_data_content;

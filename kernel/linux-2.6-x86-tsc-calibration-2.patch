@@ -1,0 +1,85 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=8c660065383976f09fbdae86c33448c8da643d4e
+Commit:     8c660065383976f09fbdae86c33448c8da643d4e
+Parent:     edaf420fdc122e7a42326fe39274c8b8c9b19d41
+Author:     Dave Johnson <djohnson@sw.starentnetworks.com>
+AuthorDate: Tue Oct 23 22:37:22 2007 +0200
+Committer:  Thomas Gleixner <tglx@linutronix.de>
+CommitDate: Tue Oct 23 22:37:22 2007 +0200
+
+    x86: fix more TSC clock source calibration errors
+    
+    The previous patch wasn't correctly handling the 'count' variable.  If
+    a CPU gave bad results on the 1st or 2nd run but good results on the
+    3rd, it wouldn't do the correct thing.  No idea if any such CPU
+    exists, but the patch below handles that case by discarding the bad
+    runs.
+    
+    If a bad result (too quick, or too slow) occurs on any of the 3 runs
+    it will be discarded.
+    
+    Also updated some comments to explain what's going on.
+    
+    Signed-off-by: Dave Johnson <djohnson@sw.starentnetworks.com>
+    Signed-off-by: Ingo Molnar <mingo@elte.hu>
+    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+---
+ arch/x86/kernel/tsc_32.c |   34 ++++++++++++++++++++--------------
+ 1 files changed, 20 insertions(+), 14 deletions(-)
+
+diff --git a/arch/x86/kernel/tsc_32.c b/arch/x86/kernel/tsc_32.c
+index f04d08a..9ebc0da 100644
+--- a/arch/i386/kernel/tsc.c
++++ b/arch/i386/kernel/tsc.c
+@@ -137,31 +137,37 @@ unsigned long native_calculate_cpu_khz(void)
+ 
+ 	local_irq_save(flags);
+ 
+-	/* run 3 times to ensure the cache is warm */
++	/* run 3 times to ensure the cache is warm and to get an accurate reading */
+ 	for (i = 0; i < 3; i++) {
+ 		mach_prepare_counter();
+ 		rdtscll(start);
+ 		mach_countup(&count);
+ 		rdtscll(end);
++
++		/*
++		 * Error: ECTCNEVERSET
++		 * The CTC wasn't reliable: we got a hit on the very first read,
++		 * or the CPU was so fast/slow that the quotient wouldn't fit in
++		 * 32 bits..
++		 */
++		if (count <= 1)
++			continue;
++
++		/* cpu freq too slow: */
++		if ((end - start) <= CALIBRATE_TIME_MSEC)
++			continue;
++
++		/*
++		 * We want the minimum time of all runs in case one of them
++		 * is inaccurate due to SMI or other delay
++		 */
+ 		delta64 = min(delta64, (end - start));
+ 	}
+-	/*
+-	 * Error: ECTCNEVERSET
+-	 * The CTC wasn't reliable: we got a hit on the very first read,
+-	 * or the CPU was so fast/slow that the quotient wouldn't fit in
+-	 * 32 bits..
+-	 */
+-	if (count <= 1)
+-		goto err;
+ 
+-	/* cpu freq too fast: */
++	/* cpu freq too fast (or every run was bad): */
+ 	if (delta64 > (1ULL<<32))
+ 		goto err;
+ 
+-	/* cpu freq too slow: */
+-	if (delta64 <= CALIBRATE_TIME_MSEC)
+-		goto err;
+-
+ 	delta64 += CALIBRATE_TIME_MSEC/2; /* round for do_div */
+ 	do_div(delta64,CALIBRATE_TIME_MSEC);
+ 
+-

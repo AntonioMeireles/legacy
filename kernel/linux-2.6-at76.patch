@@ -1,6 +1,6 @@
-diff -up linux-2.6.22.noarch/MAINTAINERS.orig linux-2.6.22.noarch/MAINTAINERS
---- linux-2.6.22.noarch/MAINTAINERS.orig	2007-09-26 19:57:31.000000000 -0400
-+++ linux-2.6.22.noarch/MAINTAINERS	2007-09-26 19:59:33.000000000 -0400
+diff -up linux-2.6.23.noarch/MAINTAINERS.orig linux-2.6.23.noarch/MAINTAINERS
+--- linux-2.6.23.noarch/MAINTAINERS.orig	2007-10-19 14:41:17.000000000 -0400
++++ linux-2.6.23.noarch/MAINTAINERS	2007-10-19 14:45:38.000000000 -0400
 @@ -685,6 +685,15 @@ W:	http://www.thekelleys.org.uk/atmel
  W:	http://atmelwlandriver.sourceforge.net/
  S:	Maintained
@@ -17,10 +17,10 @@ diff -up linux-2.6.22.noarch/MAINTAINERS.orig linux-2.6.22.noarch/MAINTAINERS
  AUDIT SUBSYSTEM
  P:	David Woodhouse
  M:	dwmw2@infradead.org
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
---- /dev/null	2007-09-25 08:26:55.562976333 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h	2007-09-26 19:59:33.000000000 -0400
-@@ -0,0 +1,662 @@
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/at76_usb.h
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/at76_usb.h	2007-10-19 14:45:38.000000000 -0400
+@@ -0,0 +1,619 @@
 +/*
 + * Copyright (c) 2002,2003 Oliver Kurth
 + *	     (c) 2003,2004 Joerg Albert <joerg.albert@gmx.de>
@@ -44,11 +44,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +
 +#ifndef _AT76_USB_H
 +#define _AT76_USB_H
-+
-+#include <net/ieee80211.h>
-+
-+/* current driver version */
-+#define DRIVER_VERSION	"0.16"
 +
 +/* Board types */
 +enum board_type {
@@ -101,9 +96,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +#define CMD_SCAN		0x03
 +#define CMD_JOIN		0x04
 +#define CMD_START_IBSS		0x05
-+#define CMD_RADIO		0x06
++#define CMD_RADIO_ON		0x06
++#define CMD_RADIO_OFF		0x07
 +#define CMD_STARTUP		0x0B
-+#define CMD_GETOPMODE		0x33
 +
 +#define MIB_LOCAL		0x01
 +#define MIB_MAC_ADDR		0x02
@@ -268,7 +263,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +	u8 size;
 +	u8 index;
 +	u8 reserved;
-+	u8 data[72];
++	union {
++		u8 byte;
++		__le16 word;
++		u8 addr[ETH_ALEN];
++	} data;
 +} __attribute__((packed));
 +
 +struct mib_local {
@@ -417,8 +416,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +	struct list_head list;
 +
 +	u8 bssid[ETH_ALEN];	/* bssid */
-+	u8 ssid[IW_ESSID_MAX_SIZE + 1];	/* ssid, +1 for trailing \0
-+					   to make it printable */
++	u8 ssid[IW_ESSID_MAX_SIZE];	/* essid */
 +	u8 ssid_len;		/* length of ssid above */
 +	u8 channel;
 +	u16 capa;		/* BSS capabilities */
@@ -576,7 +574,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +	struct set_mib_buffer mib_buf;	/* global buffer for set_mib calls */
 +
 +	/* beacon counting */
-+	int beacon_period;	/* period of mgmt beacons */
++	int beacon_period;	/* period of mgmt beacons, Kus */
 +	int beacons_received;
 +	unsigned long beacons_last_qual;	/* time we restarted counting
 +						   beacons */
@@ -641,6 +639,70 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +/* the max padding size for tx in bytes (see calc_padding) */
 +#define MAX_PADDING_SIZE	53
 +
++#endif				/* _AT76_USB_H */
+diff -up linux-2.6.23.noarch/drivers/net/wireless/Makefile.orig linux-2.6.23.noarch/drivers/net/wireless/Makefile
+--- linux-2.6.23.noarch/drivers/net/wireless/Makefile.orig	2007-10-19 14:41:17.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/Makefile	2007-10-19 14:45:38.000000000 -0400
+@@ -32,6 +32,8 @@ obj-$(CONFIG_ATMEL)             += atmel
+ obj-$(CONFIG_PCI_ATMEL)         += atmel_pci.o 
+ obj-$(CONFIG_PCMCIA_ATMEL)      += atmel_cs.o
+ 
++obj-$(CONFIG_USB_ATMEL)	        += at76_usb.o
++
+ obj-$(CONFIG_PRISM54)		+= prism54/
+ 
+ obj-$(CONFIG_HOSTAP)		+= hostap/
+diff -up /dev/null linux-2.6.23.noarch/drivers/net/wireless/at76_usb.c
+--- /dev/null	2007-10-19 09:45:41.508682727 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/at76_usb.c	2007-10-19 14:45:38.000000000 -0400
+@@ -0,0 +1,5556 @@
++/*
++ * at76c503/at76c505 USB driver
++ *
++ * Copyright (c) 2002 - 2003 Oliver Kurth
++ * Copyright (c) 2004 Joerg Albert <joerg.albert@gmx.de>
++ * Copyright (c) 2004 Nick Jones
++ * Copyright (c) 2004 Balint Seeber <n0_5p4m_p13453@hotmail.com>
++ * Copyright (c) 2007 Guido Guenther <agx@sigxcpu.org>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This file is part of the Berlios driver for WLAN USB devices based on the
++ * Atmel AT76C503A/505/505A.
++ *
++ * Some iw_handler code was taken from airo.c, (C) 1999 Benjamin Reed
++ */
++
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/sched.h>
++#include <linux/errno.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/spinlock.h>
++#include <linux/list.h>
++#include <linux/usb.h>
++#include <linux/netdevice.h>
++#include <linux/if_arp.h>
++#include <linux/etherdevice.h>
++#include <linux/ethtool.h>
++#include <linux/wireless.h>
++#include <net/iw_handler.h>
++#include <net/ieee80211_radiotap.h>
++#include <linux/firmware.h>
++#include <linux/leds.h>
++#include <net/ieee80211.h>
++
++#include "at76_usb.h"
++
++/* Version information */
++#define DRIVER_NAME "at76_usb"
++#define DRIVER_VERSION	"0.17"
++#define DRIVER_DESC "Atmel at76x USB Wireless LAN Driver"
++
 +/* at76_debug bits */
 +#define DBG_PROGRESS		0x00000001	/* authentication/accociation */
 +#define DBG_BSS_TABLE		0x00000002	/* show BSS table after scans */
@@ -682,68 +744,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.h
 +		printk(KERN_DEBUG DRIVER_NAME ": " format "\n" , ## arg); \
 +	} while (0)
 +
-+#endif				/* _AT76_USB_H */
-diff -up linux-2.6.22.noarch/drivers/net/wireless/Makefile.orig linux-2.6.22.noarch/drivers/net/wireless/Makefile
---- linux-2.6.22.noarch/drivers/net/wireless/Makefile.orig	2007-09-26 19:57:31.000000000 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/Makefile	2007-09-26 19:59:33.000000000 -0400
-@@ -32,6 +32,8 @@ obj-$(CONFIG_ATMEL)             += atmel
- obj-$(CONFIG_PCI_ATMEL)         += atmel_pci.o 
- obj-$(CONFIG_PCMCIA_ATMEL)      += atmel_cs.o
- 
-+obj-$(CONFIG_USB_ATMEL)	        += at76_usb.o
-+
- obj-$(CONFIG_PRISM54)		+= prism54/
- 
- obj-$(CONFIG_HOSTAP)		+= hostap/
-diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
---- /dev/null	2007-09-25 08:26:55.562976333 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c	2007-09-26 19:59:33.000000000 -0400
-@@ -0,0 +1,5553 @@
-+/*
-+ * at76c503/at76c505 USB driver
-+ *
-+ * Copyright (c) 2002 - 2003 Oliver Kurth
-+ * Copyright (c) 2004 Joerg Albert <joerg.albert@gmx.de>
-+ * Copyright (c) 2004 Nick Jones
-+ * Copyright (c) 2004 Balint Seeber <n0_5p4m_p13453@hotmail.com>
-+ * Copyright (c) 2007 Guido Guenther <agx@sigxcpu.org>
-+ *
-+ * This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License as
-+ * published by the Free Software Foundation; either version 2 of
-+ * the License, or (at your option) any later version.
-+ *
-+ * This file is part of the Berlios driver for WLAN USB devices based on the
-+ * Atmel AT76C503A/505/505A.
-+ *
-+ * Some iw_handler code was taken from airo.c, (C) 1999 Benjamin Reed
-+ */
-+
-+#include <linux/init.h>
-+#include <linux/kernel.h>
-+#include <linux/sched.h>
-+#include <linux/errno.h>
-+#include <linux/slab.h>
-+#include <linux/module.h>
-+#include <linux/spinlock.h>
-+#include <linux/list.h>
-+#include <linux/usb.h>
-+#include <linux/netdevice.h>
-+#include <linux/if_arp.h>
-+#include <linux/etherdevice.h>
-+#include <linux/ethtool.h>
-+#include <linux/wireless.h>
-+#include <net/iw_handler.h>
-+#include <net/ieee80211_radiotap.h>
-+#include <linux/firmware.h>
-+#include <linux/leds.h>
-+
-+#include "at76_usb.h"
-+
-+/* Version information */
-+#define DRIVER_NAME "at76_usb"
-+#define DRIVER_DESC "Atmel at76x USB Wireless LAN Driver"
-+
 +static int at76_debug = DBG_DEFAULTS;
 +
 +/* Protect against concurrent firmware loading and parsing */
@@ -761,127 +761,137 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	[BOARD_505AMX] = {"atmel_at76c505amx-rfmd.bin"},
 +};
 +
++#define USB_DEVICE_DATA(__ops)	.driver_info = (kernel_ulong_t)(__ops)
++
 +static struct usb_device_id dev_table[] = {
 +	/*
 +	 * at76c503-i3861
 +	 */
 +	/* Generic AT76C503/3861 device */
-+	{USB_DEVICE(0x03eb, 0x7603), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x03eb, 0x7603), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* Linksys WUSB11 v2.1/v2.6 */
-+	{USB_DEVICE(0x066b, 0x2211), .driver_info = BOARD_503_ISL3861},
-+	/* Netgear MA 101 Rev. A */
-+	{USB_DEVICE(0x0864, 0x4100), .driver_info = BOARD_503_ISL3861},
-+	/* Tekram U-300C / Allnet ALL0193 */
-+	{USB_DEVICE(0x0b3b, 0x1612), .driver_info = BOARD_503_ISL3861},
-+	/* HP HN210W PKW-J7801A */
-+	{USB_DEVICE(0x03f0, 0x011c), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x066b, 0x2211), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* Netgear MA101 rev. A */
++	{USB_DEVICE(0x0864, 0x4100), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* Tekram U300C / Allnet ALL0193 */
++	{USB_DEVICE(0x0b3b, 0x1612), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* HP HN210W J7801A */
++	{USB_DEVICE(0x03f0, 0x011c), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* Sitecom/Z-Com/Zyxel M4Y-750 */
-+	{USB_DEVICE(0x0cde, 0x0001), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x0cde, 0x0001), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* Dynalink/Askey WLL013 (intersil) */
-+	{USB_DEVICE(0x069a, 0x0320), .driver_info = BOARD_503_ISL3861},
-+	/* EZ connect 11Mpbs Wireless USB Adapter SMC2662W (v1) */
-+	{USB_DEVICE(0x0d5c, 0xa001), .driver_info = BOARD_503_ISL3861},
-+	/* AWL-300 */
-+	{USB_DEVICE(0x04a5, 0x9000), .driver_info = BOARD_503_ISL3861},
-+	/* AWU-120, Compex WLU11 */
-+	{USB_DEVICE(0x05dd, 0xff31), .driver_info = BOARD_503_ISL3861},
-+	/* AP310 AnyPoint II USB */
-+	{USB_DEVICE(0x8086, 0x0200), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x069a, 0x0320), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* EZ connect 11Mpbs Wireless USB Adapter SMC2662W v1 */
++	{USB_DEVICE(0x0d5c, 0xa001), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* BenQ AWL300 */
++	{USB_DEVICE(0x04a5, 0x9000), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* Addtron AWU-120, Compex WLU11 */
++	{USB_DEVICE(0x05dd, 0xff31), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* Intel AP310 AnyPoint II USB */
++	{USB_DEVICE(0x8086, 0x0200), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* Dynalink L11U */
-+	{USB_DEVICE(0x0d8e, 0x7100), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x0d8e, 0x7100), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* Arescom WL-210, FCC id 07J-GL2411USB */
-+	{USB_DEVICE(0x0d8e, 0x7110), .driver_info = BOARD_503_ISL3861},
-+	/* IO-DATA WN-B11/USB */
-+	{USB_DEVICE(0x04bb, 0x0919), .driver_info = BOARD_503_ISL3861},
++	{USB_DEVICE(0x0d8e, 0x7110), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/* I-O DATA WN-B11/USB */
++	{USB_DEVICE(0x04bb, 0x0919), USB_DEVICE_DATA(BOARD_503_ISL3861)},
 +	/* BT Voyager 1010 */
-+	{USB_DEVICE(0x069a, 0x0821), .driver_info = BOARD_503_ISL3861},
-+	/* at76c503-i3863 */
++	{USB_DEVICE(0x069a, 0x0821), USB_DEVICE_DATA(BOARD_503_ISL3861)},
++	/*
++	 * at76c503-i3863
++	 */
 +	/* Generic AT76C503/3863 device */
-+	{USB_DEVICE(0x03eb, 0x7604), .driver_info = BOARD_503_ISL3863},
++	{USB_DEVICE(0x03eb, 0x7604), USB_DEVICE_DATA(BOARD_503_ISL3863)},
 +	/* Samsung SWL-2100U */
-+	{USB_DEVICE(0x055d, 0xa000), .driver_info = BOARD_503_ISL3863},
++	{USB_DEVICE(0x055d, 0xa000), USB_DEVICE_DATA(BOARD_503_ISL3863)},
 +	/*
 +	 * at76c503-rfmd
 +	 */
 +	/* Generic AT76C503/RFMD device */
-+	{USB_DEVICE(0x03eb, 0x7605), .driver_info = BOARD_503},
++	{USB_DEVICE(0x03eb, 0x7605), USB_DEVICE_DATA(BOARD_503)},
 +	/* Dynalink/Askey WLL013 (rfmd) */
-+	{USB_DEVICE(0x069a, 0x0321), .driver_info = BOARD_503},
++	{USB_DEVICE(0x069a, 0x0321), USB_DEVICE_DATA(BOARD_503)},
 +	/* Linksys WUSB11 v2.6 */
-+	{USB_DEVICE(0x077b, 0x2219), .driver_info = BOARD_503},
++	{USB_DEVICE(0x077b, 0x2219), USB_DEVICE_DATA(BOARD_503)},
 +	/* Network Everywhere NWU11B */
-+	{USB_DEVICE(0x077b, 0x2227), .driver_info = BOARD_503},
-+	/* Netgear MA 101 Rev. B */
-+	{USB_DEVICE(0x0864, 0x4102), .driver_info = BOARD_503},
-+	/* DWL-120 rev. E */
-+	{USB_DEVICE(0x2001, 0x3200), .driver_info = BOARD_503},
++	{USB_DEVICE(0x077b, 0x2227), USB_DEVICE_DATA(BOARD_503)},
++	/* Netgear MA101 rev. B */
++	{USB_DEVICE(0x0864, 0x4102), USB_DEVICE_DATA(BOARD_503)},
++	/* D-Link DWL-120 rev. E */
++	{USB_DEVICE(0x2001, 0x3200), USB_DEVICE_DATA(BOARD_503)},
 +	/* Actiontec 802UAT1, HWU01150-01UK */
-+	{USB_DEVICE(0x1668, 0x7605), .driver_info = BOARD_503},
++	{USB_DEVICE(0x1668, 0x7605), USB_DEVICE_DATA(BOARD_503)},
 +	/* AirVast W-Buddie WN210 */
-+	{USB_DEVICE(0x03eb, 0x4102), .driver_info = BOARD_503},
-+	/* XH1153 802.11b USB adapter */
-+	{USB_DEVICE(0x1371, 0x5743), .driver_info = BOARD_503},
-+	/* WL-200U */
-+	{USB_DEVICE(0x1371, 0x0002), .driver_info = BOARD_503},
-+	/* BenQ AWL-400 USB stick */
-+	{USB_DEVICE(0x04a5, 0x9001), .driver_info = BOARD_503},
-+	/* 3COM 3CRSHEW696 */
-+	{USB_DEVICE(0x0506, 0x0a01), .driver_info = BOARD_503},
++	{USB_DEVICE(0x03eb, 0x4102), USB_DEVICE_DATA(BOARD_503)},
++	/* Dick Smith Electronics XH1153 802.11b USB adapter */
++	{USB_DEVICE(0x1371, 0x5743), USB_DEVICE_DATA(BOARD_503)},
++	/* CNet CNUSB611 */
++	{USB_DEVICE(0x1371, 0x0001), USB_DEVICE_DATA(BOARD_503)},
++	/* FiberLine FL-WL200U */
++	{USB_DEVICE(0x1371, 0x0002), USB_DEVICE_DATA(BOARD_503)},
++	/* BenQ AWL400 USB stick */
++	{USB_DEVICE(0x04a5, 0x9001), USB_DEVICE_DATA(BOARD_503)},
++	/* 3Com 3CRSHEW696 */
++	{USB_DEVICE(0x0506, 0x0a01), USB_DEVICE_DATA(BOARD_503)},
 +	/* Siemens Santis ADSL WLAN USB adapter WLL 013 */
-+	{USB_DEVICE(0x0681, 0x001b), .driver_info = BOARD_503},
++	{USB_DEVICE(0x0681, 0x001b), USB_DEVICE_DATA(BOARD_503)},
 +	/* Belkin F5D6050, version 2 */
-+	{USB_DEVICE(0x050d, 0x0050), .driver_info = BOARD_503},
++	{USB_DEVICE(0x050d, 0x0050), USB_DEVICE_DATA(BOARD_503)},
 +	/* iBlitzz, BWU613 (not *B or *SB) */
-+	{USB_DEVICE(0x07b8, 0xb000), .driver_info = BOARD_503},
++	{USB_DEVICE(0x07b8, 0xb000), USB_DEVICE_DATA(BOARD_503)},
 +	/* Gigabyte GN-WLBM101 */
-+	{USB_DEVICE(0x1044, 0x8003), .driver_info = BOARD_503},
++	{USB_DEVICE(0x1044, 0x8003), USB_DEVICE_DATA(BOARD_503)},
 +	/* Planex GW-US11S */
-+	{USB_DEVICE(0x2019, 0x3220), .driver_info = BOARD_503},
++	{USB_DEVICE(0x2019, 0x3220), USB_DEVICE_DATA(BOARD_503)},
 +	/* Internal WLAN adapter in h5[4,5]xx series iPAQs */
-+	{USB_DEVICE(0x049f, 0x0032), .driver_info = BOARD_503},
++	{USB_DEVICE(0x049f, 0x0032), USB_DEVICE_DATA(BOARD_503)},
++	/* Corega Wireless LAN USB-11 mini */
++	{USB_DEVICE(0x07aa, 0x0011), USB_DEVICE_DATA(BOARD_503)},
++	/* Corega Wireless LAN USB-11 mini2 */
++	{USB_DEVICE(0x07aa, 0x0018), USB_DEVICE_DATA(BOARD_503)},
 +	/*
 +	 * at76c503-rfmd-acc
 +	 */
-+	/* SMC 2664W */
-+	{USB_DEVICE(0x083a, 0x3501), .driver_info = BOARD_503_ACC},
-+	/* Belkin F5D6050, SMC 2662W v2, SMC 2662W-AR */
-+	{USB_DEVICE(0x0d5c, 0xa002), .driver_info = BOARD_503_ACC},
++	/* SMC2664W */
++	{USB_DEVICE(0x083a, 0x3501), USB_DEVICE_DATA(BOARD_503_ACC)},
++	/* Belkin F5D6050, SMC2662W v2, SMC2662W-AR */
++	{USB_DEVICE(0x0d5c, 0xa002), USB_DEVICE_DATA(BOARD_503_ACC)},
 +	/*
 +	 * at76c505-rfmd
 +	 */
 +	/* Generic AT76C505/RFMD */
-+	{USB_DEVICE(0x03eb, 0x7606), .driver_info = BOARD_505},
++	{USB_DEVICE(0x03eb, 0x7606), USB_DEVICE_DATA(BOARD_505)},
 +	/*
 +	 * at76c505-rfmd2958
 +	 */
 +	/* Generic AT76C505/RFMD, OvisLink WL-1130USB */
-+	{USB_DEVICE(0x03eb, 0x7613), .driver_info = BOARD_505_2958},
-+	/* Fiberline WL-240U */
-+	{USB_DEVICE(0x1371, 0x0014), .driver_info = BOARD_505_2958},
-+	/* CNet CNUSB 611G */
-+	{USB_DEVICE(0x1371, 0x0013), .driver_info = BOARD_505_2958},
++	{USB_DEVICE(0x03eb, 0x7613), USB_DEVICE_DATA(BOARD_505_2958)},
++	/* Fiberline FL-WL240U */
++	{USB_DEVICE(0x1371, 0x0014), USB_DEVICE_DATA(BOARD_505_2958)},
++	/* CNet CNUSB-611G */
++	{USB_DEVICE(0x1371, 0x0013), USB_DEVICE_DATA(BOARD_505_2958)},
 +	/* Linksys WUSB11 v2.8 */
-+	{USB_DEVICE(0x1915, 0x2233), .driver_info = BOARD_505_2958},
++	{USB_DEVICE(0x1915, 0x2233), USB_DEVICE_DATA(BOARD_505_2958)},
 +	/* Xterasys XN-2122B, IBlitzz BWU613B/BWU613SB */
-+	{USB_DEVICE(0x12fd, 0x1001), .driver_info = BOARD_505_2958},
++	{USB_DEVICE(0x12fd, 0x1001), USB_DEVICE_DATA(BOARD_505_2958)},
 +	/* Corega WLAN USB Stick 11 */
-+	{USB_DEVICE(0x07aa, 0x7613), .driver_info = BOARD_505_2958},
++	{USB_DEVICE(0x07aa, 0x7613), USB_DEVICE_DATA(BOARD_505_2958)},
 +	/* Microstar MSI Box MS6978 */
-+	{USB_DEVICE(0x0db0, 0x1020), .driver_info = BOARD_505_2958},
++	{USB_DEVICE(0x0db0, 0x1020), USB_DEVICE_DATA(BOARD_505_2958)},
 +	/*
 +	 * at76c505a-rfmd2958
 +	 */
 +	/* Generic AT76C505A device */
-+	{USB_DEVICE(0x03eb, 0x7614), .driver_info = BOARD_505A},
++	{USB_DEVICE(0x03eb, 0x7614), USB_DEVICE_DATA(BOARD_505A)},
 +	/* Generic AT76C505AS device */
-+	{USB_DEVICE(0x03eb, 0x7617), .driver_info = BOARD_505A},
++	{USB_DEVICE(0x03eb, 0x7617), USB_DEVICE_DATA(BOARD_505A)},
 +	/* Siemens Gigaset USB WLAN Adapter 11 */
-+	{USB_DEVICE(0x1690, 0x0701), .driver_info = BOARD_505A},
++	{USB_DEVICE(0x1690, 0x0701), USB_DEVICE_DATA(BOARD_505A)},
 +	/*
 +	 * at76c505amx-rfmd
 +	 */
 +	/* Generic AT76C505AMX device */
-+	{USB_DEVICE(0x03eb, 0x7615), .driver_info = BOARD_505AMX},
++	{USB_DEVICE(0x03eb, 0x7615), USB_DEVICE_DATA(BOARD_505AMX)},
 +	{}
 +};
 +
@@ -896,6 +906,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	2447, 2452, 2457, 2462, 2467, 2472, 2484
 +};
 +
++#define NUM_CHANNELS ARRAY_SIZE(channel_frequency)
++
 +static const char *const preambles[] = { "long", "short", "auto" };
 +
 +static const char *const mac_states[] = {
@@ -907,8 +919,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	[MAC_CONNECTED] = "CONNECTED",
 +	[MAC_OWN_IBSS] = "OWN_IBSS"
 +};
-+
-+#define NUM_CHANNELS ARRAY_SIZE(channel_frequency)
 +
 +/* Firmware download */
 +/* DFU states */
@@ -989,16 +999,16 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	return ret;
 +}
 +
-+static inline u32 at76_get_timeout(struct dfu_status *s)
++/* Convert timeout from the DFU status to jiffies */
++static inline unsigned long at76_get_timeout(struct dfu_status *s)
 +{
-+	u32 ret = (s->poll_timeout[2] << 16) | (s->poll_timeout[1] << 8) |
-+	    (s->poll_timeout[0]);
-+
-+	return ret;
++	return msecs_to_jiffies((s->poll_timeout[2] << 16)
++				| (s->poll_timeout[1] << 8)
++				| (s->poll_timeout[0]));
 +}
 +
 +/* Load internal firmware from the buffer.  If manifest_sync_timeout > 0, use
-+ * its value in msec in the MANIFEST_SYNC state.  */
++ * its value in jiffies in the MANIFEST_SYNC state.  */
 +static int at76_usbdfu_download(struct usb_device *udev, u8 *buf, u32 size,
 +				int manifest_sync_timeout)
 +{
@@ -1016,7 +1026,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		 manifest_sync_timeout);
 +
 +	if (!size) {
-+		err("FW Buffer length invalid!");
++		dev_printk(KERN_ERR, &udev->dev, "FW buffer length invalid!\n");
 +		return -EINVAL;
 +	}
 +
@@ -1028,7 +1038,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		if (need_dfu_state) {
 +			ret = at76_dfu_get_state(udev, &dfu_state);
 +			if (ret < 0) {
-+				err("DFU: Failed to get DFU state: %d", ret);
++				dev_printk(KERN_ERR, &udev->dev,
++					   "cannot get DFU state: %d\n", ret);
 +				goto exit;
 +			}
 +			need_dfu_state = 0;
@@ -1043,7 +1054,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +				dfu_timeout = at76_get_timeout(&dfu_stat_buf);
 +				need_dfu_state = 0;
 +			} else
-+				err("at76_dfu_get_status failed with %d", ret);
++				dev_printk(KERN_ERR, &udev->dev,
++					   "at76_dfu_get_status returned %d\n",
++					   ret);
 +			break;
 +
 +		case STATE_DFU_DOWNLOAD_BUSY:
@@ -1051,8 +1064,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			need_dfu_state = 1;
 +
 +			at76_dbg(DBG_DFU, "DFU: Resetting device");
-+			schedule_timeout_interruptible(msecs_to_jiffies
-+						       (dfu_timeout));
++			schedule_timeout_interruptible(dfu_timeout);
 +			break;
 +
 +		case STATE_DFU_DOWNLOAD_IDLE:
@@ -1073,7 +1085,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			blockno++;
 +
 +			if (ret != bsize)
-+				err("dfu_download_block failed with %d", ret);
++				dev_printk(KERN_ERR, &udev->dev,
++					   "at76_load_int_fw_block "
++					   "returned %d\n", ret);
 +			need_dfu_state = 1;
 +			break;
 +
@@ -1094,8 +1108,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +				dfu_timeout = manifest_sync_timeout;
 +
 +			at76_dbg(DBG_DFU, "DFU: Waiting for manifest phase");
-+			schedule_timeout_interruptible(msecs_to_jiffies
-+						       (dfu_timeout));
++			schedule_timeout_interruptible(dfu_timeout);
 +			break;
 +
 +		case STATE_DFU_MANIFEST:
@@ -1160,7 +1173,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	union iwreq_data wrqu;
 +	wrqu.data.length = 0;
 +	wrqu.data.flags = 0;
-+	memset(wrqu.ap_addr.sa_data, '\0', ETH_ALEN);
++	memset(wrqu.ap_addr.sa_data, 0, ETH_ALEN);
 +	wrqu.ap_addr.sa_family = ARPHRD_ETHER;
 +	wireless_send_event(netdev, SIOCGIWAP, &wrqu, NULL);
 +	at76_dbg(DBG_WE_EVENTS, "%s: %s: SIOCGIWAP sent", netdev->name,
@@ -1226,7 +1239,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (tx_lastactivity != tx_activity) {
 +		tx_lastactivity = tx_activity;
 +		led_trigger_event(ledtrig_tx, LED_FULL);
-+		mod_timer(&ledtrig_tx_timer, jiffies + msecs_to_jiffies(250));
++		mod_timer(&ledtrig_tx_timer, jiffies + HZ / 4);
 +	} else
 +		led_trigger_event(ledtrig_tx, LED_OFF);
 +}
@@ -1235,7 +1248,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	tx_activity++;
 +	if (!timer_pending(&ledtrig_tx_timer))
-+		mod_timer(&ledtrig_tx_timer, jiffies + msecs_to_jiffies(250));
++		mod_timer(&ledtrig_tx_timer, jiffies + HZ / 4);
 +}
 +
 +/* Check if the given ssid is hidden */
@@ -1362,7 +1375,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +exit:
 +	kfree(hwcfg);
 +	if (ret < 0)
-+		err("Get HW Config failed (%d)", ret);
++		printk(KERN_ERR "%s: cannot get HW Config (error %d)\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1465,15 +1479,14 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +/* Wait until the command is completed */
 +static int at76_wait_completion(struct at76_priv *priv, int cmd)
 +{
-+	struct net_device *netdev = priv->netdev;
 +	int status = 0;
 +	unsigned long timeout = jiffies + CMD_COMPLETION_TIMEOUT;
 +
 +	do {
 +		status = at76_get_cmd_status(priv->udev, cmd);
 +		if (status < 0) {
-+			err("%s: at76_get_cmd_status failed: %d", netdev->name,
-+			    status);
++			printk(KERN_ERR "%s: at76_get_cmd_status failed: %d\n",
++			       priv->netdev->name, status);
 +			break;
 +		}
 +
@@ -1488,8 +1501,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +		schedule_timeout_interruptible(HZ / 10);	/* 100 ms */
 +		if (time_after(jiffies, timeout)) {
-+			err("%s: timeout waiting for cmd %d completion",
-+			    netdev->name, cmd);
++			printk(KERN_ERR
++			       "%s: completion timeout for command %d\n",
++			       priv->netdev->name, cmd);
 +			status = -ETIMEDOUT;
 +			break;
 +		}
@@ -1520,21 +1534,24 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +}
 +
 +/* Return < 0 on error, == 0 if no command sent, == 1 if cmd sent */
-+static int at76_set_radio(struct at76_priv *priv, int on_off)
++static int at76_set_radio(struct at76_priv *priv, int enable)
 +{
 +	int ret;
++	int cmd;
 +
-+	if (priv->radio_on == on_off)
++	if (priv->radio_on == enable)
 +		return 0;
 +
-+	ret = at76_set_card_command(priv->udev, CMD_RADIO, NULL, 0);
++	cmd = enable ? CMD_RADIO_ON : CMD_RADIO_OFF;
++
++	ret = at76_set_card_command(priv->udev, cmd, NULL, 0);
 +	if (ret < 0)
-+		err("%s: at76_set_card_command(CMD_RADIO) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: at76_set_card_command(%d) failed: %d\n",
++		       priv->netdev->name, cmd, ret);
 +	else
 +		ret = 1;
 +
-+	priv->radio_on = on_off;
++	priv->radio_on = enable;
 +	return ret;
 +}
 +
@@ -1543,17 +1560,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC_MGMT;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_mac_mgmt, power_mgmt_mode);
-+
-+	priv->mib_buf.data[0] = priv->pm_mode;
++	priv->mib_buf.data.byte = priv->pm_mode;
 +
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (pm_mode) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: set_mib (pm_mode) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1563,17 +1578,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC_MGMT;
 +	priv->mib_buf.size = 2;
 +	priv->mib_buf.index = offsetof(struct mib_mac_mgmt, station_id);
-+
-+	*(__le16 *)priv->mib_buf.data = cpu_to_le16(id);
++	priv->mib_buf.data.word = cpu_to_le16(id);
 +
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (associd) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: set_mib (associd) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1583,17 +1596,16 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC;
 +	priv->mib_buf.size = 2;
 +	priv->mib_buf.index = offsetof(struct mib_mac, listen_interval);
-+
-+	*(__le16 *)priv->mib_buf.data = cpu_to_le16(interval);
++	priv->mib_buf.data.word = cpu_to_le16(interval);
 +
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (listen_interval) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR
++		       "%s: set_mib (listen_interval) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1602,15 +1614,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_LOCAL;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_local, preamble_type);
-+	priv->mib_buf.data[0] = type;
++	priv->mib_buf.data.byte = type;
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (preamble) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: set_mib (preamble) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1619,15 +1631,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC;
 +	priv->mib_buf.size = 2;
 +	priv->mib_buf.index = offsetof(struct mib_mac, frag_threshold);
-+	*(__le16 *)priv->mib_buf.data = cpu_to_le16(size);
++	priv->mib_buf.data.word = cpu_to_le16(size);
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (frag threshold) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (frag threshold) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1636,14 +1648,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC;
 +	priv->mib_buf.size = 2;
 +	priv->mib_buf.index = offsetof(struct mib_mac, rts_threshold);
-+	*(__le16 *)priv->mib_buf.data = cpu_to_le16(size);
++	priv->mib_buf.data.word = cpu_to_le16(size);
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (rts) failed: %d", priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (rts) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
@@ -1652,83 +1665,35 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_LOCAL;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_local, txautorate_fallback);
-+	priv->mib_buf.data[0] = onoff;
++	priv->mib_buf.data.byte = onoff;
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (autorate fallback) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (autorate fallback) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
-+}
-+
-+/* Set network device type for the current mode */
-+static void at76_set_monitor_mode(struct at76_priv *priv)
-+{
-+	if (priv->iw_mode == IW_MODE_MONITOR) {
-+		at76_dbg(DBG_MONITOR_MODE, "%s: MONITOR MODE ON",
-+			 priv->netdev->name);
-+		priv->netdev->type = ARPHRD_IEEE80211_RADIOTAP;
-+	} else {
-+		at76_dbg(DBG_MONITOR_MODE, "%s: MONITOR MODE OFF",
-+			 priv->netdev->name);
-+		priv->netdev->type = ARPHRD_ETHER;
-+	}
 +}
 +
 +static int at76_add_mac_address(struct at76_priv *priv, void *addr)
 +{
 +	int ret = 0;
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC_ADDR;
 +	priv->mib_buf.size = ETH_ALEN;
 +	priv->mib_buf.index = offsetof(struct mib_mac_addr, mac_addr);
-+	memcpy(priv->mib_buf.data, addr, ETH_ALEN);
++	memcpy(priv->mib_buf.data.addr, addr, ETH_ALEN);
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (MAC_ADDR, mac_addr) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (MAC_ADDR, mac_addr) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	return ret;
 +}
-+
-+#if 0
-+/* Implemented to get promisc. mode working, but does not help.
-+   May still be useful for multicast eventually. */
-+static int at76_set_group_address(struct at76_priv *priv, u8 *addr, int n)
-+{
-+	int ret = 0;
-+
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
-+	priv->mib_buf.type = MIB_MAC_ADDR;
-+	priv->mib_buf.size = ETH_ALEN;
-+	priv->mib_buf.index =
-+	    offsetof(struct mib_mac_addr, group_addr) + n * ETH_ALEN;
-+	memcpy(priv->mib_buf.data, addr, ETH_ALEN);
-+	ret = at76_set_mib(priv, &priv->mib_buf);
-+	if (ret < 0)
-+		err("%s: set_mib (MIB_MAC_ADDR, group_addr) failed: %d",
-+		    priv->netdev->name, ret);
-+
-+	/* I do not know anything about the group_addr_status field... (oku) */
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
-+	priv->mib_buf.type = MIB_MAC_ADDR;
-+	priv->mib_buf.size = 1;
-+	priv->mib_buf.index =
-+	    offsetof(struct mib_mac_addr, group_addr_status) + n;
-+	priv->mib_buf.data[0] = 1;
-+	ret = at76_set_mib(priv, &priv->mib_buf);
-+	if (ret < 0)
-+		err("%s: set_mib (MIB_MAC_ADDR, group_addr_status) failed: %d",
-+		    priv->netdev->name, ret);
-+
-+	return ret;
-+}
-+#endif
 +
 +static void at76_dump_mib_mac_addr(struct at76_priv *priv)
 +{
@@ -1743,8 +1708,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MAC_ADDR, m,
 +			   sizeof(struct mib_mac_addr));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (MAC_ADDR) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: at76_get_mib (MAC_ADDR) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1772,8 +1737,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MAC_WEP, m,
 +			   sizeof(struct mib_mac_wep));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (MAC_WEP) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib (MAC_WEP) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1802,7 +1767,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	int ret;
 +	struct mib_mac_mgmt *m = kmalloc(sizeof(struct mib_mac_mgmt),
 +					 GFP_KERNEL);
-+	char country_string[4];
 +
 +	if (!m)
 +		return;
@@ -1810,13 +1774,10 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MAC_MGMT, m,
 +			   sizeof(struct mib_mac_mgmt));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (MAC_MGMT) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: at76_get_mib (MAC_MGMT) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
-+
-+	memcpy(&country_string, m->country_string, 3);
-+	country_string[3] = '\0';
 +
 +	at76_dbg(DBG_MIB, "%s: MIB MAC_MGMT: beacon_period %d CFP_max_duration "
 +		 "%d medium_occupancy_limit %d station_id 0x%x ATIM_window %d "
@@ -1824,7 +1785,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		 "current_bssid %s current_essid %s current_bss_type %d "
 +		 "pm_mode %d ibss_change %d res %d "
 +		 "multi_domain_capability_implemented %d "
-+		 "international_roaming %d country_string %s",
++		 "international_roaming %d country_string %.3s",
 +		 priv->netdev->name, le16_to_cpu(m->beacon_period),
 +		 le16_to_cpu(m->CFP_max_duration),
 +		 le16_to_cpu(m->medium_occupancy_limit),
@@ -1834,7 +1795,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		 hex2str(m->current_essid, IW_ESSID_MAX_SIZE),
 +		 m->current_bss_type, m->power_mgmt_mode, m->ibss_change,
 +		 m->res, m->multi_domain_capability_implemented,
-+		 m->multi_domain_capability_enabled, country_string);
++		 m->multi_domain_capability_enabled, m->country_string);
 +exit:
 +	kfree(m);
 +}
@@ -1849,8 +1810,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	ret = at76_get_mib(priv->udev, MIB_MAC, m, sizeof(struct mib_mac));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (MAC) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib (MAC) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1885,8 +1846,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	ret = at76_get_mib(priv->udev, MIB_PHY, m, sizeof(struct mib_phy));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (PHY) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib (PHY) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1918,8 +1879,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	ret = at76_get_mib(priv->udev, MIB_LOCAL, m, sizeof(struct mib_local));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (LOCAL) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib (LOCAL) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1943,8 +1904,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MDOMAIN, m,
 +			   sizeof(struct mib_mdomain));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib (MDOMAIN) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib (MDOMAIN) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -1973,7 +1934,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MAC_MGMT, mac_mgmt,
 +			   sizeof(struct mib_mac_mgmt));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib failed: %d", priv->netdev->name, ret);
++		printk(KERN_ERR "%s: at76_get_mib failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto error;
 +	}
 +	memcpy(priv->bssid, mac_mgmt->current_bssid, ETH_ALEN);
@@ -1996,8 +1958,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	}
 +	ret = at76_get_mib(priv->udev, MIB_PHY, phy, sizeof(struct mib_phy));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib(MIB_PHY) failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_get_mib(MIB_PHY) failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto error;
 +	}
 +	priv->channel = phy->channel_id;
@@ -2094,14 +2056,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_set_card_command(priv->udev, CMD_START_IBSS, &bss,
 +				    sizeof(struct at76_req_ibss));
 +	if (ret < 0) {
-+		err("%s: start_ibss failed: %d", priv->netdev->name, ret);
++		printk(KERN_ERR "%s: start_ibss failed: %d\n",
++		       priv->netdev->name, ret);
 +		return ret;
 +	}
 +
 +	ret = at76_wait_completion(priv, CMD_START_IBSS);
 +	if (ret != CMD_STATUS_COMPLETE) {
-+		err("%s start_ibss failed to complete, %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: start_ibss failed to complete, %d\n",
++		       priv->netdev->name, ret);
 +		return ret;
 +	}
 +
@@ -2114,14 +2077,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		return ret;
 +
 +	/* not sure what this is good for ??? */
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC_MGMT;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_mac_mgmt, ibss_change);
++	priv->mib_buf.data.byte = 0;
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0) {
-+		err("%s: set_mib (ibss change ok) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (ibss change ok) failed: %d\n",
++		       priv->netdev->name, ret);
 +		return ret;
 +	}
 +
@@ -2231,8 +2195,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			  AT76_TX_HDRLEN, at76_tx_callback, priv);
 +	ret = usb_submit_urb(priv->tx_urb, GFP_ATOMIC);
 +	if (ret)
-+		err("%s: %s error in tx submit urb: %d",
-+		    priv->netdev->name, __func__, ret);
++		printk(KERN_ERR "%s: error in tx submit urb: %d\n",
++		       priv->netdev->name, ret);
 +
 +	kfree(mgmt_buf);
 +}
@@ -2262,18 +2226,19 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		/* a data/mgmt tx is already pending in the URB -
 +		   if this is no error in some situations we must
 +		   implement a queue or silently modify the old msg */
-+		err("%s: %s removed pending mgmt buffer %s", priv->netdev->name,
-+		    __func__, hex2str(oldbuf, 64));
++		printk(KERN_ERR "%s: removed pending mgmt buffer %s\n",
++		       priv->netdev->name, hex2str(oldbuf, 64));
 +		kfree(oldbuf);
 +		return 0;
 +	}
 +
-+	txbuf->tx_rate = 0;
++	txbuf->tx_rate = TX_RATE_1MBIT;
 +	txbuf->padding = at76_calc_padding(le16_to_cpu(txbuf->wlength));
++	memset(txbuf->reserved, 0, sizeof(txbuf->reserved));
 +
 +	if (priv->next_mgmt_bulk)
-+		err("%s: %s URB status %d, but mgmt is pending",
-+		    priv->netdev->name, __func__, urb_status);
++		printk(KERN_ERR "%s: URB status %d, but mgmt is pending\n",
++		       priv->netdev->name, urb_status);
 +
 +	at76_dbg(DBG_TX_MGMT,
 +		 "%s: tx mgmt: wlen %d tx_rate %d pad %d %s",
@@ -2290,8 +2255,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			  AT76_TX_HDRLEN, at76_tx_callback, priv);
 +	ret = usb_submit_urb(priv->tx_urb, GFP_ATOMIC);
 +	if (ret)
-+		err("%s: %s error in tx submit urb: %d",
-+		    priv->netdev->name, __func__, ret);
++		printk(KERN_ERR "%s: error in tx submit urb: %d\n",
++		       priv->netdev->name, ret);
 +
 +	kfree(txbuf);
 +
@@ -2364,9 +2329,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	struct at76_tx_buffer *tx_buffer;
 +	struct ieee80211_hdr_3addr *mgmt;
 +	struct ieee80211_assoc_request *req;
-+	struct ieee80211_info_element *tlv;
-+	char essid[IW_ESSID_MAX_SIZE + 1];
-+	int len;
++	struct ieee80211_info_element *ie;
++	char *essid;
++	int essid_len;
 +	u16 capa;
 +
 +	BUG_ON(!bss);
@@ -2377,7 +2342,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	req = (struct ieee80211_assoc_request *)tx_buffer->packet;
 +	mgmt = &req->header;
-+	tlv = req->info_element;
++	ie = req->info_element;
 +
 +	/* make wireless header */
 +	mgmt->frame_ctl = cpu_to_le16(IEEE80211_FTYPE_MGMT |
@@ -2404,29 +2369,29 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	/* write TLV data elements */
 +
-+	tlv->id = MFIE_TYPE_SSID;
-+	tlv->len = bss->ssid_len;
-+	memcpy(tlv->data, bss->ssid, bss->ssid_len);
-+	next_ie(&tlv);
++	ie->id = MFIE_TYPE_SSID;
++	ie->len = bss->ssid_len;
++	memcpy(ie->data, bss->ssid, bss->ssid_len);
++	next_ie(&ie);
 +
-+	tlv->id = MFIE_TYPE_RATES;
-+	tlv->len = sizeof(hw_rates);
-+	memcpy(tlv->data, hw_rates, sizeof(hw_rates));
-+	next_ie(&tlv);		/* tlv points behind the supp_rates field */
++	ie->id = MFIE_TYPE_RATES;
++	ie->len = sizeof(hw_rates);
++	memcpy(ie->data, hw_rates, sizeof(hw_rates));
++	next_ie(&ie);		/* ie points behind the supp_rates field */
 +
 +	/* init. at76_priv tx header */
-+	tx_buffer->wlength = cpu_to_le16((u8 *)tlv - (u8 *)mgmt);
++	tx_buffer->wlength = cpu_to_le16((u8 *)ie - (u8 *)mgmt);
 +
-+	tlv = req->info_element;
-+	len = min_t(int, IW_ESSID_MAX_SIZE, tlv->len);
-+	memcpy(essid, tlv->data, len);
-+	essid[len] = '\0';
-+	next_ie(&tlv);		/* points to IE of rates now */
++	ie = req->info_element;
++	essid = ie->data;
++	essid_len = min_t(int, IW_ESSID_MAX_SIZE, ie->len);
++
++	next_ie(&ie);		/* points to IE of rates now */
 +	at76_dbg(DBG_TX_MGMT,
-+		 "%s: AssocReq bssid %s capa 0x%04x ssid %s rates %s",
++		 "%s: AssocReq bssid %s capa 0x%04x ssid %.*s rates %s",
 +		 priv->netdev->name, mac2str(mgmt->addr3),
-+		 le16_to_cpu(req->capability), essid,
-+		 hex2str(tlv->data, tlv->len));
++		 le16_to_cpu(req->capability), essid_len, essid,
++		 hex2str(ie->data, ie->len));
 +
 +	/* either send immediately (if no data tx is pending
 +	   or put it in pending list */
@@ -2483,13 +2448,12 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	list_for_each(lptr, &priv->bss_list) {
 +		ptr = list_entry(lptr, struct bss_info, list);
-+		at76_dbg(DBG_BSS_TABLE,
-+			 "0x%p: bssid %s channel %d ssid %s (%s)"
-+			 " capa 0x%04x rates %s rssi %d link %d noise %d", ptr,
-+			 mac2str(ptr->bssid), ptr->channel, ptr->ssid,
-+			 hex2str(ptr->ssid, ptr->ssid_len), ptr->capa,
-+			 hex2str(ptr->rates, ptr->rates_len), ptr->rssi,
-+			 ptr->link_qual, ptr->noise_level);
++		at76_dbg(DBG_BSS_TABLE, "0x%p: bssid %s channel %d ssid %.*s "
++			 "(%s) capa 0x%04x rates %s rssi %d link %d noise %d",
++			 ptr, mac2str(ptr->bssid), ptr->channel, ptr->ssid_len,
++			 ptr->ssid, hex2str(ptr->ssid, ptr->ssid_len),
++			 ptr->capa, hex2str(ptr->rates, ptr->rates_len),
++			 ptr->rssi, ptr->link_qual, ptr->noise_level);
 +	}
 +	spin_unlock_irqrestore(&priv->bss_list_spinlock, flags);
 +}
@@ -3148,8 +3112,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		data->flags = 1;
 +		data->length = priv->essid_size;
 +		memcpy(extra, priv->essid, data->length);
-+		extra[data->length] = '\0';
-+		data->length += 1;
 +	} else {
 +		/* the ANY ssid was specified */
 +		if (priv->mac_state == MAC_CONNECTED && priv->curr_bss) {
@@ -3157,8 +3119,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			data->flags = 1;
 +			data->length = priv->curr_bss->ssid_len;
 +			memcpy(extra, priv->curr_bss->ssid, data->length);
-+			extra[priv->curr_bss->ssid_len] = '\0';
-+			data->length += 1;
 +		} else {
 +			/* report ANY back */
 +			data->flags = 0;
@@ -3166,7 +3126,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		}
 +	}
 +
-+	at76_dbg(DBG_IOCTL, "%s: SIOCGIWESSID - %s", netdev->name, extra);
++	at76_dbg(DBG_IOCTL, "%s: SIOCGIWESSID - %.*s", netdev->name,
++		 data->length, extra);
 +
 +	return 0;
 +}
@@ -3808,24 +3769,24 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	struct ethhdr *eh = (struct ethhdr *)skb->data;
 +
 +	if (netif_queue_stopped(netdev)) {
-+		err("%s: %s called while netdev is stopped", netdev->name,
-+		    __func__);
++		printk(KERN_ERR "%s: %s called while netdev is stopped\n",
++		       netdev->name, __func__);
 +		/* skip this packet */
 +		dev_kfree_skb(skb);
 +		return 0;
 +	}
 +
 +	if (priv->tx_urb->status == -EINPROGRESS) {
-+		err("%s: %s called while priv->tx_urb is pending for tx",
-+		    netdev->name, __func__);
++		printk(KERN_ERR "%s: %s called while tx urb is pending\n",
++		       netdev->name, __func__);
 +		/* skip this packet */
 +		dev_kfree_skb(skb);
 +		return 0;
 +	}
 +
 +	if (skb->len < ETH_HLEN) {
-+		err("%s: %s: skb too short (%d)", priv->netdev->name,
-+		    __func__, skb->len);
++		printk(KERN_ERR "%s: %s: skb too short (%d)\n",
++		       netdev->name, __func__, skb->len);
 +		dev_kfree_skb(skb);
 +		return 0;
 +	}
@@ -3845,11 +3806,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			       skb->len - ETH_HLEN);
 +			wlen = IEEE80211_3ADDR_LEN + skb->len - ETH_HLEN;
 +		} else {
-+			err("%s: %s: no support for non-SNAP 802.2 packets "
-+			    "(DSAP 0x%02x SSAP 0x%02x cntrl 0x%02x)",
-+			    priv->netdev->name, __func__,
-+			    skb->data[ETH_HLEN], skb->data[ETH_HLEN + 1],
-+			    skb->data[ETH_HLEN + 2]);
++			printk(KERN_ERR "%s: dropping non-SNAP 802.2 packet "
++			       "(DSAP 0x%02x SSAP 0x%02x cntrl 0x%02x)\n",
++			       priv->netdev->name, skb->data[ETH_HLEN],
++			       skb->data[ETH_HLEN + 1],
++			       skb->data[ETH_HLEN + 2]);
 +			dev_kfree_skb(skb);
 +			return 0;
 +		}
@@ -3889,7 +3850,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	   seems to choose the highest rate set with CMD_STARTUP in
 +	   basic_rate_set replacing this value */
 +
-+	memset(tx_buffer->reserved, 0, 4);
++	memset(tx_buffer->reserved, 0, sizeof(tx_buffer->reserved));
 +
 +	tx_buffer->padding = at76_calc_padding(wlen);
 +	submit_len = wlen + AT76_TX_HDRLEN + tx_buffer->padding;
@@ -3913,11 +3874,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = usb_submit_urb(priv->tx_urb, GFP_ATOMIC);
 +	if (ret) {
 +		stats->tx_errors++;
-+		err("%s: error in tx submit urb: %d", netdev->name, ret);
++		printk(KERN_ERR "%s: error in tx submit urb: %d\n",
++		       netdev->name, ret);
 +		if (ret == -EINVAL)
-+			err("-EINVAL: urb %p urb->hcpriv %p urb->complete %p",
-+			    priv->tx_urb, priv->tx_urb->hcpriv,
-+			    priv->tx_urb->complete);
++			printk(KERN_ERR
++			       "%s: -EINVAL: tx urb %p hcpriv %p complete %p\n",
++			       priv->netdev->name, priv->tx_urb,
++			       priv->tx_urb->hcpriv, priv->tx_urb->complete);
 +	} else {
 +		stats->tx_bytes += skb->len;
 +		dev_kfree_skb(skb);
@@ -3945,15 +3908,16 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	struct sk_buff *skb = priv->rx_skb;
 +
 +	if (!priv->rx_urb) {
-+		err("%s: priv->rx_urb is NULL", __func__);
++		printk(KERN_ERR "%s: %s: priv->rx_urb is NULL\n",
++		       priv->netdev->name, __func__);
 +		return -EFAULT;
 +	}
 +
 +	if (!skb) {
 +		skb = dev_alloc_skb(sizeof(struct at76_rx_buffer));
 +		if (!skb) {
-+			err("%s: unable to allocate rx skbuff.",
-+			    priv->netdev->name);
++			printk(KERN_ERR "%s: cannot allocate rx skbuff\n",
++			       priv->netdev->name);
 +			ret = -ENOMEM;
 +			goto exit;
 +		}
@@ -3972,8 +3936,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			at76_dbg(DBG_DEVSTART,
 +				 "usb_submit_urb returned -ENODEV");
 +		else
-+			err("%s: rx, usb_submit_urb failed: %d",
-+			    priv->netdev->name, ret);
++			printk(KERN_ERR "%s: rx, usb_submit_urb failed: %d\n",
++			       priv->netdev->name, ret);
 +	}
 +
 +exit:
@@ -4008,7 +3972,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	ret = at76_submit_rx_urb(priv);
 +	if (ret < 0) {
-+		err("%s: open: submit_rx_urb failed: %d", netdev->name, ret);
++		printk(KERN_ERR "%s: open: submit_rx_urb failed: %d\n",
++		       netdev->name, ret);
 +		goto error;
 +	}
 +
@@ -4055,14 +4020,12 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	struct at76_priv *priv = netdev_priv(netdev);
 +
-+	strncpy(info->driver, DRIVER_NAME, sizeof(info->driver) - 1);
-+
++	strncpy(info->driver, DRIVER_NAME, sizeof(info->driver));
 +	strncpy(info->version, DRIVER_VERSION, sizeof(info->version));
-+	info->version[sizeof(info->version) - 1] = '\0';
 +
 +	usb_make_path(priv->udev, info->bus_info, sizeof(info->bus_info));
 +
-+	snprintf(info->fw_version, sizeof(info->fw_version) - 1, "%d.%d.%d-%d",
++	snprintf(info->fw_version, sizeof(info->fw_version), "%d.%d.%d-%d",
 +		 priv->fw_version.major, priv->fw_version.minor,
 +		 priv->fw_version.patch, priv->fw_version.build);
 +}
@@ -4096,7 +4059,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	at76_dbg(DBG_DEVSTART, "opmode %d", op_mode);
 +
 +	if (op_mode != OPMODE_NORMAL_NIC_WITHOUT_FLASH) {
-+		err("unexpected opmode %d", op_mode);
++		dev_printk(KERN_ERR, &udev->dev, "unexpected opmode %d\n",
++			   op_mode);
 +		return -EINVAL;
 +	}
 +
@@ -4115,8 +4079,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +			 size, bsize, blockno);
 +		ret = at76_load_ext_fw_block(udev, blockno, block, bsize);
 +		if (ret != bsize) {
-+			err("loading %dth firmware block failed: %d", blockno,
-+			    ret);
++			dev_printk(KERN_ERR, &udev->dev,
++				   "loading %dth firmware block failed: %d\n",
++				   blockno, ret);
 +			goto exit;
 +		}
 +		buf += bsize;
@@ -4132,7 +4097,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +exit:
 +	kfree(block);
 +	if (ret < 0)
-+		err("Downloading external firmware failed: %d", ret);
++		dev_printk(KERN_ERR, &udev->dev,
++			   "downloading external firmware failed: %d\n", ret);
 +	return ret;
 +}
 +
@@ -4143,10 +4109,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	int need_remap = !at76_is_505a(fwe->board_type);
 +
 +	ret = at76_usbdfu_download(udev, fwe->intfw, fwe->intfw_size,
-+				   need_remap ? 0 : 2000);
++				   need_remap ? 0 : 2 * HZ);
 +
 +	if (ret < 0) {
-+		err("downloading internal fw failed with %d", ret);
++		dev_printk(KERN_ERR, &udev->dev,
++			   "downloading internal fw failed with %d\n", ret);
 +		goto exit;
 +	}
 +
@@ -4156,7 +4123,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (need_remap) {
 +		ret = at76_remap(udev);
 +		if (ret < 0) {
-+			err("sending REMAP failed with %d", ret);
++			dev_printk(KERN_ERR, &udev->dev,
++				   "sending REMAP failed with %d\n", ret);
 +			goto exit;
 +		}
 +	}
@@ -4329,18 +4297,18 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	ret = at76_join_bss(priv, priv->curr_bss);
 +	if (ret < 0) {
-+		err("%s: join_bss failed with %d", priv->netdev->name, ret);
++		printk(KERN_ERR "%s: join_bss failed with %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
 +	ret = at76_wait_completion(priv, CMD_JOIN);
 +	if (ret != CMD_STATUS_COMPLETE) {
 +		if (ret != CMD_STATUS_TIME_OUT)
-+			err("%s join_bss completed with %d",
-+			    priv->netdev->name, ret);
++			printk(KERN_ERR "%s: join_bss completed with %d\n",
++			       priv->netdev->name, ret);
 +		else
-+			printk(KERN_INFO
-+			       "%s: join_bss ssid %s timed out\n",
++			printk(KERN_INFO "%s: join_bss ssid %s timed out\n",
 +			       priv->netdev->name,
 +			       mac2str(priv->curr_bss->bssid));
 +
@@ -4394,8 +4362,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	status = at76_get_cmd_status(priv->udev, CMD_SCAN);
 +	if (status < 0) {
-+		err("%s: %s: at76_get_cmd_status failed with %d",
-+		    priv->netdev->name, __func__, status);
++		printk(KERN_ERR "%s: %s: at76_get_cmd_status failed with %d\n",
++		       priv->netdev->name, __func__, status);
 +		status = CMD_STATUS_IN_PROGRESS;
 +		/* INFO: Hope it was a one off error - if not, scanning
 +		   further down the line and stop this cycle */
@@ -4408,9 +4376,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (status != CMD_STATUS_COMPLETE) {
 +		if ((status != CMD_STATUS_IN_PROGRESS) &&
 +		    (status != CMD_STATUS_IDLE))
-+			err("%s: %s: Bad scan status: %s",
-+			    priv->netdev->name, __func__,
-+			    at76_get_cmd_status_string(status));
++			printk(KERN_ERR "%s: %s: Bad scan status: %s\n",
++			       priv->netdev->name, __func__,
++			       at76_get_cmd_status_string(status));
 +
 +		/* the first cmd status after scan start is always a IDLE ->
 +		   start the timer to poll again until COMPLETED */
@@ -4428,11 +4396,12 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (priv->scan_need_any) {
 +		ret = at76_start_scan(priv, 0);
 +		if (ret < 0)
-+			err("%s: %s: start_scan (ANY) failed with %d",
-+			    priv->netdev->name, __func__, ret);
++			printk(KERN_ERR
++			       "%s: %s: start_scan (ANY) failed with %d\n",
++			       priv->netdev->name, __func__, ret);
 +		at76_dbg(DBG_MGMT_TIMER,
-+			 "%s:%d: starting mgmt_timer for %d ticks",
-+			 __func__, __LINE__, SCAN_POLL_INTERVAL);
++			 "%s:%d: starting mgmt_timer for %d ticks", __func__,
++			 __LINE__, SCAN_POLL_INTERVAL);
 +		schedule_delayed_work(&priv->dwork_get_scan,
 +				      SCAN_POLL_INTERVAL);
 +		priv->scan_need_any = 0;
@@ -4536,7 +4505,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	struct at76_priv *priv = container_of(work, struct at76_priv,
 +					      work_new_bss);
 +	int ret;
-+	struct net_device *netdev = priv->netdev;
 +	struct mib_mac_mgmt mac_mgmt;
 +
 +	mutex_lock(&priv->mtx);
@@ -4544,7 +4512,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_get_mib(priv->udev, MIB_MAC_MGMT, &mac_mgmt,
 +			   sizeof(struct mib_mac_mgmt));
 +	if (ret < 0) {
-+		err("%s: at76_get_mib failed: %d", netdev->name, ret);
++		printk(KERN_ERR "%s: at76_get_mib failed: %d\n",
++		       priv->netdev->name, ret);
 +		goto exit;
 +	}
 +
@@ -4554,14 +4523,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	at76_iwevent_bss_connect(priv->netdev, priv->bssid);
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_MAC_MGMT;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_mac_mgmt, ibss_change);
++	priv->mib_buf.data.byte = 0;
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (ibss change ok) failed: %d", netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: set_mib (ibss change ok) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +exit:
 +	mutex_unlock(&priv->mtx);
@@ -4571,16 +4541,10 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	struct at76_card_config *ccfg = &priv->card_config;
 +	int ret;
-+	char ossid[IW_ESSID_MAX_SIZE + 1];
-+
-+	/* make priv->essid printable */
-+	BUG_ON(priv->essid_size > IW_ESSID_MAX_SIZE);
-+	memcpy(ossid, priv->essid, priv->essid_size);
-+	ossid[priv->essid_size] = '\0';
 +
 +	at76_dbg(DBG_PARAMS,
-+		 "%s param: ssid %s (%s) mode %s ch %d wep %s key %d "
-+		 "keylen %d", priv->netdev->name, ossid,
++		 "%s param: ssid %.*s (%s) mode %s ch %d wep %s key %d "
++		 "keylen %d", priv->netdev->name, priv->essid_size, priv->essid,
 +		 hex2str(priv->essid, IW_ESSID_MAX_SIZE),
 +		 priv->iw_mode == IW_MODE_ADHOC ? "adhoc" : "infra",
 +		 priv->channel, priv->wep_enabled ? "enabled" : "disabled",
@@ -4640,8 +4604,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_set_card_command(priv->udev, CMD_STARTUP, &priv->card_config,
 +				    sizeof(struct at76_card_config));
 +	if (ret < 0) {
-+		err("%s: at76_set_card_command failed: %d", priv->netdev->name,
-+		    ret);
++		printk(KERN_ERR "%s: at76_set_card_command failed: %d\n",
++		       priv->netdev->name, ret);
 +		return ret;
 +	}
 +
@@ -4651,7 +4615,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	memset(priv->bssid, 0, ETH_ALEN);
 +
 +	if (at76_set_radio(priv, 1) == 1)
-+		at76_wait_completion(priv, CMD_RADIO);
++		at76_wait_completion(priv, CMD_RADIO_ON);
 +
 +	ret = at76_set_preamble(priv, priv->preamble_type);
 +	if (ret < 0)
@@ -4674,8 +4638,6 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (ret < 0)
 +		return ret;
 +
-+	at76_set_monitor_mode(priv);
-+
 +	if (at76_debug & DBG_MIB) {
 +		at76_dump_mib_mac(priv);
 +		at76_dump_mib_mac_addr(priv);
@@ -4697,15 +4659,19 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	mutex_lock(&priv->mtx);
 +
-+	at76_startup_device(priv);
 +	netif_carrier_off(priv->netdev);	/* stop netdev watchdog */
 +	netif_stop_queue(priv->netdev);	/* stop tx data packets */
 +
++	at76_startup_device(priv);
++
 +	if (priv->iw_mode != IW_MODE_MONITOR) {
++		priv->netdev->type = ARPHRD_ETHER;
 +		at76_set_mac_state(priv, MAC_SCANNING);
 +		schedule_work(&priv->work_start_scan);
-+	} else
++	} else {
++		priv->netdev->type = ARPHRD_IEEE80211_RADIOTAP;
 +		at76_start_monitor(priv);
++	}
 +
 +	mutex_unlock(&priv->mtx);
 +}
@@ -4734,8 +4700,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	ret = at76_start_scan(priv, 1);
 +
 +	if (ret < 0)
-+		err("%s: %s: start_scan failed with %d",
-+		    priv->netdev->name, __func__, ret);
++		printk(KERN_ERR "%s: %s: start_scan failed with %d\n",
++		       priv->netdev->name, __func__, ret);
 +	else {
 +		at76_dbg(DBG_MGMT_TIMER,
 +			 "%s:%d: starting mgmt_timer for %d ticks",
@@ -4757,15 +4723,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	mutex_lock(&priv->mtx);
 +
-+	memset(&priv->mib_buf, 0, sizeof(struct set_mib_buffer));
 +	priv->mib_buf.type = MIB_LOCAL;
 +	priv->mib_buf.size = 1;
 +	priv->mib_buf.index = offsetof(struct mib_local, promiscuous_mode);
-+	priv->mib_buf.data[0] = priv->promisc ? 1 : 0;
++	priv->mib_buf.data.byte = priv->promisc ? 1 : 0;
++
 +	ret = at76_set_mib(priv, &priv->mib_buf);
 +	if (ret < 0)
-+		err("%s: set_mib (promiscuous_mode) failed: %d",
-+		    priv->netdev->name, ret);
++		printk(KERN_ERR "%s: set_mib (promiscuous_mode) failed: %d\n",
++		       priv->netdev->name, ret);
 +
 +	mutex_unlock(&priv->mtx);
 +}
@@ -4787,15 +4753,14 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +{
 +	struct ieee80211_assoc_response *resp =
 +	    (struct ieee80211_assoc_response *)buf->packet;
-+	struct ieee80211_hdr_3addr *mgmt = &resp->header;
 +	u16 assoc_id = le16_to_cpu(resp->aid);
 +	u16 status = le16_to_cpu(resp->status);
-+	u16 capa = le16_to_cpu(resp->capability);
-+	at76_dbg(DBG_RX_MGMT,
-+		 "%s: rx AssocResp bssid %s capa 0x%04x status 0x%04x "
-+		 "assoc_id 0x%04x rates %s", priv->netdev->name,
-+		 mac2str(mgmt->addr3), capa, status, assoc_id,
-+		 hex2str(resp->info_element->data, resp->info_element->len));
++
++	at76_dbg(DBG_RX_MGMT, "%s: rx AssocResp bssid %s capa 0x%04x status "
++		 "0x%04x assoc_id 0x%04x rates %s", priv->netdev->name,
++		 mac2str(resp->header.addr3), le16_to_cpu(resp->capability),
++		 status, assoc_id, hex2str(resp->info_element->data,
++					   resp->info_element->len));
 +
 +	if (priv->mac_state != MAC_ASSOC) {
 +		printk(KERN_INFO "%s: AssocResp in state %s ignored\n",
@@ -4982,7 +4947,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	struct bss_info *match;	/* entry matching addr3 with its bssid */
 +	int new_entry = 0;
 +	int len;
-+	struct ieee80211_info_element *tlv;
++	struct ieee80211_info_element *ie;
 +	int have_ssid = 0;
 +	int have_rates = 0;
 +	int have_channel = 0;
@@ -5024,14 +4989,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	if (!match) {
 +		/* BSS not in the list - append it */
-+		match = kmalloc(sizeof(struct bss_info), GFP_ATOMIC);
++		match = kzalloc(sizeof(struct bss_info), GFP_ATOMIC);
 +		if (!match) {
 +			at76_dbg(DBG_BSS_TABLE,
 +				 "%s: cannot kmalloc new bss info (%zd byte)",
 +				 priv->netdev->name, sizeof(struct bss_info));
 +			goto exit;
 +		}
-+		memset(match, 0, sizeof(*match));
 +		new_entry = 1;
 +		list_add_tail(&match->list, &priv->bss_list);
 +	}
@@ -5045,7 +5009,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	at76_dbg(DBG_RX_BEACON, "%s: bssid %s", priv->netdev->name,
 +		 mac2str(match->bssid));
 +
-+	tlv = bdata->info_element;
++	ie = bdata->info_element;
 +
 +	/* length of var length beacon parameters */
 +	varpar_len = min_t(int, le16_to_cpu(buf->wlength) -
@@ -5067,34 +5031,31 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	 * bytes are useful, hence the have_ssid etc optimizations. */
 +
 +	while (keep_going &&
-+	       ((&tlv->data[tlv->len] - (u8 *)bdata->info_element) <=
++	       ((&ie->data[ie->len] - (u8 *)bdata->info_element) <=
 +		varpar_len)) {
 +
-+		switch (tlv->id) {
++		switch (ie->id) {
 +
 +		case MFIE_TYPE_SSID:
 +			if (have_ssid)
 +				break;
 +
-+			len = min_t(int, IW_ESSID_MAX_SIZE, tlv->len);
++			len = min_t(int, IW_ESSID_MAX_SIZE, ie->len);
 +
 +			/* we copy only if this is a new entry,
 +			   or the incoming SSID is not a hidden SSID. This
 +			   will protect us from overwriting a real SSID read
 +			   in a ProbeResponse with a hidden one from a
 +			   following beacon. */
-+			if (!new_entry && at76_is_hidden_ssid(tlv->data, len)) {
++			if (!new_entry && at76_is_hidden_ssid(ie->data, len)) {
 +				have_ssid = 1;
 +				break;
 +			}
 +
 +			match->ssid_len = len;
-+			memcpy(match->ssid, tlv->data, len);
-+			match->ssid[len] = '\0';	/* terminate the
-+							   string for
-+							   printing */
-+			at76_dbg(DBG_RX_BEACON, "%s: SSID - %s",
-+				 priv->netdev->name, match->ssid);
++			memcpy(match->ssid, ie->data, len);
++			at76_dbg(DBG_RX_BEACON, "%s: SSID - %.*s",
++				 priv->netdev->name, len, match->ssid);
 +			have_ssid = 1;
 +			break;
 +
@@ -5103,19 +5064,19 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +				break;
 +
 +			match->rates_len =
-+			    min_t(int, sizeof(match->rates), tlv->len);
-+			memcpy(match->rates, tlv->data, match->rates_len);
++			    min_t(int, sizeof(match->rates), ie->len);
++			memcpy(match->rates, ie->data, match->rates_len);
 +			have_rates = 1;
 +			at76_dbg(DBG_RX_BEACON, "%s: SUPPORTED RATES %s",
 +				 priv->netdev->name,
-+				 hex2str(tlv->data, tlv->len));
++				 hex2str(ie->data, ie->len));
 +			break;
 +
 +		case MFIE_TYPE_DS_SET:
 +			if (have_channel)
 +				break;
 +
-+			match->channel = tlv->data[0];
++			match->channel = ie->data[0];
 +			have_channel = 1;
 +			at76_dbg(DBG_RX_BEACON, "%s: CHANNEL - %d",
 +				 priv->netdev->name, match->channel);
@@ -5126,13 +5087,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		case MFIE_TYPE_IBSS_SET:
 +		default:
 +			at76_dbg(DBG_RX_BEACON, "%s: beacon IE id %d len %d %s",
-+				 priv->netdev->name, tlv->id, tlv->len,
-+				 hex2str(tlv->data, tlv->len));
++				 priv->netdev->name, ie->id, ie->len,
++				 hex2str(ie->data, ie->len));
 +			break;
 +		}
 +
 +		/* advance to the next informational element */
-+		next_ie(&tlv);
++		next_ie(&ie);
 +
 +		/* Optimization: after all, the bdata->data array is
 +		 * varpar_len bytes long, whereas we get all of the useful
@@ -5172,17 +5133,17 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (at76_is_intersil(priv->board_type))
 +		qual->qual = buf->link_quality;
 +	else {
-+		unsigned long msec;
++		unsigned long elapsed;
 +
 +		/* Update qual at most once a second */
-+		msec = jiffies_to_msecs(jiffies) - priv->beacons_last_qual;
-+		if (msec < 1000)
++		elapsed = jiffies - priv->beacons_last_qual;
++		if (elapsed < 1 * HZ)
 +			return;
 +
 +		qual->qual = qual->level * priv->beacons_received *
-+		    priv->beacon_period / msec;
++		    msecs_to_jiffies(priv->beacon_period) / elapsed;
 +
-+		priv->beacons_last_qual = jiffies_to_msecs(jiffies);
++		priv->beacons_last_qual = jiffies;
 +		priv->beacons_received = 0;
 +	}
 +	qual->qual = (qual->qual > 100) ? 100 : qual->qual;
@@ -5608,8 +5569,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	skb = dev_alloc_skb(skblen);
 +	if (!skb) {
-+		err("%s: MONITOR MODE: dev_alloc_skb for radiotap header "
-+		    "returned NULL", priv->netdev->name);
++		printk(KERN_ERR "%s: MONITOR MODE: dev_alloc_skb for radiotap "
++		       "header returned NULL\n", priv->netdev->name);
 +		return;
 +	}
 +
@@ -5636,7 +5597,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	skb->ip_summed = CHECKSUM_NONE;
 +	skb_reset_mac_header(skb);
 +	skb->pkt_type = PACKET_OTHERHOST;
-+	skb->protocol = htons(ETH_P_80211_RAW);
++	skb->protocol = htons(ETH_P_802_2);
 +
 +	netdev->last_rx = jiffies;
 +	netif_rx(skb);
@@ -5761,9 +5722,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	at76_dbg(DBG_FW, "downloading firmware %s", fwe->fwname);
 +	ret = request_firmware(&fwe->fw, fwe->fwname, &udev->dev);
 +	if (ret < 0) {
-+		err("firmware %s not found.", fwe->fwname);
-+		err("You may need to download the firmware from "
-+		    "http://developer.berlios.de/projects/at76c503a/");
++		dev_printk(KERN_ERR, &udev->dev, "firmware %s not found!\n",
++			   fwe->fwname);
++		dev_printk(KERN_ERR, &udev->dev,
++			   "you may need to download the firmware from "
++			   "http://developer.berlios.de/projects/at76c503a/");
 +		goto exit;
 +	}
 +
@@ -5771,15 +5734,17 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	fwh = (struct at76_fw_header *)(fwe->fw->data);
 +
 +	if (fwe->fw->size <= sizeof(*fwh)) {
-+		err("firmware is too short (0x%zx)", fwe->fw->size);
++		dev_printk(KERN_ERR, &udev->dev,
++			   "firmware is too short (0x%zx)\n", fwe->fw->size);
 +		goto exit;
 +	}
 +
 +	/* CRC currently not checked */
 +	fwe->board_type = le32_to_cpu(fwh->board_type);
 +	if (fwe->board_type != board_type) {
-+		err("board type mismatch, requested %u, got %u", board_type,
-+		    fwe->board_type);
++		dev_printk(KERN_ERR, &udev->dev,
++			   "board type mismatch, requested %u, got %u\n",
++			   board_type, fwe->board_type);
 +		goto exit;
 +	}
 +
@@ -5796,9 +5761,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	fwe->loaded = 1;
 +
-+	at76_dbg(DBG_DEVSTART, "firmware board %u version %u.%u.%u-%u "
-+		 "(int %d:%d, ext %d:%d)", board_type,
-+		 fwh->major, fwh->minor, fwh->patch, fwh->build,
++	dev_printk(KERN_DEBUG, &udev->dev,
++		   "using firmware %s (version %d.%d.%d-%d)\n",
++		   fwe->fwname, fwh->major, fwh->minor, fwh->patch, fwh->build);
++
++	at76_dbg(DBG_DEVSTART, "board %u, int %d:%d, ext %d:%d", board_type,
 +		 le32_to_cpu(fwh->int_fw_offset), le32_to_cpu(fwh->int_fw_len),
 +		 le32_to_cpu(fwh->ext_fw_offset), le32_to_cpu(fwh->ext_fw_len));
 +	at76_dbg(DBG_DEVSTART, "firmware id %s", str);
@@ -5822,12 +5789,11 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	/* allocate memory for our device state and initialize it */
 +	netdev = alloc_etherdev(sizeof(struct at76_priv));
 +	if (!netdev) {
-+		err("out of memory");
++		dev_printk(KERN_ERR, &udev->dev, "out of memory\n");
 +		return NULL;
 +	}
 +
 +	priv = netdev_priv(netdev);
-+	memset(priv, 0, sizeof(*priv));
 +
 +	priv->udev = udev;
 +	priv->netdev = netdev;
@@ -5904,7 +5870,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	}
 +
 +	if (!ep_in || !ep_out) {
-+		printk(KERN_ERR DRIVER_NAME ": bulk endpoints missing\n");
++		dev_printk(KERN_ERR, &interface->dev,
++			   "bulk endpoints missing\n");
 +		return -ENXIO;
 +	}
 +
@@ -5914,15 +5881,15 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	priv->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 +	priv->tx_urb = usb_alloc_urb(0, GFP_KERNEL);
 +	if (!priv->rx_urb || !priv->tx_urb) {
-+		printk(KERN_ERR DRIVER_NAME ": cannot allocate URB\n");
++		dev_printk(KERN_ERR, &interface->dev, "cannot allocate URB\n");
 +		return -ENOMEM;
 +	}
 +
 +	buffer_size = sizeof(struct at76_tx_buffer) + MAX_PADDING_SIZE;
 +	priv->bulk_out_buffer = kmalloc(buffer_size, GFP_KERNEL);
 +	if (!priv->bulk_out_buffer) {
-+		printk(KERN_ERR DRIVER_NAME
-+		       ": cannot allocate output buffer\n");
++		dev_printk(KERN_ERR, &interface->dev,
++			   "cannot allocate output buffer\n");
 +		return -ENOMEM;
 +	}
 +
@@ -5951,7 +5918,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	/* MAC address */
 +	ret = at76_get_hw_config(priv);
 +	if (ret < 0) {
-+		err("could not get MAC address");
++		dev_printk(KERN_ERR, &interface->dev,
++			   "cannot get MAC address\n");
 +		goto exit;
 +	}
 +
@@ -5961,14 +5929,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	priv->channel = DEF_CHANNEL;
 +	priv->iw_mode = IW_MODE_INFRA;
-+	memset(priv->essid, 0, IW_ESSID_MAX_SIZE);
 +	priv->rts_threshold = DEF_RTS_THRESHOLD;
 +	priv->frag_threshold = DEF_FRAG_THRESHOLD;
 +	priv->short_retry_limit = DEF_SHORT_RETRY_LIMIT;
 +	priv->txrate = TX_RATE_AUTO;
 +	priv->preamble_type = PREAMBLE_TYPE_LONG;
 +	priv->beacon_period = 100;
-+	priv->beacons_last_qual = jiffies_to_msecs(jiffies);
++	priv->beacons_last_qual = jiffies;
 +	priv->auth_mode = WLAN_AUTH_OPEN;
 +	priv->scan_min_time = DEF_SCAN_MIN_TIME;
 +	priv->scan_max_time = DEF_SCAN_MAX_TIME;
@@ -5990,18 +5957,18 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	netdev->wireless_handlers = &at76_handler_def;
 +	netdev->set_multicast_list = at76_set_multicast;
 +	netdev->set_mac_address = at76_set_mac_address;
++	dev_alloc_name(netdev, "wlan%d");
 +
 +	ret = register_netdev(priv->netdev);
 +	if (ret) {
-+		err("unable to register netdevice %s (status %d)!",
-+		    priv->netdev->name, ret);
++		dev_printk(KERN_ERR, &interface->dev,
++			   "cannot register netdevice (status %d)!\n", ret);
 +		goto exit;
 +	}
 +	priv->netdev_registered = 1;
 +
-+	printk(KERN_INFO "%s: MAC address %s\n", netdev->name,
-+	       mac2str(priv->mac_addr));
-+	printk(KERN_INFO "%s: firmware version %d.%d.%d-%d\n", netdev->name,
++	printk(KERN_INFO "%s: USB %s, MAC %s, firmware %d.%d.%d-%d\n",
++	       netdev->name, interface->dev.bus_id, mac2str(priv->mac_addr),
 +	       priv->fw_version.major, priv->fw_version.minor,
 +	       priv->fw_version.patch, priv->fw_version.build);
 +	printk(KERN_INFO "%s: regulatory domain 0x%02x: %s\n", netdev->name,
@@ -6097,8 +6064,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	   we get 204 with 2.4.23, Fiberline FL-WL240u (505A+RFMD2958) ??? */
 +
 +	if (op_mode == OPMODE_HW_CONFIG_MODE) {
-+		err("cannot handle a device in HW_CONFIG_MODE (opmode %d)",
-+		    op_mode);
++		dev_printk(KERN_ERR, &interface->dev,
++			   "cannot handle a device in HW_CONFIG_MODE\n");
 +		ret = -EBUSY;
 +		goto error;
 +	}
@@ -6106,10 +6073,13 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	if (op_mode != OPMODE_NORMAL_NIC_WITH_FLASH
 +	    && op_mode != OPMODE_NORMAL_NIC_WITHOUT_FLASH) {
 +		/* download internal firmware part */
-+		at76_dbg(DBG_DEVSTART, "downloading internal firmware");
++		dev_printk(KERN_DEBUG, &interface->dev,
++			   "downloading internal firmware\n");
 +		ret = at76_load_internal_fw(udev, fwe);
 +		if (ret < 0) {
-+			err("error %d downloading internal firmware", ret);
++			dev_printk(KERN_ERR, &interface->dev,
++				   "error %d downloading internal firmware\n",
++				   ret);
 +			goto error;
 +		}
 +		usb_put_dev(udev);
@@ -6134,7 +6104,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		need_ext_fw = 1;
 +
 +	if (need_ext_fw) {
-+		at76_dbg(DBG_DEVSTART, "downloading external firmware");
++		dev_printk(KERN_DEBUG, &interface->dev,
++			   "downloading external firmware\n");
 +
 +		ret = at76_load_external_fw(udev, fwe);
 +		if (ret)
@@ -6143,20 +6114,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +		/* Re-check firmware version */
 +		ret = at76_get_mib(udev, MIB_FW_VERSION, &fwv, sizeof(fwv));
 +		if (ret < 0) {
-+			err("error %d getting firmware version", ret);
-+			goto error;
-+		}
-+
-+		/* Major and minor version must match */
-+		if (fwv.major != fwe->fw_version.major
-+		    || fwv.minor != fwe->fw_version.minor) {
-+			printk(KERN_ERR DRIVER_NAME
-+			       ": wrong firmware version, loaded %d.%d.%d-%d, "
-+			       "read back %d.%d.%d-%d\n",
-+			       fwe->fw_version.major, fwe->fw_version.minor,
-+			       fwe->fw_version.patch, fwe->fw_version.build,
-+			       fwv.major, fwv.minor, fwv.patch, fwv.build);
-+			ret = -EBUSY;
++			dev_printk(KERN_ERR, &interface->dev,
++				   "error %d getting firmware version\n", ret);
 +			goto error;
 +		}
 +	}
@@ -6197,7 +6156,7 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +
 +	printk(KERN_INFO "%s: disconnecting\n", priv->netdev->name);
 +	at76_delete_device(priv);
-+	printk(KERN_INFO DRIVER_NAME ": disconnected\n");
++	dev_printk(KERN_INFO, &interface->dev, "disconnected\n");
 +}
 +
 +/* Structure for registering this driver with the USB subsystem */
@@ -6219,7 +6178,8 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +	/* register this driver with the USB subsystem */
 +	result = usb_register(&at76_driver);
 +	if (result < 0)
-+		err("usb_register failed (status %d)", result);
++		printk(KERN_ERR DRIVER_NAME
++		       ": usb_register failed (status %d)\n", result);
 +
 +	led_trigger_register_simple("at76_usb-tx", &ledtrig_tx);
 +	return result;
@@ -6252,9 +6212,9 @@ diff -up /dev/null linux-2.6.22.noarch/drivers/net/wireless/at76_usb.c
 +MODULE_AUTHOR("Pavel Roskin <proski@gnu.org>");
 +MODULE_DESCRIPTION(DRIVER_DESC);
 +MODULE_LICENSE("GPL");
-diff -up linux-2.6.22.noarch/drivers/net/wireless/Kconfig.orig linux-2.6.22.noarch/drivers/net/wireless/Kconfig
---- linux-2.6.22.noarch/drivers/net/wireless/Kconfig.orig	2007-09-26 19:57:31.000000000 -0400
-+++ linux-2.6.22.noarch/drivers/net/wireless/Kconfig	2007-09-26 19:59:33.000000000 -0400
+diff -up linux-2.6.23.noarch/drivers/net/wireless/Kconfig.orig linux-2.6.23.noarch/drivers/net/wireless/Kconfig
+--- linux-2.6.23.noarch/drivers/net/wireless/Kconfig.orig	2007-10-19 14:41:17.000000000 -0400
++++ linux-2.6.23.noarch/drivers/net/wireless/Kconfig	2007-10-19 14:45:38.000000000 -0400
 @@ -381,6 +381,14 @@ config PCI_HERMES
  	  common.  Some of the built-in wireless adaptors in laptops are of
  	  this variety.
