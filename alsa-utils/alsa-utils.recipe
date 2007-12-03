@@ -1,19 +1,54 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class AlsaUtils(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class AlsaUtils(RPMPackageRecipe,AutoPackageRecipe):
     name = 'alsa-utils'
-    version = '1.0.14'
+    version = '1.0.15'
+    rpmRelease = '1.fc9'
+
+    rpmPatches = [ 'alsa-utils-1.0.14-alsaconf.patch',
+                   'alsa-utils-1.0.14-statedir.patch']
+
+    rpmSources = [ 'salsa.c',
+                   'alsacard.c',
+                   'alsaunmute.c' ]
 
     buildRequires = [ 'alsa-lib:devel', 'ncurses:devel', 'gettext:runtime' ]
 
-    def unpack(r):
-        r.addArchive('ftp://ftp.alsa-project.org/pub/utils/')
-        r.addSource('alsamixer.init', dest='%(sysconfdir)s/init.d/alsamixer',
-                    macros=True, mode=0755)
+#    def unpack(r):
+#        r.addArchive('ftp://ftp.alsa-project.org/pub/utils/')
+#        r.addSource('alsamixer.init', dest='%(sysconfdir)s/init.d/alsamixer',
+#                    macros=True, mode=0755)
 
-    def policy(r):
-        r.TagSpec('initscript', '%(initdir)s/')
+    def configure(r):
+        r.Configure('CFLAGS="%(cflags)s -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64" --sbindir=%(essentialsbindir)s')
+        r.addSource('alsa.rules', rpm = r.srpm, mode = 0644, dest = '/etc/udev/rules.d/90-alsa.rules')
+    def make(r):
+        r.Make()
+        r.Run('%(cc)s %(cflags)s -o salsa salsa.c -lasound')
+        r.Run('%(cc)s %(cflags)s -o alsacard alsacard.c -lasound')
+        r.Run('%(cc)s %(cflags)s -o alsaunmute alsaunmute.c -lasound')
+
+    def makeinstall(r):
+        r.MakeInstall()
+
+
+        # Install support utilities
+        for i in ['alsaunmute', 'alsacard',]:
+            r.Install(i, '%(bindir)s', mode = 0755)
+
+        r.Install('salsa', '%(essentialsbindir)s', mode = 0755)
+
+        # Link alsactl to /usr/sbin
+        r.Symlink('%(essentialsbindir)s/alsactl', '%(sbindir)s/alsactl')
+
+        # Create a place for volume configuration
+        r.Create('%(sysconfdir)s/alsa/asound.state')
+        r.InitialContents('%(sysconfdir)s/alsa/asound.state')
+
+        # add missing trailing newline...
+        r.Run('echo >> %(destdir)s/%(sysconfdir)s/udev/rules.d/90-alsa.rules')
