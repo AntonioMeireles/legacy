@@ -4,23 +4,43 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class AlsaPlugins(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class AlsaPlugins(RPMPackageRecipe,AutoPackageRecipe):
     name = 'alsa-plugins'
     version = '1.0.14'
+    rpmRelease = '5.fc8'
+    rpmPatches = [ '1.0.14-buffer-attr.patch',
+                   '1.0.14-state-xrun.patch' ]
+
 
     buildRequires = ['alsa-lib:devel', 'dbus:devel', 'jack:devel', 'libsamplerate:devel', 'pkgconfig:devel', 'pulseaudio:devel' ] 
 
     if Use.builddocs:
         buildRequires.append('doxygen:runtime')
 
-    def setup(r):
-        r.addArchive('ftp://ftp.alsa-project.org/pub/plugins/')
+    def configure(r):
+        for i in [ 'jack.conf',
+                   'pcm-oss.conf',
+                   'pulseaudio.conf',
+                   'samplerate.conf',
+                   'upmix.conf',
+                   'vdownmix.conf',]:
+            r.addSource(i,rpm = r.srpm, mode  = 0644, dest = '%(sysconfdir)s/alsa/pcm/')
 
+        r.addSource('pulse-default.conf',rpm = r.srpm, mode  = 0644, dest = '%(sysconfdir)s/alsa/')
 
-        r.Configure()
+        r.Configure('--disable-static --without-speex')
+
+    def make(r):
         r.Make()
         if Use.builddocs:
             r.Make('doc')
+
+    def makeinstall(r):
         r.MakeInstall()
         if Use.builddocs:
             r.Doc('doc/doxygen/*')
+
+        # Removing the maemo plugins
+        r.Remove('%(libdir)s/alsa-lib/libasound_module_ctl_dsp_ctl.so')
+        r.Remove('%(libdir)s/alsa-lib/libasound_module_pcm_alsa_dsp.so')
