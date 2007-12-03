@@ -1,27 +1,40 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class AlsaLib(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class AlsaLib(RPMPackageRecipe,AutoPackageRecipe):
     name = 'alsa-lib'
-    version = '1.0.14a'
+    version = '1.0.15'
+    rpmRelease = '1.fc9'
+
+    rpmPatches = [ 'alsa-lib-1.0.14rc1-config.patch',
+                   'alsa-lib-1.0.14-glibc-open.patch',
+                   'alsa-lib-pulse-default.patch', ]
 
     buildRequires = [ ] #required for buildRequires.append
     if Use.builddocs:
         buildRequires.append('doxygen:runtime')
 
-    def setup(r):
-        r.addArchive('ftp://ftp.alsa-project.org/pub/lib/')
-
-
-        r.Configure()
+    def configure(r):
+        r.Configure('--with-configdir=%(sysconfdir)s/alsa')
+        # Remove useless /usr/lib64 rpath on 64bit archs
+        r.Run(""" 
+sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
+sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
+""") 
+    def make(r):
         r.Make()
         if Use.builddocs:
             r.Make('doc')
+
+    def makeinstall(r):
         r.MakeInstall()
 
         r.AutoDoc('doc/asoundrc.txt')
         if Use.builddocs:
             r.Doc('doc/doxygen/*')
+
+        r.Symlink('%(sysconfdir)s/alsa', '%(datadir)s/alsa')
