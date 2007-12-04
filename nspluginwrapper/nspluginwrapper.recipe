@@ -4,32 +4,111 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-
-class NsPluginwrapper(CPackageRecipe):
+loadSuperClass('rpmpackage')
+loadInstalled('xulrunner')
+class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
     name = 'nspluginwrapper'
     version = '0.9.91.5'
 
+    rpmRelease = '10.fc9'
+
     buildRequires = [ 'glib:devel', 'gtk:devel', 'libX11:devel', 'libXt:devel',
-                      'zlib:devel', 'expat:devel', 'nspr:devel', 'gcc-c++:runtime', 
+                      'zlib:devel', 'expat:devel', 'nspr:devel', 'gcc-c++:runtime',
                       'GConf:runtime', 'pkgconfig:devel', 'which:runtime',
-                      'glibc:devellib[is: x86(i486,i586,i686)]', 'xextproto:devel']
+                      'xextproto:devel', 'firefox:devel', 'xulrunner:devel',
+                      'firefox:runtime',
+                      ]
 
+    rpmPatches = [ 'nspluginwrapper-0.9.91.5-rpc-error.patch',
+                   'nspluginwrapper-0.9.91.5-restart.patch',
+                   'nspluginwrapper-0.9.91.5-rh.patch',
+                   'nspluginwrapper-0.9.91.5-runtime-restart.patch',
+                   'nspluginwrapper-0.9.91.5-fork.patch',
+                   ]
 
+    rpmArchives = ['plugin-config-1.6.tar.gz']
+    
     # This is x86_64 ONLY
 
-    def setup(r):
-        r.addArchive('http://www.gibix.net/projects/%(name)s/files/')
+    def configure(r):
+        r.addSource('plugin-config.sh.in', rpm=r.srpm)
+        r.addSource('%(name)s.sh.in', rpm=r.srpm)
 
-        r.macros.cflags += ' -m64 '
+        # Define libraries for 32/64 arches
+        r.macros.lib32 = 'lib'
+        r.macros.lib64 = 'lib64'
+        r.macros.libdir32 = '%(prefix)s/%(lib32)s'
 
-        r.Configure(' --with-biarch')
+        # define mozilla plugin dir and back up dir for 64-bit browsers
+        r.macros.pluginsourcedir = '%(libdir)s/xulrunner/plugins'
+        r.macros.plugindir = '%(libdir)s/xulrunner/plugins-wrapped'
+        if Arch.x86:
+            r.macros.cflags += ' -m32 '
+            r.macros.ldflags += '-m32 -L%(libdir)s'
+        else:
+            r.macros.cflags += ' -m64 '
+            r.macros.ldflags += '-m64 -L%(libdir)s'
+
+
+        # remove old/incompatibile stuff
+        r.Remove('npapi', recursive = True)
+        r.Remove('lsb-build', recursive = True)
+
+        if Arch.x86:
+            r.Configure(' --with-lib64=%(lib64)s'
+                        ' --with-base-lib=%(lib32)s'
+                        ' --with-base-libdir=%(libdir)s'
+                        ' --with-lib32=%(lib32)s'
+                        ' --with-x11-prefix=%(prefix)s'
+                        ' --pkgdir=%(name)s'
+                        ' --pkglibdir=%(libdir)s/%(name)s'
+                        ' --target-cpu=i386')
+        else:
+                        r.Configure(' --with-lib64=%(lib64)s'
+                        ' --with-base-lib=%(lib64)s'
+                        ' --with-base-libdir=%(libdir)s'
+                        ' --with-lib32=%(lib32)s'
+                        ' --with-x11-prefix=%(prefix)s'
+                        ' --pkgdir=%(name)s'
+                        ' --pkglibdir=%(libdir)s/%(name)s'
+                        ' --target-cpu=x86_64')
+
+        r.macros.plugin_config_version = '1.6'
+        r.macros.plugin_config_name= 'plugin-config-%(plugin_config_version)s'
+        r.macros.plugin_config_binary = 'plugin-config'
+
+        r.Configure(dir='%(plugin_config_name)s')
+
+    def make(r):
         r.Make()
-        r.MakeInstall()
-        r.FixupMultilibPaths(exceptions='/usr/lib/nspluginwrapper/i386/linux/libxpcom.so')
-        r.FixupMultilibPaths(exceptions='/usr/lib/nspluginwrapper/x86_64/linux/npwrapper.so')
+        r.Make(dir='%(plugin_config_name)s')
 
-        # FIXME: fc8 has a much nicer way of solving , system-wide, this but for now
-        # i resort to the hack bellow. 
-        r.MakeDirs('/etc/profile.d')
-        r.Run(""" echo "nspluginwrapper  -a -i > /dev/null 2>&1" > %(destdir)s/etc/profile.d/nspluginwrapper.sh """)
-        r.SetModes('/etc/profile.d/nspluginwrapper.sh', 0755)
+    def makeinstall(r):
+        r.MakeInstall()
+        r.MakeInstall(dir='%(plugin_config_name)s')
+
+        r.MakeDirs('%(plugindir)s')
+        r.MakeDirs('%(libdir)s/%(name)s')
+        r.Symlink('%(libdir)s/%(name)s/npwrapper.so', '%(plugindir)s/')
+        r.Move('%(bindir)s/%(plugin_config_binary)s', '%(libdir)s/%(name)s/%(plugin_config_binary)s')
+        r.Remove('/usr/doc', recursive=True)
+
+        r.macros.xulrunnerVersion = XULRunner.version
+
+        r.Replace(('FIREFOX_VERSION','%(xulrunnerVersion)s'),
+                  ('USE_XPCOM', '0' ),
+                  ('-1.8.1.4',''),
+                  'plugin-config.sh.in')
+
+        r.Install('plugin-config.sh.in', '%(bindir)s/mozilla-plugin-config', mode = 0755)
+
+        r.Replace('EXCLUDE_LIST', '\"libtotem-*\"', '%(name)s.sh.in')
+        r.Install('%(name)s.sh.in', '%(sysconfdir)s/sysconfig/%(name)s', mode = 0644)
+
+        r.Symlink('%(libdir)s/xulrunner/plugins', '%(libdir)s/mozilla/plugins')
+        r.Symlink('%(libdir)s/xulrunner/plugins-wrapped', '%(libdir)s/mozilla/plugins-wrapped')
+
+        r.DanglingSymlinks(exceptions='%(libdir)s/mozilla/.*')
+
+        r.addSource('moz.global.env.vars.sh', dest = '%(sysconfdir)s/profile.d/', mode = 0755)
+
