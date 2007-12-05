@@ -36,6 +36,9 @@
     * Modified 04/2007 by rPath, Inc.
       - Fixed infinite-loop bugs when stomp server goes away.
       - Added delay between reads to avoid 100% CPU loops.
+    * Modified 12/2007 by rPath, Inc.
+      - If the parent thread has gone away without disconnecting, quit
+        when there is no more data to send.
 
 """
 
@@ -85,6 +88,7 @@ class Connection(threading.Thread):
         self.listeners = [ ]
         
         self.running = 1
+        self._parent_thread = threading.currentThread()
         
         connstr = 'CONNECT\nuser: %s\npasscode: %s\n\n\x00\n' % (user, passcode)
         self.ss.send(connstr)
@@ -114,7 +118,8 @@ class Connection(threading.Thread):
         return s1
 
     def run(self):
-        while self.running or len(self.sendbuf) > 0:
+        while (self.running and self._parent_thread.isAlive()) \
+          or len(self.sendbuf) > 0:
             time.sleep(0.1)
             if len(self.sendbuf) > 0:
                 for msg in self.sendbuf:
