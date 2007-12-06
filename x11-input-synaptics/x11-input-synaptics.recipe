@@ -1,0 +1,60 @@
+#
+# Copyright (c) 2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage=foresight.rpath.org@fl:2-devel')
+class X11InputSynaptics(RPMPackageRecipe, AutoPackageRecipe):
+    name = 'x11-input-synaptics'
+    version = '0.14.6'
+    rpmRelease = '123'
+    isOPENsuse = True
+
+    buildRequires = ['pkgconfig:devel', 'ghostscript:runtime', 'linuxdoc-tools:runtime', 'xorg-server:devel', 'xproto:devel', 'fontsproto:devel', 'autoconf:runtime', 'automake:runtime', 'makedepend:runtime', 'randrproto:devel', 'inputproto:devel', 'kbproto:devel', 'pixman:devel', 'libtool:runtime', 'libtool:devel',  'pkgconfig:devel' , 'm4:runtime', 'expat:devel', 'util-macros:devel', 'libX11:devel', 'libXi:devel', 'imake:runtime']
+
+    tarballName = 'synaptics-%(version)s.tar.bz2'
+
+    rpmArchives = [ 'xorg_gunze.tgz' , 'gunze-tools.tgz' ]
+
+    rpmPatches = [ 'synaptics-%(version)s.diff',
+                   'wait.diff', ]
+
+
+    def unpack(r):
+        RPMPackageRecipe.unpack(r)
+        # don't ask...
+        r.addAction('mv ../*/programs .')
+        r.addAction('mv ../*/gunze-tools .')
+
+        r.addPatch('xorg_gunze.diff', dir = 'programs/Xserver/hw/xfree86/input/gunze/', rpm=r.srpm)
+        r.addPatch('gunze-tools.diff', dir = 'gunze-tools', rpm=r.srpm)
+
+        r.Create('VERSION', contents='%(version)s')
+        r.Create('VERSION_ID', contents='1406')
+
+    def configure(r):
+        r.Run('xmkmf -a')
+        r.Run('xmkmf -a', dir = 'programs/Xserver/hw/xfree86/input/gunze')
+
+        # fixes "undefined symbol: __stack_chk_fail_local" (Bug #242319)
+        r.Replace(['-nostdlib',''],['-lgcc',''],'Makefile')
+        r.Replace(['-nostdlib',''],['-lgcc',''], 'programs/Xserver/hw/xfree86/input/gunze/Makefile')
+
+        r.macros.ldflags += '-lm -L%(libdir)s/ -lX11'
+
+    def make(r):
+        r.Make()
+        r.Make('synclient')
+        r.Make('syndaemon')
+
+        r.Make(dir = 'programs/Xserver/hw/xfree86/input/gunze/')
+        r.Make(dir = 'gunze-tools')
+
+    def makeinstall(r):
+        r.MakeInstall('MODULEDIR=%(libdir)s/xorg/')
+        r.MakeInstall('MODULEDIR=%(libdir)s/xorg/', dir = 'programs/Xserver/hw/xfree86/input/gunze/')
+        r.MakeInstall('BINDIR=%(destdir)s/%(bindir)s', dir = 'gunze-tools')
+
+        r.Install('synclient', '%(bindir)s/')
+        r.Install('syndaemon', '%(bindir)s/')
