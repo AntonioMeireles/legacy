@@ -31,11 +31,8 @@ fi
 ##
 ## Make sure that we set the plugin path
 ##
-if [ "$MOZ_PLUGIN_PATH" ]
-then
-  MOZ_PLUGIN_PATH=$MOZ_PLUGIN_PATH:$MOZ_LIB_DIR/xulrunner/$MOZ_PLUGIN_DIR:$MOZ_LIB_DIR/xulrunner/plugins
-else
-  MOZ_PLUGIN_PATH=$MOZ_LIB_DIR/xulrunner/$MOZ_PLUGIN_DIR:$MOZ_LIB_DIR/xulrunner/plugins
-fi
+
+MOZ_PLUGIN_PATH=$MOZ_LIB_DIR/xulrunner/$MOZ_PLUGIN_DIR:$MOZ_LIB_DIR/xulrunner/plugins
+
 export MOZ_PLUGIN_PATH
 

@@ -25,16 +25,17 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
                    'nspluginwrapper-0.9.91.5-runtime-restart.patch',
                    'nspluginwrapper-0.9.91.5-fork.patch',
                    'nspluginwrapper-0.9.91.5-xulrunner.patch',
-                   'plugin-config-setuid.patch'
                    ]
 
-    rpmArchives = ['plugin-config-1.8.tar.gz']
+    plugin_config_version = '1.8'
+    rpmArchives = ['plugin-config-%s.tar.gz' % plugin_config_version]
     
     # This is x86_64 ONLY
 
     def configure(r):
         r.addSource('plugin-config.sh.in', rpm=r.srpm)
         r.addSource('%(name)s.sh.in', rpm=r.srpm)
+	r.addPatch('plugin-config-setuid.patch' , rpm=r.srpm, dir = '%(plugin_config_name)s')
 
         # Define libraries for 32/64 arches
         r.macros.lib32 = 'lib'
@@ -51,35 +52,39 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
             r.macros.cflags += ' -m64 '
             r.macros.ldflags += '-m64 -L%(libdir)s'
 
-        r.Environment('XPCOM_SUPPORT',"yes")
-
-
         # remove old/incompatibile stuff
         r.Remove('npapi', recursive = True)
         r.Remove('lsb-build', recursive = True)
 
-        if Arch.x86:
-            r.Configure(' --with-lib64=%(lib64)s'
-                        ' --with-base-lib=%(lib32)s'
-                        ' --with-base-libdir=%(libdir)s'
-                        ' --with-lib32=%(lib32)s'
-                        ' --with-x11-prefix=%(prefix)s'
-                        ' --pkgdir=%(name)s'
-                        ' --pkglibdir=%(libdir)s/%(name)s'
-                        ' --target-cpu=i386')
-        else:
-                        r.Configure(' --with-lib64=%(lib64)s'
-                        ' --with-base-lib=%(lib64)s'
-                        ' --with-base-libdir=%(libdir)s'
-                        ' --with-lib32=%(lib32)s'
-                        ' --with-x11-prefix=%(prefix)s'
-                        ' --pkgdir=%(name)s'
-                        ' --pkglibdir=%(libdir)s/%(name)s'
-                        ' --target-cpu=x86_64')
+        r.macros.ldflags += ' -Wl,--rpath,%(libdir)s/xulrunner'
 
-        r.macros.plugin_config_version = '1.8'
-        r.macros.plugin_config_name= 'plugin-config-%(plugin_config_version)s'
+        if Arch.x86:
+            r.Configure( ' --with-lib64=%(lib64)s'
+                         ' --with-base-lib=%(lib32)s'
+                         ' --with-base-libdir=%(libdir)s'
+                         ' --with-lib32=%(lib32)s'
+                         ' --with-x11-prefix=%(prefix)s'
+                         ' --pkgdir=%(name)s'
+                         ' --pkglibdir=%(libdir)s/%(name)s'
+                         ' --with-xpcom=yes'
+                         ' --target-cpu=i386'
+                         )
+        else:
+            r.Configure( ' --with-lib64=%(lib64)s'
+                         ' --with-base-lib=%(lib64)s'
+                         ' --with-base-libdir=%(libdir)s'
+                         ' --with-lib32=%(lib32)s'
+                         ' --with-x11-prefix=%(prefix)s'
+                         ' --pkgdir=%(name)s'
+                         ' --pkglibdir=%(libdir)s/%(name)s'
+                         ' --with-xpcom=yes'
+                         ' --target-cpu=x86_64'
+                         )
+
+	# FIXME - simplify this
+        r.macros.plugin_config_version = r.plugin_config_version
         r.macros.plugin_config_binary = 'plugin-config'
+        r.macros.plugin_config_name= '%(plugin_config_binary)s-%(plugin_config_version)s'
 
         r.Configure(dir='%(plugin_config_name)s')
 
@@ -96,6 +101,8 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
         r.Symlink('%(libdir)s/%(name)s/npwrapper.so', '%(plugindir)s/')
         r.Move('%(bindir)s/%(plugin_config_binary)s', '%(libdir)s/%(name)s/%(plugin_config_binary)s')
         r.Remove('/usr/doc', recursive=True)
+
+        r.SetModes('%(libdir)s/nspluginwrapper/plugin-config', 04755)	
 
         r.macros.xulrunnerVersion = XULRunner.version
 
