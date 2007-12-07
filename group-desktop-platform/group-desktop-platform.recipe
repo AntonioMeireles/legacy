@@ -36,14 +36,20 @@ class GroupDesktopPlatform(GroupRecipe):
                   'anaconda-deps'
                   ]
 
-    foresightLinuxBranch = 'foresight.rpath.org@fl:2-devel'
+    foresightLinuxLabel = 'foresight.rpath.org@fl:2-devel'
 
-    rplBranch = 'conary.rpath.com@rpl:devel'
-    rplBranchCompat = 'conary.rpath.com@rpl:1-compat'
+    rplLabel = 'conary.rpath.com@rpl:devel'
+    rplLabelCompat = 'conary.rpath.com@rpl:1-compat'
 
     conaryVersion = '/conary-snapshot.rpath.org@rpl:devel/2007_11_27_0844_042b9f0b2ed9-1-1'
 
-    groupOs = 'group-os=' + rplBranch + '[%s]' % (x86_64rplGroupsFlavorString,x86rplGroupsFlavorString)[Arch.x86==True]    
+    rplGroupUmbrella = 'group-os=' + rplLabel + '[%s]'
+
+    if Arch.x86_64:
+        rplGroupUmbrella = rplGroupUmbrella % x86_64rplGroupsFlavorString
+    else:
+        rplGroupUmbrella = rplGroupUmbrella % x86rplGroupsFlavorString
+
 
     def startGroup(r, name, parentGroup=None, depCheck=False, byDefault=True, autoResolve = False):
         # creates group named 'name', adds it to the toplevel group,
@@ -193,14 +199,11 @@ class GroupDesktopPlatform(GroupRecipe):
             else:
                 flavor = r.x86FlavorString
 
+        # first we look at rPL master group, second we see if anything there, not in group, last we check -compat label
+        searchPath = (r.rplGroupUmbrella, r.rplLabel, r.rplLabelCompat)
+
         if Arch.x86_64:
             flavor32 = r.x86FlavorString
-
-        if not versionStr:
-            searchPath = [r.rplBranch, r.rplBranchCompat]
-        else:
-            searchPath = None
-
 
             # All :lib components land in compat32. this may need to be refined in the future
 
@@ -212,15 +215,15 @@ class GroupDesktopPlatform(GroupRecipe):
                       searchPath=searchPath
                       )
 
-            r.add(name,
-                  source = source,
-                  versionStr = versionStr,
-                  components = components,
-                  groupName = groupName,
-                  flavor = flavor,
-                  byDefault = byDefault,
-                  searchPath = searchPath
-                  )
+        r.add(name,
+              source = source,
+              versionStr = versionStr,
+              components = components,
+              groupName = groupName,
+              flavor = flavor,
+              byDefault = byDefault,
+              searchPath = searchPath
+              )
 
     def setup(r):
 
@@ -239,9 +242,9 @@ class GroupDesktopPlatform(GroupRecipe):
                              groupName = 'group-desktop-common')
         #
         
-        r.setSearchPath( r.foresightLinuxBranch +'-kernel', 
-                         r.foresightLinuxBranch,
-                         r.groupOs, r.rplBranchCompat)
+        r.setSearchPath( r.foresightLinuxLabel +'-kernel', 
+                         r.foresightLinuxLabel,
+                         r.rplGroupUmbrella, r.rplLabelCompat)
 
         # Create a out shell group for all the belong to 
         r.createGroup('group-world', checkPathConflicts=False, depCheck=False)
@@ -271,10 +274,10 @@ class GroupDesktopPlatform(GroupRecipe):
 
 
         for groupName in r.rplGroups:
-            r.rplAddGroup('group-' + groupName, r.rplBranch)
+            r.rplAddGroup('group-' + groupName, r.rplLabel)
 
         if Arch.x86_64:
-            r.rplAddGroup('group-compat32', r.rplBranch)
+            r.rplAddGroup('group-compat32', r.rplLabel)
 
         # we need to create this one before we call flAdd first time.
         if Arch.x86_64:
