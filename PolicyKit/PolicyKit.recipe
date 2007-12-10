@@ -4,9 +4,11 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class PolicyKit(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
     name = 'PolicyKit'
-    version = '0.6'
+    version = '0.7'
+    rpmRelease = '3.fc9'
 
     buildRequires = [ 'libtool:runtime', 'automake:runtime',
                       'autoconf:runtime', 'dbus:devel', 'pkgconfig:devel',
@@ -15,16 +17,10 @@ class PolicyKit(AutoPackageRecipe):
                       'gnome-doc-utils:devel', 'gnome-doc-utils:runtime',
                       ]
 
-    def unpack(r):
-        r.addGitSnapshot('git://anongit.freedesktop.org/git/PolicyKit',
-                         tag='POLICY_KIT_0_6')
-
-        r.addPatch('PolicyKit-fix-if-selinux-disabled.patch')
-        r.addPatch('wheel.patch')
-        r.Run('./autogen.sh')
-
     def configure(r):
-        r.Configure('--with-os-type=redhat --disable-docbook-docs')
+        r.addPatch('wheel.patch')
+
+        r.Configure('--with-os-type=redhat --disable-docbook-docs --disable-selinux --disable-gtk-doc')
 
     def policy(r):
         r.ExcludeDirectories(exceptions='%(datadir)s/PolicyKit/policy')
@@ -33,22 +29,26 @@ class PolicyKit(AutoPackageRecipe):
         if Arch.x86_64:
             r.Move('%(prefix)s/lib/pkgconfig/*', '%(libdir)s/pkgconfig/')
 
-        # NOTE: /usr/libexec/polkit-grant-helper will be owned by group
-        # 'polkituser', and installed with mode 2755 (setgid binary).
-        # The directories /var/run/PolicyKit and /var/lib/PolicyKit will be
-        # owned by user 'polkituser' and group 'polkituser' and will be of mode 775.
+        # see upstream design specification for why these permissions are necessary
+        for d in [ 'polkit-set-default-helper', 'polkit-read-auth-helper' , 'polkit-revoke-helper',
+                   'polkit-explicit-grant-helper', 'polkit-grant-helper']:
+                    r.Ownership('root','polkituser','%(libexecdir)s/' + d)
+                    r.SetModes('%(libexecdir)s/' + d, 02755)
 
-        # NOTE: /usr/libexec/polkit-grant-helper-pam will be setuid root.
-
-        r.Ownership('root','polkituser','%(libexecdir)s/polkit-grant-helper')
         r.Ownership('root','polkituser','%(libexecdir)s/polkit-grant-helper-pam')
-        r.SetModes('%(libexecdir)s/polkit-grant-helper', 02755)
         r.SetModes('%(libexecdir)s/polkit-grant-helper-pam', 04755)
 
         r.Ownership('polkituser','polkituser','%(localstatedir)s/run/PolicyKit')
         r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit')
-        r.SetModes('%(localstatedir)s/run/PolicyKit', 0775)
-        r.SetModes('%(localstatedir)s/lib/PolicyKit', 0775)
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit-public')
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/misc/PolicyKit.reload')
+
+        r.SetModes('%(localstatedir)s/run/PolicyKit', 0770)
+        r.SetModes('%(localstatedir)s/lib/PolicyKit', 0770)
+        r.SetModes('%(localstatedir)s/lib/PolicyKit-public', 0775)
+        r.SetModes('%(localstatedir)s/lib/misc/PolicyKit.reload', 0775)
 
         # allows x86 and x86_64 :lib co-existence
         r.ComponentSpec(':runtime', '%(localstatedir)s/lib/PolicyKit/reload')
+
+
