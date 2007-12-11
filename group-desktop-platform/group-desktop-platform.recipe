@@ -8,13 +8,14 @@
 import datetime
 class GroupDesktopPlatform(GroupRecipe):
     name = 'group-desktop-platform'
-    version = '1.9.9.alpha1.' + datetime.date.today().strftime("%Y%m%d")
+    version = '1.9.9.alpha2rc.' + datetime.date.today().strftime("%Y%m%d") + '.DoNotInstallYetUnlessTooBrave'
 
     autoResolve = True
 
     Flags.local_tools = True
     depCheck = True
-    checkPathConflicts = True
+    # we handle this on the group-{gnome,xfce,dist}-dist stage
+    checkPathConflicts = False
 
     x86_64rplGroupsFlavorString = 'is: x86 x86_64'
     x86_64FlavorString = 'is: x86_64'
@@ -26,16 +27,47 @@ class GroupDesktopPlatform(GroupRecipe):
     supDocComponents = [ 'supdoc', ]
     develComponents  = [ 'devellib', 'devel']
 
-    rplGroups = [ 'base',
-                  'bootable',
-                  'core',
-                  'printing',
-                  'text-tools',
-                  'devel',
-                  'os-devel',
-                  'anaconda-deps'
+    rplGroups = [ 'group-base',
+                  'group-bootable',
+                  'group-core',
+                  'group-printing',
+                  'group-text-tools',
+                  'group-devel',
+                  'group-os-devel',
+                  'group-anaconda-deps'
                   ]
 
+    kdegroups = [
+        'group-kde',
+        'group-kde-core',
+        'group-kde-devel',
+        'group-kde-dist',
+        'group-kdeaccessibility',
+        'group-kdeaddons',
+        'group-kdeadmin',
+        'group-kdeartwork',
+        'group-kdebase',
+        'group-kdeedu',
+        'group-kdegames',
+        'group-kdegraphics',
+        'group-kdemultimedia',
+        'group-kdenetwork',
+        'group-kdepim',
+        'group-kdesdk',
+        'group-kdetoys',
+        'group-kdeutils',
+        'group-kdewebdev',
+        'group-koffice'
+        ]
+    bucketDevelGroups = [ 'group-devel',
+                          'group-os-devel',
+                          'group-gnome-devel',
+                          'group-kde-devel',
+                          'group-xfce-devel',
+                          'group-desktop-common-devel',
+                          ]
+    bucketExtraDocGroups = [ 'group-extra-docs']
+        
     foresightLinuxLabel = 'foresight.rpath.org@fl:2-devel'
 
     rplLabel = 'conary.rpath.com@rpl:devel'
@@ -50,8 +82,8 @@ class GroupDesktopPlatform(GroupRecipe):
     else:
         rplGroupUmbrella = rplGroupUmbrella % x86rplGroupsFlavorString
 
-
-    def startGroup(r, name, parentGroup=None, depCheck=False, byDefault=True, autoResolve = False):
+    def flCreateGroup(r, name, parentGroup=None, depCheck=False, byDefault=True, \
+                   autoResolve = False, dynamicGroup = False, checkPathConflicts=None):
         # creates group named 'name', adds it to the toplevel group,
         # and sets the current group to that name.  calls to r.add()
         # will use the current group by default.
@@ -70,58 +102,33 @@ class GroupDesktopPlatform(GroupRecipe):
             r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
         r.setDefaultGroup(name)
 
-        # (20:59:42) mkj_wk: instead of doing something like r.moveComponents to move :supdoc into group-extra-docs
-        # (20:59:56) mkj_wk: and I'd say :devel and :devellib should be moveComonents to move into group-devel
+        if parentGroup and not dynamicGroup:
+            if not name in (r.bucketDevelGroups and r.bucketExtraDocGroups):
+                r.moveComponents(r.supDocComponents, name, 'group-extra-docs')
 
-        kdegroups = [
-            'group-kde',
-            'group-kde-core',
-            'group-kde-devel',
-            'group-kde-dist',
-            'group-kdeaccessibility',
-            'group-kdeaddons',
-            'group-kdeadmin',
-            'group-kdeartwork',
-            'group-kdebase',
-            'group-kdeedu',
-            'group-kdegames',
-            'group-kdegraphics',
-            'group-kdemultimedia',
-            'group-kdenetwork',
-            'group-kdepim',
-            'group-kdesdk',
-            'group-kdetoys',
-            'group-kdeutils',
-            'group-kdewebdev',
-            'group-koffice'
-            ]
+            if name == 'group-xfce':
+                r.copyComponents(r.develComponents,  name, 'group-xfce-devel')
+            elif name in r.kdegroups:
+                r.copyComponents(r.develComponents,  name, 'group-kde-devel')
+            elif name == 'group-gnome':
+                r.copyComponents(r.develComponents,  name, 'group-gnome-devel')
+            
+            elif name not in r.bucketDevelGroups and name not in r.bucketExtraDocGroups and name not in ['group-gnome' 'group-xfce'] and name not in r.kdegroups:
+                r.copyComponents(r.develComponents,  name, 'group-desktop-common-devel')
 
-        r.moveComponents(r.supDocComponents, name, 'group-extra-docs')
-        if name == 'group-xfce':
-            r.moveComponents(r.develComponents,  name, 'group-xfce-devel')
-        elif name in kdegroups:
-            r.moveComponents(r.develComponents,  name, 'group-kde-devel')
-        elif name == 'group-gnome':
-            r.moveComponents(r.develComponents,  name, 'group-gnome-devel')
-        elif name not in ('group-devel', 'group-gnome', 'group-xfce', kdegroups):
-            r.moveComponents(r.develComponents,  name, 'group-devel')
-
-    def rplAddGroup(r, name, version, flavor=None):
+    def rplAddGroup(r, name, flavor = None):
         if not flavor:
             if Arch.x86_64:
                 flavor = r.x86_64rplGroupsFlavorString
             else:
                 flavor = r.x86rplGroupsFlavorString
 
-        r.addCopy(name, version, flavor)
+        # copyScripts = True gives interesting errors...
+        # has to do with group recursion
+        r.addCopy(name, flavor=None, copyScripts=False)
 
-        if name == 'group-devel' or name == 'group-anaconda-deps':
-            r.addNewGroup(name, groupName='group-world')
-        elif name == 'group-os-devel':
-            r.addNewGroup(name, groupName='group-devel')
-        else:
-            r.addNewGroup(name, groupName='group-rpl-derived')
-
+        # bellow until rpl:devel decides to do it too...
+        r.moveComponents(r.supDocComponents, name, 'group-rpl-extra-docs')
 
     def flAdd(r, name, components = None, source=None, versionStr=None, \
               groupName=None, flavor=None, byDefault=True, singleArch=False):
@@ -133,7 +140,6 @@ class GroupDesktopPlatform(GroupRecipe):
                 flavor = r.x86rplGroupsFlavorString
 
         #  first, we add the trove, normally
-        
         r.add(name,
               components = components,
               versionStr = versionStr,
@@ -166,7 +172,7 @@ class GroupDesktopPlatform(GroupRecipe):
             for g in r.rplGroups:
                 r.replace(name,
                           newVersionStr = versionStr,
-                          groupName = 'group-'+ g,
+                          groupName = g,
                           newFlavor=flavor,
                           allowNoMatch=True) 
 
@@ -182,10 +188,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.replace(name, groupName=groupName, newFlavor=flavor)
 
         if Arch.x86_64:
-            r.remove(name,
-                     groupName='group-compat32',
-                     allowNoMatch=True,
-                     flavor=r.x86_64FlavorString)
+
             r.replace(name,
                       groupName='group-compat32',
                       allowNoMatch=True,
@@ -249,46 +252,56 @@ class GroupDesktopPlatform(GroupRecipe):
                          r.foresightLinuxLabel,
                          r.rplGroupUmbrella, r.rplLabelCompat)
 
-        # Create a out shell group for all the belong to 
-        r.createGroup('group-world', checkPathConflicts=False, depCheck=False)
+        # Create a out shell group for all the belong to (no parent)
+        r.flCreateGroup('group-world')
 
-        r.createGroup('group-extra-docs', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-extra-docs', groupName='group-world')
+        r.addNewGroup('group-desktop-platform', groupName='group-world')
 
-        # common bits 
-        r.createGroup('group-desktop-common', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-desktop-common', groupName='group-world')
-
-        r.createGroup('group-desktop-common-extras', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-desktop-common-extras', groupName='group-world')
-
-        r.createGroup('group-gnome-devel', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-gnome-devel', groupName='group-world')
-
-        r.createGroup('group-kde-devel', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-kde-devel', groupName='group-world')
-
-        r.createGroup('group-xfce-devel', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-xfce-devel', groupName='group-world')
+        r.flCreateGroup('group-extra-docs', parentGroup='group-desktop-platform', dynamicGroup = True)
+        r.flCreateGroup('group-rpl-extra-docs', parentGroup='group-desktop-platform', dynamicGroup = True)
 
         # stuff we re{use,refactor} from upstream (rpl:devel)
-        r.createGroup('group-rpl-derived', checkPathConflicts=False, depCheck=False)
-        r.addNewGroup('group-rpl-derived', groupName='group-desktop-common')
-
+        r.flCreateGroup('group-rpl-fullpack', parentGroup='group-desktop-platform', dynamicGroup = True)
 
         for groupName in r.rplGroups:
-            r.rplAddGroup('group-' + groupName, r.rplLabel)
+            r.rplAddGroup(groupName)
+
+        # devel groups 
+        r.flCreateGroup('group-gnome-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+        r.flCreateGroup('group-desktop-common-devel', parentGroup='group-gnome-devel', dynamicGroup = True)
+        r.addNewGroup('group-devel', groupName='group-gnome-devel')
+        r.flCreateGroup('group-kde-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+        r.addNewGroup('group-devel', groupName='group-kde-devel')
+        r.addNewGroup('group-desktop-common-devel', groupName='group-kde-devel')
+        r.flCreateGroup('group-xfce-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+        r.addNewGroup('group-devel', groupName='group-xfce-devel')
+        r.addNewGroup('group-desktop-common-devel', groupName='group-xfce-devel')
 
         if Arch.x86_64:
-            r.rplAddGroup('group-compat32', r.rplLabel)
+            r.rplAddGroup('group-compat32')
+        
+        # common bits
+        r.flCreateGroup('group-desktop-common', parentGroup='group-desktop-platform')
+        # bits from rpl that ship by default
+        r.flCreateGroup('group-rpl-derived', parentGroup='group-desktop-common', dynamicGroup = True)
 
+        for i in r.rplGroups:
+            if i not in [ 'group-devel','group-anaconda-deps', 'group-os-devel' ]:
+                r.addNewGroup(i, groupName='group-rpl-derived')
+        if Arch.x86_64:
+                r.addNewGroup('group-compat32', groupName='group-rpl-derived')
+
+        
         # we need to create this one before we call flAdd first time.
         if Arch.x86_64:
             # this on x86_64 gets :lib of each pkg we ship by default.
-            r.createGroup('group-desktop-platform-compat32', checkPathConflicts=False, depCheck=False)
-            # Should this be group-world or group-desktop-common?
-            r.addNewGroup('group-desktop-platform-compat32', groupName='group-world')
+            # Should this be group-desktop-platform or group-desktop-common?
+            r.flCreateGroup('group-desktop-platform-compat32', parentGroup='group-desktop-platform',\
+                            depCheck=False, byDefault=False, dynamicGroup = True)
 
+        # the real show beguins here        
+        r.flCreateGroup('group-desktop-common-extras', parentGroup='group-desktop-platform')
+        
         # kernel
         if Arch.x86:
             # FIXME: should we ever ship kernel.pae ?
@@ -300,10 +313,9 @@ class GroupDesktopPlatform(GroupRecipe):
         r.replace('conary', r.conaryVersion)
 
         #
-
         # stuff specific to foresight and common across all editions
         # will need to be split later in three extra sub-groups - -gnome, -kde, -xfce, maybe. 
-        r.startGroup('group-foresight-basics', parentGroup='group-desktop-common')
+        r.flCreateGroup('group-foresight-basics', parentGroup='group-desktop-common')
 
         # libs we want in all editions
         r.flAdd('qt', groupName='group-foresight-basics')
@@ -374,7 +386,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('font-util', groupName='group-anaconda-deps')
         # end of extra stuff to anaconda-deps
 
-        r.startGroup('group-drivers', parentGroup='group-desktop-common')
+        r.flCreateGroup('group-drivers', parentGroup='group-desktop-common')
         #r.flAdd('ndiswrapper', groupName='group-drivers')
         #r.flAdd('madwifi', groupName='group-drivers') 
         #r.flAdd('rt2500', groupName='group-drivers')
@@ -385,7 +397,6 @@ class GroupDesktopPlatform(GroupRecipe):
         r.add('iwlwifi-3945-ucode', groupName='group-drivers', components = ['lib'])
         r.add('iwlwifi-4965-ucode', groupName='group-drivers', components = ['lib'])
         r.add('rt61pci-firmware', groupName='group-drivers', components = ['lib'])
-
         # end of firmware
         # those  bellow are ALLWAYS byDefault=False
         if Arch.x86_64:
@@ -440,8 +451,8 @@ class GroupDesktopPlatform(GroupRecipe):
         # end off pulseaudio & associates
 
         ## esound:lib is needed for compat reasons
-        r.flAdd('esound', groupName='group-desktop-common', components = ['lib'])
-        r.flAdd('esound', groupName='group-anaconda-deps')
+#        r.flAdd('esound', groupName='group-desktop-common', components = ['lib'])
+        r.flAdd('esound', groupName='group-anaconda-deps', components = ['lib'])
         r.flAdd('alsa-lib', groupName='group-anaconda-deps')
 
         # default gnome .wav
@@ -522,12 +533,12 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('unzip', groupName='group-foresight-basics')
         r.flAdd('libdvdcss', groupName='group-foresight-basics')
 
-        r.startGroup('group-internet', parentGroup='group-desktop-common')
+        r.flCreateGroup('group-internet', parentGroup='group-desktop-common')
         r.flAdd('flashplayer', groupName='group-internet',  flavor='is: x86', singleArch=True)
         r.flAdd('gizmo', groupName='group-internet',  flavor='is: x86', singleArch=True, byDefault=False)
         r.flAdd('skype', groupName='group-internet',  flavor='is: x86', singleArch=True, byDefault=False)
 
-        r.startGroup('group-mozilla', parentGroup='group-desktop-common')
+        r.flCreateGroup('group-mozilla', parentGroup='group-desktop-common')
         r.flAdd('firefox', groupName='group-mozilla')
         r.flAdd('mplayerplug-in', groupName='group-mozilla')
         
@@ -544,7 +555,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('libpurple', groupName='group-internet')
 
         # pidgin pack 
-        r.startGroup('group-pidgin', parentGroup='group-world')
+        r.flCreateGroup('group-pidgin', parentGroup='group-desktop-platform')
         r.flAdd('pidgin', groupName='group-pidgin')
         r.flAdd('pidgin-plugin_pack', groupName='group-pidgin')
         r.flAdd('pidgin-encryption', groupName='group-pidgin')
@@ -554,7 +565,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # end of pidgin pack
 
         # telepathy goodness
-        r.startGroup('group-telepathy', parentGroup='group-world')
+        r.flCreateGroup('group-telepathy', parentGroup='group-desktop-platform')
         r.flAdd('libtelepathy', groupName='group-telepathy')
         r.flAdd('telepathy-gabble', groupName='group-telepathy')
         r.flAdd('telepathy-glib', groupName='group-telepathy')
@@ -585,12 +596,12 @@ class GroupDesktopPlatform(GroupRecipe):
         # (sun) java
         # FIXME: research why flAdd does not work...
         r.add('sun-jre', versionStr = 'foresight.rpath.org@fl:2-devel', flavor = '~!gcj', groupName='group-desktop-common')
-        r.add('sun-jdk', versionStr = 'foresight.rpath.org@fl:2-devel', flavor = '~!gcj', groupName='group-devel')
-        r.add('sun-jre', versionStr = 'foresight.rpath.org@fl:2-devel', flavor = '~!gcj', groupName='group-devel')
+        r.add('sun-jdk', versionStr = 'foresight.rpath.org@fl:2-devel', flavor = '~!gcj', groupName='group-desktop-common-devel')
+        r.add('sun-jre', versionStr = 'foresight.rpath.org@fl:2-devel', flavor = '~!gcj', groupName='group-desktop-common-devel')
 
-        r.startGroup('group-gnome-extras', parentGroup='group-world', depCheck=False)
+        r.flCreateGroup('group-gnome-extras', parentGroup='group-desktop-platform', depCheck=False)
 
-        r.startGroup('group-gnome', parentGroup='group-world', depCheck=False)
+        r.flCreateGroup('group-gnome', parentGroup='group-desktop-platform', depCheck=False)
 
         r.flAdd('PolicyKit-gnome', groupName='group-gnome')
         r.flAdd('gnome-packagekit', groupName='group-gnome')
@@ -680,11 +691,12 @@ class GroupDesktopPlatform(GroupRecipe):
 
         ## graphics tools 
         r.flAdd('f-spot', groupName='group-gnome')
-        r.flAdd('gphoto-suite', groupName='group-gnome')
-        r.flAdd('graphviz', groupName='group-devel')
+        # FIXME: collides with libgphoto2
+        #        r.flAdd('gphoto-suite', groupName='group-gnome')
+        r.flAdd('graphviz', groupName='group-desktop-common-devel')
 
         # foresight build related stuff
-        r.flAdd('foresight-recipes', groupName='group-devel')
+        r.flAdd('foresight-recipes', groupName='group-desktop-common-devel')
 
         ## inotify bits
         r.flAdd('libnotify', groupName='group-gnome')
@@ -1068,7 +1080,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
 
         # Create group-xfce, which all other xfce groups become children of
-        r.startGroup('group-xfce', parentGroup='group-world', depCheck=False)
+        r.flCreateGroup('group-xfce', parentGroup='group-desktop-platform', depCheck=False)
         xfce = [
             'gtk-xfce-engine',
             'libexo',
@@ -1111,7 +1123,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
 
         # Create group-kde, which all other kde groups become children of
-        r.startGroup('group-kde', parentGroup='group-world', depCheck=False)
+        r.flCreateGroup('group-kde', parentGroup='group-desktop-platform', depCheck=False)
 
         # Deps for various kde apps
         kdeDeps = [
@@ -1140,7 +1152,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeApps:
             r.flAdd(p, groupName='group-kde', byDefault=False)
 
-        r.startGroup('group-koffice', parentGroup='group-kde', byDefault=False)
+        r.flCreateGroup('group-koffice', parentGroup='group-kde', byDefault=False)
         kofficeApps = [
             'karbon',
             'kchart',
@@ -1160,7 +1172,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kofficeApps:
             r.flAdd(p, groupName='group-koffice')
 
-        r.startGroup('group-kde-core', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kde-core', parentGroup='group-kde', depCheck=False)
 
         # These should go into group-foresight-basics
 
@@ -1171,7 +1183,7 @@ class GroupDesktopPlatform(GroupRecipe):
             r.flAdd(p, groupName='group-kde-core')
 
 
-        r.startGroup('group-kdebase', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdebase', parentGroup='group-kde', depCheck=False)
         r.flAdd('kde-i18n', groupName='group-kdebase')
 
         r.flAdd('qt-tools', groupName='group-kdebase')
@@ -1202,7 +1214,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdebase:
             r.flAdd(p, groupName='group-kdebase')
 
-        r.startGroup('group-kdegraphics', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdegraphics', parentGroup='group-kde', depCheck=False)
 
         for d in ( 'fribidi', 'sane-backends' ):
             r.rplAdd(d,  groupName='group-kdegraphics')
@@ -1236,7 +1248,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdegraphics:
             r.flAdd(p, groupName='group-kdegraphics')
 
-        r.startGroup('group-kdepim', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdepim', parentGroup='group-kde', depCheck=False)
 
         # Runtime deps
 
@@ -1279,7 +1291,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdepim:
             r.flAdd(p, groupName='group-kdepim')
 
-        r.startGroup('group-kdeaccessibility', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeaccessibility', parentGroup='group-kde', depCheck=False)
         kdeaccessibility = [
             'kbstate',
             'kdeaccessibility-icons-mono',
@@ -1292,7 +1304,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeaccessibility:
             r.flAdd(p, groupName='group-kdeaccessibility')
 
-        r.startGroup('group-kdeaddons', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeaddons', parentGroup='group-kde', depCheck=False)
         kdeaddons = [
             'atlantik-designer',
             'kaddressbook-plugins',
@@ -1308,7 +1320,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeaddons:
             r.flAdd(p, groupName='group-kdeaddons')
 
-        r.startGroup('group-kdeadmin', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeadmin', parentGroup='group-kde', depCheck=False)
         kdeadmin = [
             'kcron',
             'kdat',
@@ -1321,7 +1333,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeadmin:
             r.flAdd(p, groupName='group-kdeadmin')
 
-        r.startGroup('group-kdeartwork', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeartwork', parentGroup='group-kde', depCheck=False)
         kdeartwork = [
             'kdeartwork-emoticons',
             'kdeartwork-icewm-themes',
@@ -1336,7 +1348,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeartwork:
             r.flAdd(p, groupName='group-kdeartwork')
 
-        r.startGroup('group-kdeedu', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeedu', parentGroup='group-kde', depCheck=False)
         kdeedu = [
             'blinken',
             'kalzium',
@@ -1362,7 +1374,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeedu:
             r.flAdd(p, groupName='group-kdeedu')
 
-        r.startGroup('group-kdegames', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdegames', parentGroup='group-kde', depCheck=False)
         kdegames = [
             'atlantik',
             'kasteroids',
@@ -1401,7 +1413,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdegames:
             r.flAdd(p, groupName='group-kdegames')
 
-        r.startGroup('group-kdemultimedia', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdemultimedia', parentGroup='group-kde', depCheck=False)
 
         r.flAdd('akode', groupName='group-kdemultimedia')
 
@@ -1432,7 +1444,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdemultimedia:
             r.flAdd(p, groupName='group-kdemultimedia')
 
-        r.startGroup('group-kdenetwork', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdenetwork', parentGroup='group-kde', depCheck=False)
         kdenetwork = [
             'dcoprss',
             'kdenetwork-filesharing',
@@ -1462,7 +1474,7 @@ class GroupDesktopPlatform(GroupRecipe):
 #        r.rplAdd('qca-tls', groupName='group-kdenetwork')
 #        r.rplAdd('jasper', groupName='group-kdenetwork')
 
-        r.startGroup('group-kdesdk', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdesdk', parentGroup='group-kde', depCheck=False)
         kdesdk = [
             'cervisia',
             'kapptemplate',
@@ -1486,7 +1498,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdesdk:
             r.flAdd(p, groupName='group-kdesdk')
 
-        r.startGroup('group-kdetoys', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdetoys', parentGroup='group-kde', depCheck=False)
         kdetoys = [
             'amor',
             'keyes',
@@ -1501,7 +1513,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdetoys:
             r.flAdd(p, groupName='group-kdetoys')
 
-        r.startGroup('group-kdeutils', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdeutils', parentGroup='group-kde', depCheck=False)
         kdeutils = [
             'ark',
             'kcalc',
@@ -1525,7 +1537,7 @@ class GroupDesktopPlatform(GroupRecipe):
         for p in kdeutils:
             r.flAdd(p, groupName='group-kdeutils')
 
-        r.startGroup('group-kdewebdev', parentGroup='group-kde', depCheck=False)
+        r.flCreateGroup('group-kdewebdev', parentGroup='group-kde', depCheck=False)
         kdewebdev = [
             'kfilereplace',
             'kimagemapeditor',
@@ -1544,21 +1556,6 @@ class GroupDesktopPlatform(GroupRecipe):
         # r.replace('python', 'foresight.rpath.org@fl:2-devel')
         # r.replace('idle', 'foresight.rpath.org@fl:2-devel')
 
-
-
-        #
-        # ruby stack
-
-        r.flAdd('ruby')
-        r.flAdd('rubygems')
-        # using locally the gem version, for now
-#        r.flAdd('rake', groupName='group-devel')
-        # now it is on rpl:devel ... 
-        # remove these, broken dep
-        r.remove('rake', groupName='group-devel')
-        r.remove('rails', groupName='group-devel')
-
-
         # remove breakage/conflicts comming from rpl:devel group-devel 
         # this conflicts with openexr:devel
         r.remove('OpenEXR:devel', groupName='group-devel')
@@ -1566,49 +1563,30 @@ class GroupDesktopPlatform(GroupRecipe):
         # this conflicts with pulseaudio:runtime
         r.remove('esound', groupName='group-devel')
 
-        # remove turbogears and friends
-        tgDeps = [
-            'Cheetah',
-            'CherryPy',
-            'ConfigObj',
-            'FormEncode',
-            'Paste',
-            'PasteDeploy',
-            'PasteScript',
-            'PyProtocols',
-            'RuleDispatch',
-            'SQLObject',
-            'TurboJson',
-            'TurboKid',
-            'simplejson',
-            ]
-        for dep in tgDeps:
-            r.remove(dep, groupName='group-devel')
-
-        # end of ruby stack
-
         # bad deps FIXME
         r.remove('qt:devel', groupName='group-devel')
         r.remove('kdelibs:devel', groupName='group-devel')
 
         # rMake and friends
-        r.flAdd('conary-repository', versionStr=r.conaryVersion, groupName='group-devel')
-        r.flAdd('conary-build', versionStr=r.conaryVersion, groupName='group-devel')
+        r.flAdd('conary-repository', versionStr=r.conaryVersion, groupName='group-desktop-common-devel')
+        r.flAdd('conary-build', versionStr=r.conaryVersion, groupName='group-desktop-common-devel')
         #r.rplAdd('rmake', groupName='group-devel')
 
+
+        # the ones bellow should (had) be(en) in group-devel from rpl...
         # More group-devel stuff that we need for anaconda
-        r.rplAdd('elementtree', groupName='group-devel')
-        r.rplAdd('neon', groupName='group-devel')
-        r.rplAdd('gd', groupName='group-devel')
-        r.rplAdd('htmlview', groupName='group-devel')
-        r.rplAdd('kid', groupName='group-devel')
+        r.rplAdd('elementtree', groupName='group-desktop-common-devel')
+        r.rplAdd('neon', groupName='group-desktop-common-devel')
+        r.rplAdd('gd', groupName='group-desktop-common-devel')
+        r.rplAdd('htmlview', groupName='group-desktop-common-devel')
+        r.rplAdd('kid', groupName='group-desktop-common-devel')
 
         # more group-devel stuff
-        r.flAdd('bzr', groupName='group-devel')
+        r.flAdd('bzr', groupName='group-desktop-common-devel')
         #
         # our own xorg stack
 
-        r.startGroup('group-xorg', parentGroup='group-desktop-common', depCheck=False)
+        r.flCreateGroup('group-xorg', parentGroup='group-desktop-common', depCheck=False)
 
         r.flAdd('xorg-server', groupName='group-xorg')
 
@@ -1622,11 +1600,11 @@ class GroupDesktopPlatform(GroupRecipe):
                   ]
 
         for p in utils:
-            r.flAdd(p, source='xorg-utils', groupName='group-devel')
+            r.flAdd(p, source='xorg-utils', groupName='group-desktop-common-devel')
 
         ## end of packages built by xorg-utils
 
-        r.flAdd('xtrans', groupName='group-devel')
+        r.flAdd('xtrans', groupName='group-desktop-common-devel')
 
         ## packages built by xorg-proto
         proto  = [
@@ -1669,13 +1647,13 @@ class GroupDesktopPlatform(GroupRecipe):
             'xproxymanagementprotocol', 
             ]
         for p in proto:
-            r.flAdd(p, source='xorg-proto', groupName='group-devel')
+            r.flAdd(p, source='xorg-proto', groupName='group-desktop-common-devel')
 
         ## end of list of packages built by xorg-proto
 
         r.flAdd('xcursor-themes', groupName='group-xorg')
         r.flAdd('xkeyboard-config', groupName='group-xorg')
-        r.flAdd('xorg-sgml-doctools', groupName='group-devel')
+        r.flAdd('xorg-sgml-doctools', groupName='group-desktop-common-devel')
 
         ## packages built by xorg-libs
 
@@ -1847,7 +1825,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
         ## end of packages built by xorg-apps
 
-        r.startGroup('group-xorg-fonts', parentGroup='group-xorg', depCheck=False)
+        r.flCreateGroup('group-xorg-fonts', parentGroup='group-xorg', depCheck=False)
         ## packages built by xorg fonts
         fonts = [
             'encodings', 
@@ -1900,13 +1878,13 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('msttcorefonts', groupName='group-xorg-fonts')
         r.flAdd('bitstream-vera-fonts', groupName='group-xorg-fonts')
 
-        #        r.startGroup('group-xorg-fonts-extra', parentGroup='group-xorg', depCheck=False)
+        #        r.flCreateGroup('group-xorg-fonts-extra', parentGroup='group-xorg', depCheck=False)
         #         r.flAdd('scim')
         #         r.flAdd('scim-anthy')
         #         r.flAdd('anthy')
         #         r.flAdd('sazanami')
 
-        r.startGroup('group-xorg-drivers', parentGroup='group-xorg', depCheck=False)
+        r.flCreateGroup('group-xorg-drivers', parentGroup='group-xorg', depCheck=False)
 
         ## packages built by xorg-drivers-input
         inputDrivers = [
@@ -2005,16 +1983,30 @@ class GroupDesktopPlatform(GroupRecipe):
         #   end of our xorg stack
         #
 
-        r.flAdd('cmake', groupName='group-devel')
+        r.flAdd('cmake', groupName='group-desktop-common-devel')
         # Deps for cmake
-        r.flAdd('xmlrpc-c', groupName='group-devel')
+        r.flAdd('xmlrpc-c', groupName='group-desktop-common-devel')
 
         # final housekeeping
-        # the r.replace in flAdd sadly doesn't allways replace **only** the components
-        # already in the original group-compat32, so we need a final cleanup there to avoid dups.
+
+        # this is a radical sport... 
+        groupList = r.getChildGroups('group-desktop-platform')
+        for g in groupList:
+            if g[0].name not in r.bucketDevelGroups:
+                
+                r.removeComponents(r.develComponents, g[0].name)
+
+
+
+        # FIXME: this is freak. r.add(..., component=['lib'], flavor = is: x86) installs 
+	# remaining components with byDefault=False
+        # obviously this messes everything, as conary still tries to resolve them...
         if Arch.x86_64:
-            r.removeComponents( ['devel', 'python', 'doc', 'data', 'runtime', 'supdoc', 'locale', 'config', 'devellib'],
-                                groupName='group-compat32')
+            legacyArchGroups = ['group-compat32', 'group-desktop-platform-compat32']
+            for g in legacyArchGroups:
+                r.removeComponents( [ 'devel', 'python', 'doc', 'data', 'runtime',
+                                      'supdoc', 'locale', 'config', 'devellib'],
+                                    groupName=g)
 
         #
         #
@@ -2022,7 +2014,8 @@ class GroupDesktopPlatform(GroupRecipe):
         # Everything below here define 'official' foresight editions (gnome,kde,xfce,etc)
 
         # Define GNOME Edition
-        r.startGroup('group-gnome-dist', parentGroup='group-world', depCheck=True, autoResolve=True)
+        r.flCreateGroup('group-gnome-dist', parentGroup='group-desktop-platform', \
+                        depCheck=True, autoResolve=True, checkPathConflicts=True)
         r.addNewGroup('group-desktop-common', groupName='group-gnome-dist')
         r.addNewGroup('group-gnome', groupName='group-gnome-dist')
         r.addNewGroup('group-telepathy', groupName='group-gnome-dist')
@@ -2032,14 +2025,16 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('foresight-services', groupName='group-gnome-dist')
 
         # Define KDE Edition
-        r.startGroup('group-kde-dist', parentGroup='group-world', depCheck=True, autoResolve=True)
+        r.flCreateGroup('group-kde-dist', parentGroup='group-desktop-platform', \
+                        depCheck=True, autoResolve=True, checkPathConflicts=True)
         r.addNewGroup('group-desktop-common', groupName='group-kde-dist')
         r.addNewGroup('group-kde', groupName='group-kde-dist')
-        r.addNewGroup('group-mozilla', groupName='group-kde-dist')
+        r.addNewGroup('group-mozilla', groupName='group-kde-dist')#
         r.addNewGroup('group-pidgin', groupName='group-kde-dist')
 
         # Define XFCE Edition
-        r.startGroup('group-xfce-dist', parentGroup='group-world', depCheck=True, autoResolve=True)
+        r.flCreateGroup('group-xfce-dist', parentGroup='group-desktop-platform', \
+                        depCheck=True, autoResolve=True, checkPathConflicts=True)
         r.addNewGroup('group-desktop-common', groupName='group-xfce-dist')
         r.addNewGroup('group-xfce', groupName='group-xfce-dist')
         r.flAdd('gdm', groupName='group-xfce-dist')
