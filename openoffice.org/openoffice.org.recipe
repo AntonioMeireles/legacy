@@ -7,11 +7,12 @@
 class OpenOffice(CPackageRecipe):
 
     name = 'openoffice.org'
-    version = '2.3.0+m8'
+    version = '2.4.0+m241'
+    ooo_build_version = '11130'
 
     buildRequires = [
-        'agg:devel', 'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
-        'automake:runtime', 'bison:runtime', 'boost:devel', 'cairo:devel',
+        'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
+        'automake:runtime', 'bison:runtime', 'boost:devel',
         'cups:devel', 'curl:devel', 'db:devel', 'db:java', 'dbus-glib:devel',
         'dbus:devel', 'desktop-file-utils:runtime', 'doxygen:runtime',
         'expat:devel', 'flex:runtime', 'fontconfig:devel', 'freetype:devel',
@@ -30,23 +31,23 @@ class OpenOffice(CPackageRecipe):
         'shared-mime-info:runtime', 'startup-notification:devel',
         'tcsh:runtime', 'unixODBC:devel', 'unzip:runtime',
         'userspace-kernel-headers:devel', 'util-linux:runtime', 'which:runtime',
-        'xmlsec:devel', 'xulrunner:devel', 'zip:runtime', 'zlib:devel', 
-	'gperf:runtime', 'Mesa:devel',
-        # java
-        'sun-jdk:devel', 'sun-jdk:lib', 'sun-jdk:java', 'sun-jdk:runtime',
-        ]
+        'xmlsec:devel', 'xulrunner:devel', 'zip:runtime', 'zlib:devel',
+        'gperf:runtime', 'Mesa:devel', 'ImageMagick:runtime', 'openssl:devel',
+        'icedtea-jre:runtime', 'icedtea-jdk:runtime',
+    ]
 
     use_kde = True
     use_gnome = True
 
     def setup(r):
 
-        r.macros.snapshot = 'oog680-'+r.version.split('+')[1]
+        r.macros.snapshot = 'src680-'+r.version.split('+')[1]
+        r.macros.snapshotdir = r.macros.snapshot.split('-')[0].upper()
         r.macros.ooobuild = r.version.split('+')[0]
         r.macros.fullName = 'OpenOffice.org-%(major_version)s'
 
         # used in loadManifest
-        r.last_manifest_id = 0
+        r.manifest_files = {}
 
         r.help_langs = [
             'af', 'be-BY', 'bg', 'bn', 'br', 'bs', 'ca', 'cs', 'cy', 'da', 'de',
@@ -83,13 +84,12 @@ class OpenOffice(CPackageRecipe):
 
         r.macros.site = 'http://download.go-oo.org'
 
-        #r.addArchive('%(site)s/OOG680/ooo-build-%(ooobuild)s.tar.gz')
         r.addSvnSnapshot(
-            'http://svn.gnome.org/svn/ooo-build/trunk', revision='10750'
+            'http://svn.gnome.org/svn/ooo-build/trunk', revision=r.ooo_build_version
         )
 
         for x in ('core', 'lang', 'sdk_oo', 'system'):
-            r.addSource('%(site)s/OOG680/%(snapshot)s-'+x+'.tar.bz2', dir='src/')
+            r.addSource('%(site)s/%(snapshotdir)s/%(snapshot)s-'+x+'.tar.bz2', dir='src/')
 
         oooSupport = [
             'biblio.tar.bz2',
@@ -97,14 +97,16 @@ class OpenOffice(CPackageRecipe):
             'cli_types_bridgetest.dll',
             'extras-2.tar.bz2',
             'libsvg-0.1.4.tar.gz',
-            'libwpg-0.1.0.tar.gz',
-            'libwps-0.1.0.tar.gz',
+            'libwpg-0.1.2.tar.gz',
+            'libwps-0.1.2.tar.gz',
             'lp_solve_5.5.0.10_source.tar.gz',
             'mdbtools-0.6pre1.tar.gz',
-            'oox.2007-09-05.tar.bz2',
+            'oox.2007-12-10.tar.bz2',
         ]
         for file in oooSupport:
             r.addSource('%%(site)s/SRC680/%s' % file, dir='src/')
+
+        r.addSource('http://cairographics.org/releases/cairo-1.4.10.tar.gz', dir='src/')
 
         r.addSource('%(site)s/xt/xt-20051206-src-only.zip', dir='src/')
         r.addSource('http://tools.openoffice.org/unowinreg_prebuild/680/unowinreg.dll', dir='src/')
@@ -144,9 +146,6 @@ class OpenOffice(CPackageRecipe):
 
         r.Environment('MONO_SHARED_DIR', '/tmp')
 
-        # XXX: we shouldn't hardcode java version
-        r.Environment('JAVA_HOME', '%(libdir)s/jvm/sun-java-6u3/jre/')
-
         # Packaging stuff
         extraConf = (
                        ' --with-tag=%(snapshot)s'
@@ -157,16 +156,12 @@ class OpenOffice(CPackageRecipe):
                        ' --disable-binfilter'
                        ' --with-ant-home=%(prefix)s/'
                        ' --with-java'
-                       ' --with-jdk-home=%(libdir)s/jvm/sun-java-6u3'
                        ' --with-java-target-version=1.5'
                        ' --with-odk'
                        ' --with-use-shell=bash'
                        ' --enable-gtk'
-                       ' --with-agg'
-                       ' --with-system-agg'
                        ' --with-system-db'
                        ' --without-nas'
-                       ' --with-system-cairo'
                        ' --with-system-libwpd'
                        ' --with-system-xmlsec'
                        ' --with-system-portaudio'
@@ -180,8 +175,8 @@ class OpenOffice(CPackageRecipe):
                        ' --without-system-xt'
                        ' --without-system-mdbtools'
                        ' --without-system-xml-apis'
-                       ' --without-system-xerces'
-                       ' --without-system-xalan'
+                       ' --with-system-xerces'
+                       ' --with-system-xalan'
                        # FIXME
                        ' --with-system-hsqldb'
                        ' --with-hsqldb-jar=%(builddir)s/hsqldb.jar'
@@ -215,9 +210,6 @@ class OpenOffice(CPackageRecipe):
         # makefile is there
         r.Make('unpack')
 
-        r.Replace("cairo-canvas-win32.diff", "#cairo-canvas-win32.diff",
-                  "patches/src680/apply")
-
         # apply upstream sources
         r.Make('patch.apply')
 
@@ -247,13 +239,23 @@ class OpenOffice(CPackageRecipe):
 
         for lang in r.build_langs:
             if lang in r.help_langs:
-                r.ComponentSpec('doc-%s' % lang, '%%(basedir)s/help/%s/' % lang)
+                r.ComponentSpec(r.name+'-doc-%s:doc' % lang, '%%(basedir)s/help/%s/' % lang)
 
         for lang in r.build_langs[1:]:
-            r.loadManifest('lang_%s' % lang, ':locale-'+lang)
+            r.loadManifest('lang_%s_list.txt' % lang, r.name+'-locale-'+lang+':locale')
 
         for p in ('kde', 'gnome', 'mono'):
-            r.loadManifest(p, ':'+p)
+            r.loadManifest('%s_list.txt' % p, r.name+'-'+p)
+
+        apps = [
+            ('calc', 'Calc'),
+            ('draw', 'Draw'),
+            ('impress', 'Impress'),
+            ('math', 'Math'),
+            ('writer', 'Wrt'),
+        ]
+        for (app, d) in apps:
+            r.loadManifest('gid_Module_Prg_'+d, '%s-%s:runtime' % (r.name, app))
 
         # make sure basedir exists... we ran into this problem before. can't
         # use an assert since that would be run before everything else
@@ -276,16 +278,28 @@ class OpenOffice(CPackageRecipe):
         # These deps provided with OOO
         r.Requires(exceptDeps=r'java: org\.hsqldb\..*')
         r.Requires(exceptDeps=r'java: javax\.servlet\..*')
-        r.Requires(exceptDeps=r'java: org\.apache\.xml\.resolver\..*')
 
-        # XXX JDK/JRE should provide this
-        r.Requires(exceptDeps=r'soname\:\ ELF64\/libjawt\.so\(SUNWprivate\_1\.1\ SysV\ x86\_64\)')
+        arch = ('i386', 'amd64')[Arch.x86_64 == True]
+        r.Requires(rpath='%(libdir)s/jvm/java-*-icedtea-*/jre/lib/'+arch)
 
     def loadManifest(r, file, package):
 
         # Hack, need better support from conary CNY-1502
         r.Run('/bin/true', package=package)
-        r.Run('cat build/%s_list.txt | grep "^/" > ../_MANIFESTS_/.%d.manifest' \
-                % (file, r.last_manifest_id))
 
-        r.last_manifest_id += 1
+        if ':' in package:
+            real_pkg = package.split(':')[0]
+            pkg = (real_pkg, 'DEFAULT')[real_pkg == '']
+        else:
+            real_pkg = package
+            pkg = package
+
+        if not r.manifest_files.has_key(pkg):
+            r.manifest_files[pkg] = 0
+        else:
+            r.manifest_files[pkg] += 1
+
+        manifest = '%s.%d.manifest' % (real_pkg, r.manifest_files[pkg])
+
+        r.Run('cat build/%s | grep "^/" > ../_MANIFESTS_/%s' % (file, manifest))
+
