@@ -4,27 +4,58 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Mono(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Mono(RPMPackageRecipe,AutoPackageRecipe):
     name = 'mono'
-    version = '1.2.5.1'
+    version = '1.2.6'
+    rpmRelease = '6.1.fc9'
+    rpmPatches = [ 'mono-big-integer-CVE-2007-5197.patch', ]
 
     buildRequires = [ 'zlib:devel', 'glib:devel', 'bison:runtime',
-        'pkgconfig:devel', 'openssl:devel', ]
+                      'pkgconfig:devel', 'openssl:devel', 'autoconf:runtime',
+                      'automake:runtime', 'expat:devel', 'libtool:devel',
+                      'm4:runtime', 'pkgconfig:devel']
 
-    def setup(r):
-        r.addArchive('http://www.go-mono.com/sources/mono/')
-        #r.addArchive('http://mono.ximian.com/daily/')
 
+    def unpack(r):
+        RPMPackageRecipe.unpack(r)
+        # FIXME: get this nicer
+        # Fix the install path, install into %(libdir)s
+        # breaks bootstrapping on x86_64
+        # in policy as local mono, at cooktime is not in ../lib64/
+        #        r.Run(""" 
+#sed -i -e 's:$(prefix)/lib:$(libdir):'  -i -e 's:$(exec_prefix)/lib:$(libdir):' -i -e "s:'mono_libdir=\${exec_prefix}/lib':\"mono_libdir=\$libdir\":" {scripts,mono/metadata}/Makefile.am configure.in       
+#sed -i -e 's:^libdir.*:libdir=@libdir@:' -i -e 's:${prefix}/lib/:${libdir}/:g' ./{scripts,}/*.pc.in 
+#""")
+
+    def configure(r):
         r.disableParallelMake()
-        r.Configure()
+
+        extraConfig = ' --with-ikvm=yes --with-jit=yes '
+        # we need this, otherwise won't cook
+        extraConfig += ' --with-tls=pthread '
+        # FIXME: it's supposed to be faster, at cost of size.
+        # do we want it ?
+        # extraConfig += ' --with-static_mono=yes'
+
+        extraConfig += ' --with-glib=system'
+        # Enable the 2.0 FX and 2.1 moonlight
+        extraConfig += ' --with-preview=yes '
+        extraConfig += ' --with-moonlight=yes '
+
+        # Remove dummy ltconfig and let libtool handle it
+        r.Remove('libgc/ltconfig')
+
+        r.Run('autoreconf -f -i -s')
+        r.Configure(extraConfig)
+                    
         # do not add spurious builddir RPATH entry
         r.Replace(('^runpath_var=.*', 'runpath_var=""'),
                   ('^hardcode_libdir_flag_spec=.*',
                    'hardcode_libdir_flag_spec=""'), 'libtool')
-        r.Make()
 
+    def makeinstall(r):
         r.MakeInstall()
-        r.Move('%(datadir)s/{jay,libgc-mono}', '%(thisdocdir)s/')
 
         # RPM scripts are not necessary
         r.Remove('%(bindir)s/mono-find-{provides,requires}')
@@ -33,10 +64,21 @@ class Mono(CPackageRecipe):
         r.Install('mono/dis/.libs/monodis', '%(bindir)s/')
         r.Install('mono/monograph/.libs/monograph', '%(bindir)s/')
 
+        # This was removed upstream... 
+        r.Remove('%(bindir)s/jay')
+        r.Remove('%(datadir)s/jay', recursive = True)
+        r.Remove('%(datadir)s/libgc-mono', recursive = True)
+        r.Remove('%(mandir)s/man1/{jay,monostyle,oldmono,mint}.1')
+        r.Remove('%(libdir)s/mono/1.0/{CorCompare.exe,browsercaps-updater.exe*,mono-api-diff.exe}')
+        r.Remove('%(libdir)s/mono/*/mono-api-info.exe', recursive = True)
+        
+
+    def policy(r):
         # The mono libraries that provide CIL: dependencies have an
         # implicit requirement on the mono interpreter
         r.Requires('%(bindir)s/mono', r'.*\.(dll|exe)')
 
+        # FIXME: review this list...
         r.ComponentSpec('devel', '%(bindir)s/monodis',
                                  '%(mandir)s/man1/monodis.1.*',
                                  '%(bindir)s/ilasm.*',
