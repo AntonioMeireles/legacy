@@ -1,30 +1,65 @@
 diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.fw/drivers/firewire/fw-ohci.c
 --- linux-2.6.23.noarch/drivers/firewire/fw-ohci.c	2007-10-09 16:31:38.000000000 -0400
-+++ linux-2.6.23.noarch.fw/drivers/firewire/fw-ohci.c	2007-11-14 17:41:26.000000000 -0500
-@@ -71,6 +71,13 @@ struct db_descriptor {
- 	__le32 reserved1;
- } __attribute__((aligned(16)));
++++ linux-2.6.23.noarch.fw/drivers/firewire/fw-ohci.c	2007-12-03 09:40:47.000000000 -0500
+@@ -435,6 +435,21 @@ static void ar_context_run(struct ar_con
+ 	flush_writes(ctx->ohci);
+ }
  
-+struct ppb_context {
-+	/* the userspace buffer */
-+	u64 buffer;
-+	/* ofset into userspace buffer to put data, 0 to append */
-+	u32 data_start;
-+};
++static struct descriptor *
++find_branch_descriptor(struct descriptor *d, int z)
++{
++	int b, key;
 +
- #define CONTROL_SET(regs)	(regs)
- #define CONTROL_CLEAR(regs)	((regs) + 4)
- #define COMMAND_PTR(regs)	((regs) + 12)
-@@ -125,6 +132,8 @@ struct iso_context {
- 	struct context context;
- 	void *header;
- 	size_t header_length;
-+	struct fw_iso_buffer *iso_buffer;
-+	u32 data_start;
- };
++	b   = (le16_to_cpu(d->control) & DESCRIPTOR_BRANCH_ALWAYS) >> 2;
++	key = (le16_to_cpu(d->control) & DESCRIPTOR_KEY_IMMEDIATE) >> 8;
++
++	/* figure out which descriptor the branch address goes in */
++	if (z == 2 && (b == 3 || key == 2))
++		return d;
++	else
++		return d + z - 1;
++}
++
+ static void context_tasklet(unsigned long data)
+ {
+ 	struct context *ctx = (struct context *) data;
+@@ -453,7 +468,7 @@ static void context_tasklet(unsigned lon
+ 		address = le32_to_cpu(last->branch_address);
+ 		z = address & 0xf;
+ 		d = ctx->buffer + (address - ctx->buffer_bus) / sizeof(*d);
+-		last = (z == 2) ? d : d + z - 1;
++		last = find_branch_descriptor(d, z);
  
- #define CONFIG_ROM_SIZE 1024
-@@ -1403,6 +1412,69 @@ static int handle_ir_dualbuffer_packet(s
+ 		if (!ctx->callback(ctx, d, last))
+ 			break;
+@@ -564,7 +579,7 @@ static void context_append(struct contex
+ 
+ 	ctx->head_descriptor = d + z + extra;
+ 	ctx->prev_descriptor->branch_address = cpu_to_le32(d_bus | z);
+-	ctx->prev_descriptor = z == 2 ? d : d + z - 1;
++	ctx->prev_descriptor = find_branch_descriptor(d, z);
+ 
+ 	dma_sync_single_for_device(ctx->ohci->card.device, ctx->buffer_bus,
+ 				   ctx->buffer_size, DMA_TO_DEVICE);
+@@ -653,7 +668,7 @@ at_context_queue_packet(struct context *
+ 	driver_data = (struct driver_data *) &d[3];
+ 	driver_data->packet = packet;
+ 	packet->driver_data = driver_data;
+-	
++
+ 	if (packet->payload_length > 0) {
+ 		payload_bus =
+ 			dma_map_single(ohci->card.device, packet->payload,
+@@ -898,7 +913,7 @@ at_context_transmit(struct context *ctx,
+ 
+ 	if (retval < 0)
+ 		packet->callback(packet, &ctx->ohci->card, packet->ack);
+-	
++
+ }
+ 
+ static void bus_reset_tasklet(unsigned long data)
+@@ -1403,6 +1418,57 @@ static int handle_ir_dualbuffer_packet(s
  	return 1;
  }
  
@@ -34,59 +69,47 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
 +{
 +	struct iso_context *ctx =
 +		container_of(context, struct iso_context, context);
-+	struct page **pages = ctx->iso_buffer->pages;
-+	struct device *dev = context->ohci->card.device;
-+	struct ppb_context *ppbc;
-+	void *p;
-+	u32 length, rest, offset;
-+	int i, page, timestamp;
++	struct descriptor *pd = d + 1;
++	__le32 *ir_header;
++	size_t header_length;
++	void *p, *end;
++	int i, z;
 +
-+	if (d->res_count == d->req_count)
-+		/* This descriptor isn't done yet, stop iteration. */
++	if (pd->res_count == pd->req_count)
++		/* Descriptor(s) not done yet, stop iteration */
 +		return 0;
 +
-+	dma_unmap_single(dev, le32_to_cpu(d->data_address),
-+			 le16_to_cpu(d->req_count), DMA_FROM_DEVICE);
++	header_length = le16_to_cpu(d->req_count);
 +
-+	ppbc = (struct ppb_context *) (d + 1);
-+	p    = (void *) ppbc->buffer;
-+	timestamp = le32_to_cpu(* (__le32 *) p) & 0xffff;
-+	i    = ctx->header_length;
++	i   = ctx->header_length;
++	z   = le32_to_cpu(pd->branch_address) & 0xf;
++	p   = d + z;
++	end = p + header_length;
 +
-+	/* Put properly formatted headers where they belong */
-+	*(u32 *) (ctx->header + i) = __swab32(*(u32 *) (p + 4));
-+	memcpy(ctx->header + i + 4, p + 8, ctx->base.header_size - 4);
-+	ctx->header_length += ctx->base.header_size;
-+
-+	if (ppbc->data_start != 0)
-+		ctx->data_start = ppbc->data_start;
-+	page   = ctx->data_start >> PAGE_SHIFT;
-+	offset = ctx->data_start & ~PAGE_MASK;
-+	rest   = le16_to_cpu(d->req_count) - le16_to_cpu(d->res_count) -
-+		 ctx->base.header_size - 4;
-+	p += ctx->base.header_size + 4;
-+
-+	while (rest > 0) {
-+		if (offset + rest < PAGE_SIZE)
-+			length = rest;
-+		else
-+			length = PAGE_SIZE - offset;
-+
-+		/* Put data payload where it belongs */
-+		memcpy(page_address(pages[page]) + offset, p, length);
-+		offset = (offset + length) & ~PAGE_MASK;
-+		page++;
-+		rest -= length;
++	while (p < end && i + ctx->base.header_size <= PAGE_SIZE) {
++		/*
++		 * The iso header is byteswapped to little endian by
++		 * the controller, but the remaining header quadlets
++		 * are big endian.  We want to present all the headers
++		 * as big endian, so we have to swap the first quadlet.
++		 */
++		*(u32 *) (ctx->header + i) = __swab32(*(u32 *) (p + 4));
++		memcpy(ctx->header + i + 4, p + 8, ctx->base.header_size - 4);
++		i += ctx->base.header_size;
++		p += ctx->base.header_size + 4;
 +	}
 +
-+	if (le16_to_cpu(d->control) & DESCRIPTOR_IRQ_ALWAYS) {
-+		ctx->base.callback(&ctx->base, timestamp,
++	ctx->header_length = i;
++
++	if (le16_to_cpu(pd->control) & DESCRIPTOR_IRQ_ALWAYS) {
++		ir_header = (__le32 *) (d + z);
++		ctx->base.callback(&ctx->base,
++				   le32_to_cpu(ir_header[0]) & 0xffff,
 +				   ctx->header_length, ctx->header,
 +				   ctx->base.callback_data);
 +		ctx->header_length = 0;
 +	}
 +
-+	kfree((void *) (unsigned long) ppbc->buffer);
 +
 +	return 1;
 +}
@@ -94,7 +117,7 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
  static int handle_it_packet(struct context *context,
  			    struct descriptor *d,
  			    struct descriptor *last)
-@@ -1438,14 +1510,12 @@ ohci_allocate_iso_context(struct fw_card
+@@ -1438,14 +1504,12 @@ ohci_allocate_iso_context(struct fw_card
  	} else {
  		mask = &ohci->ir_context_mask;
  		list = ohci->ir_context_list;
@@ -113,7 +136,7 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
  	spin_lock_irqsave(&ohci->lock, flags);
  	index = ffs(*mask) - 1;
  	if (index >= 0)
-@@ -1504,7 +1574,9 @@ static int ohci_start_iso(struct fw_iso_
+@@ -1504,7 +1568,9 @@ static int ohci_start_iso(struct fw_iso_
  		context_run(&ctx->context, match);
  	} else {
  		index = ctx - ohci->ir_context_list;
@@ -124,7 +147,7 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
  		match = (tags << 28) | (sync << 8) | ctx->base.channel;
  		if (cycle >= 0) {
  			match |= (cycle & 0x07fff) << 12;
-@@ -1710,7 +1782,6 @@ ohci_queue_iso_receive_dualbuffer(struct
+@@ -1710,7 +1776,6 @@ ohci_queue_iso_receive_dualbuffer(struct
  	offset   = payload & ~PAGE_MASK;
  	rest     = p->payload_length;
  
@@ -132,7 +155,7 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
  	/* FIXME: make packet-per-buffer/dual-buffer a context option */
  	while (rest > 0) {
  		d = context_get_descriptors(&ctx->context,
-@@ -1749,6 +1820,93 @@ ohci_queue_iso_receive_dualbuffer(struct
+@@ -1749,6 +1814,81 @@ ohci_queue_iso_receive_dualbuffer(struct
  }
  
  static int
@@ -142,24 +165,14 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
 +					 unsigned long payload)
 +{
 +	struct iso_context *ctx = container_of(base, struct iso_context, base);
-+	struct descriptor *d = NULL;
++	struct descriptor *d = NULL, *pd = NULL;
 +	struct fw_iso_packet *p;
-+	void *tmpbuf;
-+	dma_addr_t d_bus, tmpbuf_bus;
-+	u32 z, length;
-+	int i, packet_count, header_size;
-+ 
-+	struct context *context = &ctx->context;
-+	struct device *dev = context->ohci->card.device;
-+	struct ppb_context *ppbc;
-+
-+	/* save iso_buffer pointer for packet handling later */
-+	ctx->iso_buffer = buffer;
-+
-+	z = 1;
++	dma_addr_t d_bus, page_bus;
++	u32 z, header_z, rest;
++	int i, page, offset, packet_count, header_size;
 +
 +	if (packet->skip) {
-+		d = context_get_descriptors(&ctx->context, z, &d_bus);
++		d = context_get_descriptors(&ctx->context, 1, &d_bus);
 +		if (d == NULL)
 +			return -ENOMEM;
 +
@@ -167,9 +180,12 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
 +					 DESCRIPTOR_INPUT_LAST |
 +					 DESCRIPTOR_BRANCH_ALWAYS |
 +					 DESCRIPTOR_WAIT);
-+		context_append(&ctx->context, d, z, 0);
++		context_append(&ctx->context, d, 1, 0);
 +	}
 +
++	/* Set up one descriptor for header, one for payload */
++	/* FIXME: handle cases where we need multiple desc. for payload */
++	z = 2;
 +	p = packet;
 +
 +	/*
@@ -179,45 +195,40 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
 +	packet_count = p->header_length / ctx->base.header_size;
 +	header_size  = packet_count * (ctx->base.header_size + 4);
 +
++	/* Get header size in number of descriptors. */
++	header_z = DIV_ROUND_UP(header_size, sizeof(*d));
++	page     = payload >> PAGE_SHIFT;
++	offset   = payload & ~PAGE_MASK;
++	rest     = p->payload_length;
++
 +	for (i = 0; i < packet_count; i++) {
-+		d = context_get_descriptors(&ctx->context, z + 1, &d_bus);
++		/* d points to the header descriptor */
++		d = context_get_descriptors(&ctx->context,
++					    z + header_z, &d_bus);
 +		if (d == NULL)
 +			return -ENOMEM;
 +
-+		d->control = cpu_to_le16(DESCRIPTOR_STATUS |
-+					 DESCRIPTOR_INPUT_LAST |
-+					 DESCRIPTOR_BRANCH_ALWAYS);
++		d->control      = cpu_to_le16(DESCRIPTOR_INPUT_MORE);
++		d->req_count    = cpu_to_le16(header_size);
++		d->res_count    = d->req_count;
++		d->data_address = cpu_to_le32(d_bus + (z * sizeof(*d)));
 +
-+		length = p->payload_length + header_size;
++		/* pd points to the payload descriptor */
++		pd = d + 1;
++		pd->control = cpu_to_le16(DESCRIPTOR_STATUS |
++					  DESCRIPTOR_INPUT_LAST |
++					  DESCRIPTOR_BRANCH_ALWAYS);
++		if (p->interrupt)
++			pd->control |= cpu_to_le16(DESCRIPTOR_IRQ_ALWAYS);
 +
-+		tmpbuf = kmalloc(length, GFP_KERNEL);
-+		if (tmpbuf == NULL)
-+			return -ENOMEM;
++		pd->req_count = cpu_to_le16(rest);
++		pd->res_count = pd->req_count;
 +
-+		d->req_count = cpu_to_le16(length);
-+		d->res_count = d->req_count;
++		page_bus = page_private(buffer->pages[page]);
++		pd->data_address = cpu_to_le32(page_bus + offset);
 +
-+		tmpbuf_bus = dma_map_single(dev, tmpbuf,
-+					    length, DMA_FROM_DEVICE);
-+		if (dma_mapping_error(tmpbuf_bus)) {
-+			kfree(tmpbuf);
-+			return -ENOMEM;
-+		}
-+
-+		d->data_address = cpu_to_le32(tmpbuf_bus);
-+
-+		ppbc = (struct ppb_context *) (d + 1);
-+		if (i == 0)
-+			ppbc->data_start = payload;
-+		else
-+			ppbc->data_start = 0;
-+		ppbc->buffer = (unsigned long) tmpbuf;
-+
-+		context_append(&ctx->context, d, z, 1);
++		context_append(&ctx->context, d, z, header_z);
 +	}
-+
-+	if (p->interrupt)
-+		d->control |= cpu_to_le16(DESCRIPTOR_IRQ_ALWAYS);
 +
 +	return 0;
 +}
@@ -226,7 +237,7 @@ diff -Naurp linux-2.6.23.noarch/drivers/firewire/fw-ohci.c linux-2.6.23.noarch.f
  ohci_queue_iso(struct fw_iso_context *base,
  	       struct fw_iso_packet *packet,
  	       struct fw_iso_buffer *buffer,
-@@ -1762,8 +1920,9 @@ ohci_queue_iso(struct fw_iso_context *ba
+@@ -1762,8 +1902,9 @@ ohci_queue_iso(struct fw_iso_context *ba
  		return ohci_queue_iso_receive_dualbuffer(base, packet,
  							 buffer, payload);
  	else

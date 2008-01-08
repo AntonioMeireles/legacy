@@ -1,0 +1,103 @@
+Make our cpuidle code match upstream; what was added upstream by
+commit 5062911830a66df0c0ad28c387a8c0623cb0d28c does not exactly
+match what we already have.
+
+---
+ drivers/acpi/processor_idle.c |   29 ++++++-----------------------
+ 1 file changed, 6 insertions(+), 23 deletions(-)
+
+--- linux-2.6.23.noarch.orig/drivers/acpi/processor_idle.c
++++ linux-2.6.23.noarch/drivers/acpi/processor_idle.c
+@@ -821,7 +821,8 @@ static int acpi_idle_enter_simple(struct
+ 	struct acpi_processor *pr;
+ 	struct acpi_processor_cx *cx = cpuidle_get_statedata(state);
+ 	u32 t1, t2;
+-	int sleep_ticks;
++	int sleep_ticks = 0;
++
+ 	pr = processors[smp_processor_id()];
+ 
+ 	if (unlikely(!pr))
+@@ -861,8 +862,6 @@ static int acpi_idle_enter_simple(struct
+ 	/* TSC could halt in idle, so notify users */
+ 	mark_tsc_unstable("TSC halts in idle");;
+ #endif
+-
+-	/* Compute time (ticks) that we were actually asleep */
+ 	sleep_ticks = ticks_elapsed(t1, t2);
+ 
+ 	/* Tell the scheduler how much we idled: */
+@@ -874,10 +873,6 @@ static int acpi_idle_enter_simple(struct
+ 	cx->usage++;
+ 
+ 	acpi_state_timer_broadcast(pr, cx, 0);
+-
+-	/* Do not account our idle-switching overhead: */
+-	sleep_ticks -= cx->latency_ticks + C2_OVERHEAD;
+-
+ 	cx->time += sleep_ticks;
+ 	return ticks_elapsed_in_us(t1, t2);
+ }
+@@ -898,7 +893,8 @@ static int acpi_idle_enter_bm(struct cpu
+ 	struct acpi_processor *pr;
+ 	struct acpi_processor_cx *cx = cpuidle_get_statedata(state);
+ 	u32 t1, t2;
+-	int sleep_ticks;
++	int sleep_ticks = 0;
++
+ 	pr = processors[smp_processor_id()];
+ 
+ 	if (unlikely(!pr))
+@@ -921,6 +917,8 @@ static int acpi_idle_enter_bm(struct cpu
+ 		return 0;
+ 	}
+ 
++	/* Tell the scheduler that we are going deep-idle: */
++	sched_clock_idle_sleep_event();
+ 	/*
+ 	 * Must be done before busmaster disable as we might need to
+ 	 * access HPET !
+@@ -933,10 +931,6 @@ static int acpi_idle_enter_bm(struct cpu
+ 		acpi_idle_update_bm_rld(pr, cx);
+ 
+ 		t1 = inl(acpi_gbl_FADT.xpm_timer_block.address);
+-
+-		/* Tell the scheduler that we are going deep-idle: */
+-		sched_clock_idle_sleep_event();
+-
+ 		acpi_idle_do_entry(cx);
+ 		t2 = inl(acpi_gbl_FADT.xpm_timer_block.address);
+ 	} else {
+@@ -950,10 +944,6 @@ static int acpi_idle_enter_bm(struct cpu
+ 		spin_unlock(&c3_lock);
+ 
+ 		t1 = inl(acpi_gbl_FADT.xpm_timer_block.address);
+-
+-		/* Tell the scheduler that we are going deep-idle: */
+-		sched_clock_idle_sleep_event();
+-
+ 		acpi_idle_do_entry(cx);
+ 		t2 = inl(acpi_gbl_FADT.xpm_timer_block.address);
+ 
+@@ -969,10 +959,7 @@ static int acpi_idle_enter_bm(struct cpu
+ 	/* TSC could halt in idle, so notify users */
+ 	mark_tsc_unstable("TSC halts in idle");
+ #endif
+-
+-	/* Compute time (ticks) that we were actually asleep */
+ 	sleep_ticks = ticks_elapsed(t1, t2);
+-
+ 	/* Tell the scheduler how much we idled: */
+ 	sched_clock_idle_wakeup_event(sleep_ticks*PM_TIMER_TICK_NS);
+ 
+@@ -982,10 +969,6 @@ static int acpi_idle_enter_bm(struct cpu
+ 	cx->usage++;
+ 
+ 	acpi_state_timer_broadcast(pr, cx, 0);
+-
+-	/* Do not account our idle-switching overhead: */
+-	sleep_ticks -= cx->latency_ticks + C3_OVERHEAD;
+-
+ 	cx->time += sleep_ticks;
+ 	return ticks_elapsed_in_us(t1, t2);
+ }

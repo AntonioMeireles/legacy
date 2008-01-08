@@ -1,0 +1,56 @@
+Backport of commit 607126c2a21cd6e9bb807fdd415c1a992f7b9009
+libata-scsi: be tolerant of 12-byte ATAPI commands in 16-byte CDBs
+
+---
+ drivers/ata/libata-scsi.c |   27 +++++++++++++++++++--------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+--- linux-2.6.23.noarch.orig/drivers/ata/libata-scsi.c
++++ linux-2.6.23.noarch/drivers/ata/libata-scsi.c
+@@ -2747,16 +2747,15 @@ static inline int __ata_scsi_queuecmd(st
+ 				      struct ata_device *dev)
+ {
+ 	int rc = 0;
++	u8 scsi_op = scmd->cmnd[0];
+ 
+-	if (unlikely(!scmd->cmd_len || scmd->cmd_len > dev->cdb_len)) {
+-		DPRINTK("bad CDB len=%u, max=%u\n",
+-			scmd->cmd_len, dev->cdb_len);
+-		scmd->result = DID_ERROR << 16;
+-		done(scmd);
+-		return 0;
+-	}
++	if (unlikely(!scmd->cmd_len))
++		goto bad_cdb_len;
+ 
+ 	if (dev->class == ATA_DEV_ATA) {
++		if (unlikely(scmd->cmd_len > dev->cdb_len))
++			goto bad_cdb_len;
++
+ 		ata_xlat_func_t xlat_func = ata_get_xlat_func(dev,
+ 							      scmd->cmnd[0]);
+ 
+@@ -2764,10 +2763,22 @@ static inline int __ata_scsi_queuecmd(st
+ 			rc = ata_scsi_translate(dev, scmd, done, xlat_func);
+ 		else
+ 			ata_scsi_simulate(dev, scmd, done);
+-	} else
++	} else {
++		int len = COMMAND_SIZE(scsi_op);
++		if (unlikely(len > scmd->cmd_len || len > dev->cdb_len))
++			goto bad_cdb_len;
++
+ 		rc = ata_scsi_translate(dev, scmd, done, atapi_xlat);
++	}
+ 
+ 	return rc;
++
++ bad_cdb_len:
++	DPRINTK("bad CDB len=%u, scsi_op=0x%02x, max=%u\n",
++		scmd->cmd_len, scsi_op, dev->cdb_len);
++	scmd->result = DID_ERROR << 16;
++	done(scmd);
++	return 0;
+ }
+ 
+ /**

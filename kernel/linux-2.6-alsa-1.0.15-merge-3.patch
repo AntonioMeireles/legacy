@@ -1,0 +1,1002 @@
+ALSA merge 20071120
+
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195493912 -3600
+# Node ID e32072c9fd90a324acee1d3f6efa6b9f323e1024
+# Parent  9931b54a9ff40df09d93278b83c8cb1bc4315a38
+[ALSA] hda-codec - Disable shared stream on AD1986A
+
+AD1986A has a hardware problem that it cannot share a stream with
+multiple pins properly.  The problem occurs e.g. when a volume is changed
+during playback.
+So far, hda-intel driver unconditionally assigns the stream to multiple
+output pins in copy-front mode, and this should be avoided for AD1986A
+codec.
+The original fix patch was by zhejiang <zhe.jiang@intel.com>.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r 9931b54a9ff4 -r e32072c9fd90 sound/pci/hda/hda_codec.c
+--- a/sound/pci/hda/hda_codec.c	Sat Nov 17 17:00:43 2007 +0000
++++ b/sound/pci/hda/hda_codec.c	Mon Nov 19 18:38:32 2007 +0100
+@@ -2485,13 +2485,14 @@ int snd_hda_multi_out_analog_prepare(str
+ 	/* front */
+ 	snd_hda_codec_setup_stream(codec, nids[HDA_FRONT], stream_tag,
+ 				   0, format);
+-	if (mout->hp_nid && mout->hp_nid != nids[HDA_FRONT])
++	if (!mout->no_share_stream &&
++	    mout->hp_nid && mout->hp_nid != nids[HDA_FRONT])
+ 		/* headphone out will just decode front left/right (stereo) */
+ 		snd_hda_codec_setup_stream(codec, mout->hp_nid, stream_tag,
+ 					   0, format);
+ 	/* extra outputs copied from front */
+ 	for (i = 0; i < ARRAY_SIZE(mout->extra_out_nid); i++)
+-		if (mout->extra_out_nid[i])
++		if (!mout->no_share_stream && mout->extra_out_nid[i])
+ 			snd_hda_codec_setup_stream(codec,
+ 						   mout->extra_out_nid[i],
+ 						   stream_tag, 0, format);
+@@ -2501,7 +2502,7 @@ int snd_hda_multi_out_analog_prepare(str
+ 		if (chs >= (i + 1) * 2) /* independent out */
+ 			snd_hda_codec_setup_stream(codec, nids[i], stream_tag,
+ 						   i * 2, format);
+-		else /* copy front */
++		else if (!mout->no_share_stream) /* copy front */
+ 			snd_hda_codec_setup_stream(codec, nids[i], stream_tag,
+ 						   0, format);
+ 	}
+diff -r 9931b54a9ff4 -r e32072c9fd90 sound/pci/hda/hda_local.h
+--- a/sound/pci/hda/hda_local.h	Sat Nov 17 17:00:43 2007 +0000
++++ b/sound/pci/hda/hda_local.h	Mon Nov 19 18:38:32 2007 +0100
+@@ -220,6 +220,7 @@ struct hda_multi_out {
+ 	hda_nid_t dig_out_nid;	/* digital out audio widget */
+ 	int max_channels;	/* currently supported analog channels */
+ 	int dig_out_used;	/* current usage of digital out (HDA_DIG_XXX) */
++	int no_share_stream;	/* don't share a stream with multiple pins */
+ };
+ 
+ int snd_hda_multi_out_dig_open(struct hda_codec *codec,
+diff -r 9931b54a9ff4 -r e32072c9fd90 sound/pci/hda/patch_analog.c
+--- a/sound/pci/hda/patch_analog.c	Sat Nov 17 17:00:43 2007 +0000
++++ b/sound/pci/hda/patch_analog.c	Mon Nov 19 18:38:32 2007 +0100
+@@ -956,6 +956,14 @@ static int patch_ad1986a(struct hda_code
+ 		spec->multiout.dig_out_nid = 0;
+ 		break;
+ 	}
++
++	/* AD1986A has a hardware problem that it can't share a stream
++	 * with multiple output pins.  The copy of front to surrounds
++	 * causes noisy or silent outputs at a certain timing, e.g.
++	 * changing the volume.
++	 * So, let's disable the shared stream.
++	 */
++	spec->multiout.no_share_stream = 1;
+ 
+ 	return 0;
+ }
+# HG changeset patch
+# User Clemens Ladisch <clemens@ladisch.de>
+# Date 1195493912 -3600
+# Node ID e1af2e20c49431ef06c957db116bc215835ddd97
+# Parent  e32072c9fd90a324acee1d3f6efa6b9f323e1024
+[ALSA] cmipci: fix FLINKON/OFF bits
+
+Fix the definitions of the CM_FLINKON/CM_FLINKOFF register bits that
+were garbled in the last 'update register definitions' patch.
+
+Signed-off-by: Clemens Ladisch <clemens@ladisch.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r e32072c9fd90 -r e1af2e20c494 sound/pci/cmipci.c
+--- a/sound/pci/cmipci.c	Mon Nov 19 18:38:32 2007 +0100
++++ b/sound/pci/cmipci.c	Mon Nov 19 18:38:32 2007 +0100
+@@ -246,10 +246,9 @@ MODULE_PARM_DESC(joystick_port, "Joystic
+ #define CM_MMODE_MASK		0x00000E00	/* model DAA interface mode */
+ #define CM_SPDIF_SELECT2	0x00000100	/* for model > 039 ? */
+ #define CM_ENCENTER		0x00000080
+-#define CM_FLINKON		0x00000080	/* force modem link detection on, model 037 */
++#define CM_FLINKON		0x00000040	/* force modem link detection on, model 037 */
+ #define CM_MUTECH1		0x00000040	/* mute PCI ch1 to DAC */
+-#define CM_FLINKOFF		0x00000040	/* force modem link detection off, model 037 */
+-#define CM_UNKNOWN_18_5		0x00000020	/* ? */
++#define CM_FLINKOFF		0x00000020	/* force modem link detection off, model 037 */
+ #define CM_MIDSMP		0x00000010	/* 1/2 interpolation at front end DAC */
+ #define CM_UPDDMA_MASK		0x0000000C	/* TDMA position update notification */
+ #define CM_UPDDMA_2048		0x00000000
+# HG changeset patch
+# User Clemens Ladisch <clemens@ladisch.de>
+# Date 1195493912 -3600
+# Node ID b6d9fe8c18d4d59bf6ceac73656be4437fb00b8a
+# Parent  e1af2e20c49431ef06c957db116bc215835ddd97
+[ALSA] mpu401: fix recursive locking in timer
+
+When the output and input ports are used at the same time, the timer can
+be interrupted by the hardware interrupt, so we have to disable
+interrupts when we take a lock in the timer.
+
+Signed-off-by: Clemens Ladisch <clemens@ladisch.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r e1af2e20c494 -r b6d9fe8c18d4 sound/drivers/mpu401/mpu401_uart.c
+--- a/sound/drivers/mpu401/mpu401_uart.c	Mon Nov 19 18:38:32 2007 +0100
++++ b/sound/drivers/mpu401/mpu401_uart.c	Mon Nov 19 18:38:32 2007 +0100
+@@ -97,23 +97,27 @@ static void snd_mpu401_uart_clear_rx(str
+ 
+ static void uart_interrupt_tx(struct snd_mpu401 *mpu)
+ {
++	unsigned long flags;
++
+ 	if (test_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode) &&
+ 	    test_bit(MPU401_MODE_BIT_OUTPUT_TRIGGER, &mpu->mode)) {
+-		spin_lock(&mpu->output_lock);
++		spin_lock_irqsave(&mpu->output_lock, flags);
+ 		snd_mpu401_uart_output_write(mpu);
+-		spin_unlock(&mpu->output_lock);
++		spin_unlock_irqrestore(&mpu->output_lock, flags);
+ 	}
+ }
+ 
+ static void _snd_mpu401_uart_interrupt(struct snd_mpu401 *mpu)
+ {
++	unsigned long flags;
++
+ 	if (mpu->info_flags & MPU401_INFO_INPUT) {
+-		spin_lock(&mpu->input_lock);
++		spin_lock_irqsave(&mpu->input_lock, flags);
+ 		if (test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode))
+ 			snd_mpu401_uart_input_read(mpu);
+ 		else
+ 			snd_mpu401_uart_clear_rx(mpu);
+-		spin_unlock(&mpu->input_lock);
++		spin_unlock_irqrestore(&mpu->input_lock, flags);
+ 	}
+ 	if (! (mpu->info_flags & MPU401_INFO_TX_IRQ))
+ 		/* ok. for better Tx performance try do some output
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195493912 -3600
+# Node ID a1b7cd79d08a5fe0213782b3d3c043b87670b427
+# Parent  b6d9fe8c18d4d59bf6ceac73656be4437fb00b8a
+[ALSA] hda-codec - Check PINCAP only for PIN widgets
+
+The recent addition of checking PINCAP for EAPD seems to break some
+systems due to unexpected response from the codec chip.  We shouldn't
+issue GET_PINCAP verb to non-PIN widgets.  Now checks the widget type
+before checking EAPD bit.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r b6d9fe8c18d4 -r a1b7cd79d08a sound/pci/hda/hda_codec.c
+--- a/sound/pci/hda/hda_codec.c	Mon Nov 19 18:38:32 2007 +0100
++++ b/sound/pci/hda/hda_codec.c	Mon Nov 19 18:38:32 2007 +0100
+@@ -1625,19 +1625,26 @@ static void hda_set_power_state(struct h
+ 
+ 	nid = codec->start_nid;
+ 	for (i = 0; i < codec->num_nodes; i++, nid++) {
+-		if (get_wcaps(codec, nid) & AC_WCAP_POWER) {
+-			unsigned int pincap;
+-			/*
+-			 * don't power down the widget if it controls eapd
+-			 * and EAPD_BTLENABLE is set.
+-			 */
+-			pincap = snd_hda_param_read(codec, nid, AC_PAR_PIN_CAP);
+-			if (pincap & AC_PINCAP_EAPD) {
+-				int eapd = snd_hda_codec_read(codec, nid,
+-					0, AC_VERB_GET_EAPD_BTLENABLE, 0);
+-				eapd &= 0x02;
+-				if (power_state == AC_PWRST_D3 && eapd)
+-					continue;
++		unsigned int wcaps = get_wcaps(codec, nid);
++		if (wcaps & AC_WCAP_POWER) {
++			unsigned int wid_type = (wcaps & AC_WCAP_TYPE) >>
++				AC_WCAP_TYPE_SHIFT;
++			if (wid_type == AC_WID_PIN) {
++				unsigned int pincap;
++				/*
++				 * don't power down the widget if it controls
++				 * eapd and EAPD_BTLENABLE is set.
++				 */
++				pincap = snd_hda_param_read(codec, nid,
++							    AC_PAR_PIN_CAP);
++				if (pincap & AC_PINCAP_EAPD) {
++					int eapd = snd_hda_codec_read(codec,
++						nid, 0,
++						AC_VERB_GET_EAPD_BTLENABLE, 0);
++					eapd &= 0x02;
++					if (power_state == AC_PWRST_D3 && eapd)
++						continue;
++				}
+ 			}
+ 			snd_hda_codec_write(codec, nid, 0,
+ 					    AC_VERB_SET_POWER_STATE,
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195494090 -3600
+# Node ID e47bb7f6c63dafbd4f93a47b8e08bff4b375921e
+# Parent  a1b7cd79d08a5fe0213782b3d3c043b87670b427
+[ALSA] ca0106 - Check value range in ctl callbacks
+
+Check the value ranges in ctl put callbacks properly.
+Some callbacks may access a wrong pointer depending on the value passed.
+Also, fixed the access to the wrong field for enum values, and fixed
+some callbacks to return the proper error code.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r a1b7cd79d08a -r e47bb7f6c63d sound/pci/ca0106/ca0106_mixer.c
+--- a/sound/pci/ca0106/ca0106_mixer.c	Mon Nov 19 18:38:32 2007 +0100
++++ b/sound/pci/ca0106/ca0106_mixer.c	Mon Nov 19 18:41:30 2007 +0100
+@@ -86,7 +86,7 @@ static int snd_ca0106_shared_spdif_get(s
+ {
+ 	struct snd_ca0106 *emu = snd_kcontrol_chip(kcontrol);
+ 
+-	ucontrol->value.enumerated.item[0] = emu->spdif_enable;
++	ucontrol->value.integer.value[0] = emu->spdif_enable;
+ 	return 0;
+ }
+ 
+@@ -98,11 +98,11 @@ static int snd_ca0106_shared_spdif_put(s
+ 	int change = 0;
+ 	u32 mask;
+ 
+-	val = ucontrol->value.enumerated.item[0] ;
++	val = !!ucontrol->value.integer.value[0];
+ 	change = (emu->spdif_enable != val);
+ 	if (change) {
+ 		emu->spdif_enable = val;
+-		if (val == 1) {
++		if (val) {
+ 			/* Digital */
+ 			snd_ca0106_ptr_write(emu, SPDIF_SELECT1, 0, 0xf);
+ 			snd_ca0106_ptr_write(emu, SPDIF_SELECT2, 0, 0x0b000000);
+@@ -159,6 +159,8 @@ static int snd_ca0106_capture_source_put
+ 	u32 source;
+ 
+ 	val = ucontrol->value.enumerated.item[0] ;
++	if (val >= 6)
++		return -EINVAL;
+ 	change = (emu->capture_source != val);
+ 	if (change) {
+ 		emu->capture_source = val;
+@@ -207,6 +209,8 @@ static int snd_ca0106_i2c_capture_source
+ 	 * for the particular source.
+ 	 */
+ 	source_id = ucontrol->value.enumerated.item[0] ;
++	if (source_id >= 4)
++		return -EINVAL;
+ 	change = (emu->i2c_capture_source != source_id);
+ 	if (change) {
+ 		snd_ca0106_i2c_write(emu, ADC_MUX, 0); /* Mute input */
+@@ -271,6 +275,8 @@ static int snd_ca0106_capture_mic_line_i
+ 	u32 tmp;
+ 
+ 	val = ucontrol->value.enumerated.item[0] ;
++	if (val > 1)
++		return -EINVAL;
+ 	change = (emu->capture_mic_line_in != val);
+ 	if (change) {
+ 		emu->capture_mic_line_in = val;
+@@ -443,7 +449,7 @@ static int snd_ca0106_i2c_volume_put(str
+ 	ogain = emu->i2c_capture_volume[source_id][0]; /* Left */
+ 	ngain = ucontrol->value.integer.value[0];
+ 	if (ngain > 0xff)
+-		return 0;
++		return -EINVAL;
+ 	if (ogain != ngain) {
+ 		if (emu->i2c_capture_source == source_id)
+ 			snd_ca0106_i2c_write(emu, ADC_ATTEN_ADCL, ((ngain) & 0xff) );
+@@ -453,7 +459,7 @@ static int snd_ca0106_i2c_volume_put(str
+ 	ogain = emu->i2c_capture_volume[source_id][1]; /* Right */
+ 	ngain = ucontrol->value.integer.value[1];
+ 	if (ngain > 0xff)
+-		return 0;
++		return -EINVAL;
+ 	if (ogain != ngain) {
+ 		if (emu->i2c_capture_source == source_id)
+ 			snd_ca0106_i2c_write(emu, ADC_ATTEN_ADCR, ((ngain) & 0xff));
+@@ -497,7 +503,7 @@ static int spi_mute_put(struct snd_kcont
+ 	}
+ 
+ 	ret = snd_ca0106_spi_write(emu, emu->spi_dac_reg[reg]);
+-	return ret ? -1 : 1;
++	return ret ? -EINVAL : 1;
+ }
+ 
+ #define CA_VOLUME(xname,chid,reg) \
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195584720 -3600
+# Node ID acd4b1b953246461955957dec9df4479398f6c09
+# Parent  e47bb7f6c63dafbd4f93a47b8e08bff4b375921e
+[ALSA] hda-codec - Revert volume knob controls in STAC codecs
+
+Volume knob controls with STAC codecs seem to cause problems with some
+devices.  Volumes change very slowly or silent suddenly.  It's likely
+due to conflict between the software and the hardware volume knob
+setup.
+Since we'll have a virtual master control in future, it's safer to
+remove this control completely right now.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r e47bb7f6c63d -r acd4b1b95324 sound/pci/hda/patch_sigmatel.c
+--- a/sound/pci/hda/patch_sigmatel.c	Mon Nov 19 18:41:30 2007 +0100
++++ b/sound/pci/hda/patch_sigmatel.c	Tue Nov 20 19:52:00 2007 +0100
+@@ -111,7 +111,6 @@ struct sigmatel_spec {
+ 	unsigned int alt_switch: 1;
+ 	unsigned int hp_detect: 1;
+ 	unsigned int gpio_mute: 1;
+-	unsigned int no_vol_knob :1;
+ 
+ 	unsigned int gpio_mask, gpio_data;
+ 
+@@ -342,42 +341,6 @@ static int stac92xx_aloopback_put(struct
+ 	return 1;
+ }
+ 
+-static int stac92xx_volknob_info(struct snd_kcontrol *kcontrol,
+-	struct snd_ctl_elem_info *uinfo)
+-{
+-	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+-	uinfo->count = 1;
+-	uinfo->value.integer.min = 0;
+-	uinfo->value.integer.max = 127;
+-	return 0;
+-}
+-
+-static int stac92xx_volknob_get(struct snd_kcontrol *kcontrol,
+-	struct snd_ctl_elem_value *ucontrol)
+-{
+-	ucontrol->value.integer.value[0] = kcontrol->private_value & 0xff;
+-	return 0;
+-}
+-
+-static int stac92xx_volknob_put(struct snd_kcontrol *kcontrol,
+-		struct snd_ctl_elem_value *ucontrol)
+-{
+-	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
+-	unsigned int val = kcontrol->private_value & 0xff;
+-
+-	if (val == ucontrol->value.integer.value[0])
+-		return 0;
+-
+-	val = ucontrol->value.integer.value[0];
+-	kcontrol->private_value &= ~0xff;
+-	kcontrol->private_value |= val;
+-
+-	snd_hda_codec_write_cache(codec, kcontrol->private_value >> 16, 0,
+-		AC_VERB_SET_VOLUME_KNOB_CONTROL, val | 0x80);
+-	return 1;
+-}
+-
+-
+ static struct hda_verb stac9200_core_init[] = {
+ 	/* set dac0mux for dac converter */
+ 	{ 0x07, AC_VERB_SET_CONNECT_SEL, 0x00},
+@@ -445,18 +408,6 @@ static struct hda_verb stac9205_core_ini
+ 		.put   = stac92xx_aloopback_put, \
+ 		.private_value = verb_read | (verb_write << 16), \
+ 	}
+-
+-#define STAC_VOLKNOB(knob_nid)	\
+-	{ \
+-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
+-		.name  = "Master Playback Volume", \
+-		.count = 1, \
+-		.info  = stac92xx_volknob_info, \
+-		.get   = stac92xx_volknob_get, \
+-		.put   = stac92xx_volknob_put, \
+-			.private_value = 127 | (knob_nid << 16), \
+-	}
+-
+ 
+ static struct snd_kcontrol_new stac9200_mixer[] = {
+ 	HDA_CODEC_VOLUME("Master Playback Volume", 0xb, 0, HDA_OUTPUT),
+@@ -487,7 +438,6 @@ static struct snd_kcontrol_new stac9205_
+ 	},
+ 	STAC_INPUT_SOURCE(2),
+ 	STAC_ANALOG_LOOPBACK(0xFE0, 0x7E0),
+-	STAC_VOLKNOB(0x24),
+ 
+ 	HDA_CODEC_VOLUME_IDX("Capture Volume", 0x0, 0x1b, 0x0, HDA_INPUT),
+ 	HDA_CODEC_MUTE_IDX("Capture Switch", 0x0, 0x1d, 0x0, HDA_OUTPUT),
+@@ -503,7 +453,6 @@ static struct snd_kcontrol_new stac9205_
+ /* This needs to be generated dynamically based on sequence */
+ static struct snd_kcontrol_new stac922x_mixer[] = {
+ 	STAC_INPUT_SOURCE(2),
+-	STAC_VOLKNOB(0x16),
+ 	HDA_CODEC_VOLUME_IDX("Capture Volume", 0x0, 0x17, 0x0, HDA_INPUT),
+ 	HDA_CODEC_MUTE_IDX("Capture Switch", 0x0, 0x17, 0x0, HDA_INPUT),
+ 	HDA_CODEC_VOLUME_IDX("Mux Capture Volume", 0x0, 0x12, 0x0, HDA_OUTPUT),
+@@ -517,7 +466,6 @@ static struct snd_kcontrol_new stac922x_
+ 
+ static struct snd_kcontrol_new stac927x_mixer[] = {
+ 	STAC_INPUT_SOURCE(3),
+-	STAC_VOLKNOB(0x24),
+ 	STAC_ANALOG_LOOPBACK(0xFEB, 0x7EB),
+ 
+ 	HDA_CODEC_VOLUME_IDX("Capture Volume", 0x0, 0x18, 0x0, HDA_INPUT),
+@@ -1931,8 +1879,7 @@ static int stac92xx_auto_create_hp_ctls(
+ 	}
+ 	if (spec->multiout.hp_nid) {
+ 		const char *pfx;
+-		if (old_num_dacs == spec->multiout.num_dacs &&
+-		    spec->no_vol_knob)
++		if (old_num_dacs == spec->multiout.num_dacs)
+ 			pfx = "Master";
+ 		else
+ 			pfx = "Headphone";
+@@ -2489,7 +2436,6 @@ static int patch_stac9200(struct hda_cod
+ 	codec->spec = spec;
+ 	spec->num_pins = ARRAY_SIZE(stac9200_pin_nids);
+ 	spec->pin_nids = stac9200_pin_nids;
+-	spec->no_vol_knob = 1;
+ 	spec->board_config = snd_hda_check_board_config(codec, STAC_9200_MODELS,
+ 							stac9200_models,
+ 							stac9200_cfg_tbl);
+@@ -2544,7 +2490,6 @@ static int patch_stac925x(struct hda_cod
+ 	codec->spec = spec;
+ 	spec->num_pins = ARRAY_SIZE(stac925x_pin_nids);
+ 	spec->pin_nids = stac925x_pin_nids;
+-	spec->no_vol_knob = 1;
+ 	spec->board_config = snd_hda_check_board_config(codec, STAC_925x_MODELS,
+ 							stac925x_models,
+ 							stac925x_cfg_tbl);
+# HG changeset patch
+# User Krzysztof Helt <krzysztof.h1@wp.pl>
+# Date 1195584725 -3600
+# Node ID f218b73fd7a5b1008e746e543f7c5b7732261540
+# Parent  acd4b1b953246461955957dec9df4479398f6c09
+[ALSA] s3c2443-ac97: compilation fix
+
+The Samsung S3C24xx uses new architecture file layout in the post 2.6.23
+kernel.  This patch fixes include path for the s3c2443-ac97.c.
+
+Signed-off-by: Krzysztof Helt <krzysztof.h1@wp.pl>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r acd4b1b95324 -r f218b73fd7a5 sound/soc/s3c24xx/s3c2443-ac97.c
+--- a/sound/soc/s3c24xx/s3c2443-ac97.c	Tue Nov 20 19:52:00 2007 +0100
++++ b/sound/soc/s3c24xx/s3c2443-ac97.c	Tue Nov 20 19:52:05 2007 +0100
+@@ -32,7 +32,7 @@
+ 
+ #include <asm/hardware.h>
+ #include <asm/io.h>
+-#include <asm/arch/regs-ac97.h>
++#include <asm/plat-s3c/regs-ac97.h>
+ #include <asm/arch/regs-gpio.h>
+ #include <asm/arch/regs-clock.h>
+ #include <asm/arch/audio.h>
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195584734 -3600
+# Node ID 9f67238113cb9de9defe874af820e99ad4d89b83
+# Parent  f218b73fd7a5b1008e746e543f7c5b7732261540
+[ALSA] ca0106 - Fix write proc assignment
+
+The driver assigns the write proc callback to read wrongly.
+Fixed now.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r f218b73fd7a5 -r 9f67238113cb sound/pci/ca0106/ca0106_proc.c
+--- a/sound/pci/ca0106/ca0106_proc.c	Tue Nov 20 19:52:05 2007 +0100
++++ b/sound/pci/ca0106/ca0106_proc.c	Tue Nov 20 19:52:14 2007 +0100
+@@ -445,13 +445,11 @@ int __devinit snd_ca0106_proc_init(struc
+ 		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read1);
+ 		entry->c.text.write = snd_ca0106_proc_reg_write;
+ 		entry->mode |= S_IWUSR;
+-//		entry->private_data = emu;
+ 	}
+ 	if(! snd_card_proc_new(emu->card, "ca0106_i2c", &entry)) {
+-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_i2c_write);
+ 		entry->c.text.write = snd_ca0106_proc_i2c_write;
++		entry->private_data = emu;
+ 		entry->mode |= S_IWUSR;
+-//		entry->private_data = emu;
+ 	}
+ 	if(! snd_card_proc_new(emu->card, "ca0106_regs2", &entry)) 
+ 		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read2);
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195584739 -3600
+# Node ID 46fb700f070f55dca39a5ac192d016b95b346379
+# Parent  9f67238113cb9de9defe874af820e99ad4d89b83
+[ALSA] portman2x4 - Fix probe error
+
+Reported by Ingo Molnar,
+when booting an allyesconfig bzImage kernel the bootup hangs in the
+portman2x4 driver (on a box that does not have this hardware), at:
+ Pid: 1, comm:              swapper
+ EIP: 0060:[<c02f763c>] CPU: 0
+ EIP is at parport_pc_read_status+0x4/0x8
+  EFLAGS: 00000202    Not tainted  (2.6.23-rc9 #904)
+ EAX: f7e57a7f EBX: 00000010 ECX: c2b808c0 EDX: 00000379
+ ESI: f7cb8230 EDI: 00000010 EBP: f7cb8230 DS: 007b ES: 007b FS: 0000
+ CR0: 8005003b CR2: fff9c000 CR3: 007ec000 CR4: 00000690
+ DR0: 00000000 DR1: 00000000 DR2: 00000000 DR3: 00000000
+ DR6: ffff0ff0 DR7: 00000400
+  [<c04613de>] portman_flush_input+0xde/0x12c
+  [<c0461a24>] snd_portman_probe+0x368/0x484
+  [<c02fbb8c>] __device_attach+0x0/0x8
+  [<c02fce68>] platform_drv_probe+0xc/0x10
+  [<c02fba6c>] driver_probe_device+0x74/0x194
+  [<c0587174>] klist_next+0x38/0x70
+  [<c02fbb8c>] __device_attach+0x0/0x8
+  [<c02faea1>] bus_for_each_drv+0x35/0x68
+  [<c02fbc22>] device_attach+0x72/0x78
+the reason is due to an inconsistent error return code of 1 or 2, while
+snd_portman_probe only realizes negative error codes.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r 9f67238113cb -r 46fb700f070f sound/drivers/portman2x4.c
+--- a/sound/drivers/portman2x4.c	Tue Nov 20 19:52:14 2007 +0100
++++ b/sound/drivers/portman2x4.c	Tue Nov 20 19:52:19 2007 +0100
+@@ -668,7 +668,7 @@ static int __devinit snd_portman_probe_p
+ 	parport_release(pardev);
+ 	parport_unregister_device(pardev);
+ 
+-	return res;
++	return res ? -EIO : 0;
+ }
+ 
+ static void __devinit snd_portman_attach(struct parport *p)
+# HG changeset patch
+# User Timur Tabi <timur@freescale.com>
+# Date 1195584757 -3600
+# Node ID 10871a246045f6e4ccd2079cedfbbc89949d0065
+# Parent  46fb700f070f55dca39a5ac192d016b95b346379
+[ALSA] fix private data pointer calculation in CS4270 driver
+
+Fix the calculation of the private_data pointer in the CS4270 driver.
+
+Signed-off-by: Timur Tabi <timur@freescale.com>
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r 46fb700f070f -r 10871a246045 sound/soc/codecs/cs4270.c
+--- a/sound/soc/codecs/cs4270.c	Tue Nov 20 19:52:19 2007 +0100
++++ b/sound/soc/codecs/cs4270.c	Tue Nov 20 19:52:37 2007 +0100
+@@ -725,7 +725,8 @@ static int cs4270_probe(struct platform_
+ 	codec->owner = THIS_MODULE;
+ 	codec->dai = &cs4270_dai;
+ 	codec->num_dai = 1;
+-	codec->private_data = codec + ALIGN(sizeof(struct snd_soc_codec), 4);
++	codec->private_data = (void *) codec +
++		ALIGN(sizeof(struct snd_soc_codec), 4);
+ 
+ 	socdev->codec = codec;
+ 
+# HG changeset patch
+# User James Courtier-Dutton <James@superbug.co.uk>
+# Date 1195585412 -3600
+# Node ID ef8bc8b6a0c662aa5900c4599aee5ce0c0b4728d
+# Parent  10871a246045f6e4ccd2079cedfbbc89949d0065
+[ALSA] emu10k1: Add mixer controls parameter checking.
+
+
+Signed-off-by: James Courtier-Dutton <James@superbug.co.uk>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r 10871a246045 -r ef8bc8b6a0c6 sound/pci/emu10k1/emumixer.c
+--- a/sound/pci/emu10k1/emumixer.c	Tue Nov 20 19:52:37 2007 +0100
++++ b/sound/pci/emu10k1/emumixer.c	Tue Nov 20 20:03:32 2007 +0100
+@@ -58,6 +58,9 @@ static int snd_emu10k1_spdif_get(struct 
+ 	unsigned int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	unsigned long flags;
+ 
++	/* Limit: emu->spdif_bits */
++	if (idx >= 3)
++		return -EINVAL;
+ 	spin_lock_irqsave(&emu->reg_lock, flags);
+ 	ucontrol->value.iec958.status[0] = (emu->spdif_bits[idx] >> 0) & 0xff;
+ 	ucontrol->value.iec958.status[1] = (emu->spdif_bits[idx] >> 8) & 0xff;
+@@ -272,9 +275,12 @@ static int snd_emu1010_output_source_get
+                                  struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	int channel;
++	unsigned int channel;
+ 
+ 	channel = (kcontrol->private_value) & 0xff;
++	/* Limit: emu1010_output_dst, emu->emu1010.output_source */
++	if (channel >= 24)
++		return -EINVAL;
+ 	ucontrol->value.enumerated.item[0] = emu->emu1010.output_source[channel];
+ 	return 0;
+ }
+@@ -285,9 +291,12 @@ static int snd_emu1010_output_source_put
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+ 	int change = 0;
+ 	unsigned int val;
+-	int channel;
++	unsigned int channel;
+ 
+ 	channel = (kcontrol->private_value) & 0xff;
++	/* Limit: emu1010_output_dst, emu->emu1010.output_source */
++	if (channel >= 24)
++		return -EINVAL;
+ 	if (emu->emu1010.output_source[channel] != ucontrol->value.enumerated.item[0]) {
+ 		val = emu->emu1010.output_source[channel] = ucontrol->value.enumerated.item[0];
+ 		change = 1;
+@@ -301,9 +310,12 @@ static int snd_emu1010_input_source_get(
+                                  struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	int channel;
++	unsigned int channel;
+ 
+ 	channel = (kcontrol->private_value) & 0xff;
++	/* Limit: emu1010_input_dst, emu->emu1010.input_source */
++	if (channel >= 22)
++		return -EINVAL;
+ 	ucontrol->value.enumerated.item[0] = emu->emu1010.input_source[channel];
+ 	return 0;
+ }
+@@ -314,9 +326,12 @@ static int snd_emu1010_input_source_put(
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+ 	int change = 0;
+ 	unsigned int val;
+-	int channel;
++	unsigned int channel;
+ 
+ 	channel = (kcontrol->private_value) & 0xff;
++	/* Limit: emu1010_input_dst, emu->emu1010.input_source */
++	if (channel >= 22)
++		return -EINVAL;
+ 	if (emu->emu1010.input_source[channel] != ucontrol->value.enumerated.item[0]) {
+ 		val = emu->emu1010.input_source[channel] = ucontrol->value.enumerated.item[0];
+ 		change = 1;
+@@ -533,6 +548,9 @@ static int snd_emu1010_internal_clock_pu
+ 	int change = 0;
+ 
+ 	val = ucontrol->value.enumerated.item[0] ;
++	/* Limit: uinfo->value.enumerated.items = 4; */
++	if (val >= 4)
++		return -EINVAL;
+ 	change = (emu->emu1010.internal_clock != val);
+ 	if (change) {
+ 		emu->emu1010.internal_clock = val;
+@@ -669,7 +687,11 @@ static int snd_audigy_i2c_capture_source
+ 	 * update the capture volume from the cached value
+ 	 * for the particular source.
+ 	 */
+-	source_id = ucontrol->value.enumerated.item[0]; /* Use 2 and 3 */
++	source_id = ucontrol->value.enumerated.item[0];
++	/* Limit: uinfo->value.enumerated.items = 2; */
++	/*        emu->i2c_capture_volume */
++	if (source_id >= 2)
++		return -EINVAL;
+ 	change = (emu->i2c_capture_source != source_id);
+ 	if (change) {
+ 		snd_emu10k1_i2c_write(emu, ADC_MUX, 0); /* Mute input */
+@@ -720,9 +742,13 @@ static int snd_audigy_i2c_volume_get(str
+ 				 struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	int source_id;
++	unsigned int source_id;
+ 
+ 	source_id = kcontrol->private_value;
++	/* Limit: emu->i2c_capture_volume */
++        /*        capture_source: uinfo->value.enumerated.items = 2 */
++	if (source_id >= 2)
++		return -EINVAL;
+ 
+ 	ucontrol->value.integer.value[0] = emu->i2c_capture_volume[source_id][0];
+ 	ucontrol->value.integer.value[1] = emu->i2c_capture_volume[source_id][1];
+@@ -735,10 +761,14 @@ static int snd_audigy_i2c_volume_put(str
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+ 	unsigned int ogain;
+ 	unsigned int ngain;
+-	int source_id;
++	unsigned int source_id;
+ 	int change = 0;
+ 
+ 	source_id = kcontrol->private_value;
++	/* Limit: emu->i2c_capture_volume */
++        /*        capture_source: uinfo->value.enumerated.items = 2 */
++	if (source_id >= 2)
++		return -EINVAL;
+ 	ogain = emu->i2c_capture_volume[source_id][0]; /* Left */
+ 	ngain = ucontrol->value.integer.value[0];
+ 	if (ngain > 0xff)
+@@ -746,7 +776,7 @@ static int snd_audigy_i2c_volume_put(str
+ 	if (ogain != ngain) {
+ 		if (emu->i2c_capture_source == source_id)
+ 			snd_emu10k1_i2c_write(emu, ADC_ATTEN_ADCL, ((ngain) & 0xff) );
+-		emu->i2c_capture_volume[source_id][0] = ucontrol->value.integer.value[0];
++		emu->i2c_capture_volume[source_id][0] = ngain;
+ 		change = 1;
+ 	}
+ 	ogain = emu->i2c_capture_volume[source_id][1]; /* Right */
+@@ -756,7 +786,7 @@ static int snd_audigy_i2c_volume_put(str
+ 	if (ogain != ngain) {
+ 		if (emu->i2c_capture_source == source_id)
+ 			snd_emu10k1_i2c_write(emu, ADC_ATTEN_ADCR, ((ngain) & 0xff));
+-		emu->i2c_capture_volume[source_id][1] = ucontrol->value.integer.value[1];
++		emu->i2c_capture_volume[source_id][1] = ngain;
+ 		change = 1;
+ 	}
+ 
+@@ -877,6 +907,9 @@ static int snd_emu10k1_spdif_put(struct 
+ 	unsigned int val;
+ 	unsigned long flags;
+ 
++	/* Limit: emu->spdif_bits */
++	if (idx >= 3)
++		return -EINVAL;
+ 	val = (ucontrol->value.iec958.status[0] << 0) |
+ 	      (ucontrol->value.iec958.status[1] << 8) |
+ 	      (ucontrol->value.iec958.status[2] << 16) |
+@@ -1050,6 +1083,7 @@ static int snd_emu10k1_send_volume_put(s
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int change = 0, idx, val;
+@@ -1102,6 +1136,7 @@ static int snd_emu10k1_attn_get(struct s
+                                 struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	unsigned long flags;
+@@ -1119,6 +1154,7 @@ static int snd_emu10k1_attn_put(struct s
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int change = 0, idx, val;
+@@ -1171,6 +1207,7 @@ static int snd_emu10k1_efx_send_routing_
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int idx;
+@@ -1190,6 +1227,7 @@ static int snd_emu10k1_efx_send_routing_
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, idx, val;
+@@ -1241,6 +1279,7 @@ static int snd_emu10k1_efx_send_volume_g
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int idx;
+@@ -1258,6 +1297,7 @@ static int snd_emu10k1_efx_send_volume_p
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, idx, val;
+@@ -1306,6 +1346,7 @@ static int snd_emu10k1_efx_attn_get(stru
+                                 struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	unsigned long flags;
+@@ -1321,6 +1362,7 @@ static int snd_emu10k1_efx_attn_put(stru
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
++	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, val;
+# HG changeset patch
+# User Takashi Iwai <tiwai@suse.de>
+# Date 1195585419 -3600
+# Node ID 3886aae8b3c0ba4db4acd94778eb698ae8e4b21f
+# Parent  ef8bc8b6a0c662aa5900c4599aee5ce0c0b4728d
+[ALSA] emu10k1 - Check value ranges in ctl callbacks
+
+Check value ranges in ctl callbacks properly.  This fixes the unexpected
+crash due to wrong value assignment.
+Also, remove invalid comments in the last patch.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Mercurial server <hg@alsa0.alsa-project.org>
+
+diff -r ef8bc8b6a0c6 -r 3886aae8b3c0 sound/pci/emu10k1/emumixer.c
+--- a/sound/pci/emu10k1/emumixer.c	Tue Nov 20 20:03:32 2007 +0100
++++ b/sound/pci/emu10k1/emumixer.c	Tue Nov 20 20:03:39 2007 +0100
+@@ -293,12 +293,15 @@ static int snd_emu1010_output_source_put
+ 	unsigned int val;
+ 	unsigned int channel;
+ 
++	val = ucontrol->value.enumerated.item[0];
++	if (val >= 53)
++		return -EINVAL;
+ 	channel = (kcontrol->private_value) & 0xff;
+ 	/* Limit: emu1010_output_dst, emu->emu1010.output_source */
+ 	if (channel >= 24)
+ 		return -EINVAL;
+-	if (emu->emu1010.output_source[channel] != ucontrol->value.enumerated.item[0]) {
+-		val = emu->emu1010.output_source[channel] = ucontrol->value.enumerated.item[0];
++	if (emu->emu1010.output_source[channel] != val) {
++		emu->emu1010.output_source[channel] = val;
+ 		change = 1;
+ 		snd_emu1010_fpga_link_dst_src_write(emu,
+ 			emu1010_output_dst[channel], emu1010_src_regs[val]);
+@@ -328,12 +331,15 @@ static int snd_emu1010_input_source_put(
+ 	unsigned int val;
+ 	unsigned int channel;
+ 
++	val = ucontrol->value.enumerated.item[0];
++	if (val >= 53)
++		return -EINVAL;
+ 	channel = (kcontrol->private_value) & 0xff;
+ 	/* Limit: emu1010_input_dst, emu->emu1010.input_source */
+ 	if (channel >= 22)
+ 		return -EINVAL;
+-	if (emu->emu1010.input_source[channel] != ucontrol->value.enumerated.item[0]) {
+-		val = emu->emu1010.input_source[channel] = ucontrol->value.enumerated.item[0];
++	if (emu->emu1010.input_source[channel] != val) {
++		emu->emu1010.input_source[channel] = val;
+ 		change = 1;
+ 		snd_emu1010_fpga_link_dst_src_write(emu,
+ 			emu1010_input_dst[channel], emu1010_src_regs[val]);
+@@ -1083,7 +1089,6 @@ static int snd_emu10k1_send_volume_put(s
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int change = 0, idx, val;
+@@ -1136,7 +1141,6 @@ static int snd_emu10k1_attn_get(struct s
+                                 struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	unsigned long flags;
+@@ -1154,7 +1158,6 @@ static int snd_emu10k1_attn_put(struct s
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int change = 0, idx, val;
+@@ -1207,7 +1210,6 @@ static int snd_emu10k1_efx_send_routing_
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int idx;
+@@ -1227,7 +1229,6 @@ static int snd_emu10k1_efx_send_routing_
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, idx, val;
+@@ -1279,7 +1280,6 @@ static int snd_emu10k1_efx_send_volume_g
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	int idx;
+@@ -1297,7 +1297,6 @@ static int snd_emu10k1_efx_send_volume_p
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, idx, val;
+@@ -1346,7 +1345,6 @@ static int snd_emu10k1_efx_attn_get(stru
+                                 struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	struct snd_emu10k1_pcm_mixer *mix =
+ 		&emu->efx_pcm_mixer[snd_ctl_get_ioffidx(kcontrol, &ucontrol->id)];
+ 	unsigned long flags;
+@@ -1362,7 +1360,6 @@ static int snd_emu10k1_efx_attn_put(stru
+ {
+ 	unsigned long flags;
+ 	struct snd_emu10k1 *emu = snd_kcontrol_chip(kcontrol);
+-	/* FIXME: Check limits */
+ 	int ch = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
+ 	struct snd_emu10k1_pcm_mixer *mix = &emu->efx_pcm_mixer[ch];
+ 	int change = 0, val;
+diff -r ef8bc8b6a0c6 -r 3886aae8b3c0 sound/pci/emu10k1/p16v.c
+--- a/sound/pci/emu10k1/p16v.c	Tue Nov 20 20:03:32 2007 +0100
++++ b/sound/pci/emu10k1/p16v.c	Tue Nov 20 20:03:39 2007 +0100
+@@ -742,6 +742,8 @@ static int snd_p16v_capture_source_put(s
+ 	u32 source;
+ 
+ 	val = ucontrol->value.enumerated.item[0] ;
++	if (val > 7)
++		return -EINVAL;
+ 	change = (emu->p16v_capture_source != val);
+ 	if (change) {
+ 		emu->p16v_capture_source = val;
+@@ -784,6 +786,8 @@ static int snd_p16v_capture_channel_put(
+ 	u32 tmp;
+ 
+ 	val = ucontrol->value.enumerated.item[0] ;
++	if (val > 3)
++		return -EINVAL;
+ 	change = (emu->p16v_capture_channel != val);
+ 	if (change) {
+ 		emu->p16v_capture_channel = val;
+# HG changeset patch
+# User Jaroslav Kysela <perex@perex.cz>
+# Date 1195586203 -3600
+# Node ID 6d8ae26362a164eedeae318c2f361ce1c26586f5
+# Parent  3886aae8b3c0ba4db4acd94778eb698ae8e4b21f
+[ALSA] version 1.0.15
+
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+
+committer: Jaroslav Kysela <perex@perex.cz>
+
+diff -r 3886aae8b3c0 -r 6d8ae26362a1 include/sound/version.h
+--- a/include/sound/version.h	Tue Nov 20 20:03:39 2007 +0100
++++ b/include/sound/version.h	Tue Nov 20 20:16:43 2007 +0100
+@@ -1,3 +1,3 @@
+ /* include/version.h.  Generated by alsa/ksync script.  */
+ #define CONFIG_SND_VERSION "1.0.15"
+-#define CONFIG_SND_DATE " (Tue Oct 23 06:09:18 2007 UTC)"
++#define CONFIG_SND_DATE " (Tue Nov 20 19:16:42 2007 UTC)"

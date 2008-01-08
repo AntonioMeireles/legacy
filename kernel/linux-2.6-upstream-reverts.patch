@@ -1981,3 +1981,109 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
    	struct work_struct request_passive_scan;
  	struct work_struct adapter_restart;
  	struct delayed_work rf_kill;
+From 62f0f61e6673e67151a7c8c0f9a09c7ea43fe2b5 Mon Sep 17 00:00:00 2001
+From: Thomas Gleixner <tglx@linutronix.de>
+Date: Fri, 7 Dec 2007 19:16:17 +0100
+Subject: hrtimers: avoid overflow for large relative timeouts (CVE-2007-5966)
+
+From: Thomas Gleixner <tglx@linutronix.de>
+
+patch 62f0f61e6673e67151a7c8c0f9a09c7ea43fe2b5 in mainline
+
+Relative hrtimers with a large timeout value might end up as negative
+timer values, when the current time is added in hrtimer_start().
+
+This in turn is causing the clockevents_set_next() function to set an
+huge timeout and sleep for quite a long time when we have a clock
+source which is capable of long sleeps like HPET. With PIT this almost
+goes unnoticed as the maximum delta is ~27ms. The non-hrt/nohz code
+sorts this out in the next timer interrupt, so we never noticed that
+problem which has been there since the first day of hrtimers.
+
+This bug became more apparent in 2.6.24 which activates HPET on more
+hardware.
+
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ kernel/hrtimer.c |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+--- a/kernel/hrtimer.c
++++ b/kernel/hrtimer.c
+@@ -826,6 +826,14 @@ hrtimer_start(struct hrtimer *timer, kti
+ #ifdef CONFIG_TIME_LOW_RES
+ 		tim = ktime_add(tim, base->resolution);
+ #endif
++		/*
++		 * Careful here: User space might have asked for a
++		 * very long sleep, so the add above might result in a
++		 * negative number, which enqueues the timer in front
++		 * of the queue.
++		 */
++		if (tim.tv64 < 0)
++			tim.tv64 = KTIME_MAX;
+ 	}
+ 	timer->expires = tim;
+ 
+From stable-bounces@linux.kernel.org Tue Nov 20 10:55:25 2007
+From: Marcelo Tosatti <marcelo@kvack.org>
+Date: Tue, 20 Nov 2007 13:54:52 -0500
+Subject: libertas: properly account for queue commands
+To: stable@kernel.org
+Cc: Marcelo Tosatti <marcelo@kvack.org>, Marcelo Tosatti <mtosatti@redhat.com>, "John W. Linville" <linville@tuxdriver.com>
+Message-ID: <1195584892-2864-1-git-send-email-linville@tuxdriver.com>
+
+
+From: Marcelo Tosatti <marcelo@kvack.org>
+
+patch 29f5f2a19b055feabfcc6f92e1d40ec092c373ea in mainline.
+
+Properly account for queue commands, this fixes a problem reported
+by Holger Schurig when using the debugfs interface.
+
+Signed-off-by: Marcelo Tosatti <mtosatti@redhat.com>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/libertas/cmd.c |   10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+--- a/drivers/net/wireless/libertas/cmd.c
++++ b/drivers/net/wireless/libertas/cmd.c
+@@ -881,6 +881,10 @@ static int wlan_cmd_mesh_access(wlan_pri
+ 	return 0;
+ }
+ 
++/*
++ * Note: NEVER use libertas_queue_cmd() with addtail==0 other than for
++ * the command timer, because it does not account for queued commands.
++ */
+ void libertas_queue_cmd(wlan_adapter * adapter, struct cmd_ctrl_node *cmdnode, u8 addtail)
+ {
+ 	unsigned long flags;
+@@ -910,10 +914,11 @@ void libertas_queue_cmd(wlan_adapter * a
+ 
+ 	spin_lock_irqsave(&adapter->driver_lock, flags);
+ 
+-	if (addtail)
++	if (addtail) {
+ 		list_add_tail((struct list_head *)cmdnode,
+ 			      &adapter->cmdpendingq);
+-	else
++		adapter->nr_cmd_pending++;
++	} else
+ 		list_add((struct list_head *)cmdnode, &adapter->cmdpendingq);
+ 
+ 	spin_unlock_irqrestore(&adapter->driver_lock, flags);
+@@ -1400,7 +1405,6 @@ int libertas_prepare_and_send_command(wl
+ 	cmdnode->cmdwaitqwoken = 0;
+ 
+ 	libertas_queue_cmd(adapter, cmdnode, 1);
+-	adapter->nr_cmd_pending++;
+ 	wake_up_interruptible(&priv->mainthread.waitq);
+ 
+ 	if (wait_option & cmd_option_waitforrsp) {

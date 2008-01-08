@@ -1,0 +1,62 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=2d3b8eea7f2fbafd5d779cc92f7aedbd1ef575e9
+Commit:     2d3b8eea7f2fbafd5d779cc92f7aedbd1ef575e9
+Parent:     21bef6dd2b419f28c8096a8e30ad86dcbff44c02
+Author:     Albert Lee <albertcc@tw.ibm.com>
+AuthorDate: Thu Nov 15 10:35:46 2007 +0900
+Committer:  Tejun Heo <htejun@gmail.com>
+CommitDate: Mon Nov 19 12:28:11 2007 +0900
+
+    libata: workaround DRQ=1 ERR=1 for ATAPI tape drives
+    
+    After an error condition, some ATAPI tape drives set DRQ=1 together
+    with ERR=1 when asking the host to transfer the CDB of the next packet
+    command (i.e. request sense).  This patch, a revised version of
+    Alan/Mark's previous patch, adds ATA_HORKAGE_STUCK_ERR to workaround
+    the problem by ignoring the ERR bit and proceed sending the CDB.
+    
+    Signed-off-by: Albert Lee <albertcc@tw.ibm.com>
+    Cc: Alan Cox <alan@lxorguk.ukuu.org.uk>
+    Cc: Mark Lord <liml@rtr.ca>
+    Signed-off-by: Tejun Heo <htejun@gmail.com>
+---
+ drivers/ata/libata-core.c |   18 +++++++++++++-----
+ include/linux/libata.h    |    1 +
+ 2 files changed, 14 insertions(+), 5 deletions(-)
+
+--- linux-2.6.23.noarch.orig/drivers/ata/libata-core.c
++++ linux-2.6.23.noarch/drivers/ata/libata-core.c
+@@ -4962,11 +4962,19 @@ fsm_start:
+ 		 * let the EH abort the command or reset the device.
+ 		 */
+ 		if (unlikely(status & (ATA_ERR | ATA_DF))) {
+-			ata_port_printk(ap, KERN_WARNING, "DRQ=1 with device "
+-					"error, dev_stat 0x%X\n", status);
+-			qc->err_mask |= AC_ERR_HSM;
+-			ap->hsm_task_state = HSM_ST_ERR;
+-			goto fsm_start;
++			/* Some ATAPI tape drives forget to clear the ERR bit
++			 * when doing the next command (mostly request sense).
++			 * We ignore ERR here to workaround and proceed sending
++			 * the CDB.
++			 */
++			if (!(qc->dev->horkage & ATA_HORKAGE_STUCK_ERR)) {
++				ata_port_printk(ap, KERN_WARNING,
++						"DRQ=1 with device error, "
++						"dev_stat 0x%X\n", status);
++				qc->err_mask |= AC_ERR_HSM;
++				ap->hsm_task_state = HSM_ST_ERR;
++				goto fsm_start;
++			}
+ 		}
+ 
+ 		/* Send the CDB (atapi) or the first data block (ata pio out).
+--- linux-2.6.23.noarch.orig/include/linux/libata.h
++++ linux-2.6.23.noarch/include/linux/libata.h
+@@ -306,6 +306,7 @@ enum {
+ 	ATA_HORKAGE_NONCQ	= (1 << 2),	/* Don't use NCQ */
+ 	ATA_HORKAGE_MAX_SEC_128	= (1 << 3),	/* Limit max sects to 128 */
+ 	ATA_HORKAGE_BROKEN_HPA	= (1 << 4),	/* Broken HPA */
++	ATA_HORKAGE_STUCK_ERR	= (1 << 9),	/* stuck ERR on next PACKET */
+ 
+ 	 /* DMA mask for user DMA control: User visible values; DO NOT 
+ 	    renumber */
