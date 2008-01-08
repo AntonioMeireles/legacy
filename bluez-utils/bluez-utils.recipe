@@ -1,13 +1,58 @@
 #
-# Copyright (c) 2005-2006 rPath, Inc.
+# Copyright (c) 2005-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
-class BluezUtils(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class BluezUtils(RPMPackageRecipe,AutoPackageRecipe):
     name = 'bluez-utils'
-    version = '3.22'
-    buildRequires = ['bison:runtime', 'bluez-libs:devel', 'dbus:devel', 'expat:devel', 'flex:runtime', 'libusb:devel', 'pkgconfig:devel']
+    version = '3.24'
+    rpmUpVer = '3.23'
+    rpmRelease = '1.fc9'
+    buildRequires = [ 'bison:runtime', 'bluez-libs:devel', 'dbus:devel',
+                      'expat:devel', 'flex:runtime', 'libusb:devel',
+                      'pkgconfig:devel', 'alsa-lib:devel', 'glib:devel',
+                      'gst-plugins-base:devel', 'gstreamer:devel',
+                      'libxml2:devel', 'zlib:devel', 'chkconfig:runtime']
 
     def unpack(r):
-        r.addArchive('http://bluez.sf.net/download/%(name)s-%(version)s.tar.gz')
+        r.addArchive('http://bluez.sf.net/download/')
+        # we really want this one
+        r.addPatch('bluez-utils-2.3-conf.patch', rpm = r.srpm)
+
+    def configure(r):
+        r.Configure(' --with-bluez-libs=%(libdir)s --enable-pie --enable-debug '
+                    ' --enable-all --disable-bcm203x --enable-alsa --enable-bccmd '
+                    ' --enable-avctrl --enable-glib --enable-input --enable-echo '
+                    ' --enable-serial --disable-sdpd --enable-audio --disable-sync'
+                    ' --disable-obex ')
+
+    def makeinstall(r):
+        r.MakeInstall('rulesdir=%(sysconfdir)s/udev/rules.d udevdir=/lib/udev')
+        r.Remove('/etc/default/', recursive = True)
+        r.Remove('/etc/init.d/bluetooth')
+
+        # making conary-policy happy (CNP-109)
+        # this really happens after first half of for loop
+        # bellow... 
+        r.Replace('#!/bin/sh\n', '#!/bin/sh\n# chkconfig: 345 09 04\n', 'bluetooth.init')
+
+        for f in [ 'bluetooth', 'dund', 'pand']:
+            r.addSource( f + '.init', rpm = r.srpm)
+            r.addSource( f + '.conf', rpm = r.srpm)
+
+            r.Install( f + '.init', '%(initdir)s/'+ f, mode = 0755) 
+            r.Install( f + '.conf', '%(sysconfdir)s/syscdonfig/'+ f, mode = 0644) 
+
+        # Remove the cups backend from libdir, and install it in /usr/lib/cups
+        r.Remove('%(libdir)s/cups', recursive = True)
+
+        r.Install('cups/bluetooth', '/usr/lib/cups/backend/bluetooth', mode = 0755)
+        r.Move('%(sysconfdir)s/udev/rules.d/bluetooth.rules',
+               '%(sysconfdir)s/udev/rules.d/97-bluetooth.rules')
+
+        r.Install('daemon/passkey-agent', '%(bindir)s/', mode = 0755)
+        r.Install('daemon/auth-agent', '%(bindir)s/', mode = 0755)
+
+        r.ExcludeDirectories(exceptions = '/var/lib/bluetooth')
+
