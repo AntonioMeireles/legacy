@@ -1,0 +1,75 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('kdepackage')
+class kdeCorePackageRecipe(kdePackageRecipe):
+
+    name = 'kdecorepackage'
+    version = '20070212'
+
+    kversion = ''
+
+    modules = []
+
+    verify = False
+
+    buildAPIDox = False
+
+    abstractBaseClass = True
+
+    def setup(r):
+
+        r.macros.site = 'mirror://kde/stable'
+
+        if r.kversion:
+            kversion = r.kversion
+        else:
+            kversion = r.version.split('+')[0]
+        r.macros.kversion = kversion
+
+        if r.buildAPIDox:
+            r.buildRequires.extend([ 'doxygen:runtime', 'qt:apidox' ])
+            if not r.name == 'kdelibs':
+                r.buildRequires.append('kdelibs:apidox')
+
+        kdePackageRecipe.setup(r)
+
+    def unpack(r):
+
+        r.addArchive('%(site)s/%(kversion)s/src/%(name)s-%(version)s.tar.bz2')
+
+    def build(r):
+
+        r.Configure(r.extraConf)
+
+        r.Make()
+        if r.buildAPIDox:
+            r.Make('apidox')
+            r.MakeInstall(installtarget='install-apidox')
+            r.ComponentSpec('%(name)s:apidox', '%(kdehtmldir)s/en/%(name)s-apidocs/')
+        if r.modules:
+            for module in r.modules:
+                if type(module) == type(""):
+                    moduleName = module
+                    moduleSubDir = module
+                else:
+                    moduleName, moduleSubDir = module
+
+                r.MakeInstall(dir=moduleSubDir, package=moduleName)
+                r.MakeInstall(dir='doc/'+moduleSubDir, skipMissingDir=True,
+                              package=moduleName)
+        else:
+            r.MakeInstall()
+
+    def postPolicy(r):
+
+        kdePackageRecipe.postPolicy(r)
+
+        r.AutoDoc(exceptions='/')
+
+        if r.verify:
+            r.MakeInstall(package='%s-orphans' % r.name)
+
