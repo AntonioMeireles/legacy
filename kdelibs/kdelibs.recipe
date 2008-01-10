@@ -1,0 +1,87 @@
+#
+# Copyright (C) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('kdecorepackage')
+class kdeLibs(kdeCorePackageRecipe):
+
+    name = 'kdelibs'
+    version = '3.5.7'
+
+    clearBuildReqs('kdelibs:devel')
+    buildRequires = [
+        'alsa-lib:devel', 'aspell:devel', 'audiofile:devel', 'autoconf:runtime',
+        'automake:runtime', 'bzip2:devel', 'cups:devel', 'e2fsprogs:devel',
+        'esound:devel', 'glib:devel', 'jack:devel', 'krb5:devel',
+        'libmad:devel', 'libogg:devel', 'libtiff:devel', 'libtool:runtime',
+        'libvorbis:devel', 'libxml2:devel', 'libxslt:devel', 'nas:devel',
+        'OpenEXR:devel', 'openssl:devel', 'pcre:devel', 'perl:runtime',
+        'sudo:runtime', 'utempter:devel', 'jasper:devel'
+    ]
+
+    buildAPIDox = False
+
+    extraConf  = kdeCorePackageRecipe.extraConf
+    extraConf += (' --with-alsa'
+                  ' --disable-dnssd'
+                  ' --with-sudo-kdesu-backend'
+                  ' --enable-dnotify --enable-inotify')
+
+    def postUnpack(r):
+
+        r.addPatch('kstandarddirs.patch')
+        r.addPatch('kdelibs-3.5.5-kde-only-menus.patch')
+
+    def postInstall(r):
+
+        r.SetModes('%(bindir)s/kgrantpty',
+                   '%(bindir)s/fileshareset',
+                   '%(bindir)s/start_kdeinit',
+                   '%(bindir)s/kpac_dhcp_helper', 04755)
+
+        # For kde-only-menus.patch
+        r.Move('%(sysconfdir)s/xdg/menus/applications.menu',
+               '%(sysconfdir)s/xdg/menus/kde-applications.menu')
+
+        # Provided by hicolor-icon-scheme
+        r.Remove('%(datadir)s/icons/hicolor/index.theme')
+
+        # We don't want to package stub
+        r.Remove('%(libdir)s/libkdnssd.*')
+        r.Remove('%(includedir)s/dnssd', recursive=True)
+
+    def policy(r):
+
+        r.Doc('KDE2PORTING.html', 'KDE3PORTING.html')
+
+        licenses = [ 'ARTISTIC', 'BSD', 'GPL_V2', 'LGPL_V2', 'QPL_V1.0' ]
+
+        for license in licenses:
+            r.Doc('licenses/'+license, dir='licenses')
+
+        develTools = [
+            'dcopidl.*', 'makekdewidgets', 'kconfig_compiler',
+            'meinproc', 'preparetips'
+        ]
+
+        for tool in develTools:
+            r.ComponentSpec('devel', '%(bindir)s/'+tool)
+
+        # Even startkde uses it
+        r.ComponentSpec('lib', '%(bindir)s/kde-config')
+
+        r.Requires('hicolor-icon-theme:data',
+                   '%(datadir)s/icons/crystalsvg/index.theme')
+
+        r.Requires(exceptDeps='java: .*')
+
+        r.Requires('coreutils:runtime', '%(bindir)s/imagetops')
+        r.Requires('file:runtime', '%(bindir)s/imagetops')
+        r.Requires('mktemp:runtime', '%(bindir)s/imagetops')
+        r.Requires('netpbm:runtime', '%(bindir)s/imagetops')
+        r.Requires('coreutils:runtime', '%(bindir)s/dcopidlng')
+        r.Requires('perl:runtime', '%(bindir)s/dcopidlng')
+        r.Requires('coreutils:runtime', '%(datadir)s/apps/kconf_update/move_kio_help_cache.sh')
+
