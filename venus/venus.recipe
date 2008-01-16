@@ -1,0 +1,104 @@
+#
+# Copyright (c) 2007-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+import datetime
+
+class Venus(PackageRecipe):
+    name = 'venus'
+    version = datetime.date.today().strftime("%Y%m%d")
+
+    buildRequires = [ 'bzr:runtime', 'django:python', 'libxml2:python',
+        'libxslt:python', 'mx:python', 'python:runtime', ]
+
+    def setup(r):
+        # upstream doesn't tag their releases, so we're just left to guess what
+        # is considered stable
+        r.addBzrSnapshot('http://intertwingly.net/code/venus/')
+
+        # update every 10 minutes if and only if the lock is free
+        r.addSource('venus-update.in', macros=True,
+            dest='%(libexecdir)s/venus-update', mode=0755)
+        r.Create('%(sysconfdir)s/cron.d/venus-update',
+            contents='*/10 * * * * root %(libexecdir)s/venus-update')
+        r.Requires('%(bindir)s/flock', '%(libexecdir)s/venus-update')
+
+        # FIXME: why can't we do this with every update?
+        # clean out the unused cache entries every day
+        r.addSource('venus-update.in', macros=True, mode=0755,
+            dest='%(sysconfdir)s/cron.daily/venus-cleanup')
+        r.Replace('planet.py', 'planet.py -x',
+            '%(sysconfdir)s/cron.daily/venus-cleanup')
+        r.Requires('%(bindir)s/flock',
+            '%(sysconfdir)s/cron.daily/venus-cleanup')
+
+        r.addSource('venus-apache.conf.in', macros=True)
+        r.addSource('venus-nginx.conf.in', macros=True)
+
+        # Install the important stuff
+        r.Install('planet.py', '%(servicedir)s/venus/')
+        r.Copy('planet', '%(servicedir)s/venus/')
+        r.Copy('themes', '%(servicedir)s/venus/')
+        r.Copy('filters', '%(servicedir)s/venus/')
+
+        # Add planet configuration directories
+        r.MakeDirs('%(servicedir)s/venus/planets.d')
+        r.Create('%(servicedir)s/venus/planets.d/README',
+            contents="This directory is for installing multiple planets "
+                     "running the same Venus codebase.")
+
+        # Add some extra docs to from the distribution
+        r.Doc('AUTHORS', 'THANKS')
+
+        # Add the original HTML-based documentation
+        r.Doc('docs/*')
+
+        # Add the examples, as well
+        r.Doc('examples/')
+
+        # Remove system provides/requires from packages that Venus bundles
+        # (specifically: feedparser, html5lib, and httplib2)
+        r.Provides(exceptions='%(servicedir)s/venus/planet/feedparser.*')
+        r.Provides(exceptions='%(servicedir)s/venus/planet/html5lib/.*')
+        r.Provides(exceptions='%(servicedir)s/venus/planet/httplib2/.*')
+        r.Requires(exceptDeps='python\:\ feedparser')
+        r.Requires(exceptDeps='python\:\ html5lib')
+        r.Requires(exceptDeps='python\:\ httplib2')
+
+        # For some weird reason, Genshi was never found as a requirement
+        # for Genshi templates.
+        r.Requires('Genshi:python',
+                '%(servicedir)s/venus/planet/shell/_genshi.py')
+
+        # Split out optional templating languages as plugins
+        r.PackageSpec('venus-templates-django',
+                '%(servicedir)s/venus/planet/shell/dj.py',
+                '%(servicedir)s/venus/themes/django.*')
+        r.Requires('venus:runtime',
+                 '%(servicedir)s/venus/planet/shell/dj.py')
+
+        r.PackageSpec('venus-templates-genshi',
+                '%(servicedir)s/venus/planet/shell/_genshi.py',
+                '%(servicedir)s/venus/themes/genshi_fancy/.*',
+                '%(servicedir)s/venus/filters/addsearch.genshi')
+        r.Requires('venus:runtime',
+                '%(servicedir)s/venus/planet/shell/_genshi.py')
+
+        # Configure Venus for apache (as a separate trove)
+        r.Copy('venus-apache.conf.in',
+                '%(sysconfdir)s/httpd/conf.d/venus.conf')
+        r.PackageSpec('venus-apache',
+                '%(sysconfdir)s/httpd/conf.d/venus.conf')
+        r.Requires('venus:runtime',
+                '%(sysconfdir)s/httpd/conf.d/venus.conf')
+
+        # Configure Venus for nginx (as a separate trove)
+        r.Copy('venus-nginx.conf.in',
+                '%(sysconfdir)s/nginx/conf.d/00-default-venus.custom')
+        r.PackageSpec('venus-nginx',
+                '%(sysconfdir)s/nginx/conf.d/00-default-venus.custom')
+        r.Requires('venus:runtime',
+                '%(sysconfdir)s/nginx/conf.d/00-default-venus.custom')
+
