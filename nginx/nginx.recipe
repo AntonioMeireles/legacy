@@ -1,0 +1,82 @@
+#
+# Copyright (c) 2007-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Nginx(AutoPackageRecipe):
+
+    name = 'nginx'
+    version = '0.5.35'
+
+    buildRequires = [ 'chkconfig:runtime', 'zlib:devel', 'pcre:devel', 'openssl:devel', ]
+
+    def unpack(r):
+        # Add the actual tarball release
+        r.addArchive('http://sysoev.ru/%(name)s/')
+
+        # Add scripts to aid in system maintenance
+        r.addSource('nginx.conf.in', macros=True)
+        r.addSource('nginx.conf.default.vhost.in', macros=True)
+        r.addSource('nginx.initscript.in', macros=True)
+        r.addSource('nginx.logrotate.in', macros=True)
+        r.addSource('favicon.ico')
+
+        # One day, they'll fix their broken jury-rigged 'autoconf'-ish
+        # mess to be DESTDIR-compliant
+        r.addPatch('nginx-auto-destdir.patch')
+
+    def configure(r):
+        r.ManualConfigure('--prefix=%(prefix)s '
+              '--sbin-path=%(sbindir)s/%(name)s '
+              '--conf-path=%(sysconfdir)s/%(name)s/%(name)s.conf '
+              '--pid-path=%(localstatedir)s/run/%(name)s/%(name)s.pid '
+              '--lock-path=%(localstatedir)s/lock/subsys/%(name)s '
+              '--http-log-path=%(localstatedir)s/log/%(name)s/access.log '
+              '--error-log-path=%(localstatedir)s/log/%(name)s/error.log '
+              '--http-client-body-temp-path=%(localstatedir)s/cache/%(name)s/client/ '
+              '--http-proxy-temp-path=%(localstatedir)s/cache/%(name)s/proxy/ '
+              '--http-fastcgi-temp-path=%(localstatedir)s/cache/%(name)s/fastcgi/ '
+              '--with-cc-opt="%(cflags)s" --with-ld-opt="%(ldflags)s" '
+              '--user=nobody --group=nobody', preConfigure='DESTDIR=%(destdir)s')
+
+    def makeinstall(r):
+        r.MakeInstall()
+        r.MakeDirs('%(localstatedir)s/cache/%(name)s',
+                   '%(localstatedir)s/log/%(name)s',
+                   '%(localstatedir)s/run/%(name)s',
+                   '%(servicedir)s/%(name)s/html/')
+        r.Move('%(prefix)s/html/', '%(servicedir)s/%(name)s/html/')
+
+        # Replace the default script with something more sane
+        r.Copy('nginx.conf.in', '%(sysconfdir)s/%(name)s/%(name)s.conf')
+
+        # Add default virtual host for serving static content
+        r.Copy('nginx.conf.default.vhost.in',
+                '%(sysconfdir)s/%(name)s/conf.d/00-default.conf')
+
+        # Add default vhost custom stub file
+        r.Create('%(sysconfdir)s/%(name)s/conf.d/00-default.custom',
+                contents = '# Extra configuration for default virtual host')
+
+        # Add an initscript
+        r.Install('nginx.initscript.in', '%(initdir)s/%(name)s', mode=0755)
+
+        # Add a script for logrotate
+        r.Copy('nginx.logrotate.in', '%(sysconfdir)s/logrotate.d/%(name)s')
+
+        # Add a simple favicon.ico (as initialcontents, so it can be
+        # replaced manually).
+        r.Copy('favicon.ico', '%(servicedir)s/%(name)s/html/')
+        r.InitialContents('%(servicedir)s/%(name)s/favicon.ico')
+
+    def policy(r):
+        r.ExcludeDirectories(exceptions=\
+                   ('%(localstatedir)s/cache/%(name)s.*',
+                   '%(localstatedir)s/log/%(name)s',
+                   '%(localstatedir)s/run/%(name)s',
+                   '%(servicedir)s/%(name)s/html'))
+
+        r.Requires('%(sbindir)s/logrotate', '%(sysconfdir)s/logrotate.d/')
+        r.UtilizeGroup('nobody', '%(sbindir)s/')
+        r.UtilizeUser('nobody', '%(sbindir)s/')
