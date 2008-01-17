@@ -1,0 +1,77 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Anaconda(CPackageRecipe):
+    name = 'anaconda'
+    version = '11.3.0.44'
+    imagesVer = 'rpl2.2008011501'
+
+    buildRequires = ['atk:devel', 'audit:devel', 'bzip2:devel', 'cairo:devel',
+        'conary-repository:python', 'desktop-file-utils:runtime',
+        'device-mapper:devel', 'e2fsprogs:devel', 'epdb:python',
+        'fontconfig:devel', 'freetype:devel', 'gettext:runtime', 'glib:devel',
+        'glibc:locale', 'gnome-python-extras:python', 'gnome-python:python',
+        'gtk:devel', 'intltool:runtime', 'kudzu:devel', 'kudzu:python',
+        'libX11:devel', 'libXext:devel', 'libXrender:devel', 'libXt:devel',
+        'libXxf86misc:devel', 'libdhcp4client:devel', 'libdhcp6client:devel',
+        'libdhcp:devel', 'libnl:devel', 'libpng:devel', 'libuser:python',
+        'mkinitrd:devel', 'newt:devel', 'newt:python', 'openssl:devel',
+        'pango:devel', 'parted:devel', 'pciutils:devel', 'pkgconfig:devel',
+        'popt:devel', 'pump:devel', 'pyblock:python', 'pygobject:python',
+        'pygtk:python', 'pykickstart:python', 'pyparted:python',
+        'python:devel', 'pyxf86config:python', 'rhpl:python', 'rhpxl:python',
+        'slang:devel', 'urlgrabber:python', 'zlib:devel']
+
+    def setup(r):
+        r.macros.imagesVer = r.imagesVer
+
+        r.disableParallelMake()
+        r.addMercurialSnapshot('http://hg.rpath.com/anaconda-rpl2-beta1')
+        r.Replace((re.escape('/usr/lib/'), '%(libdir)s/',),
+                  (re.escape('/lib/'), '%(essentiallibdir)s/',),
+                  'loader2/Makefile')
+
+        r.Make('depend')
+        r.Make()
+        r.MakeInstall()
+        r.MakeInstall(dir='pixmaps')
+        # keep _isys.so in /usr/lib/anaconda/ instead of /usr/lib64/anaconda
+        # since anaconda doesn't know about lib64 yet
+        r.FixupMultilibPaths(exceptions='.*')
+
+        r.Strip(exceptions='%(libdir)s/anaconda-runtime/loader/.*')
+
+        r.Symlink('%(prefix)s/lib/anaconda-runtime/implantisomd5',
+                  '%(bindir)s/')
+        r.PackageSpec('anaconda-utils', '%(bindir)s/implantisomd5',
+                                        '%(prefix)s/lib/anaconda-runtime/'
+                                            'implantisomd5')
+
+        # Move rPath distro installclass to anaconda-custom.
+        r.Move('%(prefix)s/lib/anaconda/installclasses/rPathLinux.py*',
+               '%(datadir)s/anaconda/installclasses/')
+        r.PackageSpec('anaconda-custom',
+                      '%(datadir)s/anaconda/installclasses/')
+
+        # Add custom artwork
+        r.addArchive('ftp://download.rpath.com/autosource/'
+                     'anaconda-images-%(imagesVer)s.tar.bz2')
+        r.MakeInstall(dir='../anaconda-images-%(imagesVer)s')
+        # remove 5.2 MB swirl png
+        r.Remove('%(datadir)s/anaconda/swirl.png')
+        # none of the files in anaconda-images are flavor specific.
+        r.Flavor(exceptions='%(datadir)s/anaconda/pixmaps/.*')
+
+        # Add custom grub configuration
+        r.addSource('grub.defaults', dest='%(datadir)s/anaconda/')
+        r.PackageSpec('anaconda-custom', '%(datadir)s/anaconda/grub.*')
+
+        for image in ('anaconda_header.png', 'first.png', 'first-lowres.png',
+                      'prodlogo.png', 'progress_first.png',
+                      'progress_first-375.png', 'splash.png',
+                      'syslinux-splash.png'):
+            r.PackageSpec('anaconda-custom',
+                          '%%(datadir)s/anaconda/pixmaps/%s' % image)
