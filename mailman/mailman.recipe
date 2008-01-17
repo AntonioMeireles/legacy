@@ -1,0 +1,168 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('python.recipe')
+loadSuperClass('rpmpackage')
+class Mailman(RPMPackageRecipe, CPackageRecipe):
+    name = 'mailman'
+    version = '2.1.9'
+    rpmUpVer = '2.1.8'
+    rpmRelease = '3.1'
+
+    buildRequires = [ 'python:devel', 'automake:runtime',
+                      'autoconf:runtime', 'perl:lib' ]
+
+    def setup(r):
+        r.macros.python = '%(bindir)s/python'
+        r.macros.pyver = Python.majversion
+        # First, where documents are stored.  Affects where icons are placed.
+        r.macros.contentdir = '%(servicedir)s/www'
+
+        # Installation directories
+        r.macros.mmdir = '/var/mailman'
+        r.macros.varmmdir = '/var/mailman'
+        r.macros.logdir = '/var/log/mailman'
+        r.macros.queuedir = '/var/spool/mailman/qfiles'
+        r.macros.httpdconfdir = '%(sysconfdir)s/httpd/conf.d'
+        r.macros.httpdconffile = 'mailman.conf'
+        r.macros.mailgroup = '"mail postfix mailman nobody"'
+        r.macros.mail_wrapper = 'mailman'
+
+        # should match those the web server is configured to run as
+        r.macros.cgiuser = 'apache'
+        r.macros.cgigroup = 'apache'
+
+
+        r.addSource('mm_cfg.py')
+        r.addSource('httpd-mailman.conf', rpm=r.srpm)
+        r.addSource('mailman.logrotate', rpm=r.srpm)
+
+        # ftp.gnu.org tends to be far behind, fetch from sf instead
+        r.addArchive('mirror://sourceforge/mailman/')
+        r.addPatch('mailman-2.1-permissions.patch')
+
+
+        r.Run('rm -f configure')
+        r.Run('aclocal')
+        r.Run('autoconf')
+        r.ManualConfigure('--prefix=%(mmdir)s'
+                          ' --with-var-prefix=%(varmmdir)s'
+                          ' --with-python=%(python)s'
+                          ' --with-mail-gid=%(mailgroup)s'
+                          ' --with-cgi-id=%(cgiuser)s'
+                          ' --with-cgi-gid=%(cgigroup)s'
+                          ' --with-mailhost=localhost.localdomain'
+                          ' --with-urlhost=localhost.localdomain'
+                          ' --without-permcheck')
+
+        # RPL-1456
+        r.Replace('@LOG_DIR@', '%(logdir)s', 'mailman.logrotate')
+        r.Replace('@MMDIR@', '%(mmdir)s', 'mailman.logrotate')
+
+        r.Replace('@LOGDIR@', '%(logdir)s', 'mm_cfg.py')
+        r.Copy('mm_cfg.py', 'Mailman/mm_cfg.py.dist')
+
+        # mailman sets CFLAGS within Makefile to be equal to
+        # -g -O2 $(DEFS), where DEFS contains a bunch of necessary -D lines
+        # Since Make can't avoid setting CFLAGS, we use Run()
+        r.Run('make')
+
+        r.MakeDirs('%(mmdir)s/templates')
+        r.MakeDirs('%(logdir)s', '%(queuedir)s', '%(initdir)s')
+
+        # Makefile does not hide destdir by passing in 3rd arg to compile_dir
+        # Because DESTDIR does not work, makefile tries to call bin/update
+        r.Replace(
+            (r'\$\(PYTHON\) -c .*compileall.*', ''),
+            ('bin/update', 'true'),
+            'Makefile')
+        r.Run('make install prefix=%(destdir)s%(mmdir)s'
+              ' var_prefix=%(destdir)s%(varmmdir)s')
+
+        # Compile python files correctly for %(destdir)s
+        r.CompilePython('%(varmmdir)s')
+
+        r.Move('%(mmdir)s/scripts/mailman', '%(initdir)s/mailman')
+        r.Symlink('%(initdir)s/mailman', '%(mmdir)s/scripts/mailman')
+
+        r.Install('mailman.logrotate', '%(sysconfdir)s/logrotate.d/mailman')
+        r.Symlink('%(mmdir)s/mail/%(mail_wrapper)s', '%(sysconfdir)s/smrsh/')
+
+        # Use /etc/cron.d, which needs a user specification
+        r.Move('%(mmdir)s/cron/crontab.in', '%(sysconfdir)s/cron.d/mailman')
+        r.Replace(r'\* \* /', '* * mailman /', '%(sysconfdir)s/cron.d/mailman')
+        r.Requires('vixie-cron:runtime', '%(sysconfdir)s/cron.d/mailman')
+
+        # Install the httpd configuration file.
+        r.Replace(('@VARMMDIR@', '%(varmmdir)s'),
+                  ('@MMDIR@', '%(mmdir)s'),
+                  'httpd-mailman.conf')
+        r.Install('httpd-mailman.conf', '%(httpdconfdir)s/%(httpdconffile)s')
+        r.AutoDoc('ACKNOWLEDGMENTS', 'STYLEGUIDE.txt', 'UPGRADING')
+
+        r.Move('%(mmdir)s/icons', '%(contentdir)s/icons', mode=0755)
+
+        r.SetModes('%(mmdir)s/templates/*', 02775)
+        r.SetModes('%(mmdir)s/messages/*', 02775)
+
+        r.SetModes('%(mmdir)s/cgi-bin/*', 02755)
+        r.SetModes('%(mmdir)s/mail/mailman', 02755)
+        r.SetModes('%(mmdir)s/{Mailman,qfiles,lists,locks,scripts,spam,'
+                              'templates,tests,tests/bounces}', 02775)
+        r.SetModes('%(mmdir)s/archives/public', 02775)
+        r.SetModes('%(mmdir)s/archives/private', 02771)
+        r.SetModes('%(queuedir)s', 02775)
+        r.SetModes('%(contentdir)s/icons/*', 0755)
+        r.SetModes('%(logdir)s', 02775)
+
+        # A few files are owned by root:root...
+        r.Ownership('root', 'root', '%(contentdir)s/icons/.*')
+        # all other files are owned by root:mailman
+        r.Ownership('root', 'mailman', '.*')
+
+        r.ComponentSpec('locale', '%(mmdir)s/messages/')
+
+        # packaged in the wrong place for our python
+        r.Move('%(mmdir)s/pythonlib/lib/python2.2/site-packages/*',
+               '%(mmdir)s/pythonlib/lib/python%(pyver)s/site-packages/')
+        # Catch a straggler that otherwise results in the creation of :lib.
+        r.ComponentSpec('runtime', '%(mmdir)s/pythonlib/lib/python%(pyver)s/site-packages/')
+        # Delete the dir just to get rid of a policy warning
+        r.Remove('%(mmdir)s/pythonlib/lib/python2.2/', recursive=True)
+        #Remove this Remove line when the fix for bug #619 is released
+        r.Remove('%(mmdir)s/logs/', recursive=True)
+
+        # explicitly list all setgid perms...
+        r.SetModes(
+            '%(mmdir)s',
+            '%(mmdir)s/Mailman/{Archiver,Bouncers,Cgi,Commands,'
+                               'Gui,Handlers,Logging,MTA,Queue}',
+            '%(mmdir)s/{archives,bin,cgi-bin,cron,data,mail,'
+                       'messages,pythonlib}',
+            '%(mmdir)s/messages/*/LC_MESSAGES',
+            '%(mmdir)s/pythonlib/{email,japanese,korean,lib}',
+            '%(mmdir)s/pythonlib/japanese/aliases',
+            '%(mmdir)s/pythonlib/{japanese,korean}/{c,mappings,python}',
+            '%(mmdir)s/pythonlib/lib/{,python%(pyver)s,'
+                                     'python%(pyver)s/site-packages}',
+            '%(mmdir)s/tests/msgs', 02775)
+
+        # Create site password so that we can preserve file permissions
+        # Note: this is vulnerable to a sha1 attack that can create
+        # a zero-valued sha1sum, but should be a smaller risk than
+        # setting administrators up to accidentally create a
+        # world-writeable adm.pw file while trying to debug why their
+        # site password does not work.
+        r.Create('%(mmdir)s/data/adm.pw', contents="0"*40, mode=0640)
+        r.Config('%(mmdir)s/data/adm.pw')
+
+        # Mark configuration files
+        r.Config('%(mmdir)s/Mailman/mm_cfg.py')
+
+        # Yes, all these files are supposed to writeable by the mailman group.
+        r.WarnWriteable(exceptions='%(mmdir)s/')
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('httpd:runtime', '%(sysconfdir)s/httpd/conf.d/.*')
