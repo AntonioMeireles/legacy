@@ -1,0 +1,612 @@
+diff -uNr sysklogd-1.4.1/klogd.c sysklogd-1.4.1rh/klogd.c
+--- sysklogd-1.4.1/klogd.c	2001-03-11 14:40:10.000000000 -0500
++++ sysklogd-1.4.1rh/klogd.c	2002-04-17 10:49:34.000000000 -0400
+@@ -275,6 +275,10 @@
+ #define ksyslog klogctl
+ #endif
+ 
++#ifndef _PATH_KLOG
++#define _PATH_KLOG  "/proc/kmsg"
++#endif
++
+ #define LOG_BUFFER_SIZE 4096
+ #define LOG_LINE_LENGTH 1000
+ 
+@@ -291,7 +295,7 @@
+ 		terminate = 0,
+ 		caught_TSTP = 0,
+ 		reload_symbols = 0,
+-		console_log_level = -1;
++		console_log_level = 6;
+ 
+ static int	use_syscall = 0,
+ 		one_shot = 0,
+@@ -509,8 +513,7 @@
+ 
+ 
+ 	/* Set level of kernel console messaging.. */
+-	if ( (console_log_level != -1)
+-	&& (ksyslog(8, NULL, console_log_level) < 0) && \
++	if ( (ksyslog(8, NULL, console_log_level) < 0) && \
+ 	     (errno == EINVAL) )
+ 	{
+ 		/*
+@@ -887,8 +890,7 @@
+                value  = strtoul(sym_start+1, (char **) 0, 16);
+                *(line-1) = '>';  /* put back delim */
+ 
+-               symbol = LookupSymbol(value, &sym);
+-               if ( !symbol_lookup || symbol == (char *) 0 )
++               if ( !symbol_lookup || (symbol = LookupSymbol(value, &sym)) == (char *)0 )
+                {
+                   parse_state = PARSING_TEXT;
+                   break;
+@@ -938,7 +940,7 @@
+ 	 * messages into this fresh buffer.
+ 	 */
+ 	memset(log_buffer, '\0', sizeof(log_buffer));
+-	if ( (rdcnt = ksyslog(2, log_buffer, sizeof(log_buffer))) < 0 )
++	if ( (rdcnt = ksyslog(2, log_buffer, sizeof(log_buffer)-1)) < 0 )
+ 	{
+ 		if ( errno == EINTR )
+ 			return;
+@@ -1143,8 +1145,11 @@
+ 	if ( one_shot )
+ 	{
+ 		if (symbol_lookup) {
+-			InitKsyms(symfile);
+-			InitMsyms();
++			symbol_lookup  = (InitKsyms(symfile) == 1);
++			symbol_lookup |= InitMsyms();
++			if (symbol_lookup == 0) {
++				Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
++			}
+ 		}
+ 		if ( (logsrc = GetKernelLogSrc()) == kernel )
+ 			LogKernelLine();
+@@ -1159,8 +1164,11 @@
+ #endif
+ 	logsrc = GetKernelLogSrc();
+ 	if (symbol_lookup) {
+-		InitKsyms(symfile);
+-		InitMsyms();
++		symbol_lookup  = (InitKsyms(symfile) == 1);
++		symbol_lookup |= InitMsyms();
++		if (symbol_lookup == 0) {
++			Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
++		}
+ 	}
+ 
+         /* The main loop. */
+diff -uNr sysklogd-1.4.1/ksym.c sysklogd-1.4.1rh/ksym.c
+--- sysklogd-1.4.1/ksym.c	2000-09-12 17:53:31.000000000 -0400
++++ sysklogd-1.4.1rh/ksym.c	2002-03-12 16:31:15.000000000 -0500
+@@ -112,6 +112,7 @@
+ #include <stdlib.h>
+ #include <malloc.h>
+ #include <sys/utsname.h>
++#include <ctype.h>
+ #include "klogd.h"
+ #include "ksyms.h"
+ 
+@@ -344,6 +345,7 @@
+ 		if ( (sym_file = fopen(symfile, "r")) != (FILE *) 0 ) {
+ 			if (CheckMapVersion(symfile) == 1)
+ 				file = symfile;
++			fclose(sym_file);
+ 		}
+ 		if (sym_file == (FILE *) 0 || file == (char *) 0) {
+ 			sprintf (symfile, "%s", *mf);
+@@ -352,6 +354,7 @@
+ 			if ( (sym_file = fopen(symfile, "r")) != (FILE *) 0 ) {
+ 				if (CheckMapVersion(symfile) == 1)
+ 					file = symfile;
++				fclose(sym_file);
+ 			}
+ 		}
+ 
+@@ -770,6 +773,84 @@
+ 	if ( (num_syms == 0) ||
+ 	     (kp = strstr(line, "[<")) == (char *) 0 )
+ 	{
++#ifdef __sparc__
++		if (num_syms) {
++			/*
++			 * On SPARC, register dumps do not have the [< >] characters in it.
++			 */
++			static struct sparc_tests {
++				char *str;
++				int len;
++			} tests[] = { { "PC: ", 4 },
++				      { " o7: ", 5 },
++				      { " ret_pc: ", 9 },
++				      { " i7: ", 5 },
++				      { "Caller[", 7 }
++				    };
++			int i, j, ndigits;
++			char *kp2;
++			for (i = 0; i < 5; i++) {
++				kp = strstr(line, tests[i].str);
++				if (!kp) continue;
++				kp2 = kp + tests[i].len;
++				if (!isxdigit(*kp2)) continue;
++				for (ndigits = 1; isxdigit(kp2[ndigits]); ndigits++);
++				if (ndigits != 8 && ndigits != 16) continue;
++				/* On sparc64, all kernel addresses are in first 4GB */
++				if (ndigits == 16) {
++					if (strncmp (kp2, "00000000", 8)) continue;
++					kp2 += 8;
++				}
++				if (!i) {
++					char *kp3;
++					if (ndigits == 16 && kp > line && kp[-1L] != 'T') continue;
++					kp3 = kp2 + 8;
++					if (ndigits == 16) {
++						if (strncmp (kp3, " TNPC: 00000000", 15) || !isxdigit(kp3[15]))
++							continue;
++						kp3 += 15;
++					} else {
++						if (strncmp (kp3, " NPC: ", 6) || !isxdigit(kp3[6]))
++							continue;
++						kp3 += 6;
++					}
++					for (j = 0; isxdigit(kp3[j]); j++);
++					if (j != 8) continue;
++					strncpy(elp, line, kp2 + 8 - line);
++					elp += kp2 + 8 - line;
++					value = strtol(kp2, (char **) 0, 16);
++					if ( (symbol = LookupSymbol(value, &sym)) ) {
++						if (sym.size)
++							elp += sprintf(elp, " (%s+%d/%d)", symbol, sym.offset, sym.size);
++						else
++							elp += sprintf(elp, " (%s)", symbol);
++					}
++					strncpy(elp, kp2 + 8, kp3 - kp2);
++					elp += kp3 - kp2;
++					value = strtol(kp3, (char **) 0, 16);
++					if ( (symbol = LookupSymbol(value, &sym)) ) {
++						if (sym.size)
++							elp += sprintf(elp, " (%s+%d/%d)", symbol, sym.offset, sym.size);
++						else
++							elp += sprintf(elp, " (%s)", symbol);
++					}
++					strcpy(elp, kp3 + 8);
++				} else {
++					strncpy(elp, line, kp2 + 8 - line);
++					elp += kp2 + 8 - line;
++					value = strtol(kp2, (char **) 0, 16);
++					if ( (symbol = LookupSymbol(value, &sym)) ) {
++						if (sym.size)
++							elp += sprintf(elp, " (%s+%d/%d)", symbol, sym.offset, sym.size);
++						else
++							elp += sprintf(elp, " (%s)", symbol);
++					}
++					strcpy(elp, kp2 + 8);
++				}
++				return el;
++			}
++		}
++#endif	
+ 		strcpy(el, line);
+ 		return(el);
+ 	}
+diff -uNr sysklogd-1.4.1/ksym_mod.c sysklogd-1.4.1rh/ksym_mod.c
+--- sysklogd-1.4.1/ksym_mod.c	2000-09-12 17:15:28.000000000 -0400
++++ sysklogd-1.4.1rh/ksym_mod.c	2000-12-18 11:06:06.000000000 -0500
+@@ -93,7 +93,7 @@
+ #include <linux/time.h>
+ #include <linux/module.h>
+ #else /* __GLIBC__ */
+-#include <linux/module.h>
++#include "module.h"
+ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
+ extern int get_kernel_syms __P ((struct kernel_sym *__table));
+ #endif /* __GLIBC__ */
+diff -uNr sysklogd-1.4.1/Makefile sysklogd-1.4.1rh/Makefile
+--- sysklogd-1.4.1/Makefile	1998-10-12 16:25:15.000000000 -0400
++++ sysklogd-1.4.1rh/Makefile	2002-06-17 17:54:45.000000000 -0400
+@@ -3,13 +3,13 @@
+ CC= gcc
+ #CFLAGS= -g -DSYSV -Wall
+ #LDFLAGS= -g
+-CFLAGS= $(RPM_OPT_FLAGS) -O3 -DSYSV -fomit-frame-pointer -Wall -fno-strength-reduce
+-LDFLAGS= -s
++CFLAGS= -DSYSV -D_GNU_SOURCE -Wall
++LDFLAGS=
+ 
+ # Look where your install program is.
+ INSTALL = /usr/bin/install
+-BINDIR = /usr/sbin
+-MANDIR = /usr/man
++sbindir = /sbin
++mandir = /usr/share/man
+ 
+ # There is one report that under an all ELF system there may be a need to
+ # explicilty link with libresolv.a.  If linking syslogd fails you may wish
+@@ -106,17 +106,17 @@
+ 	${CC} ${CFLAGS} -DTEST -o ksym_test.o -c ksym.c
+ 
+ clean:
+-	rm -f *.o *.log *~ *.orig
++	rm -f *.o *.log *~ *.orig sysklogd-*.tar.gz syslogd klogd
+ 
+ clobber: clean
+ 	rm -f syslogd klogd ksym syslog_tst oops_test TAGS tsyslogd tklogd
+ 
+ install_exec: syslogd klogd
+-	${INSTALL} -m 500 -s syslogd ${BINDIR}/syslogd
+-	${INSTALL} -m 500 -s klogd ${BINDIR}/klogd
++	${INSTALL} -m 500 syslogd $(sbindir)/syslogd
++	${INSTALL} -m 500 klogd $(sbindir)/klogd
+ 
+ install_man:
+-	${INSTALL} -o ${MAN_OWNER} -g ${MAN_OWNER} -m 644 sysklogd.8 ${MANDIR}/man8/sysklogd.8
+-	${INSTALL} -o ${MAN_OWNER} -g ${MAN_OWNER} -m 644 syslogd.8 ${MANDIR}/man8/syslogd.8
+-	${INSTALL} -o ${MAN_OWNER} -g ${MAN_OWNER} -m 644 syslog.conf.5 ${MANDIR}/man5/syslog.conf.5
+-	${INSTALL} -o ${MAN_OWNER} -g ${MAN_OWNER} -m 644 klogd.8 ${MANDIR}/man8/klogd.8
++	${INSTALL} -m 644 sysklogd.8 $(mandir)/man8/sysklogd.8
++	${INSTALL} -m 644 syslogd.8 $(mandir)/man8/syslogd.8
++	${INSTALL} -m 644 syslog.conf.5 $(mandir)/man5/syslog.conf.5
++	${INSTALL} -m 644 klogd.8 $(mandir)/man8/klogd.8
+diff -uNr sysklogd-1.4.1/module.h sysklogd-1.4.1rh/module.h
+--- sysklogd-1.4.1/module.h	1969-12-31 19:00:00.000000000 -0500
++++ sysklogd-1.4.1rh/module.h	2000-12-18 11:06:06.000000000 -0500
+@@ -0,0 +1,62 @@
++
++/* Module definitions for klogd's module support */
++struct kernel_sym
++{
++	        unsigned long value;
++	        char name[60];
++};
++
++struct module_symbol
++{
++	unsigned long value;
++	const char *name;
++};
++
++struct module_ref
++{
++	struct module *dep;     /* "parent" pointer */
++	struct module *ref;     /* "child" pointer */
++	struct module_ref *next_ref;
++};
++
++struct module_info
++{
++	unsigned long addr;
++	unsigned long size;
++	unsigned long flags;
++	long usecount;
++};
++
++
++typedef struct { volatile int counter; } atomic_t;
++
++struct module
++{
++	unsigned long size_of_struct;   /* == sizeof(module) */
++	struct module *next;
++	const char *name;
++	unsigned long size;
++	
++	union
++	{
++		atomic_t usecount;
++		long pad;
++        } uc;                           /* Needs to keep its size - so says rth */
++	
++	unsigned long flags;            /* AUTOCLEAN et al */
++	
++	unsigned nsyms;
++	unsigned ndeps;
++	
++	struct module_symbol *syms;
++	struct module_ref *deps;
++	struct module_ref *refs;
++	int (*init)(void);
++	void (*cleanup)(void);
++	const struct exception_table_entry *ex_table_start;
++	const struct exception_table_entry *ex_table_end;
++#ifdef __alpha__
++	unsigned long gp;
++#endif
++};
++	
+diff -uNr sysklogd-1.4.1/redhat/syslog sysklogd-1.4.1rh/redhat/syslog
+--- sysklogd-1.4.1/redhat/syslog	1969-12-31 19:00:00.000000000 -0500
++++ sysklogd-1.4.1rh/redhat/syslog	2002-03-12 16:11:58.000000000 -0500
+@@ -0,0 +1,12 @@
++# Options to syslogd
++# -m 0 disables 'MARK' messages.
++# -r enables logging from remote machines
++# -x disables DNS lookups on messages recieved with -r
++# See syslogd(8) for more details
++SYSLOGD_OPTIONS="-m 0"
++# Options to klogd
++# -2 prints all kernel oops messages twice; once for klogd to decode, and
++#    once for processing with 'ksymoops'
++# -x disables all klogd processing of oops messages entirely
++# See klogd(8) for more details
++KLOGD_OPTIONS="-x"
+diff -uNr sysklogd-1.4.1/redhat/syslog.conf.rhs sysklogd-1.4.1rh/redhat/syslog.conf.rhs
+--- sysklogd-1.4.1/redhat/syslog.conf.rhs	1969-12-31 19:00:00.000000000 -0500
++++ sysklogd-1.4.1rh/redhat/syslog.conf.rhs	2001-08-14 15:49:33.000000000 -0400
+@@ -0,0 +1,26 @@
++# Log all kernel messages to the console.
++# Logging much else clutters up the screen.
++#kern.*							/dev/console
++
++# Log anything (except mail) of level info or higher.
++# Don't log private authentication messages!
++*.info;mail.none;authpriv.none;cron.none		/var/log/messages
++
++# The authpriv file has restricted access.
++authpriv.*						/var/log/secure
++
++# Log all the mail messages in one place.
++mail.*							/var/log/maillog
++
++
++# Log cron stuff
++cron.*							/var/log/cron
++
++# Everybody gets emergency messages
++*.emerg							*
++
++# Save news errors of level crit and higher in a special file.
++uucp,news.crit						/var/log/spooler
++
++# Save boot messages also to boot.log
++local7.*						/var/log/boot.log
+diff -uNr sysklogd-1.4.1/redhat/syslog.init sysklogd-1.4.1rh/redhat/syslog.init
+--- sysklogd-1.4.1/redhat/syslog.init	1969-12-31 19:00:00.000000000 -0500
++++ sysklogd-1.4.1rh/redhat/syslog.init	2002-03-13 02:25:21.000000000 -0500
+@@ -0,0 +1,85 @@
++#!/bin/bash
++#
++# syslog        Starts syslogd/klogd.
++#
++#
++# chkconfig: 2345 08 88
++# description: Syslog is the facility by which many daemons use to log \
++# messages to various system log files.  It is a good idea to always \
++# run syslog.
++### BEGIN INIT INFO
++# Provides: $syslog
++### END INIT INFO
++
++# Source function library.
++. /etc/init.d/functions
++
++[ -f /sbin/syslogd ] || exit 0
++[ -f /sbin/klogd ] || exit 0
++
++# Source config
++if [ -f /etc/sysconfig/syslog ] ; then
++	. /etc/sysconfig/syslog
++else
++	SYSLOGD_OPTIONS="-m 0"
++	KLOGD_OPTIONS="-2"
++fi
++
++RETVAL=0
++
++umask 077
++
++start() {
++ 	echo -n $"Starting system logger: "
++	daemon syslogd $SYSLOGD_OPTIONS
++	RETVAL=$?
++	echo
++	echo -n $"Starting kernel logger: "
++	daemon klogd $KLOGD_OPTIONS
++	echo
++	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/syslog
++	return $RETVAL
++}	
++stop() {
++	echo -n $"Shutting down kernel logger: "
++	killproc klogd
++	echo
++	echo -n $"Shutting down system logger: "
++	killproc syslogd
++	RETVAL=$?
++	echo
++	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/syslog
++	return $RETVAL
++}
++rhstatus() {
++	status syslogd
++	status klogd
++}
++restart() {
++	stop
++	start
++}	
++
++case "$1" in
++  start)
++  	start
++	;;
++  stop)
++  	stop
++	;;
++  status)
++  	rhstatus
++	;;
++  restart|reload)
++  	restart
++	;;
++  condrestart)
++  	[ -f /var/lock/subsys/syslog ] && restart || :
++	;;
++  *)
++	echo $"Usage: $0 {start|stop|status|restart|condrestart}"
++	exit 1
++esac
++
++exit $?
++
+diff -uNr sysklogd-1.4.1/redhat/syslog.log sysklogd-1.4.1rh/redhat/syslog.log
+--- sysklogd-1.4.1/redhat/syslog.log	1969-12-31 19:00:00.000000000 -0500
++++ sysklogd-1.4.1rh/redhat/syslog.log	2001-07-09 00:23:33.000000000 -0400
+@@ -0,0 +1,6 @@
++/var/log/messages /var/log/secure /var/log/maillog /var/log/spooler /var/log/boot.log /var/log/cron {
++    sharedscripts
++    postrotate
++	/bin/kill -HUP `cat /var/run/syslogd.pid 2> /dev/null` 2> /dev/null || true
++    endscript
++}
+diff -uNr sysklogd-1.4.1/sysklogd.8 sysklogd-1.4.1rh/sysklogd.8
+--- sysklogd-1.4.1/sysklogd.8	2001-03-11 14:35:51.000000000 -0500
++++ sysklogd-1.4.1rh/sysklogd.8	2001-07-09 00:17:22.000000000 -0400
+@@ -30,6 +30,7 @@
+ .I domainlist
+ ]
+ .RB [ " \-v " ]
++.RB [ " \-x " ]
+ .LP
+ .SH DESCRIPTION
+ .B Sysklogd
+@@ -152,6 +153,11 @@
+ .TP
+ .B "\-v"
+ Print version and exit.
++.TP
++.B "\-x"
++Disable name lookups when receiving remote messages.
++This avoids deadlocks when the nameserver is running on
++the same machine that runs the syslog daemon.
+ .LP
+ .SH SIGNALS
+ .B Syslogd
+diff -uNr sysklogd-1.4.1/syslogd.c sysklogd-1.4.1rh/syslogd.c
+--- sysklogd-1.4.1/syslogd.c	2001-03-11 14:40:10.000000000 -0500
++++ sysklogd-1.4.1rh/syslogd.c	2001-08-15 13:16:05.000000000 -0400
+@@ -637,8 +637,8 @@
+  * in seconds after previous message is logged.  After each flush,
+  * we move to the next interval until we reach the largest.
+  */
+-int	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
+-#define	MAXREPEAT ((sizeof(repeatinterval) / sizeof(repeatinterval[0])) - 1)
++time_t	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
++#define	MAXREPEAT ((int) ((sizeof(repeatinterval) / sizeof(repeatinterval[0])) - 1))
+ #define	REPEATTIME(f)	((f)->f_time + repeatinterval[(f)->f_repeatcount])
+ #define	BACKOFF(f)	{ if (++(f)->f_repeatcount > MAXREPEAT) \
+ 				 (f)->f_repeatcount = MAXREPEAT; \
+@@ -730,6 +730,7 @@
+ int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
+ int	MarkSeq = 0;		/* mark sequence number */
+ int	NoFork = 0; 		/* don't fork - don't run in daemon mode */
++int     DisableDNS = 0;		/* don't look up IP addresses of incoming messages */
+ int	AcceptRemote = 0;	/* receive messages that come via UDP */
+ char	**StripDomains = NULL;	/* these domains may be stripped before writing logs */
+ char	**LocalHosts = NULL;	/* these hosts are logged with their hostname */
+@@ -743,7 +744,7 @@
+ char **crunch_list(char *list);
+ int usage(void);
+ void untty(void);
+-void printchopped(const char *hname, char *msg, int len, int fd);
++void printchopped(const char *hname, char *msg, size_t len, int fd);
+ void printline(const char *hname, char *msg);
+ void printsys(char *msg);
+ void logmsg(int pri, char *msg, const char *from, int flags);
+@@ -829,7 +830,7 @@
+ 		funix[i]  = -1;
+ 	}
+ 
+-	while ((ch = getopt(argc, argv, "a:dhf:l:m:np:rs:v")) != EOF)
++	while ((ch = getopt(argc, argv, "a:dhf:l:m:np:rs:vx")) != EOF)
+ 		switch((char)ch) {
+ 		case 'a':
+ 			if (nfunix < MAXFUNIX)
+@@ -877,6 +878,9 @@
+ 		case 'v':
+ 			printf("syslogd %s.%s\n", VERSION, PATCHLEVEL);
+ 			exit (0);
++		case 'x':
++			DisableDNS = 1;
++			break;
+ 		case '?':
+ 		default:
+ 			usage();
+@@ -1174,7 +1178,7 @@
+ 
+ int usage()
+ {
+-	fprintf(stderr, "usage: syslogd [-drvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
++	fprintf(stderr, "usage: syslogd [-drvxh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
+ 		" [-s domainlist] [-f conffile]\n");
+ 	exit(1);
+ }
+@@ -1346,7 +1350,7 @@
+ void printchopped(hname, msg, len, fd)
+ 	const char *hname;
+ 	char *msg;
+-	int len;
++        size_t len;
+ 	int fd;
+ {
+ 	auto int ptlngth;
+@@ -1839,7 +1843,7 @@
+ #else
+ 				&& e == EBADF) {
+ #endif
+-				f->f_file = open(f->f_un.f_fname, O_WRONLY|O_APPEND|O_NOCTTY);
++				f->f_file = open(f->f_un.f_fname, O_WRONLY|O_APPEND|O_NOCTTY|O_LARGEFILE);
+ 				if (f->f_file < 0) {
+ 					f->f_type = F_UNUSED;
+ 					logerror(f->f_un.f_fname);
+@@ -1929,7 +1933,7 @@
+ 			/* is this slot used? */
+ 			if (ut.ut_name[0] == '\0')
+ 				continue;
+-			if (ut.ut_type == LOGIN_PROCESS)
++			if (ut.ut_type != USER_PROCESS)
+ 			        continue;
+ 			if (!(strcmp (ut.ut_name,"LOGIN"))) /* paranoia */
+ 			        continue;
+@@ -2013,7 +2017,10 @@
+ 		dprintf("Malformed from address.\n");
+ 		return ("???");
+ 	}
+-	hp = gethostbyaddr((char *) &f->sin_addr, sizeof(struct in_addr), \
++	if (DisableDNS)
++	  hp = 0;
++	else
++	  hp = gethostbyaddr((char *) &f->sin_addr, sizeof(struct in_addr), \
+ 			   f->sin_family);
+ 	if (hp == 0) {
+ 		dprintf("Host name for your address (%s) unknown.\n",
+@@ -2640,7 +2647,7 @@
+ 			f->f_file = open(++p, O_RDWR|O_NONBLOCK);
+ 			f->f_type = F_PIPE;
+ 	        } else {
+-			f->f_file = open(p, O_WRONLY|O_APPEND|O_CREAT|O_NOCTTY,
++			f->f_file = open(p, O_WRONLY|O_APPEND|O_CREAT|O_NOCTTY|O_LARGEFILE,
+ 					 0644);
+ 			f->f_type = F_FILE;
+ 		}
+diff -uNr sysklogd-1.4.1/syslog_tst.c sysklogd-1.4.1rh/syslog_tst.c
+--- sysklogd-1.4.1/syslog_tst.c	1997-06-02 13:21:41.000000000 -0400
++++ sysklogd-1.4.1rh/syslog_tst.c	2000-12-11 16:17:38.000000000 -0500
+@@ -42,7 +42,7 @@
+ 					if ( (nl = strrchr(bufr, '\n')) != \
+ 					    (char *) 0)
+ 						*nl = '\0';
+-					syslog(LOG_INFO, bufr);
++					syslog(LOG_INFO, "%s", bufr);
+ 					logged += strlen(bufr);
+ 					if ( logged > 1024 )
+ 					{
+@@ -54,7 +54,7 @@
+ 		}
+ 		else
+ 			while (argc-- > 1)
+-				syslog(LOG_INFO, argv++[1]);
++				syslog(LOG_INFO, "%s", argv++[1]);
+ 	}
+ 	else
+ 	{

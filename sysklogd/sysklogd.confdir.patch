@@ -1,0 +1,105 @@
+--- sysklogd-1.4.1/syslogd.c.confdir	2006-05-31 10:26:03.000000000 -0400
++++ sysklogd-1.4.1/syslogd.c	2006-05-31 10:26:03.000000000 -0400
+@@ -460,6 +460,7 @@
+ #endif
+ #include <utmp.h>
+ #include <ctype.h>
++#include <dirent.h>
+ #include <string.h>
+ #include <setjmp.h>
+ #include <stdarg.h>
+@@ -515,6 +516,9 @@
+ #ifndef _PATH_LOGCONF 
+ #define _PATH_LOGCONF	"/etc/syslog.conf"
+ #endif
++#ifndef _PATH_LOGCONFDIR 
++#define _PATH_LOGCONFDIR	"/etc/syslog.d"
++#endif
+ 
+ #if defined(SYSLOGD_PIDNAME)
+ #undef _PATH_LOGPID
+@@ -550,6 +554,7 @@
+ #endif
+ 
+ char	*ConfFile = _PATH_LOGCONF;
++char	*ConfDir = _PATH_LOGCONFDIR;
+ char	*PidFile = _PATH_LOGPID;
+ char	ctty[] = _PATH_CONSOLE;
+ 
+@@ -2211,6 +2216,10 @@
+ 	char cline[BUFSIZ];
+ #endif
+ 	struct servent *sp;
++        DIR *confdir;
++        struct dirent *cfde;
++        int cfdnl;
++        char *confdirname;
+ 
+ 	sp = getservbyname("syslog", "udp");
+ 	if (sp == NULL) {
+@@ -2288,11 +2297,14 @@
+ 	/*
+ 	 *  Foreach line in the conf table, open that file.
+ 	 */
++        confdir = opendir(ConfDir);
+ #if CONT_LINE
+ 	cline = cbuf;
+-	while (fgets(cline, sizeof(cbuf) - (cline - cbuf), cf) != NULL) {
++        do {
++	    while (fgets(cline, sizeof(cbuf) - (cline - cbuf), cf) != NULL) {
+ #else
+-	while (fgets(cline, sizeof(cline), cf) != NULL) {
++        do {
++	    while (fgets(cline, sizeof(cline), cf) != NULL) {
+ #endif
+ 		/*
+ 		 * check for end-of-section, comments, strip off trailing
+@@ -2334,10 +2346,22 @@
+ 		if (f->f_type == F_FORW || f->f_type == F_FORW_SUSP || f->f_type == F_FORW_UNKN) {
+ 			Forwarding++;
+ 		}
+-	}
++            }
++            /* close the configuration file */
++            (void) fclose(cf);
++            cf = NULL;
++            if (confdir) {
++                cfde = readdir(confdir);
++                if (cfde) {
++                    cfdnl = strlen(ConfDir) + strlen(cfde->d_name) + 2;
++                    confdirname = malloc(cfdnl);
++                    snprintf(confdirname, cfdnl,
++                             "%s/%s", ConfDir, cfde->d_name);
++                    cf = fopen(confdirname, "r");
++                }
++            }
++	} while (cf);
+ 
+-	/* close the configuration file */
+-	(void) fclose(cf);
+ 
+ #ifdef SYSLOG_UNIXAF
+ 	for (i = 0; i < nfunix; i++) {
+--- sysklogd-1.4.1/syslog.conf.5.confdir	2006-05-31 11:02:59.000000000 -0400
++++ sysklogd-1.4.1/syslog.conf.5	2006-05-31 11:04:41.000000000 -0400
+@@ -45,6 +45,9 @@
+ is able to understand an extended syntax.  One rule can be divided
+ into several lines if the leading line is terminated with an backslash
+ (``\\'').
++It also reads files in the /etc/syslog.d/ directory, if they exist,
++and treats them as if they were all included in the /etc/syslog.conf
++file.
+ 
+ .SH SELECTORS
+ The selector field itself again consists of two parts, a
+@@ -373,7 +376,9 @@
+ .PD 0
+ .TP
+ .I /etc/syslog.conf
+-Configuration file for
++and
++.I /etc/syslog.d/*
++Configuration files for
+ .B syslogd
+ 
+ .SH BUGS
