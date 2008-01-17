@@ -1,0 +1,84 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Bind(RPMPackageRecipe,CPackageRecipe):
+    name = 'bind'
+    archive_version = '9.4.1-P1'
+    version = archive_version.replace('-', '_')
+    rpmRelease = '6.fc7'
+    rpmUpVer = '9.4.0'
+
+    buildRequires = [ 'openssl:devel', 'libtool:runtime', 'pkgconfig:devel',
+        'ctags:runtime', 'libxml2:runtime', 'libxslt:runtime', 'perl:runtime',
+        'tetex-latex:runtime', 'tetex:runtime', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.macros.archive_version = r.version.replace('_', '-')
+        r.macros.majorversion = r.version.split('.')[0]
+        r.addArchive('ftp://ftp.isc.org/isc/bind%(majorversion)s/%(archive_version)s/', keyid='1BC91E6C')
+        r.addSource('named.sysconfig', rpm=r.srpm, dest='%(sysconfdir)s/sysconfig/named')
+        r.addSource('named.init', dest='%(initdir)s/named', mode=0755)
+        r.addSource('named.logrotate', rpm=r.srpm, dest='%(sysconfdir)s/logrotate.d/named')
+        r.addSource('keygen.c', rpm=r.srpm)
+        r.addPatch('globals.h.pid_path.patch')
+
+        # new openssl doesn't provide some things that bind thinks it does
+        r.Replace('#if OPENSSL_VERSION_NUMBER > 0x00908000L',
+                  '#ifdef USE_NEW_OPENSSL',
+                  'lib/dns/opensslrsa_link.c')
+
+        r.macros.cflags += ' $(pkg-config --cflags openssl)'
+        r.macros.cppflags += ' $(pkg-config --cflags-only-I openssl)'
+        r.macros.ldflags += ' $(pkg-config --libs-only-L openssl)'
+        r.Configure('--with-libtool --localstatedir=%(localstatedir)s '
+                    '--enable-threads --disable-openssl-version-check '
+                    '--enable-libbind --enable-largefile --enable-ipv6 '
+                    '--with-openssl=%(prefix)s')
+        r.Make()
+        r.MakeInstall()
+        r.Run('gcc %(cflags)s -o %(destdir)s/%(sbindir)s/dns-keygen keygen.c')
+
+        # glibc provides the following files
+        r.Remove('%(includedir)s/arpa/inet.h',
+                 '%(includedir)s/arpa/nameser.h',
+                 '%(includedir)s/arpa/nameser_compat.h',
+                 '%(includedir)s/net/route.h',
+                 '%(includedir)s/netdb.h',
+                 '%(includedir)s/hesiod.h',
+                 '%(includedir)s/resolv.h')
+
+        r.Install('bin/rndc/rndc.conf', '%(sysconfdir)s/', mode=0640)
+        r.Install('contrib/named-bootconf/named-bootconf.sh',
+            '%(sbindir)s/named-bootconf', mode=0755)
+
+        r.Create('%(sysconfdir)s/rndc.key',
+            contents='key "rndckey" {\n'
+                     '  algorithm       hmac-md5;\n'
+                     '  secret "@KEY@";\n'
+                     '};\n',
+            mode=0640)
+
+        r.Doc('doc/*')
+
+        r.MakeDirs('%(localstatedir)s/named/slaves')
+        r.MakeDirs('%(servicedir)s/named')
+        r.MakeDirs('%(localstatedir)s/run/named')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/named')
+        r.Ownership('root', 'named', '%(sysconfdir)s/rndc.key')
+        r.Ownership('root', 'named', '%(localstatedir)s/named')
+        r.Ownership('root', 'named', '%(servicedir)s/named')
+        r.Ownership('named', 'named', '%(localstatedir)s/named/slaves')
+        r.Ownership('named', 'named', '%(localstatedir)s/run/named')
+
+        r.PackageSpec('bind-utils', '%(bindir)s/(host|nslookup|nsupdate|dig)',
+                                    '%(mandir)s/man1/(host|dig).1.*',
+                                    '%(mandir)s/man5/resolver.5.*',
+                                    '%(mandir)s/man8/nsupdate.8.*',
+                                    '%(mandir)s/man8/nslookup.8.*')
+
+        r.TagSpec('initscript', '%(initdir)s/')

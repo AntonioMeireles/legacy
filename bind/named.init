@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+# named           This shell script takes care of starting and stopping
+#                 named (BIND DNS server).
+#
+# chkconfig: - 55 45
+# description: named (BIND) is a Domain Name Server (DNS) \
+# that is used to resolve host names to IP addresses.
+# probe: true
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# Source networking configuration.
+[ -r /etc/sysconfig/network ] && . /etc/sysconfig/network
+
+RETVAL=0
+prog="named"
+
+# Check that networking is up.
+[ "${NETWORKING}" = "no" ] && exit 0
+
+[ -r /etc/sysconfig/named ] && . /etc/sysconfig/named
+
+[ -x /usr/sbin/named ] || exit 0 
+
+[ -r ${ROOTDIR}/etc/named.conf ] || exit 0 
+
+
+start() {
+        # Start daemons.
+	if [ -n "`/sbin/pidof named`" ]; then
+		echo -n $"$prog: already running"
+		return 1
+	fi
+	# Set up key if necessary
+	if grep '@KEY@' /etc/rndc.key &>/dev/null ; then
+		sed -i "s/@KEY@/$(/usr/sbin/dns-keygen)/" /etc/rndc.key
+	fi
+        echo -n $"Starting $prog: "
+	if [ -n "${ROOTDIR}" -a "x${ROOTDIR}" != "x/" ]; then
+		OPTIONS="${OPTIONS} -t ${ROOTDIR}"
+	fi
+	daemon /usr/sbin/named -u named ${OPTIONS}
+	RETVAL=$?
+ 	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/named 
+        echo
+	return $RETVAL
+}
+stop() {
+        # Stop daemons.
+        echo -n $"Stopping $prog: "
+	/usr/sbin/rndc stop
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/named || {
+        	killproc named
+		RETVAL=$?
+		[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/named
+		echo
+		return $RETVAL 
+	}
+	success
+        echo
+	return $RETVAL
+}
+status() {
+	if [ -z "`/sbin/pidof named`" ]; then
+	    # not running, start it
+	    echo $"$prog not running"
+	    return 1
+	fi
+	/usr/sbin/rndc status
+	return $?
+}	
+restart() {
+	stop
+	# wait a couple of seconds for the named to finish closing down
+	sleep 2
+	start
+}	
+reload() {
+        echo -n $"Reloading $prog: "
+	if [ -z "`/sbin/pidof named`" ]; then
+	    # not running, start it
+	    failure $"$prog reload"
+	    start
+	fi
+	/usr/sbin/rndc reload >/dev/null 2>&1 || /usr/bin/kill -HUP `/sbin/pidof -o %PPID named`
+	[ "$?" -eq 0 ] && success $"$prog reload" || failure $"$prog reload"
+        echo
+	return $?
+}
+probe() {
+	# named knows how to reload intelligently; we don't want linuxconf
+	# to offer to restart every time
+	/usr/sbin/rndc reload >/dev/null 2>&1 || echo start
+	return $?
+}  
+
+# See how we were called.
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	status)
+		status
+		;;
+	restart)
+		restart
+		;;
+	condrestart)
+		if [ -e /var/lock/subsys/named ]; then restart; fi
+		;;
+	reload)
+		reload
+		;;
+	probe)
+		probe
+		;;
+	*)
+        	echo $"Usage: $0 {start|stop|status|restart|condrestart|reload|probe}"
+		exit 1
+esac
+
+exit $?
