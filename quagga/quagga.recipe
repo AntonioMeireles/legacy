@@ -1,0 +1,84 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Quagga(RPMPackageRecipe, CPackageRecipe):
+    name = 'quagga'
+    version = '0.98.6'
+    rpmRelease = '2.1'
+
+    buildRequires = [ 'readline:devel', 'ncurses:runtime', 'ncurses:devel',
+        'libcap:devel', 'libtermcap:devel', 'pam:devel',
+        'install-info:runtime', 'perl:runtime', ]
+
+    if Use.builddocs:
+        buildRequires.append('texi2html:runtime')
+
+    rpmPatches = [ 'quagga-0.96.3-netlink.patch',
+        'quagga-0.96.5-nostart.patch', 'quagga-0.98.2-gcc4.patch', ]
+
+    def setup(r):
+        r.unpack()
+
+        r.Configure(' --includedir=%(includedir)s/quagga'
+                    ' --enable-multipath=64'
+                    ' --enable-nssa'
+                    ' --enable-opaque-lsa'
+                    ' --enable-ospf-te'
+                    ' --enable-vtysh'
+                    ' --enable-ospfclient=yes'
+                    ' --enable-ospfapi=yes'
+                    ' --enable-user=quagga'
+                    ' --enable-group=quagga'
+                    ' --enable-vty-group=quaggavt'
+                    ' --enable-ipv6'
+                    ' --with-libpam'
+                    ' --with-cflags="%(cflags)s" --enable-netlink')
+
+        r.Make('MAKEINFO="makeinfo --no-split"')
+
+        if Use.builddocs:
+            r.Run('cd doc; texi2html quagga.texi')
+
+        r.MakeDirs('%(sysconfdir)s/{rc.d/init.d,sysconfig,logrotate.d,pam.d}',
+                   '%(localstatedir)s/log/quagga',
+                   '%(infodir)s',
+                   '%(sysconfdir)s/quagga/')
+
+        r.MakeInstall('DESTDIR=%(destdir)s ')
+
+        source = 'redhat/'
+
+        r.Install(source + 'zebra.init', '%(initdir)s/zebra')
+        r.Install(source + 'bgpd.init', '%(initdir)s/bgpd')
+        r.Install(source + 'ospf6d.init', '%(initdir)s/ospf6d')
+        r.Install(source + 'ripngd.init', '%(initdir)s/ripngd')
+        r.Install(source + 'ospfd.init', '%(initdir)s/ospfd')
+        r.Install(source + 'ripd.init', '%(initdir)s/ripd')
+        r.Install(source + 'quagga.sysconfig',
+                  '%(sysconfdir)s/sysconfig/quagga')
+        r.Install(source + 'quagga.pam', '%(sysconfdir)s/pam.d/quagga')
+        r.Install(source + 'quagga.logrotate',
+                  '%(sysconfdir)s/logrotate.d/quagga')
+        r.MakeDirs('%(localstatedir)s/run/quagga', mode=0750)
+        r.SetModes('%(initdir)s/*', 0755)
+
+        r.Ownership('quagga', 'quagga', '%(sysconfdir)s/quagga')
+        r.Ownership('quagga', 'quagga', '%(localstatedir)s/run/quagga')
+        r.Ownership('quagga', 'quagga', '%(localstatedir)s/log/quagga')
+        r.SetModes('%(sysconfdir)s/quagga', 0751)
+        r.SetModes('%(localstatedir)s/run/quagga', 0750)
+        r.SetModes('%(localstatedir)s/log/quagga', 0751)
+
+        r.Doc('*/*.sample*', 'REPORTING-BUGS', 'SERVICES')
+
+        if Use.builddocs:
+            r.Doc('doc/quagga.html', 'doc/mpls')
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.TagSpec('initscript', '%(initdir)s/')
