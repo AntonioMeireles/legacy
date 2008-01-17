@@ -1,0 +1,202 @@
+#!/bin/bash
+#
+# chkconfig: 345 99 1
+#
+# description: writes /etc/issue{,.net} and /etc/distro-release
+#
+
+source /etc/init.d/functions
+
+export LANG=C
+
+distro_release="/etc/distro-release"
+distro_name="/etc/sysconfig/appliance-name"
+distro_group="/etc/sysconfig/appliance-group"
+issue="/etc/issue"
+issuenet="/etc/issue.net"
+raa="/usr/bin/raa-web-scgi"
+distro_welcome="/etc/distro-welcome"
+
+get_appliance_name () {
+    if [ -f "${distro_name}" ] ; then
+        name="$(cat ${distro_name})"
+        if [ -n "${name}" ] ; then
+            echo "${name}"
+        fi
+    fi
+}
+
+get_toplevel_group () {
+    really_get_group () {
+        if [ X"${USE_CONARY}" = XNO ] ; then
+            return
+        fi
+        groups="$(conary updateall --items | grep group)"
+        number_of_groups="$(echo ${groups} | wc -l)"
+        if [ "${number_of_groups}" -ge 2 ];then
+            # we have too many groups to know which one is the toplevel
+            return
+        else
+            # cache the info and also return it
+            echo "${groups}" > ${distro_group}
+            echo "${groups}"
+        fi
+    }
+
+    if [ -f "${distro_group}" -a "$1" != "force" ]; then
+        groups="$(cat "${distro_group}")"
+        if [ -n "${groups}" ] ; then
+            echo "${groups}"
+        else
+            really_get_group
+        fi
+    else
+        really_get_group
+    fi
+}
+
+get_appliance_version () {
+    group="$(get_toplevel_group)"
+    if [ -n "${group}" -a X"${USE_CONARY}" != XNO ] ; then
+        # quick hack to find the version defined, without the name, the flavors,
+        # the source and binary versions, etc
+        group_version="$(conary q $group)"
+	# Could be "" on error (e.g. when wrong group in $distro_group file)
+	if [ -n "${group_version}" ] ; then
+	    echo ${group_version} | sed -e 's/.*=//' | sed -e 's/-.*//'
+	else
+	    # Try again, this time with feewing.
+	    group="$(get_toplevel_group force)"
+	    if [ -n "${group}" ] ; then
+		group_version="$(conary q $group)"
+		echo ${group_version} | sed -e 's/.*=//' | sed -e 's/-.*//'
+	    else
+		echo "unknown version"
+	    fi
+	fi
+    else
+        echo "unknown version"
+    fi
+
+}
+
+writedistrorelease () {
+    app_name="$(get_appliance_name)"
+    if [ -n "${app_name}" ]; then
+        name="${app_name}"
+    else
+        name="rPath-based appliance"
+    fi
+
+    if [ -n "${appliance_version}" ] ; then
+	version="${appliance_version}"
+    else
+	appliance_version="$(get_appliance_version)"
+	version="${appliance_version}"
+    fi
+
+    echo "${name} ${version}" > ${distro_release}
+
+}
+
+writeissue () {
+    # find out network addresses
+    # FIXME: figure out ipv6 support
+    ip_addr="$(/sbin/ifconfig | grep "inet addr" | grep -v "127.0.0.1" | awk \
+             '{print $2 }' | awk -F: '{ print $2 }' | head -n 1)"
+    netcount="$(/sbin/ifconfig | grep "inet addr" | grep -v "127.0.0.1" | wc -l)"
+
+    # do we have networking yet?
+    if [ "${netcount}" -ge 1 ];then
+        have_networking="true"
+    else
+        have_networking="false"
+    fi
+
+    # do we have raa?
+    if [ -x "${raa}" ] ; then
+        have_raa="true"
+    else
+        have_raa="false"
+    fi
+
+    # this is the macro <RAA>
+    if ${have_networking} && ${have_raa}; then
+        RAA="To perform administration, please use a web browser to navigate to https://${ip_addr}:8003/"
+    else
+        if ${have_networking}; then
+            # raa is not installed
+            RAA=""
+        else 
+            # raa installed but network not up
+            RAA="You do not appear to have networking. Please login to start networking."
+        fi
+    fi
+
+    # the macro <IP>
+    if ${have_networking}; then
+        IP="${ip_addr}"
+    else
+        IP="localhost"
+    fi
+
+    # the macro <APPLIANCE_NAME>
+    if [ -f "${distro_name}" ];then
+        distro="$(cat ${distro_name})"
+        if [ -n "${distro}" ]; then
+            APPLIANCE_NAME="${distro}"
+        else
+            APPLIANCE_NAME="rPath-based appliance"
+        fi
+    else
+        APPLIANCE_NAME="rPath-based appliance"
+    fi
+
+    # the macro <APPLIANCE_VERSION>
+    if [ -n "${appliance_version}" ] ; then
+	app_version="${appliance_version}"
+    else
+	appliance_version="$(get_appliance_version)"
+	app_version="${appliance_version}"
+    fi
+	    
+    if [ -n "${app_version}" ]; then
+        APPLIANCE_VERSION="${app_version}"
+    else
+        APPLIANCE_VERSION="unknown version"
+    fi
+
+    # now lets actually parse the distro-welcome file
+    initial="$(cat ${distro_welcome})"
+    without_comments="$(echo "${initial}" | grep -v '^#' )"
+    replace_macros="$(echo "${without_comments}" | sed -e "s|<RAA>|${RAA}|g"  \
+                            -e "s|<IP>|${IP}|g" \
+                            -e "s|<APPLIANCE_NAME>|${APPLIANCE_NAME}|g" \
+                            -e "s|<APPLIANCE_VERSION>|${APPLIANCE_VERSION}|g")"
+    echo "${replace_macros}" > ${issue}
+    echo "${replace_macros}" > ${issuenet}
+
+}
+
+start () {
+    writeissue
+    writedistrorelease
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        true
+        ;;
+    restart)
+        start
+        ;;
+    condrestart)
+        start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        ;;
+esac
