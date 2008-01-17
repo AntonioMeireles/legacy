@@ -1,0 +1,85 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+# Turn on freetype1 if ever available
+
+class vflib(CPackageRecipe):
+    name = 'VFlib'
+    version = '2.25.6'
+
+    buildRequires = [ 'autoconf:runtime',
+                      'automake:runtime', 'libtool:runtime',
+                      'which:runtime',
+                      # 'freetype:devel=:freetype1',
+                      'libX11:devel', 'libXext:devel', 'libXt:devel',
+                      'imake:runtime',
+                    ]
+    def setup(r):
+        r.macros.cflags += ' -ansi'
+
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/VFlib2-%(version)s-28.src.rpm'
+
+        #r.addArchive('ftp://TypeHack.aial.hiroshima-u.ac.jp/pub/TypeHack/VFlib2-%(version)s.tar.gz')
+        r.addArchive('%(name)s2-%(version)s.tar.bz2', rpm=srpm)
+        r.addSource('vfontcap-ja', rpm=srpm)
+        r.addSource('vfontcap-en', rpm=srpm)
+        for patch in ('vfontcap-jrpm.patch.bz2',
+                      'VFlib2-2.25.1-Chinese.patch.bz2',
+                      'VFlib2-2.25.1-gothic.patch',
+                      'VFlib2-2.25.1-i18ncfg.patch',
+                      'VFlib2-2.25.6-cflagpath.patch',
+                      'VFlib2-2.25.6-unneededheader.patch',
+                      'VFlib2-ppc64.patch',
+                      'VFlib2-2.25.6-gcc33.patch',
+                      'VFlib2-2.25.6-autoconf257.patch',
+                      'VFlib2-2.25.6-fix-gcc-warnings.patch',
+                      'VFlib2-2.25.6-build-fix.patch'):
+             r.addPatch(patch, rpm=srpm)
+        r.addPatch('lib64.patch', macros=True)
+
+        r.Run('mv vfontcap-ja vfontcap.ja')
+        r.Run('mv vfontcap-en vfontcap.en')
+
+        r.Replace(r'^vflib2_version=.*$',
+                  "vflib2_version='%(version)s'",
+                  'configure')
+
+        r.Run('libtoolize --force')
+        r.Run('aclocal')
+        r.Run('autoconf')
+
+        if False:
+            # not sure this is really worth a flag...
+            extraConfig = ' --with-freetype --with-freetype-includedir=%(includedir)s/freetype1/freetype'
+        else:
+            extraConfig = ''
+        r.Configure('--with-x --enable-shared --enable-static' + extraConfig)
+
+        r.Make()
+
+        r.MakePathsInstall('runtimedir=%(destdir)s%(datadir)s/VFlib/%(version)s')
+        r.Install('tools/.libs/{disol,fmtest,kban,vfperf,vftest}',
+                  '%(bindir)s/')
+        # Try a scheme interpreter that is actually on the system
+        r.Replace('/usr/local/bin/scm', '/usr/bin/guile',
+                  'jTeX/jfmsrc/MakeSlantTFM')
+        r.Install('jTeX', '%(datadir)s/VFlib/VFjfm/')
+        r.Install('dynafont', '%(datadir)s/VFlib/VFjfm/')
+
+        r.Symlink('%(datadir)s/VFlib/%(version)s/{vfontcap,vfontcap.ja}',
+                  '%(sysconfdir)s/')
+        r.ComponentSpec('lib',
+            '%(sysconfdir)s/vfontcap.*',
+            '%(datadir)s/VFlib/[^/]*/vfontcap.*')
+        r.Symlink('libVFlib2.so.24.0.4', '%(libdir)s/libVFlib.so.%(version)s')
+        r.Symlink('libVFlib2.a', '%(libdir)s/libVFlib.a')
+        r.Symlink('libVFlib.so.%(version)s', '%(libdir)s/libVFlib.so.2')
+        r.Symlink('libVFlib.so.2', '%(libdir)s/libVFlib.so')
+
+        for file in ('QA-english.tex', 'QA.txt', 'man.dvi', 'man.ps',
+                     'vfontcap.mgp'):
+            r.Move('%(datadir)s/VFlib/%(version)s/' + file, '%(thisdocdir)s/')
+
+        r.Run('find %(destdir)s -name CVS -type d | xargs rm -fr')
