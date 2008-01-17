@@ -1,0 +1,49 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class PMUtils(RPMPackageRecipe, CPackageRecipe):
+    name = 'pm-utils'
+    version = '0.19'
+    rpmRelease = '3'
+
+    buildRequires = [ 'pkgconfig:devel', 'pciutils:devel', ]
+
+    def setup(r):
+        r.macros.vbetooldir = 'vbetool-0.4'
+        r.macros.radeontooldir = 'radeontool-1.5'
+        r.macros.cppflags += ' -I/usr/include/hal/'
+
+        r.unpack()
+        r.addArchive('vbetool_0.5-1.tar.gz', rpm=r.srpm, dir='%(maindir)s')
+        r.addArchive('radeontool-1.5.tar.gz', rpm=r.srpm, dir='%(maindir)s')
+
+        r.addPatch('vbetool-0.3-fix-gcc4bug.patch', rpm=r.srpm, dir='%(vbetooldir)s')
+        r.addPatch('vbetool-0.3-libpci.patch', rpm=r.srpm, dir='%(vbetooldir)s')
+
+        for source in ('pm-hibernate.app', 'pm-powersave.app', 'pm-suspend.app'):
+            r.addSource(source, rpm=r.srpm, dir='%(sysconfdir)s/security/console.apps/')
+        for source in ('pm-suspend.pam', 'pm-hibernate.pam', 'pm-powersave.pam'):
+            r.addSource(source, rpm=r.srpm, dir='%(sysconfdir)s/pam.d/')
+
+        if Arch.x86_64: extraConfig = '--with-x86emu'
+        else: extraConfig = ''
+
+        r.Configure(extraConfig, dir='%(vbetooldir)s')
+        r.Make(dir='%(vbetooldir)s')
+        r.MakeInstall(dir='%(vbetooldir)s')
+
+        if Arch.x86 or Arch.x86_64:
+            r.Run("""cd %(radeontooldir)s
+                     %(cc)s %(cflags)s -o radeontool radeontool.c""")
+            r.MakeDirs('%(sbindir)s')
+            r.Install('%(radeontooldir)s/radeontool', '%(sbindir)s/', mode=0755)
+
+        r.Configure()
+        r.Make()
+        r.MakeInstall()
+
+        r.DanglingSymlinks(exceptions='%(bindir)s/pm.*')
