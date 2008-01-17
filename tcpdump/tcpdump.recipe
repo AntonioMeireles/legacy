@@ -1,0 +1,38 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Tcpdump(AutoPackageRecipe):
+    name = 'tcpdump'
+    version = '3.9.6'
+    buildRequires = [ 'openssl:devel', 'libpcap:devel' ]
+
+    def unpack(r):
+        r.addArchive('http://www.tcpdump.org/release/')
+        # upstream patch modified so it would actually apply
+        # http://cvs.tcpdump.org/cgi-bin/cvsweb/tcpdump/print-802_11.c?r1=1.42&r2=1.43
+        r.addPatch('print-802_11-heap-overflow-fix.patch')
+
+        # RPL-1556 CVE-20007-3798
+        # modified upstream patch so it would apply:
+        # http://cvs.tcpdump.org/cgi-bin/cvsweb/tcpdump/print-bgp.c?r1=1.91.2.11&r2=1.91.2.12
+        r.addPatch('cve-2007-3798.patch')
+
+        # don't use rpmpackage here since fedora doesn't seem to ever update
+        # tcpdump, and we only need this one patch which doesn't often change
+        r.addPatch('tcpdump-3.6.1-portnumbers.patch',
+            rpm='mirror://fedora/../development/source/SRPMS/tcpdump-3.9.5-3.fc7.src.rpm')
+
+    def configure(r):
+        # disable-smb because of all the upstream warnings about
+        # how it may be exploitable
+        r.Configure('--enable-ipv6 --with-user=pcap --disable-smb',
+                    preConfigure='CFLAGS="%(cflags)s -DIP_MAX_MEMBERSHIPS=20"')
+
+    def makeinstall(r):
+        r.Replace('TCPDUMP 1', 'TCPDUMP8', 'tcpdump.1')
+        r.MakeInstall()
+        r.Move('%(mandir)s/man1/tcpdump.1', '%(mandir)s/man8/tcpdump.8')
+        r.UtilizeUser('pcap', '%(sbindir)s/tcpdump')
