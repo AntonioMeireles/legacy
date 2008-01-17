@@ -1,0 +1,91 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Grub(RPMPackageRecipe, AutoPackageRecipe):
+    name = 'grub'
+    version = '0.97'
+    buildRequires = [ 'texinfo:runtime', 'autoconf:runtime',
+                      'automake:runtime', 'install-info:runtime',
+                      'ncurses:devel' ]
+
+    rpmRelease = '13'
+    rpmPatches = [ 'grub-0.93-configfile.patch',
+        'grub-0.90-symlinkmenulst.patch',
+        'grub-0.97-install.in.patch',
+        'grub-0.94-installcopyonly.patch',
+        'grub-0.94-addsyncs.patch',
+        'grub-0.95-staticcurses.patch',
+        'grub-0.93-endedit.patch',
+        'grub-0.90-append.patch',
+        'grub-0.97-once.patch',
+        'grub-0.95-graphics.patch',
+        'grub-0.91-splashimagehelp.patch',
+        'grub-0.93-graphics-bootterm.patch',
+        'grub-0.95-hiddenmenu-tweak.patch',
+        'grub-0.93-special-device-names.patch',
+        'grub-0.94-i2o.patch',
+        'grub-0.95-moreraid.patch',
+        'grub-0.94-initrdmax.patch',
+        'grub-0.95-odirect.patch',
+        'grub-0.95-geometry-26kernel.patch',
+        'grub-0.95-md.patch',
+        'grub-0.95-md-rework.patch',
+        'grub-0.95-xpmjunk.patch',
+        'grub-0.95-splash-error-term.patch',
+        'grub-0.97-nxstack.patch',
+        'grub-0.97-nx-multiinstall.patch',
+        'grub-0.97-mdadm-path.patch',
+        'grub-0.95-md-mbr.patch',
+        'grub-0.97-gcc4.patch',
+        'grub-0.95-nonmbr.patch',
+        'grub-0.95-recheck-bad.patch',
+        'grub-0.97-prototypes.patch',
+        'grub-0.97-datadir.patch',
+        'grub-0.97-dmraid.patch',
+        'grub-0.97-dmraid-recheck-bad.patch',
+        'grub-0.97-dmraid-partition-names.patch',
+        'grub-0.97-mactel-kbd.patch',
+        'grub-0.97-stderr.patch',
+        'grub-0.97-mpath.patch' ]
+
+    Flags.static = False
+
+    def unpack(r):
+        RPMPackageRecipe.unpack(r)
+        r.addPatch('grub-with-autoconf-2.60.patch')
+        r.addPatch('grub-0.97-boot_image.patch')
+        # Not using until safe (RPL-1282) (RPL-1306)
+        # r.addPatch('grub-0.97-stage2-config.patch')
+        # r.addSource('grub-stage2.tagdescription', macros=True,
+        #             dest='%(tagdescriptiondir)s/grub-stage2')
+        # r.addSource('grub-stage2.taghandler', macros=True, mode=0755,
+        #             dest='%(taghandlerdir)s/grub-stage2')
+        # r.addSource('grub-stage2-config.c', dest='util/')
+
+    def configure(r):
+        r.Run('autoreconf --install --force')
+        r.macros.cflags = '-Os -g -fno-strict-aliasing -Wall -Wno-shadow -Wno-unused -Wno-pointer-sign -fno-PIE'
+        if Flags.static:
+            r.macros.cflags += ' -static'
+        r.Configure(' --sbindir=%(essentialsbindir)s --disable-auto-linux-mem-opt --without-curses')
+
+    def policy(r):
+        # we hack this to remove the dependency of grub-install on diffutils
+        r.Replace(re.escape('cmp $file $img_file'),
+            '''[ "$(md5sum $file | awk '{ print $1 }')"  = "$(md5sum $img_file | awk '{ print $1 }')" ]''',
+            '%(essentialsbindir)s/grub-install')
+
+        for x in ('%(essentialbindir)s/cat', '%(bindir)s/test',
+            '%(essentialbindir)s/grep', '/dev/null', '%(bindir)s/md5sum',
+            '%(essentialbindir)s/awk'):
+            r.Requires(x, '%(essentialsbindir)s/grub-install')
+
+
+        #r.Requires('%(essentialbindir)s/cp', '%(taghandlerdir)s/grub-stage2')
+        #r.Requires('%(essentialbindir)s/ln', '%(taghandlerdir)s/grub-stage2')
+        #r.Requires('%(essentialbindir)s/rm', '%(taghandlerdir)s/grub-stage2')
+
