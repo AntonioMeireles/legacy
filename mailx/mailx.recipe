@@ -1,0 +1,34 @@
+#
+# Copyright (c) 2005-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Mailx(CPackageRecipe):
+    name = 'mailx'
+    version = '12.3'
+
+    buildRequires = [ 'krb5:devel', 'openssl:devel', ]
+
+    def setup(r):
+        # the only modification we have made to this repo is to remove nss.c to
+        # clarify the license. we don't need it since we use openssl instead
+        # reference RPL-2062
+        r.addMercurialSnapshot('http://hg.rpath.com/mailx', tag='%(version)s-rPath')
+
+        # Make 'more' the default pager.
+        r.addPatch('mailx-12.2-PAGER.patch')
+
+        r.Replace('/usr/ucb/install', '%(bindir)s/install', 'Makefile')
+
+        # the replacement getopt enforces ordering requirements that make
+        # nail not work with scripts that assume that -s SUBJ can come after
+        # the recipient.
+        r.Replace('getopt.o', '', 'Makefile')
+
+        args = 'SENDMAIL=%(sbindir)s/sendmail PREFIX=%(prefix)s ' \
+            'MAILSPOOL=%(servicedir)s/spool/mail BINDIR=%(essentialbindir)s'
+        r.Make(args)
+        r.MakeInstall(args)
+        r.Symlink('mailx', '%(essentialbindir)s/mail')
+        r.Symlink('mailx.1', '%(mandir)s/man1/mail.1')
