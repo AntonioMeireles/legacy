@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Wvstreams(RPMPackageRecipe,CPackageRecipe):
+    name = 'wvstreams'
+    version = '4.2.2'
+    rpmName = 'lib%(name)s'
+    rpmRelease = '3.fc7'
+
+    buildRequires = [ 'pkgconfig:devel', 'openssl:devel', 'xplc:devel',
+                      'perl:runtime', 'zlib:devel', 'libstdc++:devel',
+                      'net-tools:runtime', ]
+
+    rpmPatches = [ 'libwvstreams-4.2.1-gcc41.patch', ]
+
+    def setup(r):
+        r.unpack()
+
+        r.macros.cppflags += " $(pkg-config --cflags-only-I openssl) -fPIC"
+        r.macros.cflags += " $(pkg-config --cflags-only-I openssl) -fPIC"
+        r.macros.ldflags += " -lcrypt $(pkg-config --libs-only-L openssl)"
+
+        # Required for build on systems with both x86 and x86_64 glibc
+        r.Replace('-lz -lcrypt', 'LDLIBS += -lz -lcrypt', 'vars.mk')
+
+        # we disable some bits we don't use to remove build requirements
+        # the only thing we build that requires wvstreams is wvdial.
+        # might as well keep this library small for our purposes.
+        r.Configure(' --without-swig --without-ogg --without-vorbis'
+                    ' --without-fftw --without-fam --without-tcl'
+                    ' --with-xplc --with-openssl' # xplc, openssl not optional
+                    ' --without-pam --without-qt --without-openslp')
+
+        r.Make('COPTS="%(cflags)s" CXXOPTS="%(cppflags)s" PREFIX=%(prefix)s LIBDIR=%(libdir)s')
+
+        r.MakeInstall('PREFIX=%(destdir)s/%(prefix)s'
+                      ' LIBDIR=%(destdir)s/%(libdir)s')
