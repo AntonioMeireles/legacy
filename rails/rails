@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# On no parameters, we display the manpage
+if [ "x$1" = "x" ]; then
+	exec man rails
+fi
+
+TEMP=`getopt -o dCFD:I: --long no-docs,copy,force-overwrite,database:,internal: -- "$@"`
+if [ $? != 0 ]; then 
+	echo "Terminating..." >&2
+	exit 1
+fi
+
+eval set -- "$TEMP"
+COPY="false"
+DOCUMENTATION="true"
+OVERWRITE_OPTION=""
+DATABASE="mysql"
+INTERNAL_OPTIONS=""
+
+while true; do
+    case "$1" in
+        -d|--no-docs)
+            DOCUMENTATION="false"
+            ;;
+        -C|--copy)
+            COPY="true"
+            ;;
+        -F|--force-overwrite)
+            OVERWRITE_OPTION="--force"
+            ;;
+        -D|--database)
+            case "$2" in
+                mysql|oracle|postgresql|sqlite2|sqlite3)
+                   DATABASE=$2
+                   ;;
+                *)
+                   echo "Bad database name. Supported values are mysql, oracle, postgresql, sqlite2, and sqlite3"
+                   exit 1
+                   ;;
+            esac
+            shift
+            ;;
+        -I|--internal)
+            INTERNAL_OPTIONS="$2"
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Internal error"
+            exit 1
+            ;;
+	esac
+	shift
+done
+
+CWD="`pwd`"
+if [ "x$1" = "x" ]; then
+	exec man rails
+fi
+while [ "x$1" != "x" ]; do
+	if [ "${1:0:1}" = "/" ]; then
+		RAILS_PKG_DESTINATION="$1"
+	else
+		RAILS_PKG_DESTINATION="$CWD/$1"
+	fi
+	
+	# Install/upgrade core rails
+        %(bindir)s/ruby %(libdir)s/ruby/site_ruby/railties/bin/rails ${OVERWRITE_OPTION} "${RAILS_PKG_DESTINATION}" "${INTERNAL_OPTIONS}" -d $DATABASE
+        
+	# Create/update the vendor directory
+        rm -rf "${RAILS_PKG_DESTINATION}"/vendor/*
+        mkdir "${RAILS_PKG_DESTINATION}"/vendor/plugins \
+	      "${RAILS_PKG_DESTINATION}/vendor/rails"
+        if [ "x${COPY}" = "xtrue" ]; then
+            CP_CMD="cp -a"
+        else
+            CP_CMD="ln -s"
+        fi
+        $CP_CMD %(libdir)s/ruby/site_ruby/{action*,active*,railties} "${RAILS_PKG_DESTINATION}/vendor/rails"
+
+	# link to docs, if needed
+        if [ "x${DOCUMENTATION}" = "xtrue" ]; then
+            rm -rf "${RAILS_PKG_DESTINATION}/doc/api"
+            $CP_CMD %(thisdocdir)s/api "${RAILS_PKG_DESTINATION}/doc/api"
+        fi
+        
+	shift
+done
+exit 0
