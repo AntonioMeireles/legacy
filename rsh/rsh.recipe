@@ -1,0 +1,81 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Rsh(CPackageRecipe):
+    name = 'rsh'
+    version = '0.17'
+
+    buildRequires = [ 'libtermcap:devel', 'pam:devel' ]
+
+    def setup(r):
+        r.mainDir('netkit-rsh-%(version)s')
+
+        srpm = 'ftp://ftp.redhat.com/pub/redhat/linux/enterprise/3/en/os/i386/SRPMS/rsh-0.17-17.src.rpm'
+
+        # Source: ftp://ftp.uk.linux.org/pub/linux/Networking/netkit/
+        r.addArchive('netkit-rsh-%(version)s.tar.gz', rpm=srpm)
+        # Source: http://www.tc.cornell.edu/~sadd/
+        r.addArchive('rexec-1.5.tar.gz', rpm=srpm,
+                               dir='netkit-rsh-%(version)s')
+        r.addSource('rexec.pam', rpm=srpm)
+        r.addSource('rlogin.pam', rpm=srpm)
+        r.addSource('rsh.pam', rpm=srpm)
+        r.addSource('rsh-xinetd', rpm=srpm)
+        r.addSource('rlogin-xinetd', rpm=srpm)
+        r.addSource('rexec-xinetd', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-sectty.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-rexec.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.10-stdarg.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.16-jbj.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.16-jbj4.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.16-prompt.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.16-rlogin=rsh.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.16-nokrb.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-pre20000412-jbj5.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-userandhost.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-strip.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-lfs.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-chdir.patch', rpm=srpm)
+        r.addPatch('netkit-rsh-0.17-pam-nologin.patch', rpm=srpm)
+
+        r.Run('rm rexec/rexec')
+
+        r.ManualConfigure('--with-c-compiler=%(cc)s')
+        r.Replace('^CC=.*$', 'CC=%(cc)s', 'MCONFIG')
+        r.Replace('-O2', '%(cflags)s -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE'\
+                  ' -D_FILE_OFFSET_BITS=64', 'MCONFIG')
+        r.Replace('^BINDIR=.*$', 'BINDIR=%(bindir)s', 'MCONFIG')
+        r.Replace('^MANDIR=.*$', 'MANDIR=%(mandir)s', 'MCONFIG')
+        r.Replace('^SBINDIR=.*$', 'SBINDIR=%(sbindir)s', 'MCONFIG')
+
+        r.Make()
+
+        r.MakeDirs('%(bindir)s')
+        r.MakeDirs('%(sbindir)s')
+        r.MakeDirs('%(mandir)s/man{1,5,8}')
+        r.MakeDirs('%(sysconfdir)s/pam.d')
+        r.MakeInstall('BINDIR=%(bindir)s MANDIR=%(mandir)s',
+                         rootVar='INSTALLROOT')
+
+        r.Install('rexec.pam', '%(sysconfdir)s/pam.d/rexec',
+                          mode=0644)
+        r.Install('rlogin.pam', '%(sysconfdir)s/pam.d/rlogin',
+                          mode=0644)
+        r.Install('rsh.pam', '%(sysconfdir)s/pam.d/rsh', mode=0644)
+        r.Install('rsh-xinetd', '%(sysconfdir)s/xinetd.d/rsh',
+                          mode=0644)
+        r.Install('rlogin-xinetd', '%(sysconfdir)s/xinetd.d/rlogin',
+                          mode=0644)
+        r.Install('rexec-xinetd', '%(sysconfdir)s/xinetd.d/rexec',
+                          mode=0644)
+
+        r.SetModes('%(bindir)s/r{cp,login,sh}', 04755)
+
+        r.PackageSpec('rsh-server',
+                      '%(sysconfdir)s/pam.d/(rsh|rlogin|rexec)',
+                      '%(sysconfdir)s/xinetd.d/(rsh|rlogin|rexec)',
+                      '%(sbindir)s/(in.rexecd|in.rlogind|in.rshd)',
+                      '%(mandir)s/man8/.*\.8.*')
