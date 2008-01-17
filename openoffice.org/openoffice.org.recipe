@@ -7,8 +7,8 @@
 class OpenOffice(CPackageRecipe):
 
     name = 'openoffice.org'
-    version = '2.4.0+m2'
-    ooo_build_version = '11267'
+    version = '2.4.0+m3'
+    ooo_build_version = '11305'
 
     buildRequires = [
         'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
@@ -70,6 +70,7 @@ class OpenOffice(CPackageRecipe):
             'de', 'pt', 'pt-BR', 'ru', 'fr',
         ])
         r.macros.langs = ' '.join(r.build_langs)
+        r.macros.langs = 'ALL'
 
         # Saving only looks in /usr/lib/OpenOffice.org for some BASIC files
         # and does not respect --with-installed-ooo-dirname -- RPL-247
@@ -124,9 +125,9 @@ class OpenOffice(CPackageRecipe):
         # from hsqldb_1_8_0_9.zip
         r.addSource('hsqldb.jar')
 
-        # XXX
-        # /usr/lib64/OpenOffice.org-2.3/program/intro.bmp: Just 24 bpp bitmaps are supported.
-        #r.addSource('intro.bmp')
+        # From RH .spec
+        r.addSource('compact_templates.sh')
+
         # XXX
         r.Replace(
             '^rpl2:.*$',
@@ -233,11 +234,12 @@ class OpenOffice(CPackageRecipe):
 
         # XXX
         r.Install('hsqldb.jar', '%(basedir)s/program/classes/')
-        #r.Install('intro.bmp', '%(basedir)s/program/')
 
         r.Replace(
             '/bin/python', '%(bindir)s/python', '%(basedir)s/program/mailmerge.py'
         )
+
+        r.Run('bash compact_templates.sh "%(basedir)s"')
 
         # This is not a help document
         r.ComponentSpec('runtime', '%(basedir)s/help/main_transform.xsl')
@@ -260,7 +262,13 @@ class OpenOffice(CPackageRecipe):
             ('writer', 'Wrt'),
         ]
         for (app, d) in apps:
-            r.loadManifest('gid_Module_Prg_'+d, '%s-%s:runtime' % (r.name, app))
+            pkg = '%s-%s:runtime' % (r.name, app)
+            desktopFile = '%(datadir)s/applications/'+app+'%(major_version)s.desktop'
+            r.loadManifest('gid_Module_Prg_'+d, pkg)
+            r.PackageSpec(pkg, desktopFile)
+
+        desktopFile = '%(datadir)s/applications/web%(major_version)s.desktop'
+        r.PackageSpec(pkg, desktopFile)
 
         # make sure basedir exists... we ran into this problem before. can't
         # use an assert since that would be run before everything else
