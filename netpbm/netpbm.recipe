@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Netpbm(CPackageRecipe):
+    name = 'netpbm'
+    version = '10.35.l1'
+    # fedora version doesn't match up with the version of the tarball they have
+    # in their own package...
+    srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/netpbm-10.35-6.fc6.src.rpm'
+
+    buildRequires = [ 'libjpeg:devel', 'libpng:devel', 'libtiff:devel',
+        'flex:runtime', 'zlib:devel', 'libxml2:devel', 'perl:lib',
+        'perl:runtime', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('%(name)s-%(version)s.tar.bz2', rpm=r.srpm)
+        rpmPatches = [ 'netpbm-10.22-security2.patch',
+            'netpbm-10.23-security.patch', 'netpbm-10.28-CAN-2005-2471.patch', ]
+        for x in rpmPatches:
+            r.addPatch(x, rpm=r.srpm)
+        # this is, odly enough, how the docs say to package netpbm
+        r.addPatch('netpbm-10.35-config.patch', macros=True)
+        r.Copy('Makefile.config.in', 'Makefile.config')
+        r.Make()
+        # the install script will not install to an already-existing directory,
+        # so we patched it to install to a nonsensical directory
+        r.Make('package pkgdir=%(builddir)s/foobarbaz/')
+        r.Move('foobarbaz/*', '/usr/')
+        r.Move('/usr/link/*', '%(libdir)s/')
+        # clean up things that policy complains about
+        r.Remove('%(bindir)s/{doc.url,pnmtotiff,ppmtojpeg}')
+        r.Remove('%(prefix)s/{README,config_template,VERSION,pkginfo}')
+        r.Move('/usr/man/*', '%(mandir)s/')
+        # FIXME: remove when conary-1.1.14 is released
+        r.Remove('/usr/man', recursive=True)
+        # multilib fixes
+        r.Remove('%(libdir)s/netpbm.so')
+        r.Move('/usr/lib/*', '%(libdir)s/')
+        r.Symlink('%(libdir)s/libnetpbm.so.10', '%(libdir)s/libnetpbm.so')
