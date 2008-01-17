@@ -1,0 +1,112 @@
+--- ypbind-mt-1.16/src/serv_list.c.race	2004-01-14 20:20:04.000000000 +0100
++++ ypbind-mt-1.16/src/serv_list.c	2004-01-19 15:31:32.086601053 +0100
+@@ -512,6 +512,7 @@
+ }
+ 
+ static struct binding *in_use = NULL;
++static int found_one;
+ 
+ static bool_t
+ eachresult (bool_t *out, struct sockaddr_in *addr)
+@@ -589,7 +590,10 @@
+       if (in_use->client_handle == NULL)
+ 	return 0;
+ 
++	  pthread_rdwr_wlock_np (&domainlock);
+       in_use->active = 0;
++	  found_one++;
++	  pthread_rdwr_wunlock_np (&domainlock);
+ 
+       return 1;
+     }
+@@ -617,19 +621,7 @@
+     log_msg (LOG_DEBUG, _("do_broadcast() for domain '%s' is called"),
+ 	     domain);
+ 
+-  /* Get a writer lock for the domain list, since we modify one
+-     entry.  */
+-  pthread_rdwr_wlock_np (&domainlock);
+-  list->active = -1;
+-  pthread_rdwr_wunlock_np (&domainlock);
+-
+-  /* Get a reader lock while we do the broadcast. Normally we would
+-     need the writer lock, since we modify the data. But in this case,
+-     the broadcast timeout is too long and we would block all queries.
+-     Since we don't change pointers and all data is always valid, we
+-     only acquire the reader lock. */
+-  pthread_rdwr_rlock_np (&domainlock);
+-
++  found_one = 0;
+   in_use = list; /* global variable for eachresult */
+ 
+   status = clnt_broadcast (YPPROG, YPVERS, YPPROC_DOMAIN_NONACK,
+@@ -640,13 +632,24 @@
+ 
+   if (status != RPC_SUCCESS)
+     {
++      pthread_rdwr_wlock_np (&domainlock);
++      list->active = -1;
++      pthread_rdwr_wunlock_np (&domainlock);
+       remove_bindingfile (domain);
+       log_msg (LOG_ERR, "broadcast: %s.", clnt_sperrno (status));
+     }
+   else
+-    update_bindingfile (list);
+-
+-  pthread_rdwr_runlock_np (&domainlock);
++    {
++      if (found_one) {
++        pthread_rdwr_rlock_np (&domainlock);
++        update_bindingfile (list);
++        pthread_rdwr_runlock_np (&domainlock);
++      } else {
++        pthread_rdwr_wlock_np (&domainlock);
++        list->active = -1;
++        pthread_rdwr_wunlock_np (&domainlock);
++      }
++    }
+ 
+   if (debug_flag)
+     log_msg (LOG_DEBUG, _("leave do_broadcast() for domain '%s'"),
+@@ -750,10 +753,6 @@
+   if (list->server[0].host == NULL) /* There is no known server */
+     return 0;
+ 
+-  pthread_rdwr_wlock_np (&domainlock);
+-  list->active = -1;
+-  pthread_rdwr_wunlock_np (&domainlock);
+-
+   pings = malloc (sizeof (struct findserv_req *) * _MAXSERVER);
+   if (pings == NULL)
+     return 0;
+@@ -793,6 +792,9 @@
+   if (pings_count == 0)
+     {
+       free (pings);
++	  pthread_rdwr_wlock_np (&domainlock);
++	  list->active = -1;
++	  pthread_rdwr_wunlock_np (&domainlock);
+       return 0;
+     }
+ 
+@@ -805,6 +807,9 @@
+       for (i = 0; i < pings_count; ++i)
+         free (pings[i]);
+       free (pings);
++	  pthread_rdwr_wlock_np (&domainlock);
++	  list->active = -1;
++	  pthread_rdwr_wunlock_np (&domainlock);
+       return 0;
+     }
+   clnt->cl_auth = authunix_create_default ();
+@ -886,10 +894,6 @@
+   if (list->server[0].host == NULL) /* There is no known server */
+     return 0;
+ 
+-  pthread_rdwr_wlock_np (&domainlock);
+-  list->active = -1;
+-  pthread_rdwr_wunlock_np (&domainlock);
+-
+   while (list->server[i].host != NULL && i < _MAXSERVER)
+     {
+

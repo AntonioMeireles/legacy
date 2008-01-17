@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Ypbind(CPackageRecipe):
+    name = 'ypbind'
+    version = '1.20.4'
+
+    buildRequires = [ 'pkgconfig:devel', 'dbus-glib:devel', ]
+
+    def setup(r):
+        r.mainDir('ypbind-mt-%(version)s')
+
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/ypbind-1.19-0.3.src.rpm'
+        r.addArchive('ftp://ftp.us.kernel.org/pub/linux/utils/net/NIS/ypbind-mt-%(version)s.tar.bz2', keyid='517D0F0E')
+
+        r.addSource('ypbind.init', rpm=srpm,
+            apply="sed -i '/# chkconfig:/s/ 27/ 11/g' ypbind.init")
+
+        r.addPatch('ypbind-1.11-broadcast.patch', rpm=srpm)
+        r.addPatch('ypbind-binding.patch')
+        r.addPatch('ypbind.init.domainname.patch')
+
+        r.macros.sbindir = '%(essentialsbindir)s'
+
+        r.Configure()
+        r.Make()
+
+
+        r.MakeInstall()
+        r.MakeDirs('%(initdir)s', '%(localstatedir)s/yp/binding')
+        r.Install('etc/yp.conf', '%(sysconfdir)s/yp.conf', mode=0644)
+        # system-config-auth creates /etc/yp.conf, preserve it
+        r.InitialContents('%(sysconfdir)s/yp.conf')
+        r.Install('ypbind.init', '%(initdir)s/ypbind', mode=0755)
+
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/yp/binding')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('yp-tools:runtime', '%(initdir)s/ypbind')
+        r.Requires('portmap:runtime', '%(essentialsbindir)s/ypbind')
