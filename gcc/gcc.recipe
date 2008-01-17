@@ -1,0 +1,354 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Gcc(RPMPackageRecipe, CPackageRecipe):
+
+    buildRequires = [ 'file:runtime', 'flex:runtime', 'gettext:runtime',
+                      'perl:runtime', 'texinfo:runtime', 'byacc:runtime',
+                      'bison:runtime', ]
+    Flags.core = False
+    if Use.cross:
+        buildRequires.extend(['binutils:runtime[!cross]',
+                              'binutils:runtime[cross]'])
+    if Flags.core:
+        keepBuildReqs = True
+        crossRequires = ['userspace-kernel-headers:devel']
+        buildRequires.extend(['gcc[!cross]',
+                              'glibc-headers:devel[cross]'])
+        clearBuildReqs(
+            'gcc:runtime',
+            'gcc:lib',
+            'gcc:devel',
+            'gcc:devellib',
+            'libgcc:lib',
+            'libgcc:devellib')
+
+    elif Use.bootstrap or Use.cross:
+        keepBuildReqs = True
+        clearBuildReqs('gcc:runtime', 'gcc:devel', 'gcc:lib')
+        if Use.cross:
+            buildRequires.append('gcc[cross,gcc.core]')
+        else:
+            buildRequires.append('gcc[cross,!gcc.core]')
+        buildRequires.append('gcc[!cross]')
+        buildRequires.append('binutils[!cross]')
+        crossRequires = ['glibc:devel',
+                         'userspace-kernel-headers:devel']
+    else:
+        # install-info needed to get info-file tag description
+        buildRequires = ['atk:devel', 'file:runtime', 'flex:runtime',
+                         'gettext:runtime', 'glib:devel', 'gtk:devel',
+                         'install-info:runtime', 'libart_lgpl:devel',
+                         'pango:devel', 'perl:runtime', 'texinfo:runtime',
+                         'zlib:devel', 'cairo:devel', 'fontconfig:devel',
+                         'freetype:devel', 'libpng:devel',
+                         'pkgconfig:devel', 'alsa-lib:devel', 'gmp:devel',
+                         'autoconf:runtime', 'automake:runtime', 'zip:runtime',
+                         'libICE:devel', 'libSM:devel', 'libX11:devel',
+                         'libXau:devel', 'libXext:devel', 'libXrender:devel',
+                         'libXtst:devellib', 'libXdmcp:devel', 'libXt:devel',
+                         'libXi:devel', 'mpfr:devel', 'bison:runtime', ]
+
+        if Arch.x86_64:
+            buildRequires.extend((
+                    'glibc:lib[is:x86(i486,i586,i686)]',
+                    'glibc:devellib[is:x86(i486,i586,i686)]'))
+
+    name = 'gcc'
+    version = '4.1.1'
+    rpmRelease = '52.el5.2'
+    distroVersion = '5Server'
+    isRHEL = True
+
+    tarballName = 'gcc-4.1.1-20070105.tar.bz2'
+
+    rpmPatches = [ 'gcc41-ice-hack.patch',
+                   'gcc41-ppc64-m32-m64-multilib-only.patch',
+                   'gcc41-ia64-libunwind.patch',
+                   'gcc41-java-nomulti.patch',
+                   'gcc41-ada-pr18302.patch',
+                   'gcc41-ada-tweaks.patch', 'gcc41-java-slow_pthread_self.patch',
+                   'gcc41-ppc32-retaddr.patch', 'gcc41-mni.patch',
+                   'gcc41-dsohandle.patch', 'gcc41-rh184446.patch',
+                   'gcc41-pr20297-test.patch', 'gcc41-objc-rh185398.patch',
+                   'gcc41-tests.patch', 'gcc41-pr25874.patch',
+                   'gcc41-pr30189.patch', 'gcc41-i386-tune-geode.patch',
+                   'gcc41-hash-style-gnu.patch', 'gcc41-pr30001.patch',
+                   'gcc41-java-libdotdotlib.patch', 'gcc41-pr28709.patch',
+                   'gcc41-pr28755.patch', 'gcc41-pr27898.patch',
+                   'gcc41-pr27567.patch', 'gcc41-pr29272.patch',
+                   'gcc41-pr29059.patch', 'gcc41-strncat-chk.patch',
+                   'gcc41-pr29703.patch', 'gcc41-pr29299.patch',
+                   'gcc41-libjava-anonverscript.patch',
+                   'gcc41-ppc64-libffi-unwind.patch', 'gcc41-pr30113.patch',
+                   'gcc41-pr30110.patch', 'gcc41-pr30143.patch',
+                   'gcc41-pr30045.patch', 'gcc41-pr24036-revert.patch',
+                   'gcc41-libgomp-scanrtl.patch', 'gcc41-java-zoneinfo.patch', ]
+
+    javaHome = '%(prefix)s/lib/jvm/java-1.4.2-gcj-1.4.2.0/jre'
+
+    def addPatches(r):
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm, level=0)
+        r.addPatch('gcc-java-nomulti.patch')
+        r.addPatch('gcc-java-fastjar.patch')
+
+    def setup(r):
+        r.macros.securityflags = ' -fstack-protector'
+        r.addArchive(r.tarballName, rpm=r.srpm)
+        r.addPatches()
+        r.Replace('4.1.2', '4.1.1', 'gcc/BASE-VER')
+        r.Run('cp -a libstdc++-v3/config/cpu/i{4,3}86/atomicity.h')
+        r.Replace('-fno-exceptions ', '-fno-exceptions -fno-asynchronous-unwind-tables',
+                  'gcc/Makefile.in' )
+        r.Run('./contrib/gcc_update --touch')
+        # FSF asks folks who ship a modified gcc to change these to indicate who
+        # was shipping it
+        r.Replace(('#define VERSUFFIX.*', '#define VERSUFFIX " (rPath Inc.)"',),
+                  ('bug_report_url.*', 'bug_report_url[] = "<URL:https://issues.rpath.com/>";'),
+                  'gcc/version.c')
+
+        r.macros.javaHome = r.javaHome
+        r.install()
+        r.postInstall()
+
+        r.PackageSpec('libgcc', '%(libdir)s/libgcc_s.*',
+                      '%(libdir)s/gcc/%(target)s/%(version)s/libgcc.*')
+        if Arch.x86_64:
+            r.PackageSpec('libgcc', '/usr/lib/libgcc_s.*',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/32/libgcc.*')
+
+        if not Flags.core:
+            r.PackageSpec('libstdc++', '%(libdir)s/libstdc\+\+.*',
+                          '%(libdir)s/libsupc\+\+.*',
+                          '%(includedir)s/c\+\+/.*',
+                          '%(docdir)s/gcc-%(version)s/libstdc\+\+-v3/.*')
+            if Arch.x86_64:
+                r.PackageSpec('libstdc++', '/usr/lib/libstdc\+\+.*',
+                              '/usr/lib/libsupc\+\+.*')
+
+            r.PackageSpec('gcc-c++',
+                          '%(bindir)s/c\+\+',
+                          '%(bindir)s/g\+\+',
+                          '%(bindir)s/%(target)s-c\+\+',
+                          '%(bindir)s/%(target)s-g\+\+',
+                          '%(bindir)s/c\+\+filt',
+                          '%(mandir)s/man1/g\+\+.1.gz')
+
+            r.PackageSpec('gcc-fortran',
+                          '%(bindir)s/gfortran',
+                          '%(libdir)s/libgfortran.*',
+                          '%(mandir)s/man1/gfortran.1.gz',
+                          '%(infodir)s/gfortran.info.gz',
+                          '%(libexecdir)s/gcc/%(target)s/%(version)s/f951')
+
+            r.PackageSpec('gcc-java',
+                          '%(bindir)s/gappletviewer',
+                          '%(bindir)s/gcj.*',
+                          '%(bindir)s/gij',
+                          '%(bindir)s/gjarsigner',
+                          '%(bindir)s/gjnih',
+                          '%(bindir)s/gkeytool',
+                          '%(bindir)s/grmic',
+                          '%(bindir)s/grmiregistry',
+                          '%(bindir)s/rmic',
+                          '%(bindir)s/rmiregistry',
+                          '%(bindir)s/%(target)s-gcj',
+                          '%(bindir)s/%(target)s-gcjh',
+                          '%(bindir)s/jar',
+                          '%(bindir)s/grepjar',
+                          '%(bindir)s/fastjar',
+                          '%(bindir)s/jcf-dump',
+                          '%(bindir)s/jv-scan',
+                          '%(bindir)s/jv-convert',
+                          '%(mandir)s/man1/gcj.*',
+                          '%(mandir)s/man1/gij.*',
+                          '%(mandir)s/man1/jcf-dump.*',
+                          '%(mandir)s/man1/jv-scan.*',
+                          '%(mandir)s/man1/jv-convert.*',
+                          '%(mandir)s/man1/jar.*',
+                          '%(mandir)s/man1/jv-scan.*',
+                          '%(mandir)s/man1/grepjar.*',
+                          '%(mandir)s/man1/rmi.*',
+                          '%(infodir)s/gcj.*',
+                          '%(infodir)s/fastjar.*',
+                          '%(datadir)s/java/.*',
+                          '%(libdir)s/pkgconfig/libgcj.pc',
+                          '%(libdir)s/libgcj.*',
+                          '%(libdir)s/security/.*',
+                          '%(libdir)s/lib-gnu-java.*',
+                          '%(libdir)s/lib-org.*',
+                          '%(libdir)s/gcc-lib/java/.*',
+                          '%(libdir)s/classpath/.*',
+                          '%(libdir)s/gcj.*',
+                          '%(libdir)s/libgij.*',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/include/gcj/.*',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/include/jni.*',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/include/jvmpi.h',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/include/jawt.*',
+                          '%(libexecdir)s/gcc/%(target)s/%(version)s/jvgenmain'
+                          '%(libexecdir)s/gcc/%(target)s/%(version)s/jc1',
+                          '%(includedir)s/jni.h',
+                          '%(includedir)s/jvmpi.h',
+                          '%(includedir)s/gcj/.*',
+                          '%(includedir)s/gnu/gcj/.*',
+                          '%(includedir)s/gnu/awt/.*',
+                          '%(includedir)s/gnu/classpath/.*',
+                          '%(includedir)s/java/.*',
+                          '%(includedir)s/javax/.*',
+                          '%(includedir)s/gnu/javax/.*',
+                          '%(includedir)s/gnu/java/.*',
+                          '%(docdir)s/gcc-%(version)s/fastjar/.*',
+                          '%(docdir)s/gcc-%(version)s/libjava/.*',
+                          '%(docdir)s/gcc-%(version)s/gcc/java/.*',
+                          )
+
+            r.PackageSpec('gcc-objc',
+                          '%(libdir)s/libobjc.*',
+                          '%(libdir)s/gcc/%(target)s/%(version)s/include/objc/.*',
+                          '%(libexecdir)s/gcc/%(target)s/%(version)s/cc1obj',
+                          '%(docdir)s/gcc-%(version)s/gcc/objc/.*'
+                          '%(docdir)s/gcc-%(version)s/libobjc/.*')
+
+            if Arch.x86_64:
+                r.PackageSpec('gcc-objc',
+                          '/usr/lib/libobjc.*')
+
+        # we want to do this only for non-cross non-bootstrap versions of gcc
+        if not (Use.bootstrap | Use.cross | Flags.core):
+            r.Symlink('jar', '%(bindir)s/fastjar')
+            r.DanglingSymlinks(exceptions='%(bindir)s/fastjar')
+
+            for prog in ('zip', 'unzip'):
+                r.Requires('%(bindir)s/'+prog, '%(bindir)s/.*jar')
+
+        r.Requires('%(bindir)s/c++', '%(includedir)s/c\+\+/.*')
+        r.Requires('libgcc:devellib', '%(bindir)s/gcc')
+        r.Requires('binutils:runtime', '%(bindir)s/gcc')
+        r.Requires('libstdc++:devel', # gcc-c++:runtime
+                   '%(bindir)s/c\+\+',
+                   '%(bindir)s/g\+\+',
+                   '%(bindir)s/%(target)s-c\+\+',
+                   '%(bindir)s/%(target)s-g\+\+',
+                   '%(bindir)s/c\+\+filt')
+        if Use.cross:
+            r.Requires('binutils:runtime(target-%(target)s)',
+                       '%(crossprefix)s/bin/%(target)s-gcc')
+
+        # Policy tries to move the libgcc_s_32.so symlink, but this is a
+        # special case multilib trove. We can just exclude it so that
+        # -m32 works
+        r.FixupMultilibPaths(exceptions='/usr/lib/libgcc_s_32.so')
+
+        # we don't want this package to come out biarch, so we white out
+        # anywhere that might introduce the x86 flavor
+        if Arch.x86_64:
+            r.Flavor(exceptions='/usr/lib/.*')
+            r.Flavor(exceptions='/usr/lib64/gcc/x86_64-unknown-linux/%(version)s/32/.*')
+
+    def install(r):
+        if Flags.core:
+            r.ManualConfigure('--target=%(target)s '
+                  '--host=%(host)s '
+                  '--prefix=%(crossprefix)s '
+                  '--with-sysroot=%(sysroot)s '
+                  '--enable-languages=c '
+                  '--enable-threads=posix '
+                  '--disable-nls '
+                  '--disable-shared '
+                  '--with-newlib '
+                  '--disable-biarch '
+                  '--disable-multilib', objDir='obj')
+            r.Make('all-gcc', dir='obj')
+            r.MakeInstall(installtarget='install-gcc', dir='obj')
+        elif Use.cross:
+            r.ManualConfigure('--target=%(target)s '
+                     '--host=%(host)s '
+                     '--prefix=%(crossprefix)s '
+                     '--with-sysroot=%(sysroot)s '
+                     '--enable-languages=c,c++ '
+                     '--enable-threads=posix '
+                     '--disable-nls '
+                     '--enable-shared '
+                     '--enable-__cxa_atexit '
+                     '--disable-biarch '
+                     '--disable-multilib ', objDir='obj')
+            r.Make('all', dir='obj')
+            r.MakeInstall(dir='obj')
+        else:
+            conf = ('--target=%(target)s '
+                           '--host=%(target)s '
+                           '--prefix=%(prefix)s '
+                           '--enable-shared '
+                           '--enable-threads=posix '
+                           '--with-cpu=generic '
+                           '--enable-__cxa_atexit ')
+            if Use.bootstrap:
+                conf += '--enable-languages=c,c++ '
+                conf += '--disable-multilib '
+                conf += '--build=%(build)s '
+                preconf = 'BUILD_CC=gcc'
+                premake = ''
+            else:
+                conf += '--enable-languages=c,c++,objc,obj-c++,java,fortran '
+                conf += '--build=%(target)s '
+                conf += '--with-system-zlib '
+                conf += '--enable-checking=release '
+                conf += '--disable-libunwind-exceptions '
+                conf += '--enable-java-awt=gtk '
+                conf += '--enable-libgcj-multifile '
+                conf += '--disable-dssi '
+                conf += '--with-java-home=%(javaHome)s '
+                preconf = ''
+                premake = ''
+                if Arch.x86_64:
+                    libpath = 'LIBRARY_PATH=/usr/lib64:/usr/lib'
+                    preconf += libpath
+                    premake += libpath
+
+            r.Configure(conf, objDir='obj', preConfigure=preconf, bootstrapFlags='')
+            r.Make('profiledbootstrap', preMake=premake, dir='obj')
+            if Use.bootstrap:
+                r.fixBootstrap()
+            r.MakeInstall(dir='obj')
+
+    def postInstall(r):
+        if Use.cross:
+            # exclude cross compile files from trove flavor
+            r.Flavor(exceptions='%(crossprefix)s/')
+            r.Requires(exceptDeps='soname: .*')
+            # unfortunately, that's all the flavor that this trove has, so fake the flavor
+            if Arch.x86:
+                pass
+        if not (Use.cross | Flags.core):
+            r.Symlink('gcc', '%(bindir)s/cc')
+            # note, not %(lib)s - /lib/cpp is the standard
+            r.Symlink('%(bindir)s/cpp', '/lib/cpp')
+            # owned by binutils
+            r.Remove('%(libdir)s/libiberty.a')
+            r.Remove('%(prefix)s/lib/libiberty.a')
+
+# since the bootstrap compiler is built by a cross compiler, and
+# the cross compiler is used to generate the specs file, the
+# new specs file erroneously has:
+#
+# *cross_compile:
+# 1
+#
+# This awk script replaces the line after cross_compile with 0.
+#
+    def fixBootstrap(r):
+        awkscript = """'{
+          print;
+          if (/cross_compile:/) {
+             getline
+             print 0
+          }
+        }'"""
+
+        r.Run('awk ' + awkscript + '< obj/gcc/specs > obj/gcc/specs-')
+        r.Run('mv obj/gcc/specs- obj/gcc/specs')
