@@ -1,0 +1,72 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class CyrusSasl(CPackageRecipe):
+    name = 'cyrus-sasl'
+    version = '2.1.22'
+
+    buildRequires = [  'autoconf:runtime', 'automake:runtime',
+        'libtool:runtime', 'db:devel', 'gdbm:devel', 'krb5:devel',
+        'openssl:devel', 'pam:devel', 'pkgconfig:devel', ]
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.macros.cflags += ' -fPIC'
+        r.macros.plugindir = '%(libdir)s/sasl2'
+
+        r.addArchive('ftp://ftp.andrew.cmu.edu/pub/cyrus-mail/')
+        r.addSource('saslauthd.init', dest='%(initdir)s/saslauthd')
+        r.addSource('saslauthd.sysconfig',
+                    dest='%(sysconfdir)s/sysconfig/saslauthd')
+
+        r.Replace(('gssapi_dir="\${gssapi}/lib"',
+                   'gssapi_dir="${gssapi}/%(lib)s"'),
+                   'configure', 'saslauthd/configure')
+
+        r.Replace(('LDFLAGS="\$LDFLAGS -L\$gssapi/lib"',
+                   'LDFLAGS="$LDFLAGS -L$gssapi/%(lib)s"'),
+                  'configure', 'saslauthd/configure')
+
+        r.Configure('--with-pic --enable-shared'
+                    ' --with-plugindir=%(plugindir)s'
+                    ' --enable-gssapi=%(prefix)s'
+                    ' --enable-gss_mutexes'
+                    ' --with-dblib=berkeley'
+                    ' --with-saslauthd=/var/run/saslauthd'
+                    ' --without-pwcheck'
+                    ' --with-devrandom=/dev/urandom'
+                    ' --enable-login'
+                    ' --disable-otp')
+
+        r.Make()
+        r.MakeInstall()
+
+        r.Install('saslauthd/saslauthd', '%(sbindir)s/testsaslauthd')
+
+        # create /var/run/saslauthd
+        r.MakeDirs('%(localstatedir)s/run/saslauthd')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/saslauthd')
+
+        # Give man page the right extension
+        r.Install('saslauthd/saslauthd.mdoc',
+                  '%(mandir)s/man8/saslauthd.8')
+
+        # Create DB file with correct ownership to ease sendmail+sasl setup
+        r.Create('%(sysconfdir)s/sasldb2', mode=0640)
+        r.Ownership('root', 'sasldb', '%(sysconfdir)s/sasldb2')
+
+        # We don't want the cat files
+        r.Remove('%(mandir)s/cat8/saslauthd.8')
+
+        r.Doc('doc/*.html')
+
+        r.PackageSpec('cyrus-sasl-server', '.*saslauthd.*')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.ComponentSpec('gssapi', '%(plugindir)s/.*gssapi.*')
+        r.ComponentSpec('md5', '%(plugindir)s/lib.*md5.*')
+        r.ComponentSpec('plain', '%(plugindir)s/lib(plain|login).*')
