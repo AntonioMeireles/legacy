@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class E2fsprogs(CPackageRecipe):
+    name = 'e2fsprogs'
+    version = '1.40.3'
+
+    buildRequires = [ 'gettext:runtime', 'install-info:runtime',
+        'perl:runtime']
+
+    def setup(r):
+        r.disableParallelMake()
+
+        # this isn't really a pre-release, but it hasn't hit the sourceforge
+        # mirrors yet. feel free to replace next time the package is updated
+        #r.addArchive('mirror://sourceforge/e2fsprogs/')
+        r.addArchive('http://userweb.kernel.org/~tytso/e2-pre-release/', keyid='93674C40')
+
+        # remove this when the upstream source archive is fixed
+        r.SetModes('po/*po', 0644)
+        r.Configure('--enable-elf-shlibs --enable-e2initrd-helper')
+        r.Make('libs progs docs')
+        r.MakeInstall('install-libs root_sbindir=%(essentialsbindir)s'
+                         ' root_libdir=%(essentiallibdir)s')
+        for file in ('libcom_err.so', 'libe2p.so', 'libext2fs.so',
+                     'libss.so', 'libuuid.so'):
+            r.Symlink('%%(essentiallibdir)s/%s.2' %file, file)
+
+        # krb5 needs this to be in system include dirs
+        r.Copy('%(includedir)s/et/com_err.h', '%(includedir)s/')
+
+        # test files
+        if Use.buildtests:
+            r.Make('tst_badblocks tst_iscan tst_byteswap', dir='lib/ext2fs')
+            r.Make('base_device', dir='misc')
+            r.Make('test_script', dir='tests')
+        r.NormalizeCompression(exceptions='%(thistestdir)s/.*')
+        r.TestSuiteFiles('tst_.*', 'misc/base_device.*')
+
+        r.TestSuite('lib/ext2fs', './tst_badblocks')
+        r.TestSuite('lib/ext2fs', './tst_iscan')
+        r.TestSuite('lib/ext2fs', './tst_byteswap')
+        r.TestSuite('misc', './base_device < ./base_device.tst > base_device.out')
+        r.TestSuite('tests', './test_script')
