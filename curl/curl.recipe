@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Curl(AutoPackageRecipe):
+    name = 'curl'
+    version = '7.17.0'
+
+    buildRequires = [ 'libtool:runtime', 'pkgconfig:devel', 'krb5:devel',
+                      'zlib:devel', 'perl:runtime', 'openssl:devel', ]
+    # requires: openssl:runtime for shared ca-bundle
+
+    def unpack(r):
+        r.addArchive('http://curl.haxx.se/download/', keyid='279D5C91')
+
+    def configure(r):
+        r.macros.cppflags += ' $(pkg-config --cflags openssl)'
+        r.macros.ldflags += ' $(pkg-config --libs openssl)'
+
+        r.Configure(' --enable-ipv6 --with-openssl=%(prefix)s'
+                    ' --with-ca-bundle=%(sysconfdir)s/ssl/certs/ca-bundle.crt')
+
+    def policy(r):
+        # Use system default, not curl version
+        r.Remove('%(datadir)s/curl/curl-ca-bundle.crt',
+                 '%(sysconfdir)s/ssl/certs/ca-bundle.crt')
+
+        r.Doc('docs/BUGS', 'docs/CONTRIBUTE', 'docs/FAQ',
+              'docs/FEATURES', 'docs/INSTALL', 'docs/INTERNALS',
+              'docs/MANUAL', 'docs/RESOURCES',
+              'docs/TheArtOfHttpScripting', 'docs/TODO')
+        r.ComponentSpec('devel',
+            '%(bindir)s/curl-config',
+            '%(mandir)s/man1/curl-config.*')
+
+        # testing
+        if Use.buildtests:
+            for dir in [ 'libtest', 'server' ]:
+                r.Make(dir='tests/%s' % dir)
+        r.TestSuiteLinks(fileMap={'src/curl' : '%(bindir)s/curl'})
+        r.TestSuite('tests', 'perl ./runtests.pl')
+        r.EnforceConfigLogBuildRequirements(exceptions=['groff:runtime'])
