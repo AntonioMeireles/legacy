@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Tclx(RPMPackageRecipe, CPackageRecipe):
+    name = 'tclx'
+    majorver = '8.4'
+    version = majorver + '.0'
+
+    buildRequires = [ 'autoconf:runtime', 'tcl:devel',
+                      'util-linux:runtime', ]
+
+    rpmRelease = '3.1'
+    rpmPatches = [ 'tclx-8.4-relid.patch' ]
+    tarballName = '%(name)s%(majorver)s.tar.bz2'
+
+    def setup(r):
+        r.macros.majorver = r.majorver
+
+        # Use sources from rpm until the patch can be dropped
+        #r.addArchive('http://internap.dl.sourceforge.net/sourceforge/%(name)s/%(name)s%(majorver)s.tar.bz2')
+        r.unpack()
+
+        r.Run('autoconf -f')
+        r.Configure('--with-tclconfig=%(libdir)s --enable-tk',
+                    '--with-tclinclude=%(includedir)s',
+                    '--enable-gcc --enable-64bit --disable-threads --enable-shared --enable-symbols',
+                    preConfigure='TCLX_INST_LIB=%(libdir)s')
+        r.disableParallelMake() # according to spec, -j breaks. trust it.
+        r.Make()
+
+        r.MakeInstall('INSTALL_ROOT=%(destdir)s TCLX_INST_LIB=%(libdir)s '
+                      'TCLX_INST_RUNTIME=%(datadir)s/tclX%(majorver)s '
+                      'TCLX_EXEC_RUNTIME=%(libdir)s/tclX%(majorver)s '
+                      'TCLX_INST_MAN=%(mandir)s',
+                      preMake='LANG=en_US.UTF-8')
+
+        r.Symlink('%(libdir)s/%(name)s%(majorver)s/libtclx%(majorver)s.so',
+                  '%(libdir)s/%(name)s%(majorver)s/libtclx.so')
