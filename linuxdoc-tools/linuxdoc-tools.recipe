@@ -1,0 +1,45 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class LinuxdocTools(RPMPackageRecipe, CPackageRecipe):
+    name = 'linuxdoc-tools'
+    version = '0.9.21'
+    rpmRelease = '7.1'
+    tarballName = 'linuxdoc-tools_%(version)s.tar.gz'
+
+    buildRequires = [ 'autoconf:runtime', 'flex:runtime',
+        'perl:lib', 'perl:runtime', 'sgml-common:runtime','opensp:runtime',
+        'tetex:runtime', ]
+
+    def setup(r):
+        r.unpack()
+        r.addPatch('linuxdoc-tools-0.9.13-letter.patch')
+        r.addPatch('linuxdoc-tools-0.9.20-strip.patch')
+        r.addPatch('linuxdoc-tools-0.9.20-lib64.patch')
+        r.addSource('COPYRIGHT')
+
+        r.Configure('--with-installed-nsgmls --with-installed-iso-entities')
+        r.Run('cd entity-map; autoconf')
+        r.Configure(dir='entity-map')
+        r.Make('OPTIMIZE="%(cflags)s"')
+        #This replace is required for MakePathsInstall to work.
+        r.Replace("\$main::prefix/share/sgml/iso-entities-8879.1986/iso-entities.cat",
+                  "/usr/share/sgml/sgml-iso-entities-8879.1986/catalog",
+                  "lib/LinuxDocTools.pm")
+        r.MakePathsInstall()
+        r.Move('%(docdir)s/%(name)s', '%(thisdocdir)s')
+        r.Remove('%(datadir)s/%(name)s/{epsf.*,url.st}')
+        r.Move('%(datadir)s/%(name)s/*.sty',
+               '%(datadir)s/texmf/tex/latex/misc/')
+        r.AutoDoc('VERSION', '.*README')
+        # Remove this line after conary 0.60.7 released
+        r.ComponentSpec('doc', '%(thisdocdir)s/.*')
+
+        # These requirements are approximate
+        r.Requires('tetex-latex:runtime', '%(bindir)s/')
+        r.Requires('gawk:runtime', '%(bindir)s/')
+        r.Requires('groff:runtime', '%(bindir)s/')
