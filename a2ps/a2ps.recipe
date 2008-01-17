@@ -1,0 +1,90 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class A2ps(RPMPackageRecipe, CPackageRecipe):
+    name = 'a2ps'
+    version = '4.13b'
+
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime',
+        'bison:devellib', 'bison:runtime', 'flex:devel',
+        'flex:runtime', 'gettext:runtime', 'gperf:runtime', 'libtool:devel',
+        'install-info:runtime', 'libtool:runtime', 'psutils:runtime',
+        'ImageMagick:runtime', 'cups:runtime' , 'ghostscript:runtime',
+        'groff:runtime', 'perl:lib', 'tetex-dvips:runtime', 'gettext:devel',
+        'tetex-latex:runtime', 'tetex:runtime',  'texinfo:runtime',
+        'file:runtime', 'perl:runtime', ]
+    rpmRelease = '53'
+    rpmPatches = [ 'a2ps-4.13-conf.patch', 'a2ps-4.13-etc.patch',
+        'a2ps-4.13-flex.patch', 'a2ps-4.13-security.patch',
+        'a2ps-4.13-glibcpaper.patch', 'a2ps-4.13-varargs.patch',
+        'a2ps-4.13-eucjp.patch.bz2', 'a2ps-4.13-autoenc.patch',
+        'a2ps-4.13b-attr.patch', 'a2ps-4.13b-numeric.patch',
+        'a2ps-4.13b-encoding.patch', 'a2ps-4.13b-tilde.patch',
+        'a2ps-4.13b-rm.patch', 'a2ps-4.13-euckr.patch',
+        'a2ps-4.13-gnusource.patch', 'a2ps-4.13-bison.patch',
+        'a2ps-4.13-hebrew.patch', 'a2ps-4.13-malloc.patch',
+        'a2ps-underquoted.patch', 'a2ps-autoconf.patch', ]
+
+    def setup(r):
+        r.unpack()
+        r.addPatch('a2ps-more-underquotes.patch')
+        r.addArchive('ftp://ftp.enst.fr/pub/unix/a2ps/i18n-fonts-0.1.tar.gz',
+                               dir='%(maindir)s/')
+
+        r.addSource('a2psfontmetrics.tagdescription', macros=True,
+            dest='%(tagdescriptiondir)s/a2psfontmetrics')
+        r.addSource('a2psfontmetrics.taghandler', macros=True,
+            dest='%(taghandlerdir)s/a2psfontmetrics', mode=0755)
+
+        r.Replace('/usr/local/bin', '%(bindir)s', 'contrib/emacs/a2ps.el')
+        r.Replace('^AC_PROG_GNU_M4', '', 'configure.in')
+        r.Replace('AC_CONFIG_LINKS', 'dnl AC_CONFIG_LINKS', 'm4/gettext.m4')
+        r.Run('libtoolize --copy --force')
+        r.Run('cp %(datadir)s/aclocal/libtool.m4 m4/')
+        r.Run('cp %(datadir)s/aclocal-1.10/lex.m4 m4/')
+        r.Run('aclocal-1.10 -I m4')
+        r.Run('autoconf')
+        # go through some hoops to ensure that automake isn't run
+        # by config.status because timestamps are off -- a2ps has
+        # a pretty broken automake configuration.
+        r.Run('find . -name Makefile.am | xargs touch')
+        r.Run('find . -name Makefile.in | xargs touch')
+
+        r.Environment('PERL', '%(bindir)s/perl')
+        r.Configure('--with-medium=_glibc --enable-kanji')
+        if Use.builddocs:
+            # Remove prebuilt info files to force regeneration
+            r.Run('find . -name "*.info*" -exec rm -f {} \;')
+
+        # Force rebuild of scanners
+        r.Run('find src lib -name \'*.l\' -exec touch {} \;')
+
+        # spec: these scanners use 'lineno' - incompatible with -CFe flex flags
+        r.Run('cd src; /bin/sh ../auxdir/ylwrap "flex" sheets-map.l lex.yy.c sheets-map.c --')
+        r.Run('cd src; /bin/sh ../auxdir/ylwrap "flex" lexssh.l lex.yy.c lexssh.c --')
+        r.Run('cd lib; /bin/sh ../auxdir/ylwrap "flex" lexppd.l lex.yy.c lexppd.c --')
+
+        r.Make()
+
+        r.MakeDirs('%(datadir)s/a2ps/{afm,fonts}')
+        r.MakeInstall()
+        r.Install('i18n-fonts-0.1/afm/*.afm', '%(datadir)s/a2ps/afm/')
+        r.Install('i18n-fonts-0.1/fonts/*.pfb', '%(datadir)s/a2ps/fonts/')
+
+        # this should be a zero-length config file so that conary
+        # can verify the permissions without ever touching the contents
+        # the tag handler will fill this file in
+        r.Create('%(datadir)s/a2ps/afm/fonts.map')
+        r.Config('%(datadir)s/a2ps/afm/fonts.map')
+
+        r.Requires('/dev/null', '%(taghandlerdir)s/a2psfontmetrics')
+        r.Requires('%(essentialbindir)s/mv',
+                   '%(taghandlerdir)s/a2psfontmetrics')
+        r.Requires('psutils:runtime', '%(bindir)s/a2ps')
+
+        # Need to do this manually; Emacs has moved to contrib (RPL-1527).
+        r.Move('/a2ps*.el', '%(datadir)s/emacs/site-lisp/')
