@@ -1,0 +1,40 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Portmap(RPMPackageRecipe, CPackageRecipe):
+    name = 'portmap'
+    version = '4.0'
+    rpmRelease = '65.2.2.1'
+    tarballName = '%(name)s_%(majorver)s.tar.gz'
+
+    buildRequires = [ 'tcp_wrappers:devel' ]
+
+    rpmSources = [ 'pmap_set.8', 'pmap_dump.8', 'portmap.8' ]
+
+    rpmPatches = [ 'portmap-4.0-linux.patch', 'portmap-malloc.patch',
+                   'portmap-4.0-cleanup.patch', 'portmap-4.0-rpc_user.patch',
+                   'portmap-4.0-sigpipe.patch', 'portmap-4.0-errno.patch' ]
+
+    def setup(r):
+        r.macros.majorver = r.version.split('.')[0]
+        r.unpack()
+        # Source: ftp://coast.cs.purdue.edu/pub/tools/unix/netutils/portmap/
+        r.addSource('portmap.init', rpm=r.srpm,
+            apply="sed -i '/# chkconfig:/s/ 13/ 08/g' portmap.init")
+
+        r.Make('FACILITY=LOG_AUTH ZOMBIES="-DIGNORE_SIGCHLD -Dlint"'
+                  ' LIBS="-lnsl -lwrap" AUX=""')
+
+        r.Install('portmap', '%(essentialsbindir)s/', mode=0755)
+        r.Install('pmap_set', 'pmap_dump', '%(sbindir)s/', mode=0755)
+        r.Install('pmap_*.8', 'portmap.8', '%(mandir)s/man8/')
+        r.Install('portmap.init', '%(initdir)s/portmap')
+        r.AutoDoc('BLURB')
+        r.UtilizeUser('rpc', '%(essentialsbindir)s/portmap')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
