@@ -1,0 +1,156 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Php(CPackageRecipe):
+    name = 'php'
+    version = '5.2.5'
+
+    buildRequires = [ 'bzip2:devel', 'curl:devel', 'libstdc++:devel',
+                      'db:devel', 'expat:devel',
+                      'freetype:devel', 'gd:devel',
+                      'gdbm:devel', 'gmp:devel',
+                      'aspell:devel', 'httpd:devel',
+                      'libjpeg:devel', 'libpng:devel',
+                      'pam:devel', 'gcc:devel',
+                      'ncurses:devel', 'openssl:devel',
+                      'zlib:devel', 'pcre:devel',
+                      'bzip2:runtime', 'perl:runtime',
+                      'libtool:runtime', 'mysql:devel',
+                      'postgresql:devel', 'postgresql:devellib',
+                      'sed:runtime','libxslt:devel',
+                      'ncurses:devel', 'libxml2:devel', 'wget:runtime',
+                      'httpd:runtime', 'apr:devel', 'libidn:devel',
+                      'apr-util:devel','openldap:devel', 'sendmail:runtime',
+                      'bison:runtime', 'flex:runtime', 'pkgconfig:devel',
+                      'krb5:devel', ]
+
+    # FIXME: add buildreqs to work around rmake bug RMK-580
+    buildRequires.extend(['procmail:runtime', 'mailbase:runtime'])
+
+    def setup(r):
+        r.addArchive('http://us2.php.net/distributions/')
+        r.addSource('php.conf')
+
+        commonConfigure = (
+                    ' --with-libdir=%(lib)s'
+                    ' --with-config-file-path=%(sysconfdir)s'
+                    ' --with-config-file-scan-dir=%(sysconfdir)s/php.d'
+                    ' --disable-debug'
+                    ' --enable-pic'
+                    ' --disable-rpath'
+                    ' --enable-inline-optimization'
+                    ' --with-bz2'
+                    ' --with-db4=%(prefix)s'
+                    ' --with-curl'
+                    ' --with-exec-dir=%(bindir)s'
+                    ' --with-freetype-dir=%(prefix)s'
+                    ' --with-png-dir=%(prefix)s'
+                    ' --with-gd=shared'
+                    ' --enable-gd-native-ttf'
+                    ' --without-gdbm'
+                    ' --with-gettext'
+                    ' --with-ncurses=shared'
+                    ' --with-gmp'
+                    ' --with-iconv'
+                    ' --with-jpeg-dir=%(prefix)s'
+                    ' --with-openssl'
+                    ' --with-png'
+                    ' --with-pspell'
+                    ' --with-regex=system'
+                    ' --with-xml'
+                    ' --with-expat-dir=%(prefix)s'
+                    ' --with-dom=shared,%(prefix)s'
+                    ' --with-dom-xslt=%(prefix)s'
+                    ' --with-dom-exslt=%(prefix)s'
+                    ' --with-xmlrpc=shared'
+                    ' --with-pcre-regex=%(prefix)s'
+                    ' --with-zlib'
+                    ' --with-layout=GNU'
+                    ' --enable-bcmath'
+                    ' --enable-exif'
+                    ' --enable-ftp'
+                    ' --enable-magic-quotes'
+                    ' --enable-safe-mode'
+                    ' --enable-sockets'
+                    ' --enable-sysvsem'
+                    ' --enable-sysvshm'
+                    ' --enable-track-vars'
+                    ' --enable-trans-sid'
+                    ' --enable-yp'
+                    ' --enable-wddx'
+                    ' --with-pear=%(datadir)s/pear'
+                    ' --with-kerberos'
+                    ' --with-ldap=shared'
+                    ' --with-mysql=shared,%(prefix)s'
+                    ' --with-pgsql=shared,%(prefix)s'
+                    ' --enable-libxml=shared'
+                    ' --with-xsl=shared'
+                    ' --enable-soap=shared'
+                    ' --enable-memory-limit'
+                    ' --enable-shmop'
+                    ' --enable-calendar'
+                    ' --enable-dbx'
+                    ' --enable-dio'
+                    ' --enable-mbstring=shared'
+                    ' --enable-mbstr-enc-trans'
+                    ' --enable-mbregex'
+                    ' --with-mime-magic=%(datadir)s/magic.mime' )
+        #Run configure for cgi
+        r.Configure(commonConfigure +
+                    ' --enable-cgi'
+                    ' --enable-fastcgi'
+                    ' --enable-force-cgi-redirect'
+                    ' --cache-file=../config.cgi.cache',
+            preConfigure='EXTENSION_DIR="%(libdir)s/php5"')
+        r.Make()
+        r.MakeInstall('program_suffix=-cgi', rootVar='INSTALL_ROOT')
+        r.Make('clean')
+        r.Configure(commonConfigure + ' --with-apxs2=%(sbindir)s/apxs'
+                    ' --cache-file=../config.cache',
+            preConfigure='EXTENSION_DIR="%(libdir)s/php5"')
+
+        r.addSource('httpd.conf')
+        # PHP's make install requires httpd.conf to exist; we humor it
+        r.Install('httpd.conf', '/etc/httpd/conf/httpd.conf')
+        # libtool forgets to make some intermediate directories
+        r.Run(r"""sed -i -e '/creating a temporary reloadable object file/a\
+          mkdir -p $(dirname $output)' libtool""")
+        r.Make()
+        r.MakeInstall(rootVar='INSTALL_ROOT')
+        r.Remove('/etc/httpd/conf/httpd.conf*')
+        # Add trailing newline.
+        r.Run('echo >> %(destdir)s%(sysconfdir)s/pear.conf')
+        r.Install('php.conf', '/etc/httpd/conf.d/php.conf')
+        r.Replace('extension_dir = "./"', 'extension_dir = "%(libdir)s/php5"',
+            'php.ini-recommended')
+        r.Install('php.ini-recommended', '%(sysconfdir)s/php.ini')
+        r.MakeDirs('%(localstatedir)s/lib/php/session', mode=0700)
+        r.Ownership('apache', 'apache', '%(localstatedir)s/lib/php/session')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/php/session')
+        r.Remove('/.channels', recursive=True)
+        r.Remove('/.{dep*,filemap,lock}')
+
+        # test suite
+        r.Replace(r'#!\.\./\.\./php', '#!/usr/bin/php',
+                  'ext/pcntl/test-pcntl.php')
+        r.TestSuite('.', 'export NO_INTERACTIVITY=1; '
+                         ' export REPORT_EXIT_STATUS=1; make test')
+
+        for mod in ['pgsql', 'mysql', 'domxml', 'gd', 'ldap', 'mbstring',
+                    'ncurses', 'xmlrpc', 'xsl', 'soap']:
+            r.Create('%%(sysconfdir)s/php.d/%s.ini' % mod,
+                    contents="""; Enable %s extension module
+extension=%s.so""" % (mod, mod))
+
+        for package in ['pgsql', 'mysql', 'xsl', 'soap']:
+            r.PackageSpec('php-%s' % package,
+                          '%%(libdir)s/php5/%s.so' % package,
+                          '%%(sysconfdir)s/php.d/%s.ini' % package)
+            r.Requires('php:runtime', '%%(libdir)s/php5/%s.so' % package)
+
+        r.PackageSpec('php-cgi', '%(bindir)s/php.*-cgi', '%(mandir)s/man[0-9]/php.*-cgi.*')
+        #php5 in rpl:1 has -pear packaged separately.  Do here too?
+        #r.PackageSpec('php-pear', '%(datadir)s/pear.*', '%(sysconfdir)s/pear.conf', '%(bindir)s/(pear|peardev|pecl)')
