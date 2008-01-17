@@ -1,0 +1,53 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Opensp(CPackageRecipe):
+    name = 'opensp'
+    version = '1.5.2'
+
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime', 
+                      'docbook-dtds:data', 'gcc:devel', 'libstdc++:devel', 
+                      'libxml2:runtime', 'perl:runtime', 'xmlto:runtime']
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.macros.archive_name = 'OpenSP'
+        r.addArchive('mirror://sourceforge/openjade/')
+
+        r.Replace('unicode.sd', 'unicode.decl', 'unicode/catalog')
+
+        extraConfigure = ' --enable-http'
+        extraConfigure += ' --enable-default-catalog=%(sysconfdir)s/sgml/catalog'
+        extraConfigure += ' --enable-default-search-path=%(datadir)s/sgml'
+
+        if not Use.builddocs:
+            extraConfigure += ' --disable-doc-build'
+
+        r.Configure(extraConfigure)
+        r.Make()
+        r.MakeInstall()
+
+        # Fix up libtool libraries
+        r.Run("find %(destdir)s -name '*.la'"
+              r' | xargs sed -i -e "s|-L%(builddir)s[\w/.-]*||g"')
+        r.RemoveNonPackageFiles(exceptions='.*\.la')
+
+        # Fixup OpenSP to match our new /usr/share/sgml setup
+        r.Move('/usr/share/OpenSP/unicode.sd', '/usr/share/OpenSP/unicode.decl')
+        r.Move('/usr/share/OpenSP/{catalog,demo.sgm,gensyntax.pl,unicode.{syn,decl}}', '/usr/share/sgml/opensp/unicode/')
+        r.Move('/usr/share/OpenSP/opensp-implied.dcl',
+               '/usr/share/smgl/declaration/')
+        r.Remove('/usr/share/OpenSP', recursive=True)
+
+        # Replace sp with opensp
+        for file in ('nsgmls', 'sgmlnorm', 'spam', 'spent', 'sx'):
+            r.Symlink('o' + file, '%(bindir)s/' + file)
+
+        r.Symlink('osx', '%(bindir)s/sgml2xml')
+
+        if Use.builddocs:
+            r.Symlink('osx.1', '%(mandir)s/man1/sgml2xml.1')
