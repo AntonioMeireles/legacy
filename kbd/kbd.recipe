@@ -1,0 +1,69 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Kbd(CPackageRecipe):
+    name = 'kbd'
+    version = '1.12'
+
+    buildRequires = [ 'bison:runtime', 'flex:runtime' ]
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/kbd-1.12-17.src.rpm'
+        r.addArchive('http://ftp.kernel.org/pub/linux/utils/kbd/kbd-%(version)s.tar.bz2', keyid='517D0F0E')
+        r.addArchive('kbd-latsun-fonts.tar.bz2', rpm=srpm, dir='%(maindir)s')
+
+        r.addSource('keytable.init')
+        r.addPatch('kbd-1.08-compose.patch', rpm=srpm)
+        r.addPatch('kbd-1.08-rukbd.patch', rpm=srpm)
+        r.addPatch('kbd-1.08-terminal.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-Meta_utf8.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-alias.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-dir.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-nostrip.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-setfont-man.patch', rpm=srpm)
+        r.addPatch('kbd-1.12-no-user-map.patch', rpm=srpm)
+
+        r.Run("""
+            cd data/keymaps/i386;
+            mv -f qwerty/fi.map qwerty/fi-old.map;
+            cp -f qwerty/fi-latin9.map qwerty/fi.map;
+            cp -f qwerty/pt-latin9.map qwerty/pt.map;
+            cp -f qwerty/sv-latin1.map qwerty/se-latin1.map;
+
+            mv -f azerty/fr.map azerty/fr-old.map;
+            cp -f azerty/fr-latin9.map azerty/fr.map;
+
+            cp -f azerty/fr-latin9.map azerty/fr-latin0.map # legacy alias
+            """)
+
+        r.Replace('LatArCyrHeb-16', 'latarcyrheb-sun16', 'src/unicode_start')
+        r.Replace('#!/bin/bash', '#!/bin/sh', 'src/unicode_start')
+
+        r.ManualConfigure('--prefix=/ --datadir=/lib/kbd --mandir=%(mandir)s',
+                                preConfigure='OLD_PO_FILE_INPUT=yes CFLAGS="%(cflags)s"')
+        r.Make('CFLAGS="%(cflags)s" LDFLAGS=')
+        r.MakeInstall(
+            'BINDIR=%(destdir)s/%(bindir)s '
+            'LOADKEYS_BINDIR=%(destdir)s/%(essentialbindir)s '
+            'MANDIR=%(destdir)s/%(mandir)s '
+            'datadir=%(destdir)s/lib/kbd '
+            'DATADIR=%(destdir)s/lib/kbd '
+            'gnulocaledir=%(destdir)s/%(datadir)s/locale '
+            'localedir=%(destdir)s/%(datadir)s/locale'
+        )
+        r.Move(
+            '%(bindir)s/{setfont,dumpkeys,kbd_mode,unicode_st{art,op}}',
+            '%(essentialbindir)s/'
+        )
+        r.Install('keytable.init', '%(initdir)s/keytable', mode=0755)
+        r.Move('%(bindir)s/kbdrate', '%(sbindir)s/')
+        r.ConsoleHelper('%(bindir)s/kbdrate', '%(sbindir)s/kbdrate',
+            consoleuser=True)
+        r.Doc('CREDITS', 'doc/*.txt')
+        r.Doc('doc/kbd.FAQ*.html', dir='html')
+        r.Doc('doc/font-formats/*.html', dir='font-formats')
+        r.Doc('doc/utf/utf*', dir='utf')
+        r.TagSpec('initscript', '%(initdir)s/')
