@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Xterm(CPackageRecipe):
+    name = 'xterm'
+    version = '229'
+
+    buildRequires = [ 'expat:devel', 'fontconfig:devel', 'freetype:devel',
+        'imake:runtime', 'ncurses:devel',
+        'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXau:devel',
+        'libXaw:devel', 'libXdmcp:devel', 'libXext:devel', 'libXft:devel',
+        'libXmu:devel', 'libXrender:devel', 'libXt:devel', 'libtermcap:devel',
+        'luit:runtime', 'pkgconfig:devel', 'utempter:devel', 'zlib:devel' ]
+
+    def setup(r):
+        r.addArchive('ftp://dickey.his.com/xterm/')
+        r.addPatch('metaSendsEscape.patch')
+
+        # fixes a permissions issue. the source indicates that this is
+        # automatically enabled for !gnu systems, but we certainly provide this
+        # interface, and using it prevents possible race conditions where xterm
+        # has to chmod/chown the tty correctly.
+        # reference RPL-1396 and CVE-2007-2797
+        r.macros.cflags += ' -DUSE_UTEMPTER'
+
+        r.Configure('--enable-luit --enable-warnings '
+                    '--enable-wide-chars --with-utempter ',
+                    '--with-app-defaults=%(datadir)s/X11/app-defaults/')
+        # RPL-1396
+        # need to change tty group incorrectly guessed by autoconf as "rmake"
+        r.Replace('#define TTY_GROUP_NAME ".*"',
+                  '#define TTY_GROUP_NAME "tty"',
+                  'xtermcfg.h')
+
+        r.Make()
+        r.MakeInstall()
+
+        r.Move('%(mandir)s/*.1', '%(mandir)s/man1/')
