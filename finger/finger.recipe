@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Finger(CPackageRecipe):
+    buildRequires = [ 'sed:runtime' ]
+
+    name = 'finger'
+    version = '0.17'
+
+    def setup(r):
+        r.mainDir('bsd-finger-%(version)s')
+        r.addArchive('ftp://ftp.uk.linux.org/pub/linux/Networking/netkit/bsd-finger-%(version)s.tar.gz')
+        r.addSource('finger-xinetd')
+
+        r.addPatch('bsd-finger-0.16-pts.patch')
+        r.addPatch('bsd-finger-0.17-exact.patch')
+        r.addPatch('bsd-finger-0.16-allocbroken.patch')
+        r.addPatch('bsd-finger-0.17-rfc742.patch')
+        r.addPatch('bsd-finger-0.17-time.patch')
+        r.addPatch('bsd-finger-0.17-usagi-ipv6.patch')
+        r.addPatch('bsd-finger-0.17-typo.patch')
+        r.addPatch('bsd-finger-0.17-strip.patch')
+
+        r.ManualConfigure('--enable-ipv6')
+        r.Run("""
+            sed -i 's,^CC=.*$,CC=%(cc)s,
+                    s,-O2,%(cflags)s,
+                    s,^BINDIR=.*$,BINDIR=%(bindir)s,
+                    s,^MANDIR=.*$,MANDIR=%(mandir)s,
+                    s,^SBINDIR=.*$,SBINDIR=%(sbindir)s,' MCONFIG
+        """)
+        r.Make()
+
+        r.Install('finger-xinetd', '%(sysconfdir)s/xinetd.d/finger', mode=0644)
+        r.MakeInstall(rootVar='INSTALLROOT')
+        r.PackageSpec(
+            'finger-server',
+                '%(sysconfdir)s/xinetd.d/.*',
+                '%(sbindir)s/in.fingerd',
+                '%(mandir)s/man8/.*fingerd.*'
+        )
