@@ -1,0 +1,53 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Ypserv(CPackageRecipe):
+    name = 'ypserv'
+    version = '2.19'
+
+    buildRequires = [ 'gdbm:devel' ]
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/i386/os/SRPMS/ypserv-2.13-6.src.rpm'
+
+        r.addArchive('http://ftp.kernel.org/pub/linux/utils/net/NIS/', keyid='517D0F0E')
+        r.addSource('ypserv-ypserv.init', rpm=srpm)
+        r.addSource('ypserv-yppasswdd.init', rpm=srpm)
+        r.addSource('ypserv-ypxfrd.init', rpm=srpm)
+        r.addSource('yppasswdd')
+
+        r.addPatch('ypserv-2.11-path.patch', rpm=srpm)
+        r.addPatch('ypserv-2.5-nfsnobody2.patch', rpm=srpm)
+        r.addPatch('ypserv-2.11-nomap.patch', rpm=srpm)
+        r.addPatch('ypserv-iface-binding3.patch')
+
+        r.Configure('--enable-checkroot --enable-fqdn '
+                    '--enable-yppasswd --libexecdir=%(libdir)s/yp')
+        r.Make()
+        r.MakeInstall('libexecdir=%(libdir)s/yp')
+
+        r.Install('etc/ypserv.conf', '%(sysconfdir)s/')
+        r.Install('ypserv-ypserv.init', '%(initdir)s/ypserv', mode=0744)
+        r.Install('ypserv-yppasswdd.init', '%(initdir)s/yppasswdd', mode=0744)
+        r.Install('ypserv-ypxfrd.init', '%(initdir)s/ypxfrd', mode=0744)
+
+        r.Install('yppasswdd', '%(sysconfdir)s/sysconfig/')
+
+        # start ypserv and related services by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.Config('%(localstatedir)s/yp/Makefile')
+
+        r.AutoDoc('etc/ypserv.conf', 'etc/securenets', 'etc/netgroup',
+                  'etc/locale', 'etc/netmasks', 'etc/timezone')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
+
+        # Requires
+        r.Requires('make:runtime', '%(localstatedir)s/yp/Makefile')
+        r.Requires('gawk:runtime', '%(localstatedir)s/yp/Makefile')
+        r.Requires('portmap:runtime', '%(sbindir)s/rpc.*')
