@@ -1,0 +1,102 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('xorgpackage')
+class XorgServer(XorgPackageRecipe):
+    name = 'xorg-server'
+    version = '1.4'
+    component = 'xserver'
+
+    # FIXME: ld dies trying to link xorgcfg without libXext, need to make sure
+    # configure checks for it
+    # perl:lib needed to satisfy "perl: File::Glob" for /usr/bin/getconfig.pl
+    buildRequires = [ 'bison:runtime', 'ghostscript:runtime',
+        'flex:runtime', 'freetype:devel', 'libICE:devel',
+        'libSM:devel', 'libXaw:devel', 'libXext:devel', 'libXfont:devel',
+        'libXmu:devel', 'libXpm:devel', 'libXt:devel', 'libXxf86misc:devel',
+        'libXxf86vm:devel', 'libfontenc:devel', 'liblbxutil:devellib',
+        'libxkbfile:devel', 'libxkbui:devel',
+        'linuxdoc-tools:runtime', 'ncurses:devel', 'perl:lib',
+        'perl:runtime', 'xtrans:devel', 'zlib:devel',
+        'xorg-sgml-doctools:data', 'libXfixes:devel', 'pixman:devel',
+        # begin dri
+        'Mesa:devel', 'glproto:devel', 'libdrm:devel', 'xf86driproto:devel',
+        # end dri, begin dmx
+        'libXi:devel', 'libXrender:devel', 'libXres:devel', 'libXtst:devellib',
+        'libdmx:devel',
+        # end dmx
+        ]
+
+    protoBuildRequires = [ 'bigreqsproto:devel', 'compositeproto:devel',
+        'damageproto:devel', 'evieext:devel',  'fixesproto:devel',
+        'fontsproto:devel', 'inputproto:devel', 'randrproto:devel',
+        'recordproto:devel', 'renderproto:devel', 'resourceproto:devel',
+        'scrnsaverproto:devel', 'trapproto:devel', 'videoproto:devel',
+        'xcmiscproto:devel', 'xextproto:devel', 'xf86bigfontproto:devel',
+        'xf86dgaproto:devel', 'xf86miscproto:devel', 'xf86vidmodeproto:devel',
+        'xineramaproto:devel', 'xproto:devel', ]
+
+    buildRequires.extend(protoBuildRequires)
+
+    extraConfig = ' --disable-xprint'
+
+    def unpack(r):
+        r.macros.cflags += ' -fPIC'
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/xorg-x11-server-1.2.0-9.fc7.src.rpm'
+        r.macros.osname = "'rPath Linux'"
+        r.macros.vendor = "'rPath, Inc.'"
+        r.extraConfig += ' --with-os-name=%(osname)s --with-vendor=%(vendor)s --enable-install-libxf86config'
+
+        # Fonts
+        r.extraConfig += (' --enable-builtin-fonts'
+                          ' --with-fontdir=%(datadir)s/X11/fonts'
+                          ' --with-default-font-path=unix/:7100,built-ins')
+
+        # Move xkb config to %(localstatedir)s so that X isn't trying to write
+        # to /usr on startup and /usr is not writable in anaconda.
+        r.extraConfig += ' --with-xkb-output=%(localstatedir)s/lib/xkb'
+
+        # Enable libxf86config, required by pyxf86config
+        r.extraConfig += ' --enable-install-libxf86config'
+
+        XorgPackageRecipe.unpack(r)
+
+        r.addSource('xserver.pamd',
+                    dest='%(sysconfdir)s/pam.d/xserver', mode=00644)
+
+        # according to http://xorg.freedesktop.org/wiki/ModularDevelopersGuide
+        # we need the Mesa source to build GLX support
+        r.macros.mesaVersion = '7.0.1'
+        r.addArchive('mirror://sourceforge/mesa3d/MesaLib-%(mesaVersion)s.tar.bz2')
+
+        # DRI
+        r.extraConfig += ( ' --enable-dri'
+                           ' --enable-glx-tls'
+                           ' --with-mesa-source=%(builddir)s/../Mesa-%(mesaVersion)s'
+                           ' --with-dri-driver-path=%(libdir)s/dri'
+                           ' --enable-composite'
+                           ' --enable-xtrap'
+                           ' --enable-xcsecurity'
+                           ' --enable-xevie')
+
+        r.addPatch('xorg-x11-server-Red-Hat-extramodes.patch', rpm=srpm)
+        r.addPatch('xorg-x11-server-1.1.1-always-mouse-thyself.patch')
+
+    def policy(r):
+        r.SetModes('%(bindir)s/Xorg', 04611)
+
+        # FIXME: copied from xorg-x11 recipe; is this for consolehelper?
+        r.Create('%(sysconfdir)s/security/console.apps/xserver')
+
+        # make xorg.conf an InitialContents file so it's managed locally, but
+        # removed when xorg-server is
+        r.Create('%(sysconfdir)s/X11/xorg.conf')
+        r.InitialContents('%(sysconfdir)s/X11/xorg.conf')
+
+        # Install the vesamodes and extramodes files to let our install/config tools
+        # be able to parse the same modelist as the X server uses (rhpxl).
+        r.Install('hw/xfree86/common/vesamodes','%(datadir)s/xorg/vesamodes')
+        r.Install('hw/xfree86/common/extramodes','%(datadir)s/xorg/extramodes')
