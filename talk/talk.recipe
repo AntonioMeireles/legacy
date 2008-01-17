@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Talk(CPackageRecipe):
+    buildRequires = [ 'ncurses:devel' ]
+    name = 'talk'
+    version = '0.17'
+
+    def setup(r):
+        r.mainDir('netkit-ntalk-%(version)s')
+        r.macros.cflags += ' -D_GNU_SOURCE'
+
+        srpm = 'ftp://ftp.redhat.com/pub/redhat/linux/enterprise/3/en/os/i386/SRPMS/talk-%(version)s-20.src.rpm'
+
+        # Source: ftp://ftp.uk.linux.org/pub/linux/Networking/netkit-devel/
+        r.addArchive('netkit-ntalk-%(version)s.tar.gz', rpm=srpm)
+
+        for patch in ('netkit-ntalk-0.17-pre20000412-time.patch',
+                      'netkit-ntalk-0.17-strip.patch'):
+            r.addPatch(patch, rpm=srpm)
+
+        r.addSource('talk-xinetd', rpm=srpm)
+        r.addSource('ntalk-xinetd', rpm=srpm)
+
+        r.ManualConfigure('--with-c-compiler=%(cc)s')
+
+        r.Replace(('^CC=.*$', 'CC=%(cc)s'),
+                  ('-O2', '%(cflags)s %(mflags)s'),
+                  ('BINDIR=.*$', 'BINDIR=%(bindir)s'),
+                  ('MANDIR=.*$', 'MANDIR=%(mandir)s'),
+                  ('SBINDIR=.*$', 'SBINDIR=%(sbindir)s'),
+                  'MCONFIG')
+        r.Make()
+
+        r.MakeDirs('%(bindir)s')
+        r.MakeDirs('%(mandir)s/man{1,8}')
+        r.MakeDirs('%(sbindir)s')
+        r.MakeInstall(rootVar="INSTALLROOT")
+        r.Install('talk-xinetd', '/etc/xinetd.d/talk', mode=0644)
+        r.Install('ntalk-xinetd', '/etc/xinetd.d/ntalk', mode=0644)
+        r.SetModes('%(sbindir)s/in.ntalkd', 0711)
+
+        r.PackageSpec('talk-server', '%(sbindir)s/in.ntalkd',
+                      '%(sbindir)s/in.talkd', '%(mandir)s/man8/',
+                      '%(sysconfdir)s/xinetd.d/')
