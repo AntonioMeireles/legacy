@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class File(CPackageRecipe):
+    name = 'file'
+    version = '4.23'
+
+    buildRequires = [ 'libtool:runtime', 'zlib:devel' ]
+    if Use.bootstrap:
+        keepBuildReqs = ['glibc:devel', 'userspace-kernel-headers:devel']
+        buildRequires.extend(['binutils[!cross]', 'gcc[!cross]'])
+        crossRequires = 'glibc:devel', 'userspace-kernel-headers:devel'
+
+    def setup(r):
+        r.macros.cflags = '%(cflags)s -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE'
+        r.addArchive('ftp://ftp.astron.com/pub/file/')
+
+        if Use.bootstrap:
+            # first build a native file
+            r.Configure('--enable-fsect-man5', objDir='native',
+                        preConfigure='CC=%(buildcc)s',
+                        bootstrapFlags='')
+            r.Make(dir='native', preMake='CC=%(buildcc)s')
+            # now build for the target
+            r.Configure('--enable-fsect-man5', objDir='target')
+            # use the native file to compile magic files
+            r.Make('FILE_COMPILE=$(pwd)/../native/src/file', dir='target')
+            r.MakeInstall(dir='target')
+        else:
+            r.Configure('--enable-fsect-man5')
+            r.Make('LIBTOOL=%(bindir)s/libtool')
+            r.MakeInstall('LIBTOOL=%(bindir)s/libtool')
+        r.Symlink('../file/magic', '%(datadir)s/misc/magic')
+        r.Doc('LEGAL.NOTICE')
+
+        # Some packages still look for these files in the old
+        # location.
+        r.Symlink('%(datadir)s/file/magic.mime', '%(datadir)s/magic.mime')
+        r.Symlink('%(datadir)s/file/magic.mgc', '%(datadir)s/magic.mgc')
+        r.Symlink('%(datadir)s/file/magic', '%(datadir)s/magic')
+        r.Symlink('%(datadir)s/file/magic.mime.mgc', '%(datadir)s/magic.mime.mgc')
