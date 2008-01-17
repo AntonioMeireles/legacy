@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Epic(RPMPackageRecipe, CPackageRecipe):
+    name = 'epic'
+    version = '2.4'
+
+    buildRequires = [ 'ncurses:devel', ]
+    themes = [ 'sf-1.35.irc.gz', 'sf-bitchx-scheme.irc.gz',
+        'sf-eggsandham-scheme.irc.gz', 'sf-light-scheme.irc.gz',
+        'sf-perry-scheme.irc.gz' ]
+
+    rpmSources = themes +  [ 'epic.wmconfig', 'ircII.servers', ]
+    tarballName = 'epic4-%(version)s.tar.bz2'
+
+    def setup(r):
+        r.mainDir('epic4-%(version)s')
+        r.unpack()
+        r.addArchive('ftp://ftp.epicsol.org/pub/epic/EPIC4-PRODUCTION/epic4-help-current.tar.gz', dir=r.theMainDir)
+        if (r.macros.servicedir != '/var'):
+            r.Replace('(/var/spool/mail)', r'%(servicedir)s/spool/mail:\1',
+                      'source/mail.c')
+
+        # remove useless CVS files from the help archive
+        r.Run('find help -type d -name CVS | xargs -r rm -frv')
+
+        r.Configure()
+        r.Make()
+
+        r.MakeInstall('install CFLAGS="%(cflags)s" installhelp IP=%(destdir)s prefix=%(prefix)s mandir=%(mandir)s')
+        r.Symlink('epic-EPIC4-%(version)s', '%(bindir)s/epic')
+
+        # install the "themes" to the /usr/share/epic/script/ directory
+        for source in r.themes:
+            sName = source.replace('.gz', '')
+            r.Run('zcat ' + source + ' | sed -e \'s/^\(\^set HELP_PATH.*\)/#\1/\' > `basename ' + sName + '`')
+            r.Install(sName, '%(datadir)s/epic/script/')
+
+        r.Install('ircII.servers', '%(datadir)s/epic/')
+        r.AutoDoc('BUG_FORM', 'KNOWNBUGS')
+        r.Remove('help/Makefile', 'help/README_FIRST')
+        r.Remove('doc/CVS')
+        r.Remove('%(libexecdir)s/wserv')
