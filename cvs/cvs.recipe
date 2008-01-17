@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Cvs(AutoPackageRecipe):
+    name = 'cvs'
+    version = '1.12.13'
+
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime', 'libtool:runtime',
+        'zlib:devel', 'tcsh:runtime', 'install-info:runtime', 'groff:runtime',
+        'openssh-client:runtime', 'sendmail:runtime', 'texinfo:runtime',
+        'openssl:devel', 'perl:lib', 'ghostscript:runtime', 'perl:runtime',
+        'gettext:runtime', 'krb5:devel', ]
+
+    def unpack(r):
+        # Working URL, but redirects to itself before download,
+        # so can not be downloaded automatically.
+        # using gentoo's mirror is better than keeping in the in sourcedir...
+        r.addArchive('mirror://gentoo/distfiles/')
+
+        r.addPatch('cvs-1.11.19-tagname.patch')
+        r.addPatch('cvs-1.11.19-comp.patch')
+        r.addPatch('cvs-1.12.13-vasnprintf-fortify.patch') # RPL-2015
+
+        r.macros.gentoo_cvs = 'http://sources.gentoo.org/viewcvs.py/*checkout*/gentoo-x86'
+        r.addPatch('%(gentoo_cvs)s/dev-util/cvs/files/cvs-1.12.13-zlib.patch')
+        r.addPatch('%(gentoo_cvs)s/dev-util/cvs/files/cvs-1.12.13-openat.patch')
+        r.addPatch('%(gentoo_cvs)s/dev-util/cvs/files/cvs-1.12.13-cvsbug-tmpfix.patch')
+
+    def configure(r):
+        r.macros.ldflags += ' -lk5crypto'
+        r.Configure('--with-editor=/bin/vi --with-gssapi --enable-encryption')
+
+    def policy(r):
+        r.Remove('%(bindir)s/rcs2log')  # Dangling symlink to contrib.
+        r.Doc('DEVEL-CVS', 'PROJECTS', 'doc/*.ps')
+        # Among other things, this eliminates a dependency on csh.
+        r.ComponentSpec('supdoc', '%(datadir)s/%(name)s/contrib/')
+        r.Requires(exceptions='%(datadir)s/%(name)s/contrib/')
