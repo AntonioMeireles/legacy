@@ -1,0 +1,102 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
+    name = 'mkinitrd'
+    version = '6.0.25'
+    rpmRelease = '2.fc9'
+
+    buildRequires = [ 'popt:devel', 'device-mapper:devel', 'e2fsprogs:devel',
+        'glib:devel', 'parted:devel', 'pkgconfig:devel', 'libdhcp:devel',
+        'pump:devel', 'libdhcp:devel', 'openssl:devel', 'python:devel',
+        'libdhcp4client:devel', 'libdhcp6client:devel', 'libnl:devel', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+        # in the makefile - we override them by setting CFLAGS when calling make
+        r.macros.cflags += ' -D_FORTIFY_SOURCE=2 -fPIC -std=gnu99 -D_GNU_SOURCE=1'
+        r.addPatch('disable-selinux.patch')
+        r.addSource('kernel.tagdescription', macros=True, dest='%(tagdescriptiondir)s/kernel')
+        r.addSource('kernel.taghandler', macros=True, dest='%(taghandlerdir)s/kernel', mode=0755)
+
+        # don't try to link against selinux since we don't have it
+        r.Replace(('-lsepol', ''), ('-lselinux', ''),
+            'Makefile', '*/Makefile', allowNoChange=True)
+
+        # wrap fopen, socket, pipe, etc so __real_fopen doesn't show up as an
+        # unresolved symbol... filed upstream as
+        # http://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=220746
+        r.addPatch('wrapstuff.patch')
+
+        # handle adding firmware to initrd.
+        r.addPatch('firmware-handling.patch')
+
+        # Work around new [[ =~ ]] parsing rules in bash 3.2 (RPL-1478)
+        r.addPatch('mkinitrd-6.0.25-shell_regexp.patch')
+
+        # RPL-1068. Eliminate warning if /etc/ld.so.conf.d doesn't exist.
+        r.addPatch('mkinitrd-ld.so.conf.d.patch', level=0)
+
+        r.MakeDirs('%(sysconfdir)s/mkinitrd-firmware.d')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/mkinitrd-firmware.d')
+
+        # Return error if interpreter is not found.
+        r.addPatch('interpreter-error-checking.patch')
+
+        # Add usplash support.
+        #r.addPatch('usplash.patch')
+        r.addPatch('splashy.patch')
+
+        # Return error if fstab is not found (RPL-1959).
+        r.addPatch('fstab.patch')
+
+        # Handle ENOSYS on SYS_ppoll in nash for older kernels (RPL-2108)
+        r.addPatch('http://git.fedoraproject.org/git/?p=mkinitrd;a=commitdiff_plain;h=4f26aebd30f8f62e9c2102fa6a00224e6a47ded2')
+        r.addPatch('http://git.fedoraproject.org/git/?p=mkinitrd;a=commitdiff_plain;h=f865585038adc2ef61b0020a2ab9467096163aa8')
+        r.addPatch('http://git.fedoraproject.org/git/?p=mkinitrd;a=commitdiff_plain;h=f4b6cd93c580478fc1052b40b5d0efa11560e946')
+        r.addPatch('http://git.fedoraproject.org/git/?p=mkinitrd;a=commitdiff_plain;h=0a9dd7ee53246b490888d5f167a219e3321fcce9')
+        r.addPatch('util.h.save_errno.patch')
+
+        # change branding
+        r.Replace(('redhat-release', 'distro-release'),
+                  ('/redhat', '/rpath'),
+                  ('"Red Hat Linux', '"rPath Linux'),
+                  'grubby/{grubby.c,new-kernel-pkg,test.sh}')
+        r.Replace('Red Hat ', '', 'nash/nash.c')
+
+        r.Make()
+        r.MakeInstall('makdir=%(mandir)s')
+
+        # FIXME: remove once conary-policy with CNP-55 fixed is released
+        r.Move('%(prefix)s/lib/pkgconfig/*', '%(libdir)s/pkgconfig/')
+
+        for req in ('/bin/awk', '/sbin/dmsetup', '/sbin/ip', '/sbin/insmod',
+                    '/sbin/lvm', '/sbin/ldconfig', '/dev/null',
+                    '%(bindir)s/head', '%(bindir)s/tail',
+                    '%(essentialbindir)s/cat',
+                    '%(essentialbindir)s/chmod',
+                    '%(essentialbindir)s/cp',
+                    '%(essentialbindir)s/cpio',
+                    '%(essentialbindir)s/df',
+                    '%(essentialbindir)s/egrep',
+                    '%(essentialbindir)s/grep',
+                    '%(essentialbindir)s/gzip',
+                    '%(essentialbindir)s/ln',
+                    '%(essentialbindir)s/mkdir',
+                    '%(essentialbindir)s/mknod',
+                    '%(essentialbindir)s/mktemp',
+                    '%(essentialbindir)s/rm',
+                    '%(essentialbindir)s/mv',
+                    '%(essentialbindir)s/sed',
+                    '%(essentialsbindir)s/ext3flush',
+                    '%(essentialsbindir)s/lvm.static',
+                    '%(essentialsbindir)s/modprobe',
+                    '%(essentialsbindir)s/bootman',
+                    '%(essentialsbindir)s/bommy',
+                    'initscripts:runtime',):
+            r.Requires(req, '%(essentialsbindir)s/mkinitrd')
