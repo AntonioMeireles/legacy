@@ -1,0 +1,101 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Openldap(CPackageRecipe):
+    name = 'openldap'
+    version = '2.4.7'
+
+    buildRequires = [ 'gdbm:devel', 'krb5:devel',
+                      'openssl:devel', 'pam:devel', 'perl:runtime',
+                      'pkgconfig:devel', 'tcp_wrappers:devel',
+                      'libtool:runtime', 'autoconf:runtime',
+                      'db:devel', 'libtool:devel', 'groff:runtime',
+                      'coreutils:runtime[!bootstrap]',
+                      'e2fsprogs:devel', 'cyrus-sasl:devel' ]
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.addArchive('ftp://ftp.OpenLDAP.org/pub/OpenLDAP/openldap-release/')
+
+        r.addSource('ldap.init', dest='%(initdir)s/ldap', mode=0755, macros=True)
+        r.addSource('http://www.openldap.org/doc/admin23/guide.html')
+
+        r.Replace(r'\$\(SLAPD_LIBS\) \$\(SECURITY_LIBS\) \$\(LUTIL_LIBS\)',
+                  '$(LUTIL_LIBS) $(SLAPD_LIBS) $(SECURITY_LIBS)',
+                  'servers/slapd/Makefile.in')
+
+        r.Replace('(#define LDAPI_SOCK).*',
+                  r'\1 "%(localstatedir)s/run/openldap/slapd.sock"',
+                  'include/ldap_defaults.h')
+
+        r.Symlink('shtool', 'build/install')
+        r.Symlink('shtool', 'build/install.sh')
+
+        r.macros.cflags += ' -D_REENTRANT -fPIC'
+
+        r.Configure(' --with-slapd --with-slurpd'
+                    ' --enable-syslog --enable-dynamic --enable-modules'
+                    ' --enable-rewrite --enable-rlookups'
+                    ' --enable-passwd=mod --enable-phonetic=mod'
+                    ' --enable-dnssrv=mod --enable-ldap'
+                    ' --enable-meta=mod --enable-monitor=mod'
+                    ' --enable-null=mod --enable-shell=mod'
+                    ' --enable-local --enable-proctitle'
+                    ' --enable-dyngroup'
+                    ' --enable-aci --enable-proxycache'
+                    ' --enable-cleartext --enable-slapi'
+                    ' --enable-local --enable-cldap --with-tls'
+                    ' --enable-wrappers --enable-crypt'
+                    ' --disable-sql --without-ldapd'
+                    ' --with-threads=posix'
+                    ' --localstatedir=%(localstatedir)s'
+                    ' --enable-static --enable-shared'
+                    ' --with-cyrus-sasl')
+
+        r.Make('LIBTOOL=%(bindir)s/libtool depend')
+        r.Make('LIBTOOL=%(bindir)s/libtool')
+
+        r.MakeInstall('LIBTOOL=%(bindir)s/libtool')
+
+        r.SetModes('%(sysconfdir)s/openldap/slapd.conf', 0600)
+
+        r.MakeDirs('%(localstatedir)s/%(lib)s/ldap',
+                   '%(localstatedir)s/run/openldap-data')
+        r.SetModes('%(localstatedir)s/%(lib)s/ldap', 0700,
+                   component='openldap-servers:runtime')
+        r.SetModes('%(localstatedir)s/run/openldap-data', 0700,
+                   component='openldap-servers:runtime')
+        r.Ownership('ldap', 'ldap', '%(localstatedir)s/%(lib)s/ldap',
+                                    '%(sysconfdir)s/openldap/slapd\.conf',
+                                    '%(localstatedir)s/run/openldap-data')
+
+        r.Remove('%(libexecdir)s/openldap/*.a')
+
+        r.PackageSpec('openldap-clients',
+                      '%(bindir)s/.*', '%(mandir)s/man1/.*')
+
+        r.PackageSpec('openldap-servers',
+                      '%(initdir)s/ldap',
+                      '%(sysconfdir)s/openldap/slapd\.conf.*',
+                      '%(sysconfdir)s/openldap/schema/.*\.schema.*',
+                      '%(sysconfdir)s/openldap/schema/redhat/.*\.schema.*',
+                      '%(datadir)s/openldap/(go500gw|rcpt500).help',
+                      '%(sbindir)s/.*',
+                      '%(mandir)s/.*slap.*',
+                      '%(mandir)s/man8/.*',
+                      '%(libexecdir)s/.*',
+                      '%(datadir)s/openldap/*.help',
+                      '%(datadir)s/openldap/migration/README.*',
+                      '%(datadir)s/openldap/migration/.*\.(ph|pl|sh|txt)',
+                      '%(localstatedir)s/%(lib)s/ldap',
+                      '%(localstatedir)s/run/openldap-data',
+                      '%(thisdocdir)s/servers.*')
+
+        r.Requires('%(essentialsbindir)s/runuser', '%(initdir)s/ldap')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.AutoDoc('ANNOUNCEMENT', r'doc/rfc/.*\.txt')
