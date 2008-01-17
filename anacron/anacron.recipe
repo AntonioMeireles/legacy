@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage.recipe')
+class Anacron(RPMPackageRecipe, CPackageRecipe):
+    name = 'anacron'
+    version = '2.3'
+    rpmRelease = '38.FC6.1'
+
+    def setup(r):
+        r.addArchive('%(name)s_%(version)s.orig.tar.gz', rpm=r.srpm)
+        r.addPatch('anacron-2.3-mk-incl.patch', rpm=r.srpm)
+        r.addPatch('anacron-2.3-mail-content-type-77108.patch', rpm=r.srpm)
+
+        # inline patch:
+        # gcc 3.4.4 fails on this line because the variable assigned to
+        # later
+        r.Replace('const int isleap;', 'int isleap;', 'gregor.c')
+
+        r.addSource('anacrontab', rpm=r.srpm)
+        r.addSource('anacron.init', rpm=r.srpm)
+        for i in ('daily', 'weekly', 'monthly'):
+            r.addSource('anacron.%s' %i,
+                        dest='%%(sysconfdir)s/cron.%s/0anacron' % i,
+                        mode=0755)
+
+        # use our cflags in Makefile
+        r.Replace('CFLAGS =.*', 'CFLAGS = -Wall -pedantic ' + r.macros.cflags,
+                  'Makefile')
+        r.Make()
+
+        r.MakeDirs('%(localstatedir)s/spool/anacron')
+        r.Install('anacrontab', '%(sysconfdir)s/')
+        r.Install('anacron', '%(sbindir)s/')
+        r.Install('anacron.8', '%(mandir)s/man8/')
+        r.Install('anacrontab.5', '%(mandir)s/man5/')
+        r.Install('anacron.init', '%(initdir)s/anacron')
+
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/spool/anacron')
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('crontabs:runtime', '%(sysconfdir)s/.*/0anacron')
