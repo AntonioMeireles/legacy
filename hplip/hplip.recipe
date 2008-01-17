@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Hplip(CPackageRecipe):
+    name = 'hplip'
+    version = '2.7.9'
+
+    buildRequires = [ 'python:devel', 'sane-backends:runtime', 'cups:devel',
+        'libjpeg:devel', 'openssl:devel', 'file:runtime',
+        'desktop-file-utils:runtime', 'libusb:devel', 'libstdc++:devel',
+        'chkconfig:runtime', 'cups:runtime', 'python:tk',
+        'desktop-file-utils:runtime', 'pygtk:python', 'net-snmp:devel',
+        'sane-backends:devel', 'perl:runtime', 'PIL:python', ]
+
+    def setup(r):
+        r.macros.foomaticver = '20070607'
+        r.addArchive('mirror://sourceforge/hplip/')
+        r.addArchive('http://www.linuxprinting.org/download/foomatic/foomatic-db-hpijs-%(foomaticver)s.tar.gz')
+
+        # RPL-1812
+        r.addPatch('hplip-CVE-2007-5208.patch')
+
+        r.Configure('--disable-cups-install --disable-foomatic-install ')
+        r.Make()
+
+        r.MakeInstall()
+        r.Remove('/etc/sane.d/dll.conf')
+        r.Create('%(sysconfdir)s/sane.d/dll.conf.d/hplip', contents='hpaio')
+        r.Move('prnt/hpijs/ppd/*', '%(datadir)s/ppd/')
+
+        r.Configure(dir='../foomatic-db-hpijs-%(foomaticver)s')
+        r.Make(dir='../foomatic-db-hpijs-%(foomaticver)s')
+        r.MakeInstall(dir='../foomatic-db-hpijs-%(foomaticver)s')
+
+        # FIXME: foomatic-db-hpijs no longer provides ppd's
+        # Standardize and compress ppd files
+        #r.MakeDirs('%(datadir)s/ppd/HP/')
+        #r.Move('%(datadir)s/ppd/*.ppd', '%(datadir)s/ppd/HP/')
+        #r.Run('gzip %(destdir)s%(datadir)s/ppd/HP/*.ppd')
+
+        r.Requires('foomatic-filters:runtime', '%(bindir)s/hpi(js|od)')
+        r.Requires('libusb:devel', '%(bindir)s/hpi(js|od)')
+        r.Requires('%(bindir)s/gs', '%(bindir)s/hpi(js|od)')
+        r.TagSpec('initscript', '%(initdir)s/')
