@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadRecipe('python')
+class PyCrypto(CPackageRecipe):
+    name = 'pycrypto'
+    version = '2.0.1'
+
+    buildRequires = [ 'gmp:devel', 'python:devel' ]
+    if Use.bootstrap:
+        crossRequires = ['glibc:devel', 'userspace-kernel-headers:devel']
+
+    def setup(r):
+        r.addArchive('http://www.amk.ca/files/python/crypto/')
+        r.addPatch('remove-algorithms.patch')
+
+        r.macros.pyver = Python.majversion
+        conf = 'CC=%(cc)s CXX=%(cxx)s PYVERSION=%(pyver)s libdir=%(libdir)s'
+
+        if Use.bootstrap:
+            conf += (' PYINCLUDE=%(sysroot)s/%(includedir)s/python%(pyver)s'
+                     ' LDSHARED="%(cc)s -pthread -shared"')
+            buildExtConf = ' -I%(sysroot)s/%(includedir)s/python%(pyver)s'
+        else:
+            buildExtConf = ''
+
+        # remove some algorithms
+        for cipher in ('IDEA', 'RC5'):
+            r.Remove('src/%s.c' % cipher)
+            r.Replace('Crypto\.Cipher\.%s.*' % cipher,
+                      '', 'Cipher/__init__.py')
+            r.Replace("'%s'," % cipher, '', 'Cipher/__init__.py')
+
+        r.Replace('/usr/local', '%(prefix)s', 'Util/RFC1751.py')
+
+        r.Run(conf + ' python setup.py build_py')
+        r.Run(conf + ' python setup.py build_ext' + buildExtConf )
+        # specify install-lib so that all python files gets installed in lib64
+        # on lib64 systems (python tries to split arch-specific vs. arch-indep)
+        # this may only be a problem when cross-compiling.
+        r.Run('python setup.py install --root=%%(destdir)s --install-lib=%s'
+              % Python.sitepkgs)
+        r.Replace('#!/usr/local/bin/python', '#!%(bindir)s/python', 
+                  Python.sitepkgs + '/Crypto/*.py',
+                  Python.sitepkgs + '/Crypto/*/*.py',
+                  allowNoChange=True)
+
+        # Remove test-only dependencies
+        r.Requires(exceptDeps='python: testdata')
