@@ -1,0 +1,59 @@
+#
+# Copyright (c) 2004-2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Telnet(CPackageRecipe):
+
+    buildRequires = [ 'ncurses:devel', 'gcc-c++:runtime' ]
+    name = 'telnet'
+    version = '0.17'
+
+    def setup(r):
+        r.mainDir('netkit-telnet-%(version)s')
+
+        r.addArchive('ftp://ftp.uk.linux.org/pub/linux/Networking/netkit/netkit-telnet-%(version)s.tar.gz')
+        r.addAction('mv telnet telnet-NETKIT')
+
+        srpm = 'ftp://ftp.redhat.com/pub/redhat/linux/enterprise/3/en/os/i386/SRPMS/telnet-%(version)s-26.src.rpm'
+        r.addArchive('telnet-client.tar.gz', rpm=srpm, dir=r.theMainDir)
+        r.addPatch('telnet-client-cvs.patch', rpm=srpm, level=0)
+        r.addPatch('telnetd-0.17.diff', rpm=srpm, level=0)
+        r.addPatch('telnet-0.17-env.patch', rpm=srpm)
+        r.addPatch('telnet-0.17-pek.patch', rpm=srpm, level=0)
+        r.addPatch('telnet-0.17-issue.patch', rpm=srpm)
+        r.addPatch('telnet-0.17-sa-01-49.patch', rpm=srpm)
+        r.addPatch('telnet-0.17-8bit.patch', rpm=srpm)
+
+        r.addSource('telnet-xinetd', rpm=srpm)
+        r.addSource('telnet.wmconfig', rpm=srpm)
+
+
+        r.ManualConfigure('--with-c-compiler=%(cc)s')
+
+        # remove stripping
+        r.Replace(('^CC=.*$', 'CC=%(cc)s'),
+                  ('-O2', '%(cflags)s %(mflags)s'),
+                  ('^BINDIR=.*$', 'BINDIR=%(bindir)s'),
+                  ('^MANDIR=.*$', 'MANDIR=%(mandir)s'),
+                  ('^SBINDIR=.*$', 'SBINDIR=%(sbindir)s'),
+                  'MCONFIG')
+        r.Replace('install[ ]+-s', 'install',
+                  'telnet/GNUmakefile', 'telnetd/Makefile', 'telnetlogin/Makefile',
+                  'telnet-NETKIT/Makefile' )
+        r.Make()
+
+        r.MakeDirs('%(bindir)s')
+        r.MakeDirs('%(sbindir)s')
+        r.MakeDirs('%(mandir)s/man1')
+        r.MakeDirs('%(mandir)s/man5')
+        r.MakeDirs('%(mandir)s/man8')
+        r.MakeInstall(rootVar='INSTALLROOT')
+        r.Install('telnet-xinetd', '/etc/xinetd.d/telnet', mode=0644)
+
+        r.PackageSpec('telnet-server',
+                      r'%(sysconfdir)s/xinetd\.d/telnet',
+                      r'%(sbindir)s/in\.telnetd',
+                      r'%(mandir)s/man5/issue\.net\.5.*',
+                      r'%(mandir)s/man8/(in.telnetd|telnetd)\.8.*')
