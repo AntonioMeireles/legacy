@@ -1,0 +1,123 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Dhcp(RPMPackageRecipe, CPackageRecipe):
+    name = 'dhcp'
+    version = '3.1.0'
+    rpmRelease = '12.fc9'
+
+    buildRequires = [ 'groff:runtime', 'openldap:devel' ]
+
+    rpmPatches = [
+        'dhcp-3.0.5-Makefile.patch',
+        #'dhcp-3.0.5-errwarn-message.patch', # extracted and modified
+        'dhcp-3.1.0-ldap-configuration.patch',
+        'dhcp-3.0.6-memory.patch',
+        'dhcp-3.1.0-options.patch',
+        'dhcp-3.0.5-release-by-ifup.patch',
+        'dhcp-3.0.5-dhclient-decline-backoff.patch',
+        'dhcp-3.0.5-enable-timeout-functions.patch',
+        'dhcp-3.0.5-inherit-leases.patch',
+        'dhcp-3.0.5-unicast-bootp.patch',
+        'dhcp-3.0.5-fast-timeout.patch',
+        'dhcp-3.0.5-failover-ports.patch',
+        'dhcp-3.1.0-dhclient-usage.patch',
+        'dhcp-3.0.5-default-requested-options.patch',
+        'dhcp-3.0.5-prototypes.patch',
+        'dhcp-3.1.0-libdhcp4client.patch',
+        'dhcp-3.1.0-xen-checksum.patch',
+        'dhcp-3.1.0-dhclient-anycast.patch',
+        'dhcp-3.0.6-ignore-hyphen-x.patch',
+        #'dhcp-3.1.0-warnings.patch',
+    ]
+
+    rpmSources = [
+        'libdhcp4client.pc',
+        'README.ldap',
+        'dhcrelay.init',
+        'dhcp.schema',
+    ]
+
+    def setup(r):
+        r.macros.cflags = '-fPIC -Dlint -fno-strict-aliasing'
+
+        r.addArchive('ftp://ftp.isc.org/isc/dhcp/', keyid='1BC91E6C')
+        r.addSource('dhcpd.conf.sample')
+        r.addSource('dhcpd.init')
+        r.addSource('dhcpd.sysconfig')
+        r.addSource('dhcrelay.sysconfig')
+        r.addSource('dhcpd.leases')
+
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
+
+        r.addSource('site.conf', macros=True)
+        r.addSource('findptrsize.c')
+
+        for source in r.rpmSources:
+            r.addSource(source, rpm=r.srpm)
+        r.addSource('draft-ietf-dhc-ldap-schema-01.txt',
+                    dest='doc/', rpm=r.srpm)
+        r.addSource('dhcpd-conf-to-ldap', dest='contrib/', rpm=r.srpm)
+        r.addSource('linux', dest='client/scripts/', rpm=r.srpm)
+        r.addSource('Makefile.libdhcp4client',
+                    dest='libdhcp4client/Makefile.dist', rpm=r.srpm)
+        r.addSource('dhcp4client.h', dest='libdhcp4client/', rpm=r.srpm)
+        r.addSource('libdhcp_control.h', dest='includes/isc-dhcp/', rpm=r.srpm)
+        r.addSource('dhclient-script.8', dest='client/', rpm=r.srpm)
+        r.addSource('dhclient.8', dest='client/', rpm=r.srpm)
+        r.addSource('dhclient.conf.5', dest='client/', rpm=r.srpm)
+        r.addSource('dhcp-options.5', dest='common/', rpm=r.srpm)
+        r.addSource('dhcpctl.3', dest='dhcpctl/', rpm=r.srpm)
+        r.addSource('dhcpd.conf.5', dest='server/', rpm=r.srpm)
+
+        r.addPatch('site.h.patch')
+        r.addPatch('dhcp-3.0.5-errwarn-message.patch')
+
+        r.Replace('@PRODUCTNAME@', ' ', 'common/dhcp-options.5')
+        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+                  'includes/cf/linux.h')
+        r.Replace('@DHCP_VERSION@', '%(version)s', 'libdhcp4client.pc')
+        r.Install('libdhcp4client.pc', '%(datadir)s/pkgconfig/')
+
+        r.Make('findptrsize')
+        r.ManualConfigure('--copts "%(cflags)s'
+            ' $([ $(./findptrsize) -ge 8 ] && echo -DPTRSIZE_64BIT)"')
+        r.Make()
+        r.MakeInstall()
+        r.Install('dhcpd.init', '%(initdir)s/dhcpd', mode=0755)
+        r.Install('dhcpd.leases', '%(localstatedir)s/lib/dhcp/')
+        r.Install('dhcpd.sysconfig', '%(sysconfdir)s/sysconfig/dhcpd')
+        r.Install('dhcrelay.init', '%(initdir)s/dhcrelay', mode=0755)
+        r.Install('dhcrelay.sysconfig', '%(sysconfdir)s/sysconfig/dhcrelay')
+
+        r.Run('mv client/dhclient.conf client/dhclient.conf.sample')
+        r.Doc('client/dhclient.conf.sample', component='dhclient:')
+        r.AutoDoc('RELNOTES')
+        r.Doc('dhcpd.conf.sample')
+
+        r.Install('dhcp.schema', '%(sysconfdir)s/openldap/schema/')
+
+        r.SetModes('%(essentialsbindir)s/dhclient-script', 0755)
+        r.Requires('initscripts:runtime', '/sbin/dhclient-script')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/(lib|run)/dhcp')
+        r.MakeDirs('%(localstatedir)s/lib/dhclient')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/dhclient')
+        r.Move('%(prefix)s/lib/pkgconfig/*', '%(libdir)s/pkgconfig/')
+
+        r.PackageSpec('dhclient', '%(localstatedir)s/lib/dhcp/',
+            '%(localstatedir)s/lib/dhclient',
+            '%(essentialsbindir)s/dhclient.*',
+            '%(mandir)s/man.*/dhclient.*',
+            '%(mandir)s/man5/dhcp-options.5.*')
+
+        r.PackageSpec('libdhcp4client', '%(includedir)s/dhcp4client/.*',
+            '%(libdir)s/libdhcp4client.*',
+            '%(libdir)s/pkgconfig/libdhcp4client.pc')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.InitialContents('%(localstatedir)s/lib/dhcp/dhcpd.leases')
