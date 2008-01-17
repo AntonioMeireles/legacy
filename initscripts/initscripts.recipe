@@ -1,0 +1,154 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Initscripts(CPackageRecipe):
+    name = 'initscripts'
+    version = '8.56.4'
+
+    if Use.bootstrap:
+        clearBuildReqs()
+        buildRequires = [ 'setup:runtime' ]
+    else:
+        buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
+                      'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel' ]
+    buildRequires.extend(['mercurial:runtime'])
+
+    # Add sysvinit:runtime to work around rMake bug RMK-580
+    buildRequires.append('sysvinit:runtime')
+
+    def setup(r):
+        if Use.bootstrap:
+            # we only need this to prevent build req loops when trying to build
+            # the real initscripts - kudzu requires /etc/init.d/functions to
+            # install and we require kudzu to build initscripts, so we just
+            # create a dummy
+            r.Create('%(initdir)s/functions', mode=0755)
+            r.TagSpec('initscript', exceptions='%(initdir)s/functions')
+            r.RequireChkconfig(exceptions='%(initdir)s/functions')
+            return
+
+        r.addMercurialSnapshot('http://hg.rpath.com/initscripts',
+            tag='rpl-'+r.version)
+
+        r.Make()
+        r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
+                      ' mandir=%(mandir)s', rootVar='ROOT')
+
+        r.Remove('%(sysconfdir)s/sysconfig/init.s390')
+        r.Remove('%(sysconfdir)s/rc.d/rc.sysinit.s390init')
+        # we use separate build trees rather than trying to unify them
+        r.Remove('%(essentialsbindir)s/mkkerneldoth')
+
+        r.Doc('sysconfig.txt', 'sysvinitfiles', 'static-routes-ipv6',
+            'ipv6-tunnel.howto', 'ipv6-6to4.howto', 'changes.ipv6')
+        r.SetModes('%(sbindir)s/usernetctl', 04755)
+        r.SetModes('%(essentialsbindir)s/netreport', 02755)
+        r.SetModes('%(localstatedir)s/run/netreport', 0775)
+
+        # avoid prefdm from checkings stuff every 4 seconds:
+        # https://issues.rpath.com/browse/RPL-334
+        r.Remove('%(sysconfdir)s/X11/prefdm')
+        r.Replace('.*prefdm.*', '', '%(sysconfdir)s/inittab')
+
+        if r.macros.initdir != r.macros.sysconfdir+'/init.d':
+            # Using something other than FHS standard, add compat symlinks
+            r.Symlink('%(initdir)s', '%(sysconfdir)s/init.d')
+            # "rcdir = initdir - /init.d"
+            rcdir='/'.join(r.macros.initdir.split('/')[:-1])
+            for level in range(7):
+                r.Symlink('%s/rc%d.d' %(rcdir, level),
+                                     '/%%(sysconfdir)s/rc%d.d' %level)
+        else:
+            # we'll use the FHS init directories, with symlinks for old stuff
+            for dir in ('rc?.d', 'init.d'):
+                # remove the FHS compatibility symlinks
+                r.Remove('%(sysconfdir)s/'+dir)
+                # move directories to their new position
+                r.Move('%(sysconfdir)s/rc.d/'+dir, '%(sysconfdir)s/')
+                # Now install compatibility symlinks going the other way
+                r.Symlink('%(sysconfdir)s/'+dir, '%(sysconfdir)s/rc.d/')
+            for file in ('rc', 'rc.local', 'rc.sysinit'):
+                r.Remove('%(sysconfdir)s/'+file)
+                r.Move('%(sysconfdir)s/rc.d/'+file, '%(sysconfdir)s/')
+                r.Symlink('%(sysconfdir)s/'+file, '%(sysconfdir)s/rc.d/'+file)
+            r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
+                  " %(destdir)s/%(sysconfdir)s/inittab")
+
+        r.SetModes('%(localstatedir)s/{log/wtmp,run/utmp}', 0644)
+        r.SetModes('%(localstatedir)s/log/btmp', 0600)
+        r.Ownership('root', 'utmp', '%(localstatedir)s/log/wtmp',
+                                    '%(localstatedir)s/run/utmp')
+
+        # oddly enough, it's the initscripts package itself that has violations
+        # of its own "must use chkconfig" policy!
+        r.RemoveNonPackageFiles(exceptions='%(sysconfdir)s.*/rc[0-6].d/[KS].*$')
+
+        # Tag most init scripts in case the initscript tag desc. is
+        # not installed, but exclude some special scripts
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.TagSpec('initscript', exceptions='%(initdir)s/killall')
+        r.TagSpec('initscript', exceptions='%(initdir)s/halt')
+        r.TagSpec('initscript', exceptions='%(initdir)s/single')
+        r.TagSpec('initscript', exceptions='%(initdir)s/functions')
+        r.RequireChkconfig(exceptions='%(initdir)s/killall')
+        r.RequireChkconfig(exceptions='%(initdir)s/halt')
+        r.RequireChkconfig(exceptions='%(initdir)s/single')
+        r.RequireChkconfig(exceptions='%(initdir)s/functions')
+
+        # add runtime requirements
+        r.Requires('/dev/null', '%(initdir)s/functions')
+        r.Requires('/sbin/dmsetup', '%(initdir)s/functions')
+        r.Requires('%(essentialsbindir)s/pidof', '%(initdir)s/functions')
+        r.Requires('%(essentialsbindir)s/losetup', '%(initdir)s/functions')
+        r.Requires('%(essentialsbindir)s/runuser', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/awk', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/umount', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/sort', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/sleep', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/nice', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/rm', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/ls', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/egrep', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/sed', '%(initdir)s/functions')
+        #   filesystem:runtime required for directories like
+        #     /var/lock/subsys
+        r.Requires('filesystem:runtime', '%(initdir)s/functions')
+        #   default inittab requires mingetty
+        r.Requires('%(essentialsbindir)s/mingetty', '%(sysconfdir)s/inittab')
+        #   inittab calls shutdown from sysvinit (and is also not
+        #   very useful without an init(8))
+        r.Requires('%(essentialsbindir)s/init', '%(sysconfdir)s/inittab')
+        r.Requires('%(essentialsbindir)s/shutdown', '%(sysconfdir)s/inittab')
+        # networking scripts need the following:
+        r.Requires('%(essentialsbindir)s/ip',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialsbindir)s/arping',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialsbindir)s/sysctl',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialbindir)s/cat',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialbindir)s/rm',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialbindir)s/grep',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('%(essentialbindir)s/ps',
+            '%(sysconfdir)s/sysconfig/network-scripts/ifup-eth')
+        r.Requires('/sbin/fuser',
+            '%(sysconfdir)s/init.d/(halt|netfs|functions)')
+        r.Requires('%(bindir)s/killall',
+            '%(sysconfdir)s/init.d/(halt|netfs|functions)')
+        r.Requires('%(essentialsbindir)s/dhclient',
+                   '%(sysconfdir)s/sysconfig/network-scripts/(ifup|ifdown)-eth')
+
+        # default networking information
+        r.Create('%(sysconfdir)s/resolv.conf',
+            contents='# created by conary\nnameserver 38.100.0.22')
+        r.Create('%(sysconfdir)s/hosts',
+            contents='127.0.0.1               localhost.localdomain')
+        r.Create('%(sysconfdir)s/sysconfig/network',
+            contents='NETWORKING=yes\nHOSTNAME=localhost.localdomain')
+        r.InitialContents('%(sysconfdir)s/(hosts|resolv.conf|sysconfig/network)')
