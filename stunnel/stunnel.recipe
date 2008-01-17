@@ -1,0 +1,56 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Stunnel(CPackageRecipe):
+    name = 'stunnel'
+    version = '4.18'
+
+    buildRequires = [ 'automake:runtime', 'autoconf:runtime', 'perl:runtime',
+        'pkgconfig:devel', 'libtool:devel', 'util-linux:runtime', 'perl:lib',
+        'zlib:devel', 'libtool:runtime', 'tcp_wrappers:devel',
+        'openssl:devel', ]
+
+    def setup(r):
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/2/SRPMS/stunnel-4.05-1.src.rpm'
+        r.addArchive('ftp://stunnel.mirt.net/stunnel/stunnel-%(version)s.tar.gz',
+                     keyid='74C732D1')
+        r.addSource('stunnel.cnf', rpm=srpm)
+        r.addSource('Certificate-Creation', rpm=srpm)
+        r.addSource('sfinger.xinetd', rpm=srpm)
+        r.addSource('stunnel-sfinger.conf', rpm=srpm)
+        r.addSource('pop3-redirect.xinetd', rpm=srpm)
+        r.addSource('stunnel-pop3s-client.conf', rpm=srpm)
+        r.addPatch('stunnel-authpriv.patch', backup='.authpriv')
+        r.Replace("facility 'daemon'", "facility 'authpriv'", 'doc/*',
+                  allowNoChange=True)
+
+        r.Automake(autoMakeArgs='-a')
+
+        r.macros.cflags += ' $(pkg-config --cflags openssl)'
+        r.macros.ldflags += ' $(pkg-config --libs-only-L openssl)'
+
+        r.Configure('--with-tcp-wrappers')
+
+        r.Make('LIBTOOL=%(bindir)s/libtool', preMake='tagname=CC')
+        r.Create('%(sysconfdir)s/stunnel/stunnel.pem')
+        r.MakeInstall('docdir=./installed-docs LIBTOOL=%(bindir)s/libtool',
+                      preMake='tagname=CC')
+
+        # put non-English manpages in proper location
+        for lang in ('fr', 'pl'):
+            r.MakeDirs('%(mandir)s/' + lang + '/man8/')
+            r.Move('%(mandir)s/man8/*.' + lang + '.8*', '%(mandir)s/' + lang + '/man8/')
+            r.Run('rename ".' + lang + '" "" %(destdir)s/%(mandir)s/' + lang + '/man8/*')
+
+        r.Doc('doc/*.html', 'Certificate-Creation', 'sfinger.xinetd',
+              'pop3-redirect.xinetd', 'stunnel-pop3s-client.conf',
+              'stunnel-sfinger.conf')
+
+        # we are not a development library
+        r.Remove('%(libdir)s/libstunnel.a')
+
+        # not a shared lib for linking. it's for preload wrapping.
+        r.ComponentSpec('runtime', '%(libdir)s/.*')
