@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage.recipe')
+class Rwho(RPMPackageRecipe, CPackageRecipe):
+    name = 'rwho'
+    version = '0.17'
+    rpmRelease = '26'
+
+    def setup(r):
+        r.addArchive('netkit-rwho-%(version)s.tar.gz', rpm=r.srpm)
+        r.addSource('rwhod.init', rpm=r.srpm)
+
+        for patch in ('netkit-rwho-0.15-alpha.patch',
+                      'netkit-rwho-0.17-bug22014.patch',
+                      'rwho-0.17-fixbcast.patch',
+                      'rwho-0.17-fixhostname.patch',
+                      'netkit-rwho-0.17-gcc4.patch',
+                      'netkit-rwho-0.17-strip.patch'):
+             r.addPatch(patch, rpm=r.srpm)
+
+        r.ManualConfigure('--with-c-compiler=%(cc)s')
+
+        r.Replace(('^CC=.*$', 'CC=%(cc)s'),
+                  ('-O2', '%(cflags)s'),
+                  ('^BINDIR=.*$', 'BINDIR=%(bindir)s'),
+                  ('^MANDIR=.*$', 'MANDIR=%(mandir)s'),
+                  ('^SBINDIR=.*$', 'SBINDIR=%(sbindir)s'),
+                  'MCONFIG')
+
+        r.Make()
+        r.MakeDirs('%(bindir)s')
+        r.MakeDirs('%(mandir)s/man{1,8}')
+        r.MakeDirs('%(sbindir)s')
+        r.MakeDirs('%(localstatedir)s/spool/rwho')
+        r.MakeInstall(rootVar='INSTALLROOT')
+        r.MakeInstall('-C ruptime', rootVar='INSTALLROOT')
+        r.Install('rwhod.init', '%(initdir)s/rwhod', mode=0755)
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/spool/rwho')
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
