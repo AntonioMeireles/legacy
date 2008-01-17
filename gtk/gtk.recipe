@@ -1,0 +1,97 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Gtk2(CPackageRecipe):
+    name = 'gtk'
+    version = '2.12.3'
+
+    buildRequires = [ 'atk:devel', 'pango:devel', 'glib:devel',
+        'libtiff:devel', 'libjpeg:devel', 'libpng:devel', 'pkgconfig:devel',
+        'freetype:devel', 'fontconfig:devel', 'zlib:devel', 'cairo:devel',
+        'indent:runtime', 'libtool:runtime', 'perl:runtime', 'libX11:devel',
+        'libXcursor:devel', 'libXext:devel', 'libXfixes:devel', 'libXi:devel',
+        'libXinerama:devellib', 'libXrandr:devel', 'libXrender:devel',
+        'libXt:devel', 'libXau:devel', 'libXdmcp:devel', 'gettext:runtime',
+        'cups:devel', 'openssl:devel', ]
+
+    def setup(r):
+        # setup some macros to make the taghandler work properly
+        r.macros.fieldnum = str(len(r.macros.datadir.split('/'))+2)
+
+        r.addArchive('http://ftp.gnome.org/pub/GNOME/sources/gtk+/%(major_version)s/gtk+-%(version)s.tar.bz2')
+
+        # Better support multilib.
+        r.addPatch('gtk+-2.4.1-lib64.patch')
+
+        r.addSource('gtk-input-method.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gtk-input-method')
+        r.addSource('gtk-input-method.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gtk-input-method', mode=0755)
+        r.addSource('gdk-pixbuf-loader.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gdk-pixbuf-loader')
+        r.addSource('gdk-pixbuf-loader.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gdk-pixbuf-loader', mode=0755)
+        r.addSource('gtk-update-icon-cache.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/gtk-update-icon-cache')
+        r.addSource('gtk-update-icon-cache.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/gtk-update-icon-cache', mode=0755)
+
+        extraConfigure = ' --build=%(host)s --host=%(host)s --disable-gtk-doc'
+        r.Configure('--with-xinput=xfree ' + extraConfigure)
+
+        r.Replace('(SRC_SUBDIRS.*) tests (.*)', r'\1 \2', 'Makefile')
+
+        r.Make()
+
+        r.MakeInstall('RUN_QUERY_IMMODULES_TEST=false'
+                      ' RUN_QUERY_LOADER_TEST=false')
+        r.MakeDirs('%(sysconfdir)s/gtk-2.0')
+
+        # set up HOST definition for gtk.modules location
+        r.macros.host = r.macros.target
+        if r.macros.target.endswith("linux"):
+            # autotools appends -gnu to -linux
+            r.macros.host += '-gnu'
+
+        r.macros.queryloaders = '%(bindir)s/gdk-pixbuf-query-loaders-%(host)s'
+        r.macros.loadersfile = '%(sysconfdir)s/gtk-2.0/%(host)s/gdk-pixbuf.loaders'
+
+        r.macros.queryimmodules = '%(bindir)s/gtk-query-immodules-2.0-%(host)s'
+        r.macros.immodulesfile = '%(sysconfdir)s/gtk-2.0/%(host)s/gtk.immodules'
+
+        # separate query modules for multilib installation
+        r.Move('%(bindir)s/gdk-pixbuf-query-loaders', '%(queryloaders)s')
+        r.Move('%(bindir)s/gtk-query-immodules-2.0', '%(queryimmodules)s')
+
+        r.Remove('%(sysconfdir)s/gtk-2.0/gdk-pixbuf.loaders')
+        r.Remove('%(sysconfdir)s/gtk-2.0/gtk.immodules')
+
+        # zero-length config files
+        r.Create('%(loadersfile)s')
+        r.Create('%(immodulesfile)s')
+
+        # move non multilib files back to :config
+        r.ComponentSpec('config', '%(sysconfdir)s/gtk-2.0/im-multipress.conf')
+
+        # :runtime can be installed only once, :lib has multilib, so
+        # move de-collided paths into :lib where they belong
+        r.ComponentSpec('lib',
+            '%(bindir)s/.*query.*',
+            '%(sysconfdir)s/gtk-.*/.*')
+
+        r.Doc('docs/tutorial', 'docs/faq', 'examples')
+        r.ComponentSpec('devel', '%(bindir)s/gdk-pixbuf-csource')
+        r.ComponentSpec('doc', '%(datadir)s/gtk-.*/demo/')
+        # this is arch-dependent and needed for multilib
+        r.ComponentSpec('lib', '%(sysconfdir)s/gtk-2.0/%(target)s/gdk-pixbuf.loaders')
+
+        # modules require tag handlers being run in order to be loaded
+        r.Requires('gtk:runtime',
+                   r'%(libdir)s/gtk-[^/]*/[^/]*/(loaders|immodules)/[^/]*\.so')
+
+        for x in ('%(essentialbindir)s/cat',
+                  '%(essentialbindir)s/sort', '/dev/null'):
+            r.Requires(x, '%(taghandlerdir)s/gtk-update-icon-cache')
