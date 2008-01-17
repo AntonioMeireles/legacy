@@ -1,0 +1,46 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Dev86(CPackageRecipe):
+    name = 'dev86'
+    version = '0.16.17'
+
+    buildRequires = [ 'glib:devel', 'popt:devel' ]
+
+    def setup(r):
+        r.addArchive('http://homepage.ntlworld.com/robert.debath/dev86/Dev86src-%(version)s.tar.gz')
+        r.addPatch('dev86-noelks.patch')
+        # converting fd to unsigned and comparing to 255 is not the best
+        # way to check for an error from open...  Is this an old minix thing?
+        r.addPatch('dev86.manyfds.patch')
+        # makefile.in does not know to bother to look for its own ncc,
+        # causing a bootstrap failure
+        r.addAction("""
+            sed -i 's|LIB3ARGS= CC=ncc|LIB3ARGS= CC=%(builddir)s/%(name)s-%(version)s/bin/ncc|;
+                    s|LIBARGS= CC=ncc|LIBARGS= CC=%(builddir)s/%(name)s-%(version)s/bin/ncc|' makefile.in
+        """)
+
+
+        # Makefile requires manual user input
+        r.Run('make <<EOF\n5\nquit\nEOF')
+
+        r.MakeInstall('DIST=%(destdir)s MANDIR=%(mandir)s install install-man')
+        r.Strip(exceptions='%(libdir)s/bcc/.*')
+
+        for readme in ('bootblocks', 'copt', 'dis88',
+                       'elksemu', 'unproto', 'bin86'):
+            r.Run('cp %s/README README.%s' % (readme, readme) )
+            r.Doc('README.%s' %readme)
+
+        r.Run('cp bin86/README-0.4 README-0.4.bin86')
+        r.Run('cp bin86/ChangeLog ChangeLog.bin86')
+        r.Doc('README-0.4.bin86', 'ChangeLog.bin86')
+
+        r.Remove('%(bindir)s/{nm86,size86}')
+        r.Symlink('%(bindir)s/objdump86', '%(bindir)s/nm86')
+        r.Symlink('%(bindir)s/objdump86', '%(bindir)s/size86')
+
+        r.Doc('MAGIC', 'Contributors')
