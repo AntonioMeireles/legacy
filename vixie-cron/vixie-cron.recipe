@@ -1,0 +1,85 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class VixieCron(RPMPackageRecipe, CPackageRecipe):
+    name = 'vixie-cron'
+    version = '4.1'
+
+    # require chkconfig to get the initscript tag description
+    buildRequires = [ 'chkconfig:runtime', 'pam:devel', ]
+
+    rpmRelease = '63.fc6'
+    rpmPatches = [  'vixie-cron-4.1-_0_rh_Makefile.patch',
+        'vixie-cron-4.1-_1_rh_pathnames.patch',
+        'vixie-cron-4.1-_2_config.patch', 'vixie-cron-4.1-_3_selinux.patch',
+        'vixie-cron-4.1-_4_vfork_sigchld.patch',
+        'vixie-cron-4.1-_5_sprintf_misc.patch',
+        'vixie-cron-4.1-_6_rh_crond.patch',
+        'vixie-cron-4.1-_7_crontab-stdin.patch',
+        'vixie-cron-4.1-_8_root-allowed.patch',
+        'vixie-cron-4.1-_9_no-header.patch',
+        'vixie-cron-4.1-_10_manpages.patch', 'vixie-cron-4.1-_12_pam.patch',
+        'vixie-cron-4.1-_14_pamd_crond.patch',
+        'vixie-cron-4.1-_15_system_crontab_user.patch',
+        'vixie-cron-4.1-_16_crontab_selinux.patch',
+        'vixie-cron-4.1-_17_pam-rootok.patch',
+        'vixie-cron-4.1-_18_cron_log_facility.patch',
+        'vixie-cron-4.1-_19_crontab_stat_not_fstat.patch',
+        'vixie-cron-4.1-_20_nickname_man.patch',
+        'vixie-cron-4.1-_21_-i_option.patch',
+        'vixie-cron-4.1-_22_no_0600_mode_enforce.patch',
+        'vixie-cron-4.1-_25-allow-root-crontab.patch',
+        'vixie-cron-4.1-_26-saved-uids.patch',
+        'vixie-cron-4.1-_27-no-strip-header-comments.patch',
+        'vixie-cron-4.1-_28-fix_ppc.patch',
+        'vixie-cron-4.1-_29-permit_any_crontab_option.patch',
+        'vixie-cron-4.1-_30-uninitialized.patch',
+        'vixie-cron-4.1-_31-allow_pam_access.patch',
+        'vixie-cron-4.1-_32-no_mail_rcpt_safe_p.patch',
+        'vixie-cron-4.1-_33-fix_selinux_segfault.patch',
+        'vixie-cron-4.1-_34-pam_fail_close_session.patch',
+        'vixie-cron-4.1-_35-crontab-job-control.patch',
+        'vixie-cron-4.1-_36-pam_close_fork_fail.patch',
+        'vixie-cron-4.1-_37-limits.patch',
+        'vixie-cron-4.1-_38-CAN-2005-1038.patch',
+        'vixie-cron-4.1-loginuid.patch', 'vixie_cron-4.1-162887.patch',
+        'vixie-cron-4.1-CAN-2005-1038-fix-race.patch',
+        'vixie-cron-4.1-_42-getseuserbyname.patch',
+        'vixie-cron-4.1-_43-config_comments.patch',
+        'vixie-cron-4.1-_44-build_env.patch',
+        'vixie-cron-4.1-_45-warnings.patch',
+        'vixie-cron-4.1-_47-m_option.patch',
+        'vixie-cron-4.1-_50-bz178931.patch', ]
+
+
+    def setup(r):
+        r.unpack()
+        r.addSource('vixie-cron.init', rpm=r.srpm)
+        r.addSource('crond.sysconfig', rpm=r.srpm, dest='%(sysconfdir)s/sysconfig/crond')
+        # Replaces vixie-cron-4.1-_13_with_pam.patch
+        r.Replace('^DEFS.*=.*$', 'DEFS = -DWITH_PAM', 'Makefile')
+        r.Replace('^LIBS.*=.*$', 'LIBS = -lpam -lpam_misc', 'Makefile')
+
+        r.Make('CDEBUG="%(cflags)s"')
+
+        r.MakeDirs('%(bindir)s', '%(sbindir)s', '%(mandir)s/man{1,5,8}',
+                   '%(sysconfdir)s/pam.d')
+        r.MakeInstall('DESTROOT=%(destdir)s/%(prefix)s'
+                      ' DESTSBIN=%(destdir)s/%(sbindir)s'
+                      ' DESTBIN=%(destdir)s/%(bindir)s'
+                      ' DESTMAN=%(destdir)s/%(mandir)s'
+                      ' DESTETC=%(destdir)s/%(sysconfdir)s')
+
+        r.MakeDirs('%(sysconfdir)s/cron.d')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/cron.d')
+        r.MakeDirs('%(localstatedir)s/spool/cron', mode=0700)
+        r.Install('vixie-cron.init', '%(initdir)s/crond', mode=0755)
+        r.SetModes('%(bindir)s/crontab', 04755)
+        r.Create('%(sysconfdir)s/cron.deny', contents=
+'''# If for any reason you have users in the 'cron' group who should not
+# be allowed to run crontab, add them to this file (one username per
+# line)''')
