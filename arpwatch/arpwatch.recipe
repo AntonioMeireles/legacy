@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class ArpWatch(CPackageRecipe):
+    name = 'arpwatch'
+    version = '2.1a15'
+    buildRequires = [ 'libpcap:devel' ]
+
+    def setup(r):
+        r.addArchive('ftp://ftp.ee.lbl.gov/')
+
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/tcpdump-3.8.2-12.src.rpm'
+        r.addPatch('arpwatch-2.1a4-fhs.patch', rpm=srpm)
+        r.addPatch('arpwatch-2.1a10-man.patch', rpm=srpm)
+        r.addPatch('arpwatch-drop.patch', rpm=srpm)
+        r.addPatch('arpwatch-drop-man.patch', rpm=srpm, level=0)
+        r.addPatch('arpwatch-addr.patch', rpm=srpm)
+
+        r.addSource('arpwatch.init', dest='%(initdir)s/arpwatch',
+                    rpm=srpm, mode=0755)
+        r.addSource('arpwatch.sysconfig', rpm=srpm, mode=0644,
+                    dest='%(sysconfdir)s/sysconfig/arpwatch')
+
+        # start initscript by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.Replace('/usr/operator/arpwatch', '%(localstatedir)s/arpwatch',
+                  'arpsnmp.8', 'arpwatch.8')
+        r.Configure()
+        r.Make('ARPDIR=%(localstatedir)s/arpwatch')
+        r.MakeDirs('%(sbindir)s', '%(mandir)s/man8',
+                   '%(localstatedir)s/arpwatch')
+        r.MakeInstall('install-man')
+        r.Install('arp2ethers', 'arpfetch', 'massagevendor',
+                  'massagevendor-old', '%(localstatedir)s/arpwatch/')
+
+        r.Install('*.awk', '*.dat', '%(localstatedir)s/arpwatch/', mode=0644)
+
+        r.Ownership('pcap', 'pcap', '%(localstatedir)s/arpwatch')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/arpwatch')
+        r.TagSpec('initscript', '%(initdir)s/')
