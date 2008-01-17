@@ -1,0 +1,56 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Mtr(CPackageRecipe):
+    name = 'mtr'
+    version = '0.72'
+
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime', 'atk:devel',
+                      'glib:devel', 'libtermcap:devel', 'ncurses:devel',
+                      'pango:devel', 'pkgconfig:devel', 'zlib:devel',
+                      'gtk:devel', 'desktop-file-utils:runtime', ]
+
+    def setup(r):
+        r.addArchive('ftp://ftp.bitwizard.nl/mtr/')
+        r.addSource('net-xmtr.desktop')
+
+        r.addPatch('mtr-0.69-CVE-2002-0497.patch')
+
+        # turn off need for AM_PATH_GTK -- this macro is not
+        # available unless you have gtk1 installed -- which we don't
+        # require.  If the macro is not available, the aclocal call fails,
+        # which breaks if the automake ver is different than the expected
+        # one
+        r.addPatch('mtr-0.69-no-gtk1.patch')
+        r.Run('aclocal && automake && autoconf')
+
+        config = ' --enable-ipv6 '
+
+        # gtk
+        r.Configure(config + '--enable-gtk2 --disable-gtktest')
+        r.Make()
+        r.Install('mtr', '%(sbindir)s/xmtr', mode=0755)
+        r.Install('img/mtr_icon.xpm', '%(datadir)s/pixmaps/')
+        r.Desktopfile('net-xmtr.desktop')
+        r.ConsoleHelper('%(bindir)s/xmtr', '%(sbindir)s/xmtr',
+                        session=True)
+
+        # rebuild without gtk
+        r.Make('distclean')
+        r.Configure(config + ' --without-gtk --disable-gtktest')
+        r.Make()
+        r.MakeInstall()
+        # We don't set mtr setuid root; users can change that if they
+        # want to and then conary will maintain the change...
+        r.SetModes('%(sbindir)s/mtr', 0755)
+
+        r.PackageSpec('mtr-gtk',
+            '%(sbindir)s/xmtr',
+            '%(bindir)s/xmtr',
+            '%(sysconfdir)s/pam.d/.*',
+            '%(sysconfdir)s/security/console.apps/.*',
+            '%(datadir)s/applications/net-xmtr.desktop',
+            '%(datadir)s/pixmaps/mtr_icon.xpm')
