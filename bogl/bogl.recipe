@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Bogl(RPMPackageRecipe, CPackageRecipe):
+    name = 'bogl'
+    version = '0.1.18'
+
+    isRHEL = True
+    distroVersion = '5Client'
+    rpmRelease = '11.2.1.el5.1'
+    tarballName = 'bogl_0.1.18-1.2.tar.gz'
+
+    buildRequires = [ 'ncurses:devel', 'zlib:devel', 'gd:devel',
+        'libpng:devel', 'perl:runtime', ]
+
+    rpmPatches = [ 'bogl-0.1.18-1.1.rh.patch', 'bogl-0.1.18-1.1.sigchld.patch',
+        'bogl-0.1.18-1.2.page_size.patch', 'bogl-0.1.18-noexecstack.patch',
+        'bogl-0.1.9-2.6fbdev.patch', ]
+
+    rpmSources = [ 'wlite-0.8.1.tar.gz', '14x14cjk.bdf.gz' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+        r.addArchive('wlite-0.8.1.tar.gz', rpm=r.srpm, dir='bogl-%(version)s')
+        r.addArchive('http://www.cl.cam.ac.uk/~mgk25/download/ucs-fonts.tar.gz', dir='bogl-%(version)s/fonts')
+        r.addArchive('http://www.cl.cam.ac.uk/~mgk25/download/ucs-fonts-asian.tar.gz', dir='bogl-%(version)s/fonts')
+        r.Replace('^CFLAGS =(.*)', 'CFLAGS = \\1 -D_GNU_SOURCE %(cflags)s -I/usr/include/php/main', 'Makefile')
+        r.Replace(re.escape('all:    depend subdirs'), 'all:    depend subdirs pngtobogl', 'Makefile')
+        r.Make()
+        # we no longer use these fonts, we use the 14x14cjk instead
+        r.Run('zcat 14x14cjk.bdf.gz > font.bdf')
+        r.Run('./bdftobogl -b font.bdf > font.bgf')
+        r.MakeInstall('libdir=%(libdir)s')
+        r.MakeInstall('prefix=%(destdir)s/%(prefix)s '
+                      'libdir=%(destdir)s/%(libdir)s', dir='wlite')
+        # FIXME: not %(libdir)s, these are not libraries.  probably should go
+        # /usr/share anyway... see what'll break if we do that
+        r.Install('font.bdf', 'font.bgf', '%(prefix)s/lib/bogl/')
+        r.Install('pngtobogl', '%(bindir)s/')
+        r.Run('gzip -9 %(destdir)s/%(prefix)s/lib/bogl/*')
+        r.Doc('README.BOGL-bterm')
+        r.ComponentSpec('data', '%(prefix)s/lib/bogl/')
