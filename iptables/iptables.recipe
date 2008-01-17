@@ -1,0 +1,55 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Iptables(CPackageRecipe):
+    name = 'iptables'
+    version = '1.3.8'
+
+    buildRequires = [ 'sed:runtime', 'perl:runtime' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('http://www.netfilter.org/projects/%(name)s/files/')
+
+        r.addSource('iptables.init', dest='%(initdir)s/iptables', mode=0755)
+        r.addSource('iptables-config', dest='%(sysconfdir)s/sysconfig/')
+
+        r.addPatch('iptables-1.2.10-counters.patch')
+        r.addPatch('iptables-1.3.0-autoload.patch')
+        r.addPatch('iptables-1.3.0-no_root.patch')
+        r.addPatch('iptables-1.3.0-selinux.patch')
+        r.addPatch('iptables-enable-ipv6header.patch')
+
+        r.Run('find . -type f -exec sed -i "s,/usr/local,%(prefix)s,g" {} \;')
+
+        r.Make('COPT_FLAGS="%(cflags)s" KERNEL_DIR=%(prefix)s LIBDIR=/%(lib)s')
+        r.Make('COPT_FLAGS="%(cflags)s" KERNEL_DIR=%(prefix)s LIBDIR=/%(lib)s'
+               ' iptables-save iptables-restore')
+
+        r.Make('COPT_FLAGS="%(cflags)s"'
+               ' KERNEL_DIR=%(prefix)s'
+               ' LIBDIR=/%(lib)s ip6tables-save ip6tables-restore')
+
+        r.MakeInstall('KERNEL_DIR=%(prefix)s'
+                      ' BINDIR=%(essentialsbindir)s'
+                      ' LIBDIR=/%(lib)s'
+                      ' MANDIR=%(mandir)s')
+        r.MakeInstall('KERNEL_DIR=%(prefix)s'
+                      ' BINDIR=%(essentialsbindir)s'
+                      ' LIBDIR=/%(lib)s'
+                      ' MANDIR=%(mandir)s', installtarget='install-devel')
+
+        r.Install('ip{6,}tables-{save,restore}',
+                  '%(destdir)s/%(essentialsbindir)s/')
+        r.Install('iptables-*.8',
+                  '%(destdir)s/%(mandir)s/man8/')
+
+        r.Run("sed -e 's;iptables;ip6tables;g' -e 's;IPTABLES;IP6TABLES;g' < %(destdir)s%(initdir)s/iptables > %(destdir)s%(initdir)s/ip6tables")
+        r.SetModes('%(initdir)s/ip6tables', 0755)
+
+        r.Run("sed -e 's;iptables;ip6tables;g' -e 's;IPTABLES;IP6TABLES;g' < %(destdir)s%(sysconfdir)s/sysconfig/iptables-config > %(destdir)s%(sysconfdir)s/sysconfig/ip6tables-config")
+
+        r.TagSpec('initscript', '%(initdir)s/')
