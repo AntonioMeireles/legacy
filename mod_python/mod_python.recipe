@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class ModPython(CPackageRecipe):
+    name = 'mod_python'
+    version = '3.3.1'
+
+    buildRequires = [ 'httpd:devel', 'httpd:runtime', 'python:runtime',
+        'python:devel', 'apr:devel', 'apr-util:devel', 'flex:runtime',
+        'autoconf:runtime', ]
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/mod_python-3.2.10-4.src.rpm'
+        r.macros.manualdir = '%(servicedir)s/www/manual/mod/mod_python'
+        r.addArchive('http://www.apache.org/dist/httpd/modpython/%(name)s-%(version)s.tgz')
+        r.addSource('python.conf' , rpm=srpm,
+                    dest='%(sysconfdir)s/httpd/conf.d/', mode=0644)
+        r.addPatch('chunked-encoding.patch')
+
+        r.Run('autoconf')
+        r.Configure('--with-apxs=%(sbindir)s/apxs')
+        r.Make()
+        r.MakeDirs('%(libdir)s/httpd/modules')
+        r.MakeInstall()
+
+        # Install the manual.
+        r.MakeDirs('%(manualdir)s')
+        r.Install('doc-html/*', '%(manualdir)s/')
+        r.ComponentSpec('manual', '%(manualdir)s/')
+        r.ByDefault(exceptions=[':manual'])
+
+        r.ComponentSpec('runtime', '.*/mod_python.so')
+        r.Requires('mod_python:python', '.*/mod_python.so')
+
+        r.Requires('httpd:runtime', '%(sysconfdir)s/httpd/conf.d/.*')
+
+        # Advertise that this allows "Transfer-encoding: chunked" to work
+        r.ComponentProvides('chunked')
