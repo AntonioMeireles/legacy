@@ -1,0 +1,36 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Dejagnu(CPackageRecipe):
+    name = 'dejagnu'
+    version = '1.4.4'
+
+    buildRequires = [ 'tcl:runtime', 'expect:runtime', 'gcc-c++:runtime' ]
+    if Use.builddocs:
+        buildRequires.extend([
+            'jadetex:runtime', 'docbook-utils:runtime', 'tetex:runtime' ])
+
+    def setup(r):
+        r.addArchive('mirror://gnu/dejagnu/')
+        r.Run('find . -name \*.rej -exec rm {} \;')
+
+        r.Configure('-v')
+        r.Make()
+        if Use.builddocs:
+            r.Make('overview.{ps,pdf} book1.html')
+
+        r.MakeInstall()
+
+        if Use.builddocs:
+            r.Make('docs', dir='doc')
+            r.Make('man1dir=%(destdir)s/%(mandir)s/man1 install-man',
+                   dir='doc')
+        r.Run('mv %(destdir)s/%(datadir)s/dejagnu/libexec/config.guess '
+              '%(destdir)s/%(datadir)s/dejagnu/')
+        r.Doc('doc/overview.*', 'doc/html')
+        r.Remove('%(thisdocdir)s/html/CVS', recursive=True)
+        r.Make('check', dir='testsuite/libdejagnu')
+        r.TestSuite('testsuite/', 'runtest')
