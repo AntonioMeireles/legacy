@@ -1,0 +1,51 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('python')
+class Libxml2(AutoPackageRecipe):
+    name = 'libxml2'
+    version = '2.6.30'
+
+    buildRequires = [ 'python:runtime', 'python:devel', 'zlib:devel',
+                      'gcc-c++:runtime' ]
+
+    if not Use.bootstrap:
+        buildRequires += ['libxslt:runtime', 'libxslt:python', 'perl:runtime']
+
+    def setup(r):
+        r.addArchive('ftp://xmlsoft.org/libxml2/')
+        r.addArchive('ftp://xmlsoft.org/libxml2/libxml2-tests-%(version)s.tar.gz')
+
+        # RPL-2121 CVE-2007-6284
+        r.addPatch('CVE-2007-6284.patch')
+
+        if Use.bootstrap:
+            preconf = 'PYTHON_INCLUDES="%%(sysroot)s/%s" PYTHON_SITE_PACKAGES="%s"' % ( Python.includedir , Python.sitepkgs )
+            for variable in ('PYTHON_SITE_PACKAGES', 'PYTHON_INCLUDES'):
+                r.Replace(variable+'=$', '', 'configure', 'configure.in')
+        else:
+            preconf = ''
+        r.Configure('--with-python', preConfigure=preconf)
+
+        r.Make()
+        r.Make('-f Makefile.tests')
+        r.MakeInstall()
+
+        if not Use.bootstrap:
+            r.Move('%(docdir)s/%(name)s-python-%(version)s/examples/*',
+                   '%(thisdocdir)s/examples/')
+            r.Remove('%(docdir)s/%(name)s-python-%(version)s', recursive=True)
+
+            # other docs are not installed by make install:
+            r.Doc('doc/*.html', 'doc/*.gif', 'doc/*.png',
+                  'doc/tutorial', 'doc/libxml2-api.xml')
+            r.Doc('python/libxml2class.txt', 'python/tests/*.py',
+                  'doc/*.py', 'doc/python.html')
+
+            for test in ('relaxng', 'xinclude', 'xml', 'xsddata'):
+                testname = 'check-'+test+'-test-suite.py'
+                r.Run('sed -i -e "s/quiet = 1/quiet = 0/g" %s' % testname)
+                r.TestSuite('.', "./%s" % testname)
