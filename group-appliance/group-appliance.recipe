@@ -1,0 +1,100 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+import datetime
+
+class ApplianceGroupRecipe(GroupRecipe):
+    name = 'group-appliance'
+    version= datetime.date.today().strftime("%Y%m%d")
+
+    def startGroup(r, name, parentGroup, depCheck=False, byDefault=True,
+                   checkPathConflicts=None):
+        # creates group named "name", adds it to the toplevel group,
+        # and sets the current group to that name.  calls to r.add()
+        # will use the current group by default.
+
+        # note: byDefault applies to whether the group is included by
+        # default in its parent group, not whether the troves in
+        # the group are added by default. (use the setByDefault() command
+        # to get that)
+
+        # get all the the default for the new group from its parent group.
+        r.setDefaultGroup(parentGroup)
+        r.createGroup(name, autoResolve=False, depCheck=depCheck,
+                      byDefault=True, checkPathConflicts=checkPathConflicts)
+        r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
+        r.setDefaultGroup(name)
+
+    # Labels used for kernel selection.
+    groupLabel = 'conary.rpath.com@rpl:2-devel'
+    xenLabel = 'conary.rpath.com@rpl:2-xen-devel'
+
+    if Arch.x86:
+        gccFlavor = None
+        glibcFlavor = 'is: x86(i486,i586,i686)'
+        glibcFlavor32 = None # needed so we can control addition of troves with use=
+        grubFlavor = None
+        kernelLabel = groupLabel
+        mkinitrdFlavor = '!xen,!domU'
+        if Use.xen:
+            glibcFlavor = 'xen is: x86(i486,i586,i686)'
+            kernelLabel = xenLabel
+            if Use.dom0:
+                if Use.domU:
+                    print "This recipe may be built with dom0 or domU, but cannot use both.\n"
+                    sys.exit(1)
+                groupCoreFlavor = 'dom0,~!domU,~!vmware,xen is: x86(i486,i586,i686,sse,sse2)'
+                kernelFlavor = 'dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~!kernel.numa,~kernel.pae,~kernel.smp,xen is: x86(i486,i586,i686)'
+                releaseFlavor = 'xen,dom0'
+            if Use.domU:
+                groupCoreFlavor = '~!dom0,domU,~!vmware,xen is: x86(i486,i586,i686,sse,sse2)'
+                kernelFlavor = '~!dom0,domU,~!vmware,xen is: x86(i486,i586,i686,sse,sse2)'
+                mkinitrdFlavor = 'xen,domU'
+                releaseFlavor = 'xen,domU'
+        elif Use.vmware:
+            groupCoreFlavor = '~!dom0,~!domU,vmware,~!xen is: x86(i486,i586,i686,sse,sse2)'
+            kernelFlavor = '~!dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~kernel.debuginfo,~!kernel.numa,~!kernel.pae,~kernel.smp,~!xen is: x86(i486,i586,i686)'
+            releaseFlavor = 'vmware'
+        else:
+            groupCoreFlavor = '~!dom0,~!domU,~!vmware,~!xen is: x86(i486,i586,i686,sse,sse2)'
+            kernelFlavor = '!dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~!kernel.numa,~kernel.pae,~kernel.smp,!xen is: x86(i486,i586,i686)'
+            releaseFlavor = None
+    elif Arch.x86_64:
+        glibcFlavor = None
+        glibcFlavor32 = 'is: x86(i486,i586,i686)'
+        kernelLabel = groupLabel
+        mkinitrdFlavor = '!xen,!domU'
+        if Use.xen:
+            glibcFlavor = None
+            glibcFlavor32 = 'xen is: x86(i486,i586,i686)'
+            kernelLabel = xenLabel
+            if Use.dom0:
+                if Use.domU:
+                    print "This recipe may be built with dom0 or domU, but cannot use both.\n"
+                    sys.exit(1)
+                groupCoreFlavor = 'dom0,~!domU,~!vmware,xen is: x86(i486,i586,i686,sse,sse2) x86_64'
+                kernelFlavor = 'dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~!kernel.numa,~!kernel.pae,~kernel.smp,xen is: x86_64'
+                releaseFlavor = 'xen,dom0'
+            if Use.domU:
+                mkinitrdFlavor = 'xen,domU'
+                groupCoreFlavor = '~!dom0,domU,~!vmware,xen is: x86(i486,i586,i686,sse,sse2) x86_64'
+                kernelFlavor = '~!dom0,domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~!kernel.numa,~!kernel.pae,~kernel.smp,xen is: x86_64'
+                releaseFlavor = 'xen,domU'
+        elif Use.vmware:
+            groupCoreFlavor = '~!dom0,~!domU,vmware,~!xen is: x86(i486,i586,i686,sse,sse2) x86_64'
+            kernelFlavor = '~!dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~kernel.debuginfo,~!kernel.numa,~!kernel.pae,~kernel.smp,~!xen is: x86_64'
+            releaseFlavor = 'vmware'
+        else:
+            groupCoreFlavor = '~!dom0,~!domU,~!vmware,~!xen is: x86(i486,i586,i686,sse,sse2) x86_64'
+            kernelFlavor = '~!dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~kernel.debuginfo,~!kernel.numa,~!kernel.pae,~kernel.smp,~!xen is: x86_64'
+            releaseFlavor = None
+
+    def addAppliancePlatform(r):
+        r.startGroup('group-core', parentGroup=r.name)
+        r.addAll('group-appliance-platform', r.groupLabel, flavor=r.groupCoreFlavor, flatten=True)
+        r.replace('kernel', r.kernelLabel, newFlavor=r.kernelFlavor)
+        r.add('kernel', r.kernelLabel, flavor=r.kernelFlavor)
+        r.add('open-vm-tools', 'conary.rpath.com@rpl:2-devel', use=Use.vmware)
