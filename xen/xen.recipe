@@ -1,0 +1,91 @@
+#
+# Copyright (c) 2005-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Xen(CPackageRecipe):
+    name = "xen"
+    version = "3.1.2"
+    vncDir = "LibVNCServer-0.8.2"
+
+    buildRequires = ['SDL:devel', 'e2fsprogs:devel', 'ncurses:devel',
+                     'zlib:devel', 'mod_python:python', 'openssl:devel',
+                     'python:devel', 'PyPAM:python', 'udev:runtime',
+                     'tetex-latex:runtime', 'tetex-dvips:runtime',
+                     'latex2html:runtime', 'perl:runtime', 'which:runtime',
+                     'tetex:runtime', 'tetex-fonts:data', 'tetex-afm:runtime',
+                     'ghostscript-fonts:data', 'dev86:runtime', 'libjpeg:devel',
+                     'gettext:runtime', 'libX11:devel']
+
+    rpmPatches = [ 'xen-initscript.patch',
+                   'xen-remove-python-path-check.patch',
+                   'xen-compile-fixes.patch',
+                   'xen-dumpdir.patch',
+                   'xen-block-readonly.patch',
+                   'xen-blktap-no-aio-epoll.patch',
+                   'xen-hvm-save-paths.patch',
+                   'xen-console-log.patch',
+                   'xen-3.1.0-no-xenapi-docs.patch',
+                   'xen-config-dom0-minmem.patch',
+                   'xen-3.0.2-config-allow-unix-server.patch',
+                   'xen-3.0.2-config-disable-reloc.patch',
+                   'pygrub-manykernels.patch']
+
+    vncPatches = [ 'vnc-thread-fixes.patch',
+                   'vnc-invalid-fd.patch',
+                   'vnc-ref-counting.patch',
+                   'vnc-client-iterator.patch',
+                   'vnc-double-cleanup.patch' ]
+
+    if Arch.x86_64:
+        buildRequires += ['glibc:devellib[is: x86(i486,i586,i686)]']
+
+    def setup(r):
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/updates/7/SRPMS/%(name)s-%(version)s-1.fc7.src.rpm'
+        r.macros.vncDir = r.vncDir
+        r.addArchive('%(name)s-%(version)s-src.tgz', rpm=srpm)
+        r.addArchive('LibVNCServer-0.8.2.tar.gz', dir='%(maindir)s', rpm=srpm)
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=srpm)
+        r.addPatch('xen-xs-transactions.patch')
+        for patch in r.vncPatches:
+            r.addPatch(patch, dir=r.vncDir, rpm=srpm)
+        r.addSource('check_libvncserver', dir='tools/check/')
+        r.Configure(dir=r.vncDir)
+        r.Make('-C libvncserver', dir=r.vncDir)
+
+        r.Replace('libvncserver-config', '%(builddir)s/%(vncDir)s/libvncserver-config', 'tools/xenfb/Makefile')
+        # Fig2dev is not used at this time so we shouldn't fail if it is
+        # not present
+        r.Replace('silent_which fig2dev    \|\| exit 1', 'silent_which fig2dev', 'docs/check_pkgs')
+        r.Replace('/usr/sbin/xend start', 'modprobe loop 2>/dev/null\n\t/usr/sbin/xend start', 'tools/examples/init.d/xend')
+
+        r.Make('XENFB_TOOLS=y XEN_PYTHON_NATIVE_INSTALL=1 tools docs')
+        r.Make('XENFB_TOOLS=y XEN_PYTHON_NATIVE_INSTALL=1 DESTDIR=%(destdir)s install-tools install-docs')
+        r.MakeDirs('%(localstatedir)s/run/xenstored',
+                   '%(localstatedir)s/lib/xenstored',
+                   '%(localstatedir)s/lib/xen/xend-db/domain',
+                   '%(localstatedir)s/lib/xen/xend-db/vnet',
+                   '%(localstatedir)s/lib/xen/xend-db/migrate',
+                   '%(localstatedir)s/log/xen')
+
+        # Install the public headers since we build the hypervisor in the kernel.
+        r.MakeDirs('%(includedir)s/xen/io',
+                   '%(includedir)s/xen/hvm',
+                   '%(includedir)s/xen/arch-x86')
+
+        r.Install('xen/include/public/io/*.h', '%(includedir)s/xen/io/')
+        r.Install('xen/include/public/hvm/*.h', '%(includedir)s/xen/hvm/')
+        r.Install('xen/include/public/arch-x86/*.h', '%(includedir)s/xen/arch-x86/')
+        r.Install('xen/include/public/*.h', '%(includedir)s/xen/')
+        r.Install('xen/include/public/COPYING', '%(includedir)s/xen/')
+        r.Move('%(sysconfdir)s/udev/xen-backend.rules', '%(sysconfdir)s/udev/rules.d/')
+
+        r.ExcludeDirectories(exceptions='(%(sysconfdir)s/xen/auto|'
+                             '%(localstatedir)s/(xen/dump|run/xen.*|'
+                             'lib/xen.*|log/xen))')
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('kernel:runtime(XEN_3.1.0)', '%(sbindir)s/xend')
+        r.Requires('bridge-utils:runtime', '%(sysconfdir)s/xen/scripts/(vif|network)-bridge')
+        r.Flavor(exceptions='%(prefix)s/lib/xen/boot/hvmloader')
