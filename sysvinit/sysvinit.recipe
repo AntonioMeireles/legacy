@@ -1,0 +1,39 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class SysVinit(RPMPackageRecipe,CPackageRecipe):
+    name = 'sysvinit'
+    version = '2.86'
+    rpmName = 'SysVinit'
+    rpmRelease = '14'
+
+    def setup(r):
+        r.addArchive('%(name)s-%(version)s.tar.gz', rpm=r.srpm)
+        r.addPatch('sysvinit-2.86-strip.patch')
+        r.addPatch('sysvinit-2.85-bootstrap.patch')
+        # This patch is required by /etc/init.d/functions
+        r.addPatch('sysvinit-2.86-chroot.patch')
+        # Fix single-user mode (RPL-1001)
+        r.addPatch('sysvinit-2.86-single.patch', rpm=r.srpm)
+        # Use /dev/tty1 instead of /dev/console, if on VTY (RPL-1776)
+        r.addPatch('use_tty1.patch', level=0)
+
+        r.Make(dir='src')
+        r.MakeDirs('%(essentialsbindir)s',
+                   '%(essentialbindir)s',
+                   '%(bindir)s',
+                   '%(sbindir)s',
+                   '%(sysconfdir)s',
+                   '%(mandir)s/man{1,2,5,8}')
+        r.MakeInstall('MANDIR=%(mandir)s BIN_OWNER=$(id -nu)',
+                      'BIN_GROUP=$(id -ng)', rootVar='ROOT',
+                      dir='src')
+        r.Symlink('killall5', '%(essentialsbindir)s/pidof')
+        r.AutoDoc('doc/sysvinit-%(version)s.lsm', 'contrib/start-stop-daemon.*')
+
+        r.SetModes('%(bindir)s/wall', 02555)
+        r.Ownership('root', 'tty', '%(bindir)s/wall')
