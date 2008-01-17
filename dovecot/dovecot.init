@@ -1,0 +1,95 @@
+#!/bin/bash
+#
+#	/etc/rc.d/init.d/dovecot
+#
+# Starts the dovecot daemon
+#
+# chkconfig: 345 54 54
+# description: Dovecot Imap Server
+# processname: dovecot
+# Source function library.
+. /etc/init.d/functions
+
+test -x %(sbindir)s/dovecot || exit 0
+
+RETVAL=0
+prog="Dovecot Imap"
+
+makecert () {
+        if [ ! -d %(ssldir)s/private ]; then
+            mkdir -p %(ssldir)s/private
+        fi
+
+        if [ ! -d %(ssldir)s/certs ]; then
+            mkdir -p %(ssldir)s/certs
+        fi
+
+        if [ ! -s %(ssldir)s/certs/dovecot.pem ] ; then
+           (cd %(ssldir)s
+            umask 077
+            openssl req -new -x509 -days 365 -nodes -out certs/dovecot.pem -keyout private/dovecot.pem &>/dev/null << EOF
+--
+SomeState
+SomeCity
+SomeOrganization
+SomeOrganizationalUnit
+localhost.localdomain
+root@localhost.localdomain
+EOF
+            chown root:root private/dovecot.pem certs/dovecot.pem
+            chmod 600 private/dovecot.pem certs/dovecot.pem
+           )
+        fi
+}
+
+start() {
+    echo -n $"Starting $prog: "
+    makecert
+    daemon %(sbindir)s/dovecot
+    RETVAL=$?
+    [ $RETVAL -eq 0 ] && touch %(localstatedir)s/lock/subsys/dovecot
+    echo
+}
+
+stop() {
+    echo -n $"Stopping $prog: "
+    killproc %(sbindir)s/dovecot
+    RETVAL=$?
+    [ $RETVAL -eq 0 ] && rm -f %(localstatedir)s/lock/subsys/dovecot
+    echo
+}
+
+#
+#	See how we were called.
+#
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  makecert)
+    makecert
+    ;;
+  reload|restart)
+    stop
+    start
+    RETVAL=$?
+    ;;
+  condrestart)
+    if [ -f /var/lock/subsys/dovecot ]; then
+        stop
+        start
+    fi
+    ;;
+  status)
+    status /usr/sbin/dovecot
+    RETVAL=$?
+    ;;
+  *)
+    echo $"Usage: $0 {condrestart|start|stop|restart|reload|status|makecert}"
+    exit 1
+esac
+
+exit $RETVAL

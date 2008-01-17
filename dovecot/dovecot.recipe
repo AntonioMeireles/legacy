@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Dovecot(CPackageRecipe):
+    name = 'dovecot'
+    version = '1.0.10'
+
+    buildRequires = [ 'pkgconfig:devel', 'zlib:devel', 'cyrus-sasl:devel',
+        'openssl:devel', 'openldap:devel', 'pam:devel', 'krb5:devel', ]
+
+    def setup(r):
+        r.macros.ssldir = '%(sysconfdir)s/ssl'
+
+        r.addArchive('http://dovecot.org/releases/%(major_version)s/', keyid='40558AC9')
+        r.addSource('dovecot.init', dest='%(initdir)s/dovecot', macros=True, mode=0755)
+        r.addSource('dovecot.pam', dest='%(sysconfdir)s/pam.d/dovecot')
+        r.addSource('dovecot.conf', macros=True, dest='%(sysconfdir)s/')
+        r.addSource('dovecot.logrotate', dest='%(sysconfdir)s/logrotate.d/%(name)s')
+
+        r.Replace('/var', '%(servicedir)s', 'src/lib-storage/index/mbox/mbox-storage.c')
+        r.Configure('--with-ldap --with-ssl=openssl --with-ssldir=%(ssldir)s'
+            ' --enable-header-install')
+        r.Make()
+        r.MakeInstall()
+
+        r.Create('%(ssldir)s/certs/dovecot.pem', mode=0600)
+        r.Create('%(ssldir)s/private/dovecot.pem', mode=0600)
+        r.MakeDirs('%(localstatedir)s/run/dovecot', mode=0755)
+        r.MakeDirs('%(localstatedir)s/run/dovecot/login', mode=0750)
+        r.Remove('%(docdir)s/%(name)s/', recursive=True)
+        r.Remove('%(sysconfdir)s/dovecot-example.conf')
+        r.MakeDirs('%(localstatedir)s/log', mode=0755)
+        r.Create('%(localstatedir)s/log/dovecot.log', mode=0600)
+        r.Doc('doc/*.txt', 'doc/dovecot-openssl.cnf', 'doc/mkcert.sh')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.UtilizeUser('dovecot', '%(bindir)s/')
+        r.Ownership('root', 'dovecot', '%(localstatedir)s/run/dovecot/login')
+        r.Requires('openssl:runtime', '%(initdir)s/dovecot')
