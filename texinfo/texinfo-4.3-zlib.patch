@@ -1,0 +1,185 @@
+--- texinfo-4.7/util/Makefile.in.zlib	2004-04-09 22:32:26.000000000 +0100
++++ texinfo-4.7/util/Makefile.in	2004-06-25 09:59:33.990117203 +0100
+@@ -157,7 +157,7 @@
+ LIBICONV = @LIBICONV@
+ LIBINTL = @LIBINTL@
+ LIBOBJS = @LIBOBJS@
+-LIBS = @LIBS@
++LIBS = @LIBS@ -lz
+ LTLIBICONV = @LTLIBICONV@
+ LTLIBINTL = @LTLIBINTL@
+ LTLIBOBJS = @LTLIBOBJS@
+--- texinfo-4.7/util/install-info.c.zlib	2004-03-29 13:44:23.000000000 +0100
++++ texinfo-4.7/util/install-info.c	2004-06-25 10:00:23.115729565 +0100
+@@ -20,6 +20,7 @@
+ 
+ #include "system.h"
+ #include <getopt.h>
++#include <zlib.h>
+ 
+ static char *progname = "install-info";
+ 
+@@ -529,7 +530,7 @@
+    COMPRESSION_PROGRAM.  The compression program is determined by the
+    magic number, not the filename.  */
+ 
+-FILE *
++gzFile
+ open_possibly_compressed_file (char *filename,
+     void (*create_callback) (char *),
+     char **opened_filename, char **compression_program, int *is_pipe) 
+@@ -537,7 +538,7 @@
+   char *local_opened_filename, *local_compression_program;
+   int nread;
+   char data[4];
+-  FILE *f;
++  gzFile *f;
+ 
+   /* We let them pass NULL if they don't want this info, but it's easier
+      to always determine it.  */
+@@ -545,11 +546,11 @@
+     opened_filename = &local_opened_filename;
+ 
+   *opened_filename = filename;
+-  f = fopen (*opened_filename, FOPEN_RBIN);
++  f = gzopen (*opened_filename, FOPEN_RBIN);
+   if (!f)
+     {
+       *opened_filename = concat (filename, ".gz", "");
+-      f = fopen (*opened_filename, FOPEN_RBIN);
++      f = gzopen (*opened_filename, FOPEN_RBIN);
+   if (!f)
+     {
+       free (*opened_filename);
+@@ -562,13 +563,13 @@
+         {
+           free (*opened_filename);
+           *opened_filename = concat (filename, ".igz", "");
+-          f = fopen (*opened_filename, FOPEN_RBIN);
++          f = gzopen (*opened_filename, FOPEN_RBIN);
+         }
+       if (!f)
+         {
+           free (*opened_filename);
+           *opened_filename = concat (filename, ".inz", "");
+-          f = fopen (*opened_filename, FOPEN_RBIN);
++          f = gzopen (*opened_filename, FOPEN_RBIN);
+         }
+ #endif
+       if (!f)
+@@ -580,7 +581,7 @@
+               /* And try opening it again.  */
+               free (*opened_filename);
+               *opened_filename = filename;
+-              f = fopen (*opened_filename, FOPEN_RBIN);
++              f = gzopen (*opened_filename, FOPEN_RBIN);
+               if (!f)
+                 pfatal_with_name (filename);
+             }
+@@ -589,66 +590,7 @@
+         }
+     }
+ 
+-  /* Read first few bytes of file rather than relying on the filename.
+-     If the file is shorter than this it can't be usable anyway.  */
+-  nread = fread (data, sizeof (data), 1, f);
+-  if (nread != 1)
+-    {
+-      /* Empty files don't set errno, so we get something like
+-         "install-info: No error for foo", which is confusing.  */
+-      if (nread == 0)
+-        fatal (_("%s: empty file"), *opened_filename, 0);
+-      pfatal_with_name (*opened_filename);
+-    }
+-
+-  if (!compression_program)
+-    compression_program = &local_compression_program;
+-
+-  if (data[0] == '\x1f' && data[1] == '\x8b')
+-#if STRIP_DOT_EXE
+-    /* An explicit .exe yields a better diagnostics from popen below
+-       if they don't have gzip installed.  */
+-    *compression_program = "gzip.exe";
+-#else
+-    *compression_program = "gzip";
+-#endif
+-  else if(data[0] == 'B' && data[1] == 'Z' && data[2] == 'h')
+-#ifndef STRIP_DOT_EXE
+-    *compression_program = "bzip2.exe";
+-#else
+-    *compression_program = "bzip2";
+-#endif
+-  else if(data[0] == 'B' && data[1] == 'Z' && data[2] == '0')
+-#ifndef STRIP_DOT_EXE
+-    *compression_program = "bzip.exe";
+-#else
+-    *compression_program = "bzip";
+-#endif
+-  else
+-    *compression_program = NULL;
+-
+-  if (*compression_program)
+-    { /* It's compressed, so fclose the file and then open a pipe.  */
+-      char *command = concat (*compression_program," -cd <", *opened_filename);
+-      if (fclose (f) < 0)
+-        pfatal_with_name (*opened_filename);
+-      f = popen (command, "r");
+-      if (f)
+-        *is_pipe = 1;
+-      else
+-        pfatal_with_name (command);
+-    }
+-  else
+-    { /* It's a plain file, seek back over the magic bytes.  */
+-      if (fseek (f, 0, 0) < 0)
+-        pfatal_with_name (*opened_filename);
+-#if O_BINARY
+-      /* Since this is a text file, and we opened it in binary mode,
+-         switch back to text mode.  */
+-      f = freopen (*opened_filename, "r", f);
+-#endif
+-      *is_pipe = 0;
+-    }
++  *is_pipe = 0;
+ 
+   return f;
+ }
+@@ -667,7 +609,7 @@
+     char **compression_program)
+ {
+   char *real_name;
+-  FILE *f;
++  gzFile *f;
+   int pipe_p;
+   int filled = 0;
+   int data_size = 8192;
+@@ -681,7 +623,7 @@
+ 
+   for (;;)
+     {
+-      int nread = fread (data + filled, 1, data_size - filled, f);
++      int nread = gzread (f, data + filled, data_size - filled);
+       if (nread < 0)
+         pfatal_with_name (real_name);
+       if (nread == 0)
+@@ -700,10 +642,7 @@
+   /* We need to close the stream, since on some systems the pipe created
+      by popen is simulated by a temporary file which only gets removed
+      inside pclose.  */
+-  if (pipe_p)
+-    pclose (f);
+-  else
+-    fclose (f);
++  gzclose(f);
+ 
+   *sizep = filled;
+   return data;
+@@ -1449,7 +1388,7 @@
+     warning (_("no entries found for `%s'; nothing deleted"), infile, 0);
+ 
+   output_dirfile (opened_dirfilename, dir_nlines, dir_lines, n_entries_to_add,
+-                  entries_to_add, input_sections, compression_program);
++                  entries_to_add, input_sections, NULL);
+ 
+   xexit (0);
+   return 0; /* Avoid bogus warnings.  */
