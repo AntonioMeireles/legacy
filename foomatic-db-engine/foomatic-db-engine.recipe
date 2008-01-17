@@ -1,0 +1,60 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class FoomaticDbEngine(CPackageRecipe):
+    name = 'foomatic-db-engine'
+    version = '3.0_20070618'
+
+    buildRequires = [ 'foomatic-db:data', 'foomatic-filters:runtime',
+        'perl:runtime', 'perl:lib', 'curl:devel', 'a2ps:runtime',
+        'cups:runtime', 'curl:runtime', 'ghostscript:runtime', 'nc:runtime',
+        'samba:runtime', 'libxml2:devel', 'wget:runtime', 'zlib:devel',
+        'findutils:runtime', ]
+
+    def setup(r):
+        r.macros.upver = r.version.replace('_', '-')
+        r.addArchive('http://www.linuxprinting.org/download/foomatic/%(name)s-%(upver)s.tar.gz')
+        r.addPatch('perl-module-3.0.1.diff')
+
+        r.disableParallelMake()
+        r.macros.ldflags += ' -lxml2'
+
+        # the lines containing foomatic_filters_root assume an inplace
+        # foomatic-db, which we don't have.  The lines try to install
+        # files from foomatic-db and therefore break the build
+        r.Run("sed -ie '/.*INSTALL.*foomatic_filters_root.*/,+1d' Makefile.in")
+
+        r.Configure()
+        r.Make()
+        r.MakeInstall()
+
+        r.Run('cd lib; make DESTDIR=%(destdir)s PREFIX=%(prefix)s install')
+
+        # Generate and install the PPDs
+        r.Replace("\$bindir = .*;",
+                  "$bindir = '.';",
+                  'lib/Foomatic/Defaults.pm')
+
+        r.Make('filters-ppds')
+        # this is ugly, but we can't use any shell expansion because conary
+        # passes the dir arg to cd with '' not ""
+        import time
+        r.Run('./install -d %(destdir)s -p %(prefix)s -z',
+              dir='foomatic-filters-ppds-%s' % time.strftime('%Y%m%d') )
+
+        # somehow the destdir gets embedded twice for these four perl files, but
+        # the makefile is 991 lines long to install only these four so simply
+        # moving is easier than hacking it
+        r.Run('cd %(destdir)s/%(destdir)s ; for x in `find . -type f` ; do mkdir -p %(destdir)s/`dirname $x`; mv $x %(destdir)s/`dirname $x` ; done ; cd ; rm -rf %(destdir)s/%(destdir)s')
+
+        # Provided by foomatic-filters
+        r.Remove('%(bindir)s/foomatic-*')
+        r.Remove('%(mandir)s/man1/foomatic-*.1')
+
+        # Provided by hplip
+        r.Remove('%(datadir)s/ppd/HP/', recursive=True)
+
+        r.Install('foomatic-ppdfile', '%(bindir)s/')
