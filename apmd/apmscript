@@ -1,0 +1,376 @@
+#!/bin/bash
+#
+# Red Hat APM suspend/resume script
+# $Id: apmscript,v 1.1 2004/03/31 15:02:22 johnsonm Exp $
+# (c) 1999-2002 Bernhard Rosenkraenzer <bero@redhat.com>
+# (c) 2003 Red Hat, Inc.
+#
+# DO NOT EDIT THIS SCRIPT, CREATE AND EDIT apmcontinue IN THIS DIRECTORY; you
+# can put your stuff into apmcontinue for every link you create to apmscript;
+# for a start and definitely enough for most laptops we have two links and
+# according subroutines defined here: suspend and resume; all other links
+# will be redirected directly to apmcontinue which you can create; also
+# suspend and resume call apmscript, so you can also do other things (like
+# reinitialising some PCMCIA-Card) there; apmcontinue will get the name
+# as which it was called as $1; for debugging see the logfiles
+#
+# If you think something in this script needs to be changed anyway, please
+# report it to http://bugzilla.redhat.com/bugzilla/
+#
+# This script can be controlled by editing /etc/sysconfig/apmd.
+
+PROG="$1"
+LOCKFILE=/var/lock/subsys/resume
+LANG="C" # We're parsing the output of some scripts, better not i18n it
+[ -e /etc/sysconfig/keyboard ] && . /etc/sysconfig/keyboard
+[ -e /etc/sysconfig/apmd ] && . /etc/sysconfig/apmd
+[ -e /etc/sysconfig/clock ] && . /etc/sysconfig/clock
+[ -z "$UTC" ] && UTC="no"
+[ -z "$CHANGEVT" ] && CHANGEVT="0"
+[ -z "$CLOCK_SYNC" ] && CLOCK_SYNC="no"
+[ -z "$CPUFREQ" ] && CPUFREQ="no"
+if [ -n "`/sbin/pidof X`" ]; then
+	X_RUNNING=1
+fi
+
+if [ ! -f /proc/cpufreq ]; then
+    CPUFREQ="no"
+fi
+
+CLOCK="--localtime"
+[ "$UTC" = "yes" -o "$UTC" = "true" -o "$UTC" = 1 ] && CLOCK="--utc"
+
+case "$PROG" in
+    suspend|standby)
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue-pre ] && /etc/sysconfig/apm-scripts/apmcontinue-pre "$@"
+	# Stop services that might break
+	echo "#!/bin/sh" >/var/run/apm-resume-post
+	if [ -n "$RESTORESERVICES" ]; then
+		for i in $RESTORESERVICES; do
+			if /sbin/service $i status &>/dev/null; then
+				echo "/sbin/service $i start" >>/var/run/apm-resume-post
+				/sbin/service $i stop &>/dev/null
+			fi
+		done
+	fi
+	# Remove sound progs and modules if requested
+	if [ "$RESTORESOUND" = "yes" -o "$RESTORESOUNDPROGS" = "yes" ]; then
+		# Find all programs using sound and kill them...
+		rm -rf /var/run/apm-soundprogs
+		if [ -c /dev/sndstat ]; then
+			for n in `cat /dev/sndstat 2>/dev/null| LC_ALL=C grep Open\ by|awk {'print $3'}|uniq`; do
+				SOUNDPROG=`echo $n|awk -F / {'print $2'}`
+				SOUNDPID=`echo $n|awk -F / {'print $1'}`
+				SOUNDUSER=`ls -ld /proc/$SOUNDPID |awk {'print $3'}`
+				SOUNDDISPLAY=`perl -e 's/\000/\n/g;' -p /proc/$SOUNDPID/environ| LC_ALL=C grep ^DISPLAY=|cut -d= -f2-`
+
+				# Make sure nobody is playing foul tricks on us
+				SOUNDPROG=`echo $SOUNDPROG |sed -e "s/|.*//`
+
+				kill $SOUNDPID
+				ps "$SOUNDPID" &>/dev/null && kill -9 $SOUNDPID
+				echo "$SOUNDPROG|$SOUNDPID|$SOUNDUSER|$SOUNDDISPLAY" >>/var/run/apm-soundprogs
+				logger "apmscript: Program $SOUNDPROG ($SOUNDPID) of user $SOUNDUSER on display $SOUNDDISPLAY terminated."
+			done
+		fi
+		for n in `lsof | LC_ALL=C grep /dev| LC_ALL=C grep ' 14,'|sed -e 's/ \+/|/g'|cut '-d|' -f1-3`; do
+			SOUNDPROG=`echo $n |cut '-d|' -f1`
+			SOUNDPID=`echo $n |cut '-d|' -f2`
+			SOUNDUSER=`echo $n |cut '-d|' -f3`
+			SOUNDDISPLAY=`perl -e 's/\000/\n/g;' -p /proc/$SOUNDPID/environ| LC_ALL=C grep ^DISPLAY=|cut -d= -f2-`
+
+			# Make sure nobody is playing foul tricks on us
+			SOUNDPROG=`echo $SOUNDPROG |sed -e "s/|.*//`
+
+			kill $SOUNDPID
+			ps "$SOUNDPID" &>/dev/null && kill -9 $SOUNDPID
+			echo "$SOUNDPROG|$SOUNDPID|$SOUNDUSER|$SOUNDDISPLAY" >>/var/run/apm-soundprogs
+			logger "apmscript: Program $SOUNDPROG ($SOUNDPID) of user $SOUNDUSER on display $SOUNDDISPLAY terminated."
+		done
+		# We unload the modules later to give the driver some time
+		# to spin down.
+	fi
+
+	# Some broken disks won't return from a suspend to disk
+	# unless they're set to 100% failsafe settings with hdparm.
+	# Typically, notebooks with SystemSoft MobilePRO BIOS are
+	# affected by this.
+	if test "x$HDPARM_AT_SUSPEND" != "x"; then
+		for i in /proc/ide/hd*; do
+			DRIVE=/dev/`echo $i |sed -e "s,.*/,,g"`
+			if test "x`cat $i/media`" = "xdisk"; then
+				hdparm $HDPARM_AT_SUSPEND $DRIVE
+			fi
+		done
+	fi
+	sync
+
+	unset NEED_NETFS_START || :
+	if [ "$NETFS_RESTART" = "yes" ]; then
+		NEED_NETFS_START=yes
+		/sbin/service netfs stop
+	fi
+        if [ "$NET_RESTART" = "yes" ] ; then
+		# Make an educated guess at what interfaces need restarting
+		NETDEVICES=`LC_ALL=C /etc/init.d/network status | LC_ALL=C grep -A1 "Currently active devices" |tail -n1`
+		if [ "$?" = "0" ]; then
+			for i in $NETDEVICES; do
+				echo "/sbin/ifup $i" >>/var/run/apm-resume-post
+			done
+			echo "touch /var/lock/subsys/network" >>/var/run/apm-resume-post
+		fi
+                /sbin/service network stop
+        fi
+	[ -n "$NEED_NETFS_START" ] && echo "/sbin/service netfs start" >>/var/run/apm-resume-post
+	[ "$PCMCIARESTART" = "yes" ] && {
+		/sbin/cardctl suspend
+		/sbin/cardctl eject
+	}
+	if [ "$PCMCIAWAIT" = "yes" ]; then
+		until [ `LC_ALL=C grep "Socket .: empty" /var/lib/pcmcia/stab|wc -l` = `LC_ALL=C grep "Socket" /var/lib/pcmcia/stab|wc -l` ]; do
+			logger "Waiting for pcmcia-device to be removed..."
+			sleep 10
+		done
+	fi
+
+	while [ -f "$LOCKFILE" ]; do
+		RESUMEPID=`cat "$LOCKFILE"`
+		logger "Waiting for resume to be finished ($LOCKFILE gives PID $RESUMEPID)..."
+		sleep 10
+	done
+
+	# Don't try to restore the terminal or lock X if X isn't running...
+	[ -n "$X_RUNNING" ] && {
+		[ "$CHANGEVT" != "0" ] && chvt 1
+		[ "x$LOCK_X" = "xyes" -o "x$LOCK_X" = "x1" ] && {
+			# Lock X, based on patch from Hannu Martikka
+			# <Hannu.Martikka@nokia.com>
+			w |tail +3 |awk '{print $1, $3}'| LC_ALL=C grep -v '-'| LC_ALL=C grep : | \
+			sort -u | \
+			while read line; do
+				Usern=`echo $line |awk '{print $1}'`
+				XDisp=`echo $line |awk '{print $2}'`
+				if [ "x`/sbin/pidof 'kdeinit: kdesktop'`" != "x" ]; then
+					# We're running KDE - a dcop call is sufficient.
+					su $Usern -c "DISPLAY=$XDisp dcop kdesktop KScreensaverIface 'lock()'"
+				else
+					# This isn't KDE... Do some ugly stuff.
+					if [ "x$Usern" = "xroot" ]; then
+						xlock -display $XDisp &>/dev/null &
+					else
+						su $Usern -c "xscreensaver-command -display $XDisp -lock || (xscreensaver -display $XDisp -no-splash &sleep 1; xscreensaver-command -display $XDisp -lock) || (xlock -display $XDisp &)" &>/dev/null
+					fi
+				fi
+			done
+		}
+	}
+
+	# Unload sound modules if necessary
+	if [ "$RESTORESOUND" = "yes" -o "$RESTORESOUNDPROGS" = "yes" ]; then
+		# soundoff is from the commercial OSS drivers, don't worry
+		# if you don't have it. (Nobody sane does ;) ).
+		[ -x /usr/bin/soundoff ] && /usr/bin/soundoff
+		[ -x /usr/sbin/soundoff ] && /usr/sbin/soundoff
+		[ -x /usr/local/bin/soundoff ] && /usr/local/bin/soundoff
+		[ -x /usr/local/sbin/soundoff ] && /usr/local/sbin/soundoff
+		rm -rf /var/run/apm-soundmodules
+		for m in $SOUNDMODULES; do
+			if lsmod | LC_ALL=C grep -q "^$m " &>/dev/null; then
+				rmmod $m
+				echo $m >>/var/run/apm-soundmodules
+			fi
+		done
+	fi
+	sync
+
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue ] && . /etc/sysconfig/apm-scripts/apmcontinue "$@"
+
+	[ -e /var/run/apm-resume-post ] && chmod 0755 /var/run/apm-resume-post
+
+	[ -n "$DELAYSUSPEND" ] && sleep $DELAYSUSPEND
+
+	sync
+	;;
+
+    resume)
+	# If HDPARM_AT_RESUME is set, the user has a broken disk.
+	# We'd better wake it up manually. :/
+	if test "x$HDPARM_AT_RESUME" != "x"; then
+		for i in /proc/ide/hd*; do
+			DRIVE=/dev/`echo $i |sed -e "s,.*/,,g"`
+			if test "x`cat $i/media`" = "xdisk"; then
+				hdparm -q -S0 $DRIVE
+			fi
+		done
+	fi
+
+	# Read the hardware clock
+	if test $CLOCK_SYNC != "no"; then
+		hwclock $CLOCK --hctosys
+	fi
+
+
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue-pre ] && /etc/sysconfig/apm-scripts/apmcontinue-pre "$@"
+
+	# as some displays don't like being waked up from power-off
+	# state directly into graphics mode, we can switch to console
+	# 1 during suspend and back to console n (where we assume X11
+	# is running) after a resume; also the setting of the console
+	# beep and the whole sound system can be confused; see
+	# /etc/sysconfig/apm for a detailed description of the
+	# variables used here.
+
+	echo $$ >> "$LOCKFILE"
+	if [ -n "$TERMINALBEEP" -a "$TERMINALBEEP" != "no" -a "$TERMINALBEEP" != "n" ]; then
+		# first we set the beep-length
+		for t in 1 2 3 4 5 6 7 8 9; do
+			setterm -blength $BEEPLENGTH >/dev/tty$t
+		done
+	fi
+	if [ "$RESTORESOUND" = "yes" -o "$RESTORESOUNDPROGS" = "yes" ]; then
+		# Get the sound modules back up...
+		# soundon is from the commercial OSS drivers, don't worry
+		# if you don't have it.
+		[ -x /usr/bin/soundon ] && /usr/bin/soundon
+		[ -x /usr/sbin/soundon ] && /usr/sbin/soundon
+		[ -x /usr/local/bin/soundon ] && /usr/local/bin/soundon
+		[ -x /usr/local/sbin/soundon ] && /usr/local/sbin/soundon
+		for m in `cat /var/run/apm-soundmodules`; do
+			modprobe $m
+		done
+		rm -f /var/run/apm-soundmodules
+	fi
+	if [ "$RESTORESOUNDPROGS" = "yes" ]; then
+		# at least we can restart the programs using sound on
+		# the right display
+		# If you're using the trial version of OSS, you want to add
+		#sleep 5
+		# here to wait for the trial text
+		for n in `cat /var/run/apm-soundprogs`; do
+			SOUNDPROG=`echo $n|cut '-d|' -f1`
+			SOUNDPID=`echo $n|cut '-d|' -f2`
+			SOUNDUSER=`echo $n|cut '-d|' -f3`
+			SOUNDDISPLAY=`echo $n|cut '-d|' -f4`
+			su --shell="/bin/bash" - "$SOUNDUSER" -c "source /etc/profile;[ -f ~/.bashrc ] && source ~/.bashrc;[ -f ~/.bash_profile ] && source ~/.bash_profile;export DISPLAY="$SOUNDDISPLAY";$SOUNDPROG &"
+			logger "apmscript: Program $SOUNDPROG started as user $SOUNDUSER on display $SOUNDDISPLAY."
+		done
+		rm -f /var/run/apm-soundprogs
+	fi
+
+	# restore X if necessary
+	[ "$CHANGEVT" != "0" ] && [ "x`pidof X`" != x ] && chvt "$CHANGEVT"
+
+	# Restart services if necessary
+	if [ -x /var/run/apm-resume-post ]; then
+		/var/run/apm-resume-post &>/dev/null
+		rm -f /var/run/apm-resume-post
+	fi
+
+	# Restore network and PCMCIA
+	[ "$NETFS_RESTART" = "yes" ] && /etc/rc.d/init.d/netfs start
+	if [ "$PCMCIARESTART" = "yes" ] ; then
+		/sbin/cardctl insert
+		/sbin/cardctl resume
+	fi
+
+	sync
+
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue ] && . /etc/sysconfig/apm-scripts/apmcontinue "$@"
+
+	# Finally, run anacron to catch up cron stuff we missed...
+	# If anacron is installed and we're on AC power or we want
+	# to run it even in battery mode.
+	if [ -x /usr/sbin/anacron ]; then
+		if apm | LC_ALL=C grep -q on-line &>/dev/null; then
+			/usr/sbin/anacron
+		elif test "x$ANACRON_ON_BATTERY" = "xyes"; then
+			/usr/sbin/anacron
+		fi
+	fi
+
+	if test "x$CPUFREQ" = "xyes"; then
+	    if apm | LC_ALL=C grep -q on-line &>/dev/null; then
+		echo -n "0%100%100%performance" > /proc/cpufreq
+	    else
+		echo -n "0%0%0%powersave" > /proc/cpufreq
+	    fi
+	fi
+		  
+	if test "x$HDPARM_AT_RESUME" != "x"; then
+		for i in /proc/ide/hd*; do
+			DRIVE=/dev/`echo $i |sed -e "s,.*/,,g"`
+			if test "x`cat $i/media`" = "xdisk"; then
+				hdparm $HDPARM_AT_RESUME $DRIVE
+			fi
+		done
+	fi
+
+	rm -f "$LOCKFILE"
+	;;
+    change)
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue-pre ] && /etc/sysconfig/apm-scripts/apmcontinue-pre "$@"
+	case $2 in
+	power)
+		# change from performance to powersave or vice versa based
+		# on whether we're running on batter or ac power
+		if test "x$CPUFREQ" = "xyes"; then
+		    if apm | LC_ALL=C grep -q on-line &>/dev/null; then
+			echo -n "0%100%100%performance" > /proc/cpufreq
+		    else
+			echo -n "0%0%0%powersave" > /proc/cpufreq
+		    fi
+		fi
+
+		# Change from battery power to AC power or vice versa.
+		if [ -n "$POWER_SERVICES" ]; then
+			if apm | LC_ALL=C grep -q on-line &>/dev/null; then
+				what="start"
+				if [ -n "$LOWPOWER_SERVICES" -a -e /var/run/apmd/LOW_POWER ]; then
+					rm -f /var/run/apmd/LOW_POWER
+					for i in $LOWPOWER_SERVICES; do
+						/sbin/service $i start
+					done
+				fi
+			else
+				what="stop"
+			fi
+			for i in $POWER_SERVICES; do
+				/sbin/service $i $what
+			done
+		fi
+		;;
+	battery)
+		# Battery low. If you want to be on the safe side, maybe put
+		# the harddisk into extreme powersaving, or "apm -s" here.
+		if [ -n "$LOWPOWER_SERVICES" ]; then
+			touch /var/run/apmd/LOW_POWER
+			for i in $LOWPOWER_SERVICES; do
+				/sbin/service $i stop
+			done
+		fi
+		;;
+	esac
+        if [ -f /etc/sysconfig/apm-scripts/apmcontinue ]; then
+		. /etc/sysconfig/apm-scripts/apmcontinue $@
+        fi
+        ;;
+    start)
+	# This occurs at system startup - you usually don't need to do
+	# anything here.
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue ] && . /etc/sysconfig/apm-scripts/apmcontinue $@
+	;;
+    stop)
+	# This occurs at system shutdown - you usually don't need to do
+	# anything here.
+	[ -f /etc/sysconfig/apm-scripts/apmcontinue ] && . /etc/sysconfig/apm-scripts/apmcontinue $@
+	;;
+    *)
+	if [ -f /etc/sysconfig/apm-scripts/apmcontinue ]; then
+		. /etc/sysconfig/apm-scripts/apmcontinue "$@"
+	else
+		logger "FAIL: Wrong parameter \"$PROG\" in apmscript!"
+		exit 1
+	fi
+	;;
+esac
+exit 0
