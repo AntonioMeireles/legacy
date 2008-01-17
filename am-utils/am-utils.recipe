@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage.recipe')
+class AmUtils(RPMPackageRecipe, CPackageRecipe):
+    name = 'am-utils'
+    version = '6.1.5'
+
+    buildRequires = [ 'gdbm:devel', 'hesiod:devel', 'openldap:devel',
+                      'autoconf:runtime', 'automake:runtime',
+                      'libtool:runtime', 'glibc:devel[!bootstrap]',
+                      'bison:runtime', 'flex:runtime', 'perl:lib',
+                      'userspace-kernel-headers:devel', ]
+    rpmRelease = '3'
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+
+        r.addSource('am-utils.init' , rpm=r.srpm)
+        r.addSource('am-utils.conf' , rpm=r.srpm)
+        r.addSource('am-utils.sysconf' , rpm=r.srpm)
+        r.addSource('am-utils.net.map' , rpm=r.srpm)
+        r.Remove('%(builddir)s/m4/macros/linux_headers.m4')
+        r.addPatch('acinclude.m4.utsversion')
+        r.addPatch('nfs_prot_linux.h.utsversion')
+
+        r.Automake(autoMakeArgs='--add-missing')
+        r.Run('libtoolize --force')
+        r.Run('autoheader')
+        r.Configure('--enable-shared --enable-am-cflags="%(cflags)s"'
+                     ' --enable-libs="-lnsl -lresolv"')
+        r.Make()
+        r.MakeInstall()
+        r.Install('am-utils.sysconf', '%(sysconfdir)s/sysconfig/amd')
+        r.Install('am-utils.init', '%(initdir)s/amd', )
+        r.MakeDirs('/.automount', component='runtime')
+
+        r.Install('am-utils.conf', '%(sysconfdir)s/amd.conf')
+        r.Install('am-utils.net.map', '%(sysconfdir)s/amd.net')
+
+        r.Remove('%(sysconfdir)s/amd.conf-sample',
+                 '%(sysconfdir)s/lostaltmail.conf-sample')
+
+        r.Doc('doc/*.ps', 'scripts/*-sample')
+        r.TagSpec('initscript', '%(initdir)s/')
+
+        # start am-utils by default, RPL-418
+        r.Replace('chkconfig: - 72 28', 'chkconfig: 345 72 28', '%(initdir)s/amd')
