@@ -1,0 +1,46 @@
+#!/bin/bash
+
+if [ $# -lt 2 ]; then
+    echo "not enough arguments: $0 $*" >&2
+    exit 1
+fi
+
+type="$1"
+shift
+action="$1"
+shift
+
+case "$type" in
+    files)
+	case "$action" in
+	    update)
+	    	for file in $@; do
+		   /sbin/install_initd $file
+                   # Needed if the package changes initscript priorities. This
+                   # honours user changes made with chkconfig. If symlinks are
+                   # added/deleted in /etc/rc*.d/ without chkconfig's
+                   # knowledge, they will be overwritten. User changes to
+                   # chkconfig lines in /etc/init.d/* will be merged via
+                   # conary's three-way-merge.
+                   /sbin/chkconfig $(basename $file) resetpriorities
+		done
+		;;
+	    preremove)
+	    	for file in $@; do
+		   $file stop
+		   /sbin/remove_initd $file
+		done
+		;;
+            *)
+                echo "ERROR: taghandler $0 invoked for an action ($action) that is not handled" 1>&2
+                exit 1
+                ;;
+	esac
+	;;
+    *)
+        echo "ERROR: taghandler $0 invoked for a type ($type) that is not handled" 1>&2
+        exit 1
+        ;;
+esac
+
+exit 0
