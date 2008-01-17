@@ -1,0 +1,84 @@
+#!/bin/bash
+#
+# Regenerate %(sysconfdir)s/xml/catalog based on the contents of the
+# tag description files provided by packages for catalogs located
+# %(sysconfdir)s/xml.
+#
+# Copyright (C) 2006 rPath, Inc.
+# All rights reserved.
+#
+
+CATALOGS_HOME=%(sysconfdir)s/xml
+CATALOGS_DESC=%(tagdatadir)s/xml-catalog/desc.d
+CATALOG_FILE=$CATALOGS_HOME/catalog
+
+if [ $# -lt 2 ]; then
+    echo "not enough arguments: $0 $*" 1>&2
+    exit 1
+fi
+
+# Basic taghandler setup.
+type="$1"
+shift
+action="$1"
+shift
+
+
+addActions()
+{
+    # Orig is the original string (same meaning as in the xmlcatalog
+    # manpage), delegate is the type of delegation to be peroformed.
+    orig=$(echo $1 | sed -r 's!^(delegateURI|delegatePublic|delegateSystem)[ \t]*"(.*)"!\2!')
+    delegate=$(echo $1 | sed -r 's/^(delegateURI|delegatePublic|delegateSystem)[ \t]*.*$/\1/')
+    xmlcatalog --noout --add "$delegate" "$orig" "file://$CATALOGS_HOME/$2" "$CATALOG_FILE"
+}
+
+
+delActions()
+{
+    # Remove catalog entries from the catalog, that originate from 
+    # the catalog file passed. 
+    xmlcatalog --noout --del "file://$CATALOGS_HOME/$1" "$CATALOG_FILE"
+}
+
+
+case $type in 
+    files)
+        case $action in 
+            update)
+                for catalogFile in "$@"; do
+                    catalogBaseName=$(basename $catalogFile)
+                    descFile=$CATALOGS_DESC/$catalogBaseName
+
+                    if [ $catalogBaseName = "catalog" ]; then
+                        continue
+                    fi
+
+                    if [ -f $descFile ]; then
+                        (while read i; do addActions "$i" $catalogBaseName; done) < $descFile
+                    else
+                        echo "Warning: description file not found for catalog $catalogFile" 1>&2
+                    fi
+                done
+                ;;
+            remove)
+                for catalogFile in "$@"; do
+                    if [ $catalogFile = "catalog" ]; then
+                        continue
+                    fi
+
+                    catalogBaseName=$(basename $catalogFile)
+                    delActions "$catalogBaseName"
+                done
+                ;;
+            *)
+                echo "ERROR: taghandler $0 invoked for an action ($action) that is not handled" 1>&2
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo "ERROR: taghandler $0 invoked for a type ($type) that is not handled" 1>&2
+        exit 1
+        ;;   
+esac

@@ -1,0 +1,120 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class SgmlCommon(PackageRecipe):
+    name = 'sgml-common'
+    version = '1.0.0'
+
+    buildRequires = [ 'libxml2:runtime' ]
+
+    def setup(r):
+        # We grab the debian maintained sgml/xml data collections for
+        # now, as they are rather complete...
+        r.macros.sgmlversion = '2.0.3'
+        r.macros.xmlversion = '0.09'
+        r.addArchive('http://ftp.debian.org/debian/pool/main/s/sgml-data/sgml-data_%(sgmlversion)s.tar.gz')
+        r.addArchive('http://ftp.debian.org/debian/pool/main/x/xml-core/xml-core_%(xmlversion)s.tar.gz', dir='sgml-data-%(sgmlversion)s')
+
+        r.Install('sgml', '%(datadir)s/')
+        r.Install('xml', '%(datadir)s/')
+
+        r.Install('xml-core-%(xmlversion)s/schemas/{catalog.dtd,catalog.xml,tr9401.dtd}',
+                  '%(datadir)s/xml/schema/xml-core/')
+        r.Install('xml-core-%(xmlversion)s/schemas/catalog',
+                  '%(datadir)s/sgml/dtd/xml-core/')
+        r.Symlink('%(datadir)s/xml/schema/xml-core/catalog.dtd',
+                  '%(datadir)s/sgml/dtd/xml-core/catalog.dtd')
+
+        # Setup symlinks
+        r.Symlink('%(datadir)s/xml/declaration/big5xml.decl', '%(datadir)s/sgml/declaration/')
+        r.Symlink('%(datadir)s/sgml/html/dtd/4.01/HTML4.decl', '%(datadir)s/sgml/declaration/html.decl')
+        r.Symlink('%(datadir)s/xml/declaration/xml1n.dcl', '%(datadir)s/sgml/declaration/')
+        r.Symlink('%(datadir)s/xml/declaration/xml.dcl', '%(datadir)s/sgml/declaration/')
+        r.Symlink('%(datadir)s/xml/declaration/xml.dcl', '%(datadir)s/sgml/declaration/xml.decl')
+        r.Symlink('%(datadir)s/xml/qaml/qaml-xml.dtd', '%(datadir)s/sgml/dtd/')
+        r.Symlink('%(datadir)s/xml/svg/svg10.dtd', '%(datadir)s/sgml/dtd/')
+        r.Symlink('%(datadir)s/xml/svg/svg11.dtd', '%(datadir)s/sgml/dtd/')
+
+        r.Symlink('%(datadir)s/sgml/entities/Hewlett-Packard/HPcalc', '%(datadir)s/sgml/entities/')
+        r.Symlink('%(datadir)s/sgml/entities/Hewlett-Packard/HPservice', '%(datadir)s/sgml/entities/')
+        r.Symlink('%(datadir)s/sgml/entities/Hewlett-Packard/HPsym', '%(datadir)s/sgml/entities/')
+        r.Symlink('%(datadir)s/sgml/entities/Hewlett-Packard/HPtexchars', '%(datadir)s/sgml/entities/')
+        r.Symlink('%(datadir)s/sgml/entities/Hewlett-Packard/HPtif', '%(datadir)s/sgml/entities/')
+        r.Symlink('%(datadir)s/xml/entities/xml-iso-entities-8879.1986', '%(datadir)s/sgml/entities/')
+
+        # Install some of the old RedHat scripts just in case
+        # anything still requires them.
+        r.addSource('install-catalog.8', dest='%(mandir)s/man8/')
+        r.addSource('install-catalog', dest='%(bindir)s/', mode=0755)
+        r.addSource('sgmlwhich', dest='%(bindir)s/', mode=0755)
+
+        # Install the catalog helper entry
+        r.addSource('sgml-common.xml', mode=0644, dest='%(tagdatadir)s/xml-catalog/desc.d/')
+
+        # Directories for the tag handler
+        r.MakeDirs('%(datadir)s/sgml/docbook', '%(sysconfdir)s/xml', '%(sysconfdir)s/sgml')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/.*')
+
+        # Tag Handlers
+        r.addSource('xml-catalog.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/xml-catalog')
+        r.addSource('xml-catalog.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/xml-catalog', mode=0755)
+
+        r.addSource('sgml-catalog.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/sgml-catalog')
+        r.addSource('sgml-catalog.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/sgml-catalog', mode=0755)
+
+        # Tag exception; omission may result in havoc.
+        r.TagSpec('xml-catalog', exceptions='%(sysconfdir)s/xml/catalog')
+        r.ComponentSpec('config', '%(sysconfdir)s/xml/')
+        
+        r.Requires('coreutils:runtime', '%(taghandlerdir)s/xml-catalog')
+        r.Requires('sed:runtime', '%(taghandlerdir)s/xml-catalog')
+        r.Requires('libxml2:runtime', '%(taghandlerdir)s/xml-catalog')
+        r.Requires('coreutils:runtime', '%(taghandlerdir)s/sgml-catalog')
+        r.Requires('libxml2:runtime', '%(taghandlerdir)s/sgml-catalog')
+        r.Requires('mktemp:runtime', '%(taghandlerdir)s/sgml-catalog')
+
+        # Create an empty XML Catalog and mark it as initialcontents
+        # this allows us to add/remove entries and keep the file
+        # managed by a taghandler, but also allow other things, or
+        # the user, to add/remove entries to that file.
+        r.Run('xmlcatalog --noout --create %(destdir)s/%(sysconfdir)s/xml/catalog')
+        r.InitialContents('%(sysconfdir)s/xml/catalog')
+
+        # Create the SGML catalog
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/dtd/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/entities/ArborText/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/entities/Hewlett-Packard/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/entities/sgml-iso-entities-8879.1986/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/entities/sgml-iso-entities-9573-13.1991/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/html/dtd/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/html/dtd/4.0/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/html/dtd/4.01/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/html/dtd/iso-15445/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/html/entities/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/xml/qaml/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/xml/svg/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/xml/entities/xml-iso-entities-8879.1986/catalog')
+        r.SGMLCatalogEntry('sgml-common.cat', '%(datadir)s/sgml/dtd/xml-core/catalog')
+
+        # Create the XML catalog
+        # sgml-data catalog entries
+        r.XMLCatalogEntry('sgml-common.xml', 'delegatePublic', '+//IDN faq.org//DTD Frequently Asked Questions', '%(datadir)s/xml/qaml/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', 'http://xml.ascc.net/xml/resource/qaml-xml', '%(datadir)s/xml/qaml/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegatePublic', '+//ISBN 82-7640-023//DTD Frequently Asked Questions//EN', '%(datadir)s/xml/qaml/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', '/usr/share/sgml/dtd/qaml-xml.dtd', '%(datadir)s/xml/qaml/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegatePublic', '-//W3C//DTD SVG', '%(datadir)s/xml/svg/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', 'http://www.w3.org/TR/2001/REC-SVG-20010904/', '%(datadir)s/xml/svg/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', 'http://www.w3.org/Graphics/SVG/1.1/', '%(datadir)s/xml/svg/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', '/usr/share/sgml/dtd/svg', '%(datadir)s/xml/svg/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegatePublic', 'ISO 8879:1986//ENTITIES', '%(datadir)s/xml/entities/xml-iso-entities-8879.1986/catalog.xml')
+
+        # xml-core catalog entries
+        r.XMLCatalogEntry('sgml-common.xml', 'delegateSystem', 'http://www.oasis-open.org/committees/entity/release/1.0/catalog.dtd', '%(datadir)s/xml/schema/xml-core/catalog.xml')
+        r.XMLCatalogEntry('sgml-common.xml', 'delegatePublic', '-//OASIS//DTD XML Catalogs V1.0//EN', '%(datadir)s/xml/schema/xml-core/catalog.xml')
