@@ -1,0 +1,74 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Mutt(CPackageRecipe):
+    name = 'mutt'
+    version = '1.5.17'
+
+    buildRequires = [ 'cyrus-sasl:devel', 'krb5:devel', 'sendmail:runtime',
+                      'autoconf:runtime', 'automake:runtime',
+                      'ncurses:devel', 'pcre:devel', 'slang:devel',
+                      'openssl:devel', 'aspell:runtime', 'gdb:runtime',
+                      'libidn:devel', 'opensp:runtime', 'perl:lib',
+                      'perl:runtime', 'e2fsprogs:devel', 'which:runtime', ]
+
+    def setup(r):
+        r.macros.uversion = '0.9'
+        r.macros.urlviewdir = 'urlview-%(uversion)s'
+
+        r.addArchive('ftp://ftp.mutt.org/mutt/devel/')
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/mutt-1.4.2.2-4.fc7.src.rpm'
+        r.addArchive('urlview-%(uversion)s.tar.gz', rpm=srpm,
+                     dir='mutt-%(version)s')
+
+        r.addSource('mutt_ldap_query', rpm=srpm)
+        r.addSource('mutt-colors' , rpm=srpm)
+
+        # note that with mutt 1.6.x --with-sasl will become --with-sasl2
+        # run autoconf to regenerate configure for sasl2 patch
+        r.Run('autoconf')
+        r.Configure(' --enable-pop --enable-imap --with-sasl'
+                    ' --disable-warnings --with-ncursesw --disable-domain'
+                    ' --disable-flock --enable-fcntl'
+                    ' --with-mailpath=%(servicedir)s/spool/mail'
+                    ' --with-ssl'
+                    ' --with-gss=%(krbprefix)s')
+
+        r.Make()
+
+        r.Configure('--with-slang', dir='%(urlviewdir)s')
+        r.Make(dir='%(urlviewdir)s')
+        r.Replace('chgrp', 'true', 'Makefile')
+
+        r.MakePathsInstall('sharedir=%(destdir)s%(sysconfdir)s'
+                           ' docdir=%(destdir)s%(thisdocdir)s'
+                           ' sysconfdir=%(destdir)s%(sysconfdir)s')
+
+        # set up the config file:
+        # use aspell
+        r.Create('%(sysconfdir)s/Muttrc', contents='\n'.join((
+                 '# use aspell',
+                 'set ispell="/usr/bin/aspell --mode=email check"')))
+
+        # use GPG
+        r.Run('cat contrib/gpg.rc >> %(destdir)s%(sysconfdir)s/Muttrc')
+        # use common colors
+        r.Run('grep -5 "^color" contrib/sample.muttrc >> '
+              ' %(destdir)s%(sysconfdir)s/Muttrc')
+
+        r.MakePathsInstall(dir='%(urlviewdir)s')
+        r.Install('%(urlviewdir)s/url_handler.sh', '%(bindir)s/url_handler.sh', mode=0755)
+        r.Ownership('root', 'mail', '%(bindir)s/mutt_dotlock')
+        r.SetModes('%(bindir)s/mutt_dotlock', 02755)
+        r.AutoDoc('sample.urlview', 'urlview.sgml')
+        r.Doc('doc/*.txt', 'contrib/*.rc', 'contrib/sample.*',
+              'doc/manual.txt', 'contrib/language*',
+              'mime.types', 'mutt_ldap_query')
+
+        r.Remove('%(sysconfdir)s/mime.types')
+        r.Remove('%(bindir)s/muttbug')
+        r.Remove('%(mandir)s/man1/{muttbug.1,mutt_dotlock.1}*')
+        r.Remove('%(mandir)s/man5/mbox.5*')
