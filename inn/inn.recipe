@@ -1,0 +1,92 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Inn(RPMPackageRecipe, CPackageRecipe):
+    name = 'inn'
+    version = '2.4.3'
+    rpmRelease = '5'
+    externalArchive = 'ftp://ftp.isc.org/isc/inn/inn-%(version)s.tar.gz'
+    rpmSources = [ 'inn-default-distributions', 'inn-cron-expire',
+        'inn-cron-rnews', 'inn-cron-nntpsend', 'innd.init', ]
+    rpmPatches = [ 'inn-2.4.1.perl.patch', 'inn-2.4.1.pie.patch',
+        'inn-2.4.2-makedbz.patch', ]
+
+    buildRequires = [ 'db:devel', 'perl:runtime', 'byacc:runtime',
+                      'flex:runtime', 'pam:devel', 'perl:devel', 'perl:lib', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+        r.addArchive('inn-faq.tar.gz', rpm=r.srpm, dir=r.theMainDir)
+        r.macros.cflags += ' -fPIC'
+
+        r.Run('find . -type f | xargs sed -i -e "s/LOCK_WRITE/LLOCK_WRITE/" '
+                                           ' -e "s/LOCK_READ/LLOCK_READ/"')
+
+        r.Configure('--prefix=%(libdir)s/news --sysconfdir=%(sysconfdir)s/news'
+                    ' --mandir=%(mandir)s '
+                    ' --with-log-dir=%(localstatedir)s/log/news'
+                    ' --with-spool-dir=%(localstatedir)s/spool/news'
+                    ' --with-db-dir=%(localstatedir)s/lib/news'
+                    ' --with-run-dir=%(localstatedir)s/run/news'
+                    ' --with-etc-dir=%(sysconfdir)s/news'
+                    ' --with-tmp-dir=%(localstatedir)s/lib/news/tmp'
+                    ' --with-perl --enable-shared'
+                    ' --enable-php-verify --with-sendmail=%(sbindir)s/sendmail'
+                    ' --with-news-user=$(id -nu) --with-news-group=$(id -ng)'
+                    ' --with-news-master=news',
+                    preConfigure='with_tmp_path=/var/lib/news/tmp')
+        r.Run('sed -i -e "s/HAVE_DB1_NDBM_H/DO_NOT_USE_DB1_NDBM_H/" ./include/config.h')
+
+        r.Make()
+
+        r.MakeInstall()
+        r.MakeDirs('%(includedir)s/inn',
+                   '%(sysconfdir)s/cron.{hourly,daily}',
+                   '%(sysconfdir)s/rc.d/init.d')
+        for f in ('clibrary.h', 'conffile.h', 'config.h', 'dbz.h',
+                  'libinn.h', 'acconfig.h', 'storage.h'):
+            r.Install('include/' + f, '%(includedir)s/inn/')
+        r.Move('%(libdir)s/news/bin/rc.news', '%(sysconfdir)s/')
+        r.Create('%(localstatedir)s/lib/news/subscriptions', mode=0644)
+
+        r.Install('inn-default-distributions',
+                  '%(localstatedir)s/lib/news/distributions', mode=0644)
+        r.Install('inn-cron-expire',
+                  '%(sysconfdir)s/cron.daily/inn-cron-expire', mode=0755)
+        r.Install('inn-cron-rnews',
+                  '%(sysconfdir)s/cron.hourly/inn-cron-rnews', mode=0755)
+        r.Install('inn-cron-nntpsend',
+                  '%(sysconfdir)s/cron.hourly/inn-cron-nntpsend', mode=0755)
+        r.Install('innd.init', '%(initdir)s/innd')
+        r.SetModes('%(initdir)s/*', 0755)
+
+        r.Ownership('root', 'news',
+                    '%(sysconfdir)s/news/.*',
+                    '%(sysconfdir)s/rc.news')
+        r.Ownership('uucp', 'news', '%(sysconfdir)s/news/inn.conf')
+        r.Ownership('news', 'news',
+                    '%(libdir)s/news/bin/{control,filter,rnews.libexec,auth}',
+                    '%(localstatedir)s/spool/news',
+                    '%(localstatedir)s/spool/news/{archive,articles,incoming}',
+                    '%(localstatedir)s/spool/news/{infeed,outgoing,overview}',
+                    '%(localstatedir)s/spool/news/incoming/bad',
+                    '%(localstatedir)s/log/news',
+                    '%(localstatedir)s/log/news/OLD',
+                    '%(localstatedir)s/lib/news/.*',
+                    '%(localstatedir)s/log/news/tmp',
+                    '%(localstatedir)s/run/news')
+
+        r.Doc('samples')
+
+        r.Create('%(localstatedir)s/lib/news/history',
+            contents='PATH=\$PATH:/usr/lib/news/bin\n'
+                     'export PATH')
+        r.Remove('%(libdir)s/news/bin/filter/filter_innd.pl')
+        # glibc files -- inn headers are in %(includedir)s/inn/
+        r.Remove('%(includedir)s/*.h')
+        r.TagSpec('initscript', '%(initdir)s/')
