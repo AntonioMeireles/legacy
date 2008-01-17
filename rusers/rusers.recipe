@@ -1,0 +1,64 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Rusers(CPackageRecipe):
+    name = 'rusers'
+    version = '0.17'
+    buildRequires = [ 'procps:lib', 'glibc:devel[!bootstrap]' ]
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.mainDir('netkit-rusers-%(version)s')
+        r.macros.fedoraRevision = '47'
+        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/rusers-%(version)s-%(fedoraRevision)s.src.rpm'
+
+        # Source: ftp://ftp.uk.linux.org/pub/linux/Networking/netkit/
+        r.addArchive('netkit-rusers-%(version)s.tar.gz', rpm=srpm)
+
+        r.addArchive('rstatd.tar.gz', rpm=srpm, dir='netkit-rusers-%(version)s')
+        r.addSource('rusersd.init', rpm=srpm)
+        r.addSource('rstatd.init', rpm=srpm)
+        r.addSource('MCONFIG', macros=True)
+        for patch in (
+                      'rstatd-jbj.patch',
+                      'netkit-rusers-0.15-numusers.patch',
+                      'netkit-rusers-0.17-2.4.patch',
+                      'netkit-rusers-0.17-includes.patch',
+                      'netkit-rusers-0.17-truncate.patch',
+                      'netkit-rusers-0.17-stats.patch',
+                      'netkit-rusers-0.17-rstatd-no-static-buffer.patch',
+                      'netkit-rusers-0.17-strip.patch',
+                      'netkit-rusers-0.17-rup.patch',
+                      'netkit-rusers-0.17-rup-timeout.patch',
+                      'netkit-rusers-0.17-procps.patch',
+                        ):
+             r.addPatch(patch, rpm=srpm)
+
+        r.Make()
+        r.Make('LIBS="$(echo /%(lib)s/libproc-*.*.so)" -C rpc.rstatd')
+
+        r.MakeDirs('%(bindir)s')
+        r.MakeDirs('%(sbindir)s')
+        r.MakeDirs('%(mandir)s/man{1,8}')
+        r.MakeDirs('%(initdir)s')
+        r.MakeInstall(rootVar='INSTALLROOT')
+        r.MakeInstall('-C rpc.rstatd', rootVar='INSTALLROOT')
+        r.Install('rusersd.init', '%(initdir)s/rusersd', mode=0755)
+        r.Install('rstatd.init', '%(initdir)s/rstatd', mode=0755)
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        r.PackageSpec('rusers-server',
+                         '%(mandir)s/man8/.*',
+                         '/usr/sbin/rpc.rstatd',
+                         '/usr/sbin/rpc.rusersd',
+                         '%(initdir)s/rusersd',
+                         '%(initdir)s/rstatd')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
