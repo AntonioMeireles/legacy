@@ -1,0 +1,226 @@
+--- minicom-2.00.0/src/updown.c.orig	2003-08-01 18:11:31.000000000 -0400
++++ minicom-2.00.0/src/updown.c	2003-08-01 18:18:34.000000000 -0400
+@@ -88,41 +88,84 @@
+  * Translate %b to the current bps rate, and
+  *           %l to the current tty port.
+  *           %f to the serial port file descriptor
++ *
++ * Caller must free the returned string
+  */
+ static char *translate(s)
+ char *s;
+ {
+-  static char buf[128];
+-  char str_portfd[8];     /* kino */
+-  int i;
+-
+-  for(i = 0; *s && i < 127; i++, s++) {
+-  	if (*s != '%') {
+-  		buf[i] = *s;
+-  		continue;
+-  	}
+-  	switch(*++s) {
+-  		case 'l':
+-  			strncpy(buf + i, dial_tty, sizeof(buf)-i);
+-  			i += strlen(dial_tty) - 1;
+-  			break;
+-  		case 'b':
+-  			strncpy(buf + i, P_BAUDRATE, sizeof(buf)-i);
+-  			i += strlen(P_BAUDRATE) - 1;
+-  			break;
+- 		case 'f':
+-		  	sprintf(str_portfd, "%d", portfd);
+-                        strncpy(buf + i, str_portfd, sizeof(buf)-i);
+-                        i += strlen(str_portfd) - 1;
+-                        break;
+-  		default:
+-  			buf[i++] = '%';
+-  			buf[i] = *s;
+-  			break;
+-  	}
+-  }
+-  buf[i] = 0;
+-  return(buf);
++	char * ptr;
++	char * translation;
++	size_t translation_length;
++	char str_portfd[8];     /* kino */
++
++	/* determine how many bytes we'll need for the translated version */
++	translation_length = 0;
++	for (ptr = s; *ptr != '\0'; ptr++) {
++		if (*ptr != '%') {
++			translation_length++;
++		}
++		else {
++			switch(*++ptr) {
++
++			case 'l': /* tty port */
++				translation_length += strlen(dial_tty);
++				break;
++
++			case 'b': /* baud rate (bbp) */
++				translation_length += strlen(P_BAUDRATE);
++				break;
++
++			case 'f': /* serial port file descriptor */
++				sprintf(str_portfd, "%d", portfd);
++				translation_length += strlen(str_portfd);
++				break;
++
++			default: /* treat all other escape sequences literally */
++				translation_length += 2;
++				break;
++			}
++		}
++	}
++
++	translation = malloc(translation_length + 1);
++	if (translation == NULL) {
++		do_log("out of memory");
++		return NULL;
++	}
++
++	/* now copy and translate s into the allocated buffer */
++	for (ptr = translation; *s != '\0'; s++) {
++		if (*s != '%') {
++			*ptr++ = *s;
++			continue;
++		}
++		switch(*++s) {
++		case 'l': /* tty port */
++			strcpy(ptr, dial_tty);
++			ptr += strlen(dial_tty);
++			break;
++
++		case 'b': /* baud rate (bbp) */
++			strcpy(ptr, P_BAUDRATE);
++			ptr += strlen(P_BAUDRATE);
++			break;
++
++		case 'f': /* serial port file descriptor */
++			sprintf(str_portfd, "%d", portfd);
++			strcpy(ptr, str_portfd);
++			ptr += strlen(str_portfd);
++			break;
++
++		default: /* treat all other escape sequences literally */
++			*ptr++ = '%';
++			*ptr++ = *s;
++			break;
++		}
++	}
++	*ptr = '\0';
++
++	return translation;
+ }
+ 
+ /*
+@@ -184,7 +227,8 @@
+   char *s ="";
+   int pipefd[2];
+   int n, status;
+-  char cmdline[128];
++  char * cmdline = NULL;
++  char * translated_cmdline = NULL;
+   WIN *win = (WIN *)NULL;
+ #if VC_MUSIC
+   _PROTO(void music, (void));
+@@ -216,6 +260,7 @@
+ #if 1
+   {
+ 	int multiple; /* 0:only directory, 1:one file, -1:any number */
++        size_t cmdline_length;
+ 	
+ 	if(P_MUL(g)=='Y') {
+ 	    /* need file(s), or just a directory? */
+@@ -237,7 +282,14 @@
+ 	}
+ 
+ 	/* discard directory if "multiple" == 0 */
+-	snprintf(cmdline, sizeof(cmdline), "%s %s", P_PPROG(g), multiple == 0? "" : s);
++
++	cmdline_length = strlen(P_PPROG(g)) + strlen((char*) (multiple == 0 ? "" : s)) + 1; /* + 1 for ' ' */
++	cmdline = malloc(cmdline_length + 1); /* + 1 for NUL */
++	if (cmdline == NULL) {
++	  werror(_("Out of memory: could allocate buffer for command line"));
++	  return;
++	} 
++	snprintf(cmdline, cmdline_length + 1, "%s %s", P_PPROG(g), multiple == 0 ? "" : s);
+   }
+ #endif
+ 
+@@ -263,6 +315,7 @@
+ 		} else
+ 			wreturn();
+   		(void) mcd("");
++  		free(cmdline);
+   		return;
+   	case 0: /* Child */
+ 		if (P_PIORED(g) == 'Y') {
+@@ -279,7 +332,12 @@
+ 		set_privs();
+ 		setgid((gid_t)real_gid);
+   		setuid((uid_t)real_uid);
+-  		(void) fastexec(translate(cmdline));
++		translated_cmdline = translate(cmdline);
++	 	if (translated_cmdline != NULL) {
++  		    (void) fastexec(translated_cmdline);
++		    free(translated_cmdline);
++		}
++  		free(cmdline);
+   		exit(1);
+   	default: /* Parent */
+   		break;
+@@ -288,6 +346,8 @@
+ 	(void) setcbreak(1); /* Cbreak, no echo. */
+ 	enab_sig(1, 0);	       /* But enable SIGINT */
+   }
++  free(cmdline);
++
+   signal(SIGINT, udcatch);
+   if (P_PIORED(g) == 'Y') {
+ 	close(pipefd[1]);
+@@ -383,6 +443,7 @@
+   char buf[81];
+   int fd;
+ #endif
++  char * translated_cmdline;
+ 
+   /* Clear screen, set keyboard modes etc. */
+   wleave();
+@@ -401,7 +462,11 @@
+ 
+   		for(n = 0; n < _NSIG; n++) signal(n, SIG_DFL);
+ 
+-  		(void) fastexec(translate(P_KERMIT));
++		translated_cmdline = translate(P_KERMIT);
++	 	if (translated_cmdline != NULL) {
++			(void) fastexec(translated_cmdline);
++			free(translated_cmdline);
++		}
+   		exit(1);
+   	default: /* Parent */
+   		break;
+@@ -517,6 +582,7 @@
+   char buf[81];
+   char scr_lines[5];
+   char cmdline[128];
++  char * translated_cmdline;
+   char *ptr;
+   WIN *w;
+   int done = 0;
+@@ -619,7 +685,12 @@
+   		mc_setenv("LOGIN", scr_user);
+   		mc_setenv("PASS", scr_passwd);
+ 		mc_setenv("TERMLIN", scr_lines);	/* jl 13.09.97 */
+-  		(void) fastexec(translate(cmdline));
++
++		translated_cmdline = translate(cmdline);
++	 	if (translated_cmdline != NULL) {
++			(void) fastexec(translated_cmdline);
++			free(translated_cmdline);
++		}
+   		exit(1);
+   	default: /* Parent */
+   		break;

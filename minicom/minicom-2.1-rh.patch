@@ -1,0 +1,159 @@
+--- minicom-1.83.1/src/main.c.rh	Wed Mar 15 11:31:32 2000
++++ minicom-1.83.1/src/main.c	Tue Aug 28 14:53:47 2001
+@@ -63,7 +63,7 @@
+ 	close(portfd);
+   }
+   set_privs();
+-  if (lockfile[0]) unlink(lockfile);
++  if (lockfile[0]) ttyunlock(lockfile);
+   if (P_CALLIN[0]) (void) fastsystem(P_CALLIN, CNULL, CNULL, CNULL);
+   if (real_uid) chown(dial_tty, (uid_t)portuid, (gid_t)portgid);
+   fprintf(stderr, "%s", s);
+@@ -104,10 +104,13 @@
+ int doinit;
+ {
+   struct stat stt;
++#ifdef	NOTNOW
+   char buf[128];
+-  int fd, n = 0;
++  int fd;
+   int pid;
+   int mask;
++#endif
++  int n = 0;
+ #ifdef HAVE_ERRNO_H
+   int s_errno;
+ #endif
+@@ -115,6 +118,8 @@
+   /* Upgrade our status. */
+   set_privs();
+ 
++#ifdef NOTNOW
++
+   /* First see if the lock file directory is present. */
+   if (P_LOCK[0] && stat(P_LOCK, &stt) == 0) {
+ #ifdef SVR4_LOCKS
+@@ -176,12 +181,37 @@
+   	close(fd);
+   }
+ 
++#else
++  lockfile[0] = 0;
++  if (doinit >= 0) {
++	int rc = ttylock(dial_tty);
++	if (rc < 0) {
++		if (access(dial_tty, W_OK) == -1)
++  			fprintf(stderr, _("Device %s access failed: %s.\n"),
++				dial_tty, strerror(errno));
++		else
++  			fprintf(stderr, _("Device %s lock failed: %s.\n"),
++				dial_tty, strerror(-rc));
++	} else if (rc > 0) {
++  		fprintf(stderr, _("Device %s is locked.\n"), dial_tty);
++	} else if (rc == 0) {
++		snprintf(lockfile, sizeof(lockfile), "%s", dial_tty);
++	}
++	if (rc) {
++  		if (stdwin != NIL_WIN) wclose(stdwin, 1);
++		drop_privs();
++		return(-1);
++	}
++  }
++#endif
++  
++
+   /* Run a special program to disable callin if needed. */
+   if (doinit > 0 && P_CALLOUT[0]) {
+ 	if(fastsystem(P_CALLOUT, CNULL, CNULL, CNULL) < 0) {
+   		if (stdwin != NIL_WIN) wclose(stdwin, 1);
+   		fprintf(stderr, _("Could not setup for dial out.\n"));
+-  		if (lockfile[0]) unlink(lockfile);
++  		if (lockfile[0]) ttyunlock(lockfile);
+ 		drop_privs();
+ 		return(-1);
+   	}
+@@ -221,11 +251,11 @@
+ #else
+   		fprintf(stderr, _("minicom: cannot open %s. Sorry.\n"), dial_tty);
+ #endif
+-		if (lockfile[0]) unlink(lockfile);
++  		if (lockfile[0]) ttyunlock(lockfile);
+ 		drop_privs();
+ 		return(-1);
+ 	}
+-	if (lockfile[0]) unlink(lockfile);
++  	if (lockfile[0]) ttyunlock(lockfile);
+ 	werror(_("Cannot open %s!"), dial_tty);
+ 	drop_privs();
+ 	return(-1);
+--- minicom-1.83.1/src/minicom.c.rh	Tue Aug 28 14:48:06 2001
++++ minicom-1.83.1/src/minicom.c	Tue Aug 28 14:48:06 2001
+@@ -1466,7 +1466,7 @@
+   wclose(stdwin, 1);
+   set_privs();
+   keyboard(KUNINSTALL, 0);
+-  if (lockfile[0]) unlink(lockfile);
++  if (lockfile[0]) ttyunlock(lockfile);
+   close(portfd);
+   /* Please - if your system doesn't have uid_t and/or gid_t, define 'em
+    * conditionally in "port.h".
+--- minicom-1.83.1/src/updown.c.rh	Tue Aug 28 14:48:06 2001
++++ minicom-1.83.1/src/updown.c	Tue Aug 28 14:48:06 2001
+@@ -372,8 +372,10 @@
+ {
+   int status;
+   int pid, n;
++#ifdef	NOTNOW
+   char buf[81];
+   int fd;
++#endif
+ 
+   /* Clear screen, set keyboard modes etc. */
+   wleave();
+@@ -386,7 +388,7 @@
+   	case 0: /* Child */
+   		/* Remove lockfile */
+ 		set_privs();
+-  		if (lockfile[0]) unlink(lockfile);
++  		if (lockfile[0]) ttyunlock(lockfile);
+ 		setgid((gid_t)real_gid);
+ 		setuid((uid_t)real_uid);
+ 
+@@ -406,6 +408,7 @@
+   /* Re-create lockfile */
+   if (lockfile[0]) {
+ 	set_privs();
++#ifdef	NOTNOW
+ 	n = umask(022);
+   	/* Create lockfile compatible with UUCP-1.2 */
+   	if ((fd = open(lockfile, O_WRONLY | O_CREAT | O_EXCL, 0666)) < 0) {
+@@ -417,6 +420,9 @@
+   		close(fd);
+   	}
+ 	(void) umask(n);
++#else
++	(void) ttylock(lockfile);
++#endif
+ 	drop_privs();
+   }
+   m_flush(portfd);
+--- minicom-1.83.1/src/minicom.h.rh	Fri Jan  7 13:52:03 2000
++++ minicom-1.83.1/src/minicom.h	Tue Aug 28 14:48:06 2001
+@@ -26,6 +26,8 @@
+ #include "keyboard.h"
+ #include "vt100.h"
+ 
++#include <baudboy.h>
++
+ /*
+  * kubota@debian.or.jp 08/08/98
+  * COLS must be equal to or less than MAXCOLS.
+@@ -68,7 +70,7 @@
+ EXTERN int tempst;	/* Status line is temporary */
+ EXTERN int escape;	/* Escape code. */
+ 
+-EXTERN char lockfile[128]; /* UUCP lock file of terminal */
++EXTERN char lockfile[1024]; /* UUCP lock file of terminal */
+ EXTERN char homedir[256];  /* Home directory of user */
+ EXTERN char logfname[PARS_VAL_LEN]; /* Name of the logfile */
+ EXTERN char username[16];  /* Who is using minicom? */
