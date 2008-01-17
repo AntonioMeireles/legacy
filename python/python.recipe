@@ -1,0 +1,204 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Python(CPackageRecipe):
+    name = 'python'
+    version = '2.4.4'
+
+    buildRequires = [ ]
+    if Use.bootstrap:
+        keepBuildReqs = ['glibc:devel', 'userspace-kernel-headers:devel',
+                         'openssl:devel', 'zlib:devel', 'bzip2:devel']
+        # we need to build the local version as well, so we need the same
+        # reqs.
+        buildRequires.extend(['binutils[!cross]', 'gcc[!cross]',
+                              'openssl:devel', 'gcc-c++:runtime',
+                              'krb5:runtime', 'zlib:devel'])
+        crossRequires = ['glibc:devel', 'userspace-kernel-headers:devel',
+                         'openssl:devel', 'zlib:devel', 'bzip2:devel']
+    else:
+        buildRequires.extend(['db:devel', 'gdbm:devel', 'ncurses:devel',
+            'libtermcap:devel', 'gcc:devel', 'libX11:devel',
+            'libstdc++:devel', 'openssl:devel[!bootstrap]',
+            'e2fsprogs:devel', 'readline:devel', 'tk:devel', 'tcl:devel',
+            'zlib:devel', 'bzip2:devel',])
+
+    # the following three are for other python recipes to use with
+    # loadInstalled('python') to have a consistent system
+    majversion = '.'.join(version.split('.')[0:2])
+    sitepkgs = ''.join(('%(libdir)s/python', majversion, '/site-packages'))
+    includedir = '%(includedir)s/python' + majversion
+
+    def applyUse(r, path):
+        '''build a command to uncomment the appropriate use lines in
+        a file like Setup.dist'''
+
+        substs = []
+
+        if Use.bootstrap:
+            flags = ('bootstrap', 'ssl')
+        else:
+            flags = ('readline', 'tcl', 'tk', 'ssl',)
+            substs.append(('#\(not use bootstrap\)', ''))
+
+        for flag in flags:
+            substs.append(('#\(use %s\)' % flag, ''))
+
+        substs.append(path)
+        # it's possible that applying these substitutions does nothing,
+        # if all the Use flags are set to false
+        kw = {'allowNoChange' : True}
+        r.Replace(*substs, **kw)
+
+    def setup(r):
+        r.macros.majversion = r.majversion
+        r.macros.cflags += ' -fPIC'
+        r.macros.cppflags += ' -fPIC'
+        r.mainDir('Python-%(version)s')
+        r.addArchive('http://www.python.org/ftp/python/%(version)s/Python-%(version)s.tar.bz2')
+        r.addArchive('http://www.python.org/ftp/python/doc/%(version)s/html-%(version)s.tar.bz2',
+                     dir = r.macros.maindir)
+        r.addPatch('python-2.4.3-config.patch', backup='.config', macros=True)
+        r.addPatch('python-2.4.4-cross.patch', backup='.cross',use=Use.bootstrap)
+        r.addPatch('python-2.3.4-lib64-regex.patch', backup='.lib64-regex',
+                   use=(r.macros.lib == 'lib64'))
+        r.addPatch('python-2.4-lib64.patch', backup='.lib64',
+                  use=(r.macros.lib == 'lib64'))
+
+        # RPL-1358 CVE-2007-2052
+        r.addPatch('http://svn.python.org/view/python/trunk/Modules/_localemodule.c?rev=54669&r1=46819&r2=54669&makepatch=1&diff_format=u')
+
+        # RPL-1885
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/development/source/SRPMS/python-2.5.1-15.fc8.src.rpm'
+        r.addPatch('python-2.5.CVE-2007-4965-int-overflow.patch', rpm=srpm)
+
+        # RPL-1225
+        r.addPatch('pydoc_html_docs.patch', macros=True)
+
+        # Now for the cross compiling version.
+        # I wish I could use Use.cross here...
+        r.addArchive('http://www.python.org/ftp/python/%(version)s/Python-'
+                     '%(version)s.tar.bz2', dir='bootstrap', use=Use.bootstrap)
+        r.addAction('mv bootstrap/Python-%(version)s hostpython', dir='..',
+                    use=Use.bootstrap)
+
+        r.addPatch('python-2.4.3-config.patch', backup='.config',
+                   macros=True, dir='../hostpython', use=Use.bootstrap)
+        r.addPatch('python-2.3.4-lib64-regex.patch',
+                   backup='.lib64-regex', dir='../hostpython',
+                   use=Use.bootstrap and (r.macros.buildarch == 'x86_64'))
+        r.addPatch('python-2.4-lib64.patch', backup='.lib64', dir='../hostpython',
+                  use=Use.bootstrap and (r.macros.buildarch == 'x86_64'))
+
+        # maintained distribution packages really shouldn't be using /usr/local
+        # for anything -- don't include /usr/local/include or search
+        # /usr/local/lib when linking
+        r.Replace('/usr/local', '%(prefix)s', 'setup.py')
+        r.applyUse('Modules/Setup.dist')
+
+        if Use.bootstrap:
+            r.macros.cflags += ' -DOPENSSL_NO_KRB5'
+            r.Replace('/usr/local', '%(prefix)s', '../hostpython/setup.py')
+            r.applyUse('../hostpython/Modules/Setup.dist')
+            r.Replace(re.escape(r'-ldb-$(DBLIBVER)'), '-ldb',
+                      '../hostpython/Modules/Setup.dist')
+
+        # db >=4.5.20 has libdb.so so versions aren't needed
+        r.Replace(re.escape(r'-ldb-$(DBLIBVER)'), '-ldb', 'Modules/Setup.dist')
+
+        # arguments to pass to r.Make() and r.MakeInstall()
+        makeargs = ''
+        conf = ' --enable-ipv6'
+
+        # Do not change the following configuration item!
+        conf += ' --enable-unicode=ucs4'
+
+        if Use.bootstrap:
+            # first build a python for the $HOST platform
+            buildconf = conf
+            buildconf += ' --with-cxx=%(buildcxx)s '
+            r.Configure(buildconf,
+                        bootstrapFlags='',
+                        preConfigure='CC=%(buildcc)s CXX=%(buildcxx)s'
+                                     ' CONFIG_SITE= ',
+                        dir='../hostpython',
+                        local=True)
+            # we need unicode support now, just build all the modules
+            r.Make('"OPT=%(cflags)s -I/usr/kerberos/include"'
+                   ' sysroot=%(sysroot)s python'
+                   ' Parser/pgen oldsharedmods',
+                    dir='../hostpython',
+                    local=True)
+            # set up the environment for cross compiling
+            r.Environment('RANLIB', '%(target)s-ranlib' % r.macros)
+            r.Environment('AR', '%(target)s-ar' % r.macros)
+            r.Environment('CROSS_COMPILING', 'yes')
+            # make sure that we don't look in the native environment
+            # for header files
+            r.Replace('/usr/include', '%(headerpath)s', 'setup.py')
+            conf += ' --with-cxx=%(target)s-g++'
+            # set up the native python -- need to be able to run
+            # python during the build
+            makeargs = ('sysroot=%(sysroot)s HOSTPYTHON=../hostpython/python'
+                        ' HOSTPGEN=../hostpython/Parser/pgen'
+                        ' CROSS_INCDIR=%(headerpath)s'
+                        ' CROSS_LIBDIR=%(sysroot)s/%(libdir)s')
+
+        # Compile shared
+        r.Configure(conf + ' --enable-shared')
+        r.Make('"OPT=%(cflags)s"', makeargs)
+        r.MakeInstall(makeargs)
+
+        # Compile without shared libpython
+        #r.Make('distclean')
+        r.Configure(conf)
+        r.Make('"OPT=%(cflags)s"', makeargs)
+        r.MakeInstall(makeargs)
+
+        r.Replace('#! /usr/local/bin/python', '#! /usr/bin/python',
+                  '%(libdir)s/python*/cgi.py')
+
+        r.Run('%(cc)s -pthread -shared  Modules/pwdmodule.o   -o Modules/pwdmodule.so')
+        r.Run('install -c -m 555 Modules/pwdmodule.so %(destdir)s/%(libdir)s/python%(majversion)s/lib-dynload/pwdmodule.so')
+
+        # Place tk support in :tk so we don't end up bringing in all
+        # tk requirements with python.
+        r.ComponentSpec('tk', '%(libdir)s/python.*/lib-dynload/_tkinter.so')
+        r.ComponentSpec('tk', '%(libdir)s/python.*/lib-tk/.*')
+
+        # don't require an extra 14mb of testfiles in group-core by placing
+        # them into :lib
+        r.ComponentSpec('test', '%(libdir)s/python%(majversion)s/test/')
+        r.ComponentSpec('test', '%(libdir)s/python%(majversion)s/distutils/tests/')
+        r.ComponentSpec('test', '%(libdir)s/python%(majversion)s/email/test/')
+        r.ComponentSpec('test', '%(libdir)s/python%(majversion)s/bsddb/test/')
+        r.ComponentSpec('test', '%(libdir)s/python%(majversion)s/hotshot/stones.py[co]?')
+        r.Requires(exceptDeps=('%(libdir)s/python%(majversion)s/MimeWriter.py.?', 'python: test.*'))
+        r.Requires(exceptDeps=('%(libdir)s/python%(majversion)s/UserString.py.?', 'python: test.*'))
+
+        # everything else goes in :lib
+        r.ComponentSpec('lib', '%(libdir)s/python.*/.*')
+        r.PackageSpec('idle', '%(bindir)s/idle')
+        r.PackageSpec('idle', '%(libdir)s/python.*/idlelib/.*')
+        r.Requires('python:tk', '%(bindir)s/idle')
+        r.Requires('python:tk', '%(libdir)s/python.*/idlelib/idle.py')
+
+        r.Requires(exceptDeps=('.*/(test/test_tcl.pyc?|config/(Setup|'
+                               'Makefile))', 'python: _tkinter'))
+        r.Requires(exceptDeps=('.*/(test/test_tcl.pyc?|pydoc.pyc?)',
+                               'python: Tkinter'))
+
+        # Define the major version python provides.
+        r.Requires(bootstrapPythonFlags=['%(majversion)s', '%(lib)s'])
+
+        # sgmlop is an optional dep on an external library, we don't want
+        # to require it
+        r.Requires(exceptDeps='python: sgmlop')
+
+        if not Use.bootstrap:
+            r.TestSuite('.', 'make test ')
+            r.Move('Python-Docs-*', 'html/')
+            r.Doc('html/')
