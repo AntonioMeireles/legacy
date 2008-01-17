@@ -1,0 +1,40 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Audit(CPackageRecipe):
+    name = 'audit'
+    version = '1.2.8'
+    buildRequires = [ 'autoconf:runtime', 'userspace-kernel-headers:devel',
+                      'swig:runtime', 'automake:runtime', 'libtool:runtime',
+                      'python:devel', ]
+
+    loadInstalled('python')
+    
+    def setup(r):
+        r.addArchive('http://people.redhat.com/sgrubb/audit/')
+        r.addPatch('makefile_fixes.patch')
+
+        r.macros.pyver = Python.majversion
+
+        r.Replace('/lib/python2.4/site-packages',
+                  '/%(lib)s/python%(pyver)s/site-packages',
+                  'audisp/Makefile')
+        r.Run('autoreconf -fv --install')
+
+        r.Configure('--sbindir=%(essentialsbindir)s --libdir=%(essentiallibdir)s')
+
+        # autoconf is getting this wrong.
+        r.Replace('/lib/python%(pyver)s/site-packages',
+                  '/%(lib)s/python%(pyver)s/site-packages',
+                  'Makefile', 'swig/Makefile')
+        r.Make()
+        r.MakeInstall()
+
+        r.Replace('2345', '-', '%(sysconfdir)s/rc.d/init.d/auditd')
+        r.MakeDirs('%(localstatedir)s/log/audit')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/log/audit')
+
+        r.TagSpec('initscript', '%(initdir)s/')
