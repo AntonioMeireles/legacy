@@ -1,0 +1,154 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Udev(RPMPackageRecipe,CPackageRecipe):
+    name = 'udev'
+    version = '116'
+    rpmRelease = '3.fc8'
+
+    buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
+                      'bison:runtime', 'pam:devel', 'chkconfig:runtime' ]
+
+    rpmPatches = [ 'udev-116-nettype.patch',
+                   'udev-089-nopie.patch',
+                   'udev-091-lib64.patch',
+                   ]
+
+    rpmSources = [ 'udev-post.init',
+                   'start_udev',
+                   'fw_unit_symlinks.sh',
+                   'udev.nodes'
+                   ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.macros.debug = 'false'
+
+        r.unpack()
+        # addons and extra features
+
+#        r.Run('rm -f etc/udev/redhat/51-hotplug.rules etc/udev/redhat/50* etc/udev/redhat/06*')
+
+        # Make the static binaries...
+        r.Make('USE_KLIBC=false'
+               ' USE_SELINUX=false'
+               ' USE_STATIC=true'
+               ' STRIP="%(essentialbindir)s/true"'
+               ' udevdir="/dev"'
+               ' USE_LOG=false'
+               ' VOLUME_ID_STATIC=true'
+               ' DEBUG=%(debug)s'
+               ' EXTRAS="extras/scsi_id extras/ata_id extras/usb_id '
+                         'extras/edd_id extras/path_id extras/volume_id '
+                         'extras/cdrom_id extras/floppy"'
+               ' all ')
+
+        for t in ['udevd',
+                  'udevtrigger',
+                  'udevsettle',
+                  'extras/scsi_id/scsi_id',
+                  'extras/ata_id/ata_id',
+                  'extras/edd_id/edd_id',
+                  'extras/usb_id/usb_id', 
+                  'extras/cdrom_id/cdrom_id',
+                  'extras/volume_id/vol_id',
+                  'extras/floppy/create_floppy_devices']:
+            r.Move(t,t+'.static')
+
+        r.Make('clean')
+        r.Make("""E='@echo' Q='@' -C extras/volume_id/lib clean""")
+
+
+        # Make the shared binaries...
+        r.Make('CC="gcc %(cflags)s"'
+               ' USE_KLIBC=false'
+               ' USE_SELINUX=false'
+               ' udevdir="/dev"'
+               ' USE_LOG=true'
+               ' DEBUG=%(debug)s'
+               ' STRIP="%(essentialbindir)s/true"'
+               ' EXTRAS="extras/scsi_id extras/ata_id extras/usb_id '
+                        'extras/edd_id extras/path_id extras/volume_id '
+                        'extras/cdrom_id extras/floppy extras/rule_generator extras/firmware" all')
+
+
+        # copy static over shared instead of fshipping shared and .static ... (FIXME ?)  
+        for t in ['udevd',
+                  'udevtrigger',
+                  'udevsettle', ]:
+            r.Install(t+'.static', '%(essentialsbindir)s/'+ t +'.static')
+
+        for t in [
+                  'extras/scsi_id/scsi_id',
+                  'extras/ata_id/ata_id',
+                  'extras/edd_id/edd_id',
+                  'extras/usb_id/usb_id', 
+                  'extras/cdrom_id/cdrom_id',
+                  'extras/volume_id/vol_id',
+                  'extras/floppy/create_floppy_devices']:
+            r.Install(t + '.static', '/lib/' + t.rsplit('/')[0]+'.static')
+
+
+        r.MakeInstall('EXTRAS="'
+               'extras/scsi_id'
+               ' extras/ata_id'
+               ' extras/usb_id'
+               ' extras/edd_id'
+               ' extras/path_id'
+               ' extras/volume_id'
+               ' extras/cdrom_id'
+               ' extras/floppy'
+               ' extras/rule_generator'
+               ' extras/firmware"')
+
+        # multilib fixes (still needed ?)
+        r.Remove('/usr/lib/libvolume_id.so')
+        r.Move('/lib/lib*so*', '%(essentiallibdir)s/')
+        r.Symlink('%(essentiallibdir)s/libvolume_id.so.0', '%(libdir)s/libvolume_id.so')
+        r.Move('/usr/lib/pkgconfig/libvolume_id.pc', '%(libdir)s/pkgconfig/')
+
+        r.MakeDirs('%(sysconfdir)s/udev/devices')
+        r.MakeDirs('%(sysconfdir)s/dev.d/{default,block}')
+        r.MakeDirs('%(datadir)s/udev')
+        r.MakeDirs('/lib/firmware')
+        # Deprecated, but keep the ownership
+        r.MakeDirs('%(sysconfdir)s/udev/{rules.d,scripts,devices,makedev.d}')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/udev/{rules.d,scripts,devices,makedev.d}')
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/dev.d/.*')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/udev/.*')
+        r.ExcludeDirectories(exceptions='%(datadir)s/udev')
+        r.ExcludeDirectories(exceptions='/lib/firmware')
+        r.ExcludeDirectories(exceptions='/dev')
+
+        r.Install('udevd.static', '%(essentialsbindir)s/udevd.static')
+        r.Install('start_udev', '%(essentialsbindir)s/')
+ 
+        r.Install('udev.nodes', '%(sysconfdir)s/udev/makedev.d/50-udev.nodes', mode=0644)
+
+        for i in ('0', '1', '2', '3'):
+            r.MakeDirs('%%(sysconfdir)s/dev.d/fd%s' % i)
+
+        r.Install('etc/udev/udev.conf', '%(sysconfdir)s/udev/udev.conf')
+        r.MakeDirs('%(initdir)s')
+        r.Install('udev-post.init', '%(initdir)s/udev-post', mode = 0755)
+        r.Install('fw_unit_symlinks.sh', '/lib/udev/fw_unit_symlinks.sh', mode=0755)
+
+        # short-term workaround
+        r.MakeDirs('%(sysconfdir)s/sysconfig/modules')
+        r.Run("""cat > %(destdir)s/%(sysconfdir)s/sysconfig/modules/udev-stw.modules <<EOF
+#!/bin/sh
+exec /sbin/modprobe -a nvram floppy >/dev/null 2>&1 &
+EOF
+""")
+
+        # These rules should do...
+        r.Install('etc/udev/redhat/*.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/40-alsa.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/64-md-raid.rules', '%(sysconfdir)s/udev/rules.d/')
+        r.Install('etc/udev/packages/64-device-mapper.rules', '%(sysconfdir)s/udev/rules.d/')
+
