@@ -1,0 +1,72 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Gpm(RPMPackageRecipe, CPackageRecipe):
+    name = 'gpm'
+    version = '1.20.1'
+
+    # never add ncurses:devel; it is a buildRequires loop
+    buildRequires = [ 'autoconf:runtime', 'bison:runtime', 'gawk:runtime',
+        'install-info:runtime', 'sed:runtime' ]
+
+    # Disable emacs support to prevent a build dep loop
+    #   xorg-x11 -> ncurses -> gpm -> emacs -> Xaw3d -> xorg-x11
+
+    rpmRelease = '74.1'
+    rpmPatches = [ 'gpm-evdev-cumulative.patch', 'gpm-1.20.1-math.patch',
+        'gpm-1.20.1-weak-wgetch.patch', 'gpm-1.20.1-nodebug.patch',
+        'gpm-1.20.1-gpmopen.patch', 'gpm-1.20.1-idie.patch',
+        'gpm-1.20.1-subscript.patch', 'gpm-1.20.1-input.patch',
+        'gpm-1.20.1-consolename.patch', 'gpm-1.20.1-multilib.patch', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+
+        r.macros.ldflags += ' -lm'
+
+        r.addArchive('gpm-%(version)s.tar.gz', rpm=r.srpm)
+        r.addSource('gpm.init', rpm=r.srpm,
+                    dest='%(initdir)s/gpm', mode=0755)
+        r.addSource('gpm.sysconfig', dest='%(sysconfdir)s/sysconfig/gpm')
+        r.addSource('inputattach.c', rpm=r.srpm)
+        # gcc 4.1 fixes
+        r.Replace('ceil', 'ceilf', 'src/synaptics.c')
+
+        # disable tetex doc
+        r.Replace('all:.*\$\(MANPAGES\)', 'all: $(MANPAGES)', 'doc/Makefile.in')
+
+        r.macros.cflags = '%(cflags)s -D_GNU_SOURCE'
+        r.Run('autoheader')
+        r.Run('autoconf')
+
+        # --without-curses avoids a buildRequires loop
+        r.Configure('--without-curses',
+                    preConfigure='lispdir=%(datadir)s/emacs/site-lisp')
+        r.Make()
+        r.Run('%(cc)s %(cflags)s -o inputattach inputattach.c')
+
+        r.MakePathsInstall('lispdir=%(destdir)s/%(datadir)s/emacs/site-lisp',
+                           preMake="PATH=$PATH:%(sbindir)s:%(essentialsbindir)s")
+        r.Install('inputattach', '%(sbindir)s/')
+        # While tetex is disabled, make sure that Conary does not ask
+        # that it be added back
+        r.EnforceConfigLogBuildRequirements(exceptions=(
+            '/usr/bin/dvips',
+            '/usr/bin/emacs',
+            '/usr/bin/makeinfo',
+            '/usr/bin/tex',
+            '/usr/bin/texi2html',
+            '/usr/bin/texindex',))
+
+        r.Install('doc/gpm-root.1', '%(mandir)s/man1/', mode=0644)
+        r.Install('conf/gpm-root.conf', '%(sysconfdir)s/', mode=0644)
+        r.Install('src/prog/hltest', '%(bindir)s/', mode=0755)
+
+        # remove useless bit
+        r.Remove('%(bindir)s/disable-paste')
+        r.TagSpec('initscript', '%(initdir)s/')
