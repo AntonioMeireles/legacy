@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2005-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class OpenVmTools(CPackageRecipe):
+    name = "open-vm-tools"
+    version = "2007.11.21_64693"
+
+    buildRequires = [ 'chkconfig:runtime', 'pkgconfig:devel' ]
+
+    def setup(r):
+        r.macros.version = r.macros.version.replace('_', '-')
+        r.addArchive('mirror://sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
+        r.addSource('tools.conf.in', macros=True)
+        r.addSource('vmware-guestd.pam')
+        r.addSource('xautostart.conf')
+        r.addSource('vmware-guestd.init')
+        r.addSource('poweroff-vm-default', macros=True)
+        r.addPatch('no_more_pgrep.patch')
+        r.Replace('COMMON_CFLAGS -Werror', 'COMMON_CFLAGS', 'configure')
+        r.Configure('--without-x')
+        r.Make()
+        r.MakeInstall()
+
+        # There is no make install, we have to do it by hand
+        r.MakeDirs('%(sysconfdir)s/vmware-tools',
+                   '/mnt/hgfs',)
+        r.Install('tools.conf.in', '%(sysconfdir)s/vmware-tools/tools.conf',
+                  mode=0644)
+        r.Install('vmware-guestd.pam', '%(sysconfdir)s/pam.d/vmware-guestd',
+                  mode=0644)
+        r.Install('xautostart.conf', '%(sysconfdir)s/vmware-tools/xautostart.conf',
+                  mode=0644)
+        r.Install('vmware-guestd.init', '%(initdir)s/vmware-guestd',
+                  mode=0755)
+        r.Install('checkvm/checkvm', '%(sbindir)s/vmware-checkvm')
+        r.Install('guestd/guestd', '%(sbindir)s/vmware-guestd')
+        r.Install('hgfsclient/hgfsclient', '%(bindir)s/vmware-hgfsclient')
+        r.Install('hgfsmounter/hgfsmounter', '%(essentialsbindir)s/mount.vmhgfs', mode=4755)
+        r.Install('xferlogs/xferlogs', '%(bindir)s/vmware-xferlogs')
+
+        # VMware complains if power scripts are not present, but we want 
+        # Appliance vendors to have the option of custom scripts.  These
+        # scripts simply exec any scripts which may exist in 
+        # %(sysconfdir)s/vmware-tools/scripts/$0.d/
+        r.Install('poweroff-vm-default', '%(sysconfdir)s/vmware-tools/poweroff-vm-default',
+                  mode=0755)
+        r.Symlink('%(sysconfdir)s/vmware-tools/poweroff-vm-default', '%(sysconfdir)s/vmware-tools/poweron-vm-default')
+        r.Symlink('%(sysconfdir)s/vmware-tools/poweroff-vm-default', '%(sysconfdir)s/vmware-tools/resume-vm-default')
+        r.Symlink('%(sysconfdir)s/vmware-tools/poweroff-vm-default', '%(sysconfdir)s/vmware-tools/suspend-vm-default')
+
+        r.ExcludeDirectories(exceptions='/mnt/hgfs')
