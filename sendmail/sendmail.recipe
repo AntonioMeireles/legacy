@@ -1,0 +1,154 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Sendmail(CPackageRecipe):
+    name = 'sendmail'
+    version = '8.14.2'
+
+    buildRequires = [ 'gdbm:devel', 'openssl:devel',
+        'tcp_wrappers:devel', 'cyrus-sasl:devel', 'db:devel',
+        'm4:runtime', 'hesiod:devel', 'openldap:devel', ]
+
+    def setup(r):
+        r.macros.maildir = '%(sysconfdir)s/mail'
+        r.macros.sendmailcf = '%(datadir)s/sendmail-cf'
+        r.macros.smshell = '/sbin/nologin'
+        r.macros.conf_ldapdefine = '-DLDAPMAP'
+        r.macros.conf_ldaplib    = '-lldap -llber'
+        r.macros.conf_ldapenv    = '-DSM_CONF_LDAP_MEMFREE=1'
+        r.macros.conf_tlsdefine  = '-DSTARTTLS'
+        r.macros.conf_tlslib     = '-lssl -lcrypto'
+        r.macros.conf_sasldefine = '-DSASL=2 -D_FFR_UNSAFE_SASL'
+        r.macros.conf_sasllib    = '-lsasl2 -lcrypto'
+
+        # For Fedora patches
+        # (Recipe could use a rewrite to be an RPMPackageRecipe.)
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/sendmail-8.14.0-1.src.rpm'
+
+        r.addArchive('ftp://ftp.sendmail.org/pub/sendmail/%(name)s.%(version)s.tar.gz')
+        r.addPatch('sendmail-8.14.0-makemapman.patch', rpm=srpm)
+        r.addPatch('sendmail-8.13.2-smrsh-paths.patch', rpm=srpm)
+        r.addPatch('sendmail-8.12.2-movefiles.patch', rpm=srpm)
+        r.addPatch('sendmail-8.12.7-hesiod.patch', rpm=srpm)
+        r.addPatch('sendmail-8.12.7-manpage.patch', rpm=srpm)
+        r.addPatch('sendmail-8.13.0-cyrus.patch', rpm=srpm)
+        r.addPatch('sendmail-8.12.10-buildfile.patch', macros=True)
+
+        r.addSource('sendmail.init', rpm=srpm)
+        r.addSource('sendmail.sysconfig', rpm=srpm)
+        r.addSource('sendmail.etc-mail-Makefile', rpm=srpm)
+        r.addSource('Sendmail-sasl2.conf', rpm=srpm)
+        r.addSource('sendmail.pam', rpm=srpm)
+        r.addSource('sendmail-8.12.5-newconfig.readme', rpm=srpm)
+        r.addSource('access')
+        r.addSource('local-host-names')
+        r.addSource('trusted-users')
+        r.addSource('sendmail-rpath.mc', macros=True)
+        r.addSource('rpath.config.m4', macros=True)
+
+        r.macros.objdir = 'obj.Linux..%(unamearch)s'
+
+        # put sm-client.pid location in sync with /etc/init.d/sendmail
+        r.Replace(' QUEUE_DIR`/sm-client\.pid', ' `%(localstatedir)s/run/sm-client.pid', 'cf/feature/msp.m4')
+
+        for dir in ('libmilter', 'libsmutil', 'sendmail', 'mailstats',
+                    'rmail', 'praliases', 'srmrsh'):
+            r.Run('cd %s ; sh Build -f ../rpath.config.m4' % dir)
+
+
+        r.MakeDirs('%(bindir)s', '%(includedir)s/libmilter', '%(libdir)s',
+                      '%(prefix)s/lib')
+        r.MakeDirs('%(mandir)s/man{1,5,8}')
+        r.MakeDirs('%(sbindir)s', '%(localstatedir)s/{log,spool}')
+        r.MakeDirs('%(sysconfdir)s/smrsh')
+        r.MakeDirs('%(localstatedir)s/spool/mqueue', mode=0700)
+        r.MakeDirs('%(localstatedir)s/spool/clientmqueue', mode=0770)
+
+        extraConfig = (' MANROOT=%(mandir)s/man '
+                       ' SBINOWN=$(id -nu) SBINGRP=$(id -ng)'
+                       ' UBINOWN=$(id -nu) UBINGRP=$(id -ng)'
+                       ' MANOWN=$(id -nu)  MANGRP=$(id -ng)'
+                       ' INCOWN=$(id -nu)  INCGRP=$(id -ng)'
+                       ' LIBOWN=$(id -nu)  LIBGRP=$(id -ng)'
+                       ' GBINOWN=$(id -nu) GBINGRP=$(id -ng)'
+                       ' CFOWN=$(id -nu)   CFGRP=$(id -ng)'
+                       ' MSPQOWN=$(id -nu)')
+
+        for target in ('libmilter', 'libsmutil', 'sendmail', 'mailstats',
+                       'praliases', 'smrsh', 'makemap'):
+            r.MakeInstall('-C %%(objdir)s/%s %s ' % (target,extraConfig))
+        for target in ('sendmail', 'mailstats', 'praliases', 'makemap',
+                       'smrsh'):
+            r.MakeInstall('-C %%(objdir)s/%s %s ' % (target,extraConfig),
+                          installtarget='install-docs')
+
+        r.MakeInstall('-C %(objdir)s/rmail' + extraConfig,
+                      installtarget='force-install')
+
+        r.Replace('@@PATH@@', '/%(sendmailcf)s', 'sendmail-rpath.mc')
+        r.Run("cp sendmail-rpath.mc cf/cf/rpath.mc")
+
+        r.Replace('/%(sendmailcf)s', '..', 'cf/cf/rpath.mc')
+        r.Run("cd cf/cf; m4 rpath.mc > rpath.cf")
+
+        r.Install('sendmail-rpath.mc', '%(maildir)s/sendmail.mc')
+        r.Install('cf/cf/rpath.cf', '%(maildir)s/sendmail.cf')
+        r.Install('local-host-names', '%(maildir)s/')
+        r.Install('trusted-users', '%(maildir)s/')
+        r.Install('cf/cf/submit.mc', '%(maildir)s/')
+        r.Install('cf/*', '%(sendmailcf)s/')
+        r.Install('access', '%(maildir)s/')
+        r.Install('sendmail.sysconfig',
+                  '%(sysconfdir)s/sysconfig/sendmail')
+        r.Install('sendmail.init', '%(initdir)s/sendmail',mode=0755)
+        r.Install('sendmail.etc-mail-Makefile', '%(maildir)s/Makefile')
+        r.Install('Sendmail-sasl2.conf', '%(libdir)s/sasl2/Sendmail.conf')
+        r.Install('%(objdir)s/libsmutil/libsmutil.a', '%(libdir)s')
+        r.Install('%(objdir)s/libsm/libsm.a', '%(libdir)s')
+        r.Move('/usr/lib/libmilter.a', '%(libdir)s')
+        # not %(libdir) -- no one looks for /usr/lib64/sendmail
+        r.Symlink('%(sbindir)s/sendmail', '%(prefix)s/lib/sendmail')
+        r.ComponentSpec('runtime', '%(prefix)s/lib/sendmail')
+        for file in ('hoststat', 'mailq', 'newaliases', 'purgestate'):
+            r.Symlink('%(sbindir)s/sendmail', '%%(bindir)s/%s'%file)
+
+        r.Symlink('%(sbindir)s/makemap', '%(bindir)s/makemap')
+
+        for map in ('virtusertable', 'domaintable', 'mailertable'):
+            r.Create('%(maildir)s/'+map, mode=0644)
+
+        # Handle documentation
+        r.Doc( 'doc', 'sendmail-8.12.5-newconfig.readme')
+
+        # aliases is placed in mailbase:doc
+        r.Move('%(mandir)s/man5/aliases.5',
+               '%(mandir)s/man5/aliases.sendmail.5')
+
+        r.Ownership('root','smmsp','%(sbindir)s/sendmail')
+        r.SetModes('%(sbindir)s/sendmail', 02755)
+        r.SetModes('%(bindir)s/rmail', 0755)
+
+        r.SetModes('%(sbindir)s/{mailstats,praliases}', 0755)
+        r.SetModes('%(maildir)s/helpfile', 0644)
+
+        r.SetModes('%(localstatedir)s/spool/clientmqueue', 0770)
+        r.SetModes('%(localstatedir)s/spool/mqueue', 0700)
+        r.Ownership('smmsp','smmsp','%(localstatedir)s/spool/clientmqueue')
+        r.Ownership('root','mail','%(localstatedir)s/spool/mqueue')
+        r.UtilizeUser('mailnull', '%(sbindir)s/sendmail')
+
+        r.PackageSpec('sendmail-cf','%(sendmailcf)s/.*')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/smrsh')
+
+        # the default sendmail configuration requires procmail
+        r.Requires('procmail:runtime', '%(sysconfdir)s/mail/sendmail.(mc|cf)')
+        r.Requires('mailbase:runtime', '%(sbindir)s/sendmail')
+        # need m4 to generate *.cf
+        r.Requires('m4:runtime', '%(sysconfdir)s/mail/Makefile')
