@@ -1,0 +1,66 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Ncurses(CPackageRecipe):
+    name = 'ncurses'
+    version = '5.6'
+
+    buildRequires = [ 'gcc-c++:runtime', ]
+
+    conf = '--with-shared --with-cxx --without-ada --with-ospeed=unsigned' \
+           ' --without-gpm --disable-termcap --with-rc-ids --enable-symlinks' \
+           ' --program-prefix="" --with-chtype=long --with-mmask-t=long' \
+           ' --enable-colorfgbg %s --with-install-prefix=%%(destdir)s'
+
+    def setup(r):
+        r.addArchive('mirror://gnu/ncurses/')
+
+        r.addSource('xterm-debian.ti')
+        r.addSource('ncurses-resetall.sh')
+
+        # upstream patches
+        allPatches = [ ('20070303', True),]
+        for x in allPatches:
+            if isinstance(x, tuple):
+                r.addSource('ftp://invisible-island.net/ncurses/%(version)s/ncurses-%(version)s-'+x[0]+'-patch.sh.bz2',
+                    apply='bzcat ncurses-%(version)s-'+x[0]+'-patch.sh.bz2 > runme; bash runme')
+            else:
+                r.addPatch('ftp://invisible-island.net/ncurses/%(version)s/ncurses-%(version)s-'+x+'.patch.gz')
+
+        r.macros.cflags = '%(cflags)s -DPURE_TERMINFO -DSVR4_CURSES'
+
+        r.Configure(r.conf %'', objDir='narrowc')
+        r.Make('sources', dir='narrowc')
+        r.Make(dir='narrowc')
+        r.Configure(r.conf %
+                        '--enable-widec --includedir="%(includedir)s/ncursesw"',
+                    objDir='widec')
+        r.Make('sources', dir='widec')
+        r.Make(dir='widec')
+        # install unicode version first so that the non-unicode
+        # files overwrite the unicode versions
+        r.MakeInstall('includedir="%(includedir)s/ncursesw"', dir='widec')
+        r.MakeInstall('includedir="%(includedir)s/ncurses"', dir='narrowc')
+        r.Symlink('%(datadir)s/terminfo', '%(libdir)s/terminfo')
+        # Gentoo bug #18486
+        r.Run('LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:%(destdir)s/%(libdir)s:' \
+              '%(destdir)s/%(lib)s TERMINFO=%(destdir)s/%(datadir)s/terminfo ' \
+              '%(destdir)s/%(bindir)s/tic xterm-debian.ti')
+        r.Symlink('%(datadir)s/terminfo/l/linux',
+                  '%(datadir)s/terminfo/c/console')
+        # remove unnecessary recursive symlink
+        r.Remove('%(datadir)s/terminfo/terminfo')
+        r.Symlink('libncurses.a', '%(libdir)s/libcurses.a')
+        r.Symlink('libncursesw.a', '%(libdir)s/libcursesw.a')
+        r.Symlink('ncurses/curses.h', '%(includedir)s/ncurses.h')
+        r.Symlink('ncurses/{curses,unctrl,eti,form,menu,panel,term}.h',
+                  '%(includedir)s/')
+        r.Install('ncurses-resetall.sh', '%(bindir)s/resetall', mode=0755)
+        r.Remove('%(datadir)s/man/man2/{key_defined,panel}.3x.200*')
+        r.ComponentSpec('devel', '%(bindir)s/(tic|tack|toe|.*info.*)')
+        # RPL-1289: limited terminfo in core system
+        r.ComponentSpec('data', '%(datadir)s/.*/(xterm|vt100|linux|console|std)')
+        r.ComponentSpec('supterminfo', '%(datadir)s/(terminfo|tabset)/')
