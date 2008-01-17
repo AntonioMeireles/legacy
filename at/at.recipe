@@ -1,0 +1,61 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class At(CPackageRecipe):
+    name = 'at'
+    version = '3.1.10'
+    buildRequires = [ 'flex:runtime', 'bison:runtime', 'autoconf:runtime',
+                      'util-linux:runtime', 'pam:devel' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('http://ftp.debian.org/debian/pool/main/a/at/%(name)s_%(version)s.tar.gz')
+        r.addSource('atd.init')
+        r.addSource('test.pl')
+
+        r.addPatch('at-3.1.7-lockfile.patch')
+        r.addPatch('at-3.1.8-man-timespec-path.patch')
+        r.addPatch('at-3.1.7-sigchld.patch')
+        r.addPatch('at-3.1.7-typo.patch')
+        r.addPatch('at-3.1.8-test.patch')
+        r.addPatch('at-3.1.8-env-tng.patch')
+        r.addPatch('at-3.1.8-perr.patch')
+        r.addPatch('at-3.1.8-atrun.8-typo-97697.patch')
+        r.addPatch('at-3.1.8-make-deps.patch')
+
+        r.Replace('-g root', '', 'Makefile.in')
+        r.Replace('-o root', '', 'Makefile.in')
+        r.Run('rm -f lex.yy.* y.tab.*') # at-3.1.8-11-lexer-parser.diff
+        r.Configure('--with-atspool=%(localstatedir)s/spool/at/spool'
+                    ' --with-jobdir=%(localstatedir)s/spool/at',
+                    preConfigure='SENDMAIL=/usr/sbin/sendmail')
+        r.Make()
+
+        # the use of id is to avoid trouble from chown -- we touch
+        # this up later with r.Ownership as appropriate
+        r.MakeInstall('DAEMON_USERNAME=$(id -nu) DAEMON_GROUPNAME=$(id -ng)'
+                      ' etcdir=%(sysconfdir)s'
+                      ' ATJOB_DIR=%(localstatedir)s/spool/at'
+                      ' ATSPOOL_DIR=%(localstatedir)s/spool/at/spool'
+                      ' docdir=%(docdir)s'
+                      ' atdocdir=%(thisdocdir)s',
+                      rootVar='IROOT')
+
+        r.Install('atd.init', '%(initdir)s/atd', mode=0755)
+        r.Create('%(sysconfdir)s/at.deny', mode=0600)
+        r.Create('%(localstatedir)s/spool/at/.SEQ', mode=0600)
+
+        r.Move('%(mandir)s/man5/at_allow.5', '%(mandir)s/man5/at.allow.5')
+        r.Remove('%(mandir)s/man5/at_deny.5')
+        r.Symlink('at.allow.5', '%(mandir)s/man5/at.deny.5')
+        r.SetModes('%(localstatedir)s/spool/at',
+                   '%(localstatedir)s/spool/at/spool', 0700)
+        r.Ownership('daemon', 'daemon', '%(localstatedir)s/spool/at',
+                    '%(localstatedir)s/spool/at/spool',
+                    '%(localstatedir)s/spool/at/.SEQ')
+        r.SetModes('%(bindir)s/at', 04755)
+        r.TagSpec('initscript', '%(initdir)s/')
+
