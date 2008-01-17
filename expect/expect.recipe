@@ -1,0 +1,36 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Expect(RPMPackageRecipe, CPackageRecipe):
+#class Expect(CPackageRecipe):
+    name = 'expect'
+    version = '5.43.0'
+
+    buildRequires = [ 'tcl:devel', 'tk:devel',
+        'mktemp:runtime', 'autoconf:runtime',
+        'libX11:devel', ]
+
+    rpmRelease = '5.1'
+    rpmPatches = [ 'expect-5.38.0-lib-spec.patch', 'expect-5.43.0-cfg-setpgrp.patch' ]
+    externalArchive = 'http://expect.nist.gov/src/%(name)s-%(version)s.tar.gz'
+
+    def setup(r):
+        r.macros.majorver = '5.43'
+        r.unpack()
+        r.addPatch('config.sub-x86_64-support.patch')
+        r.Run('autoconf -f ; cd testsuite ; autoconf -f -I.. ')
+        r.Configure('--with-tcl=%(libdir)s --with-tk=%(libdir)s'
+                    ' --with-tclinclude=%(includedir)s/tcl-private'
+                    ' --enable-shared --enable-gcc --enable-symbols')
+        r.Make()
+        r.MakeInstall(rootVar='INSTALL_ROOT')
+        #r.Symlink('libexpect%(majorver)s.so', '%(libdir)s/libexpect.so')
+        r.Remove('%(bindir)s/{de,}cryptdir}')
+        r.Remove('%(mandir)s/man1/{de,}cryptdir}.1*')
+        r.PackageSpec('expectk',
+                '%(bindir)s/(expectk|multixterm|tknewsbiff|tkpasswd|xpstat)',
+                '%(mandir)s/man1/(expectk.1.*|multixterm.1.*|tknewsbiff.1.*)')
