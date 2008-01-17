@@ -1,0 +1,60 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Bzip2(CPackageRecipe):
+    name = 'bzip2'
+    version = '1.0.4'
+
+    def setup(r):
+        r.addArchive('http://www.bzip.org/%(version)s/')
+        r.addPatch('bzip2-1.0.4-saneso.patch', rpm='http://download.fedora.redhat.com/pub/fedora/linux/core/development/source/SRPMS/bzip2-1.0.4-1.fc7.src.rpm')
+
+        r.compile()
+        r.install()
+
+    def compile(r):
+        if Use.bootstrap:
+            # don't run 'make test' since we most likely can't execute the
+            # new bzip2 binaries
+            r.addAction('sed -i "s/bzip2recover test/bzip2recover/g" Makefile*')
+            crosstools = 'CC=%(target)s-gcc AR=%(target)s-ar RANLIB=%(target)s-ranlib '
+        else:
+            crosstools = ''
+
+        r.Make(crosstools + '-f Makefile-libbz2_so '
+                  'CFLAGS="%(cflags)s -D_FILE_OFFSET_BITS=64 -fpic -fPIC" '
+                  'all'),
+        r.Make(crosstools + 'CFLAGS="%(cflags)s -D_FILE_OFFSET_BITS=64" all')
+
+    def install(r):
+        r.Install('bzip2-shared', '/%(bindir)s/bzip2', mode=0755)
+        r.Install('bzlib.h', '/%(includedir)s/', mode=0755)
+        r.Install('libbz2.so.%s' %r.version, '/%(libdir)s/',
+                          mode=0755)
+        r.Install('libbz2.a', '/%(libdir)s/', mode=0755)
+        r.Install('bzip2-shared', '/%(bindir)s/bzip2', mode=0755)
+        r.Install('bzip2recover', 'bzgrep', 'bzdiff',
+                           'bzmore', '/%(bindir)s/', mode=0755)
+        r.Install('bzip2.1', 'bzdiff.1', 'bzgrep.1',
+                           'bzmore.1', '/%(mandir)s/man1/', mode=0644)
+
+        r.Symlink('bzip2', '/%(bindir)s/bunzip2')
+        r.Symlink('bzip2', '/%(bindir)s/bzcat')
+        r.Symlink('bzdiff', '/%(bindir)s/bzcmp')
+        r.Symlink('bzmore', '/%(bindir)s/bzless')
+        r.Symlink('libbz2.so.%s' %r.version,
+                             '/%(libdir)s/libbz2.so.1')
+        r.Symlink('libbz2.so.1', '/%(libdir)s/libbz2.so')
+        r.Symlink('bzip2.1', '/%(mandir)s/man1/bzip2recover.1')
+        r.Symlink('bzip2.1', '/%(mandir)s/man1/bunzip2.1')
+        r.Symlink('bzip2.1', '/%(mandir)s/man1/bzcat.1')
+        r.Symlink('bzdiff.1', '/%(mandir)s/man1/bzcmp.1')
+        r.Symlink('bzmore.1', '/%(mandir)s/man1/bzless.1')
+        r.Doc('manual_*', 'manual.html', dir='html')
+        r.Doc('manual.{pdf,ps}')
+
+        # RPL-1178 - not needed for appliances
+        r.PackageSpec('bzip2-extras', '.*bz(less|more).*')
