@@ -1,0 +1,97 @@
+#!/bin/sh
+#
+# chkconfig: 345 13 89
+# description: Starts and stops the iSCSI initiator
+#
+# processname: iscsid
+# pidfile: /var/run/iscsid.pid
+# config:  /etc/iscsi/iscsid.conf
+
+# Source function library.
+. /etc/init.d/functions
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+RETVAL=0
+
+init_initiatorname()
+{
+	if [ ! -f /etc/iscsi/initiatorname.iscsi ]; then
+		if [ -f /etc/iscsi/initiatorname.prefix ]; then
+			initiatorprefix="-p $(cat /etc/iscsi/initiatorname.prefix)"
+		else
+			initiatorprefix=""
+		fi
+		echo "InitiatorName=$(/sbin/iscsi-iname $initiatorprefix)" > /etc/iscsi/initiatorname.iscsi
+	fi
+}
+
+start()
+{
+	# Initialize InitiatorName if necessary
+	init_initiatorname
+	echo -n $"Starting iSCSI initiator service: "
+	modprobe -q iscsi_tcp
+	modprobe -q ib_iser
+	daemon iscsid
+	RETVAL=$?
+	success
+	echo
+	[ $RETVAL -eq 0 ] || return
+
+	touch /var/lock/subsys/open-iscsi
+
+	echo -n $"Setting up iSCSI targets: "
+	iscsiadm -m node --loginall=automatic
+	success
+	echo
+
+}
+
+stop()
+{
+	echo -n $"Stopping iSCSI initiator service: "
+	sync
+	iscsiadm -m node --logoutall=all
+	pkill -KILL iscsid
+	rm -f /var/run/iscsid.pid
+	#killproc iscsid
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/open-iscsi
+	modprobe -r iscsi_tcp 2>/dev/null
+	modprobe -r ib_iser 2>/dev/null
+	success
+	echo
+
+}
+
+restart()
+{
+	stop
+	start
+
+}
+
+case "$1" in
+	start)
+			start
+			;;
+	stop)
+			stop
+			;;
+	restart)
+			stop
+			start
+			;;
+	status)
+			status iscsid
+			RETVAL=$?
+			;;
+	condrestart)
+			[ -f /var/lock/subsys/iscsi ] && restart
+			;;
+	*)
+			echo $"Usage: $0 {start|stop|restart|status|condrestart}"
+			exit 1
+esac
+
+exit $RETVAL
