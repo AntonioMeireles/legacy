@@ -1,0 +1,102 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Cdrtools(RPMPackageRecipe, CPackageRecipe):
+    name = 'cdrtools'
+    version = '2.01.01.0.a10'
+    buildRequires = [ 'perl:runtime' ]
+
+    if Use.builddocs:
+        buildRequires.append('groff:runtime')
+
+    rpmRelease = '1.1'
+    rpmPatches = [ 'mkisofs-iconv-14.patch',
+        'cdrtools-2.01a27-manpatch.patch',
+        'cdrtools-2.01a27-type.patch', 'cdrtools-2.01a27-silly-warnings.patch',
+        'cdrtools-2.01a27-UTF8.patch', 'cdrtools-2.01a32-scan.patch',
+        'cdrtools-2.01.01-O_EXCL.patch', 'mkisofs-padsize-123548.patch',
+        'cdrtools-2.01-dbg.patch', 'cdrtools-2.01.01a03-nozero.patch',
+        'cdrtools-2.01.1-gcc4.patch']
+    # on the odd chance this will stay consistant...
+    tarballName = '%(name)s-' + '.'.join(version.split('.')[0:3]) + version.split('.')[-1] + '.tar.bz2'
+
+
+    def setup(r):
+        r.unpack()
+        r.addSource('cdrecord.conf', rpm=r.srpm)
+
+        # sometimes there have been broken permissions...
+        r.Run('find . | xargs chmod a+r')
+
+        r.Run("fgrep -rl '/etc/default/cdrecord' . | "
+              "xargs sed -i -e 's#/etc/default/cdrecord#%(sysconfdir)s/cdrecord.conf#g'")
+        r.Run(r'find . -name \*.mk | '
+              r"xargs sed -i -e 's#INSDIR=\s*lib\s*$#INSDIR=%(lib)s\n#g'")
+
+        r.Run('''
+            for i in $(find . -name *.1); do
+                iconv -f iso-8859-1 $i -t utf-8 -o $i.new && mv -f $i.new $i
+            done''')
+        for compiler in ['cc','gcc']:
+            for arch in ['athlon', 's390x', 'ppc64', 'x86_64']:
+                r.Symlink('i686-linux-'+compiler+'.rul', 'RULES/'+arch+'-linux-'+compiler+'.rul')
+
+        r.Make()
+        r.Make('"MANDIR=share/man/" "INS_BASE=%(destdir)s/%(prefix)s"'
+               ' install')
+
+        # do not package this symlink, it is build-time-only
+        r.Run('rm -f include/scg')
+
+        r.Install('include/*', '%(includedir)s/schily/scg/')
+        r.Install('incs/*/xconfig.h', '%(includedir)s/schily/')
+        r.Install('libscg/scg/*', '%(includedir)s/schily/scg/')
+
+        if Use.builddocs:
+            r.Run('groff -Tps -man doc/cdrecord.man > doc/cdrecord.ps')
+
+        r.Install('cdrecord.conf', '%(sysconfdir)s/cdrecord.conf')
+
+        # remove Schily-specific bits
+        r.Remove('%(mandir)s/man1/scgcheck*',
+                 '%(mandir)s/man5/makefiles*',
+                 '%(mandir)s/man5/makerules*')
+
+        # scgcheck is a development-only tool
+        # no need for development libraries
+        # rscsi is remote scsi tool, not supported/used currently
+        # cdda2ogg manpage exists but binary doesn't?
+        r.Remove('%(bindir)s/scgcheck',
+                 '%(includedir)s/align.h',
+                 '%(libdir)s/libfile.a',
+                 '%(libdir)s/libhfs.a',
+                 '%(libdir)s/librscg.a',
+                 '%(libdir)s/libunls.a',
+                 '%(sbindir)s/rscsi',
+                 '%(mandir)s/man1/cdda2ogg*')
+
+        r.PackageSpec('cdda2wav',
+            '%(bindir)s/cdda2wav',
+            r'%(mandir)s/man1/cdda2wav\.1.*')
+
+        r.PackageSpec('mkisofs',
+            '%(bindir)s/mkisofs',
+            '%(bindir)s/mkhybrid',
+            '%(bindir)s/isoinfo',
+            '%(bindir)s/isodump',
+            '%(bindir)s/isovfy',
+            '%(bindir)s/isodebug',
+            r'%(mandir)s/man8/isoinfo\.8.*',
+            r'%(mandir)s/man8/mkisofs\.8.*',
+            r'%(mandir)s/man8/mkhybrid\.8.*')
+
+        r.Doc('cdda2wav/FAQ', 'cdda2wav/OtherProgs',
+              'cdda2wav/README*', 'cdda2wav/Frontends', 'cdda2wav/HOWTOUSE',
+              component='cdda2wav:')
+        r.Doc('mkisofs/COPYING', 'mkisofs/ChangeLog',
+              component='mkisofs:')
+        r.AutoDoc('AN-%(version)s', 'doc/cdrecord.ps', 'cdrecord/cdrecord.dfl')
