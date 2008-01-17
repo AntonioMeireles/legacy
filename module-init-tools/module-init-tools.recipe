@@ -1,0 +1,50 @@
+#
+# Copyright (c) 2005-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Modutils(CPackageRecipe):
+    name = 'module-init-tools'
+    version = '3.2.2'
+    buildRequires = [ 'flex:runtime', 'bison:runtime', 'zlib:devel',
+                      'docbook-utils:runtime',
+                      'automake:runtime', 'autoconf:runtime',
+                      # XXX the following are runtime requirements for
+                      # docbook-utils promoted to build time requirements
+                      # fix ASAP
+                      'which:runtime', 'perl-SGMLS:runtime' ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('http://ftp.kernel.org/pub/linux/utils/kernel/module-init-tools/', keyid='517D0F0E')
+        r.addSource('modprobe.conf.dist')
+        r.addSource('boot_image_release.c')
+        # Kudzu and anaconda expect modules.alias to match the actual module filename
+        r.addPatch('module-init-tools-noescape.patch')
+        r.addPatch('module-init-tools-3.2.2-boot_image_release.patch')
+        r.macros.cflags = '-Os -DCONFIG_NO_BACKWARDS_COMPAT=1'
+        r.Automake()
+        r.Configure('--enable-zlib')
+        r.Make('insmod.static')
+        r.Run('cp insmod.static insmod-static')
+
+        r.Make('distclean')
+        r.Configure('--enable-zlib')
+        r.MakeInstall('sbindir=%(essentialsbindir)s mandir=%(mandir)s')
+
+        r.Install('insmod-static', '%(essentialsbindir)s/insmod.static', mode=0755)
+        r.Install('modprobe.conf.dist', '%(sysconfdir)s/modprobe.conf.dist', mode=0644)
+        r.Move('/usr/bin/lsmod', '%(essentialsbindir)s/lsmod')
+
+        for req in ('/dev/null',
+                    '%(essentialbindir)s/mktemp',
+                    '%(essentialbindir)s/rm',
+                    '%(essentialbindir)s/cp',
+                    '%(essentialbindir)s/cat',
+                    '%(essentialbindir)s/grep',
+                    '%(essentialbindir)s/awk',
+                    '%(essentialbindir)s/sed',
+                    '%(essentialbindir)s/true',
+                    '%(bindir)s/tr',):
+            r.Requires(req, '%(essentialsbindir)s/generate-modprobe.conf')
