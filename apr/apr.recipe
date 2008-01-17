@@ -1,0 +1,62 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Apr(CPackageRecipe):
+    name = 'apr'
+    version = '1.2.12'
+
+    buildRequires = [ 'autoconf:runtime', 'libtool:runtime', 'e2fsprogs:devel' ]
+
+    def setup(r):
+        r.macros.aprver = r.macros.version.split('.')[0]
+
+        # FIXME: Enable key once conary 2.0.4 is released
+        r.addArchive('http://www.apache.org/dist/apr/') #, keyid='10FDE075')
+
+        r.Configure('-C '
+                    '--includedir=%(includedir)s/apr-%(aprver)s '
+                    '--with-installbuilddir=%(libdir)s/apr/build '
+                    '--with-devrandom=/dev/urandom ')
+
+        r.Make()
+        r.MakeInstall()
+
+        if Arch.x86_64:
+            excludes = 'testlock'
+
+        # These are referenced by apr_rules.mk
+        for f in ('make_exports.awk', 'make_var_export.awk'):
+            r.Install('build/' + f, '%(libdir)s/apr/build/' + f)
+
+        r.Install('build/mkdir.sh', '%(libdir)s/apr/build/mkdir.sh', mode=0755)
+
+        # Sanitize apr_rules.mk
+        r.Replace(('^apr_build',''),
+                  ('\$\(apr_builders\)', '%(libdir)s/apr/build'),
+                  ('\$\(apr_builddir\)', '%(libdir)s/apr/build'),
+                  'build/apr_rules.mk')
+
+        # apr-config assumes that we are keeping the build source in the
+        # same place
+        r.Replace(('^APR_BUILD_DIR=.*','APR_BUILD_DIR=%(libdir)s/apr/build'),
+                  ('^APR_SOURCE_DIR=.*','APR_SOURCE_DIR=%(libdir)s/apr'),
+                  '%(bindir)s/apr-*config')
+
+        r.Install('build/apr_rules.mk',
+                  '%(libdir)s/apr/build/apr_rules.mk')
+
+        # Unpackaged files:
+        r.Remove('%(libdir)s/apr.exp')
+        r.Doc('docs/APRDesign.html', 'docs/canonical_filenames.html',
+              'docs/incomplete_types', 'docs/non_apr_programs')
+
+        # include libtool .la files, they are used by programs that
+        # link with `apr-config --link-libtool`
+        r.RemoveNonPackageFiles(exceptions=r'\.la$')
+
+        r.TestSuiteFiles(r'.*/\.lib/.*\.so.*')
+        r.TestSuite('/test/', 'make testall; ./testall -v',
+                    autoBuildMakeDependencies=False)
