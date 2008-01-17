@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class BusyBox(CPackageRecipe):
+    name = 'busybox'
+    version = '1.9.0'
+
+    def enable(r, feature):
+        r.Replace('.*CONFIG_%s is not.*' % feature, 'CONFIG_%s=y' % feature, '.config')
+
+    def disable(r, feature):
+        r.Replace('.*CONFIG_%s=y.*' % feature, '# CONFIG_%s is not set/' % feature, '.config')
+
+    def setup(r):
+        r.addArchive('http://busybox.net/downloads/')
+
+        # upstream patches
+        programToPatch = [ ]
+        for prog in programToPatch:
+            r.addPatch('http://busybox.net/downloads/fixes-%s/busybox-%s-%s.patch' % (r.version, r.version, prog) )
+
+        # busybox claims linking statically against glibc produces a buggy
+        # output, but it works fine for our purposes
+        r.Replace('#error.*', '', 'applets/applets.c')
+        r.Replace('-Werror', '', 'Makefile.flags')
+
+        r.Make('defconfig')
+        r.enable('FEATURE_SH_IS_MSH')
+        r.enable('STATIC')
+        r.Make('oldconfig < /dev/null')
+
+        r.Make()
+        r.Install('busybox', '%(essentialsbindir)s/busybox')
+
+        # FIXME: is this still necessary? the configs are the same...
+        # build the busybox for anaconda
+        r.Install('busybox', '/sbin/busybox-anaconda', mode=0755)
+
+        r.ComponentSpec('anaconda', '/sbin/busybox-anaconda')
