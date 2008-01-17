@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Radvd(AutoPackageRecipe):
+    name = 'radvd'
+    version = '1.0'
+
+    buildRequires = [ 'flex:runtime', 'flex:devel', 'byacc:runtime' ]
+
+    def unpack(r):
+        r.addArchive('http://www.litech.org/%(name)s/dist/')
+
+    def configure(r):
+        r.macros.cflags += ' -D_GNU_SOURCE'
+        r.disableParallelMake()
+        r.Configure('--with-pidfile=%(localstatedir)s/run/%(name)s/%(name)s.pid')
+
+    def policy(r):
+        r.Install('redhat/radvd.conf.empty', '%(sysconfdir)s/radvd.conf')
+        r.Install('redhat/radvd.init', '%(initdir)s/radvd', mode=0755)
+        r.Install('redhat/radvd.sysconfig', '%(sysconfdir)s/sysconfig/radvd')
+
+        r.UtilizeUser('radvd', '%(sbindir)s/radvd')
+        r.MakeDirs('%(localstatedir)s/run/radvd/')
+        r.Ownership('radvd', 'root', '%(localstatedir)s/run/radvd.*')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/radvd')
+
+        r.AutoDoc('INTRO.html')
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/*')
+
+        # Tag init scripts in case the initscript tag desc. is not installed
+        r.TagSpec('initscript', '%(initdir)s/')
