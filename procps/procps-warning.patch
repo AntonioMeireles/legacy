@@ -1,0 +1,126 @@
+--- sysctl.c.orig	2007-10-01 16:10:51.000000000 +0300
++++ sysctl.c	2007-10-17 19:28:28.000000000 +0300
+@@ -116,18 +116,39 @@ static char *StripLeadingAndTrailingSpac
+    return t;
+ }
+ 
++char na[] = { 'N', '/', 'A', '\n', 0 };
++void PrintEntry(char *outname, char *inbuf);
++
++void PrintEntry(char *outname, char *inbuf) {
++  if (NameOnly) {
++     fprintf(stdout, "%s\n", outname);
++  } else {
++     /* already has the \n in it */
++     if (PrintName) {
++        fprintf(stdout, "%s = %s", outname, inbuf);
++     } else {
++        if (!PrintNewline) {
++          char *nlptr = strchr(inbuf,'\n');
++          if(nlptr) *nlptr='\0';
++        }
++        fprintf(stdout, "%s", inbuf);
++     }
++  }
++}
++
+ static int DisplayAll(const char *restrict const path);
+ 
+ /*
+  *     Read a sysctl setting 
+  *
+  */
+-static int ReadSetting(const char *restrict const name) {
++static int ReadSetting(const char *restrict const name, bool DisplayErrorRead) {
+    int rc = 0;
+    char *restrict tmpname;
+    char *restrict outname;
+    char inbuf[1025];
+    FILE *restrict fp;
++   struct stat stat_key;
+ 
+    if (!name || !*name) {
+       fprintf(stderr, ERR_INVALID_KEY, name);
+@@ -155,7 +176,15 @@ static int ReadSetting(const char *restr
+          }
+          break;
+       case EACCES:
+-         fprintf(stderr, ERR_PERMISSION_DENIED, outname);
++	 /* Don't display an error if it's simply because the file is not
++	  * readable and we are listing all the keys */
++	 if (DisplayErrorRead || 
++	     (stat(tmpname, &stat_key) || (stat_key.st_mode & S_IRUSR))) {
++	    fprintf(stderr, ERR_PERMISSION_DENIED, outname);
++         }
++         else {
++            PrintEntry(outname, na);
++         }
+          rc = -1;
+          break;
+       default:
+@@ -168,25 +197,18 @@ static int ReadSetting(const char *restr
+          // this loop is required, see
+          // /sbin/sysctl -a | egrep -6 dev.cdrom.info
+          do {
+-            if (NameOnly) {
+-               fprintf(stdout, "%s\n", outname);
+-            } else {
+-               /* already has the \n in it */
+-               if (PrintName) {
+-                  fprintf(stdout, "%s = %s", outname, inbuf);
+-               } else {
+-                  if (!PrintNewline) {
+-                    char *nlptr = strchr(inbuf,'\n');
+-                    if(nlptr) *nlptr='\0';
+-                  }
+-                  fprintf(stdout, "%s", inbuf);
+-               }
+-            }
++            PrintEntry(outname, inbuf);
+          } while(fgets(inbuf, sizeof inbuf - 1, fp));
+       } else {
+          switch(errno) {
+          case EACCES:
+-            fprintf(stderr, ERR_PERMISSION_DENIED, outname);
++	    if (DisplayErrorRead || 
++		(stat(tmpname, &stat_key) || (stat_key.st_mode & S_IRUSR))) {
++	       fprintf(stderr, ERR_PERMISSION_DENIED, outname);
++            }
++            else {
++               PrintEntry(outname, na);
++            }
+             rc = -1;
+             break;
+          case EISDIR:{
+@@ -198,7 +220,12 @@ static int ReadSetting(const char *restr
+             break;
+          }
+          default:
+-            fprintf(stderr, ERR_UNKNOWN_READING, strerror(errno), outname);
++	    if (DisplayErrorRead) {
++               fprintf(stderr, ERR_UNKNOWN_READING, strerror(errno), outname);
++            }
++            else {
++               PrintEntry(outname, na);
++            }
+             rc = -1;
+             break;
+          }
+@@ -244,7 +271,7 @@ static int DisplayAll(const char *restri
+                strcat(tmpdir, "/");
+                DisplayAll(tmpdir);
+             } else {
+-               rc |= ReadSetting(tmpdir+strlen(PROC_PATH));
++               rc |= ReadSetting(tmpdir+strlen(PROC_PATH), false);
+             }
+          }
+          free(tmpdir);
+@@ -506,7 +533,7 @@ int main(int argc, char *argv[]) {
+          if (WriteMode || index(*argv, '='))
+             ReturnCode = WriteSetting(*argv);
+          else
+-            ReturnCode = ReadSetting(*argv);
++            ReturnCode = ReadSetting(*argv, true);
+       }
+    }
+ 
