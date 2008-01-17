@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Splashy(AutoPackageRecipe):
+    name = 'splashy'
+    version = '0.3.5'
+
+    buildRequires = [ 'DirectFB:devel', 'file:devel', 'glib:devel',
+        'pkgconfig:devel', 'zlib:devel', 'sysfsutils:devellib',
+        'freetype:devel', 'libpng:devel', ]
+
+    def unpack(r):
+        r.macros.ldflags += (' %(libdir)s/libsysfs.a'
+                             ' %(libdir)s/libdirectfb.a'
+                             ' %(libdir)s/libdirect.a'
+                             ' %(libdir)s/libfusion.a')
+
+        r.addArchive('http://alioth.debian.org/frs/download.php/2071/'
+                     '%(name)s_%(version)s.tar.gz')
+        r.addSource('splashy-theme.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/splashy-theme')
+        r.addSource('splashy-theme.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/splashy-theme', mode=0755)
+        r.addSource('splashy-bootloader.conf',
+                    dest='%(sysconfdir)s/bootloader.d/')
+        #r.addPatch('dfb-no-vt-switch.patch')
+        r.Replace('\/usr\/lib', '%(libdir)s', 'src/libglib-2.0.la')
+        # RPL-1776:
+        # - only check tty1 in F2 loop
+        # - create /dev/vcs1 if it doesn't exist (if removed by switchroot)
+        # - sleep after scanning screen to consume less CPU
+        # rewrite verbose_text_loop() (RPL-1844)
+        r.addPatch('text_loop.patch', level=0)
+        # RPL-1840, RPL-1804
+        r.Replace(('@EXPANDED_SYSCONFDIR@\/splashy\/themes\/default',
+                   '%(datadir)s/splashy/themes/rpath'),
+                  ('@EXPANDED_SYSCONFDIR@\/splashy\/themes',
+                   '%(datadir)s/splashy/themes'),
+                  ('<current_theme>default</current_theme>',
+                   '<current_theme>rpath</current_theme>'),
+                  'doc/config.xml.in')
+        r.Replace(('@EXPANDED_SYSCONFDIR@\/splashy\/themes\/default',
+                  '%(datadir)s/splashy/themes/rpath'),
+                  'src/xml_format.h.in');
+
+    def policy(r):
+        # Package theme separately, in /usr/share/splashy/themes
+        r.Remove('%(sysconfdir)s/splashy/themes', recursive=True)
+        r.MakeDirs('%(datadir)s/%(name)s/themes')
+        r.Remove('%(initdir)s/splashy')
+        r.Requires('%(name)s-theme:data', '%(sbindir)s/splashy')
