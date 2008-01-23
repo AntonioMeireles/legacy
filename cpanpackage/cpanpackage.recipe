@@ -1,0 +1,107 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class CPANPackageRecipe(BuildPackageRecipe):
+
+    buildRequires = [ 'perl:runtime', 'perl:lib' ]
+
+    name = 'cpanpackage'
+    module = None # module under which package is classified -- find at CPAN
+    author = None # id of author of module (e.g. SBECK) - sometimes easier
+                  # to use
+    version = '0'
+    docs = None
+    server = 'mirror://cpan/'
+
+
+    pversion = '' # set this only if actually specific to some perl version
+    upstreamname = None
+    maindirname = None
+    installtarget = 'install'
+    extraConfig = ''
+    installConfig = ''
+    preConfigure = ''
+
+    def __init__(r, *args, **kw):
+        PackageRecipe.__init__(r, *args, **kw)
+
+        if r.__class__.__name__ == 'CPANPackageRecipe':
+            return
+
+        # name - "perl-"
+        if r.name.startswith('perl-'):
+            r.pname = r.name[5:]
+        else:
+            r.pname = r.name
+
+        # copy configuration, with appropriate overrides, into macros
+        if r.upstreamname is None:
+            r.upstreamname = r.pname
+        if r.maindirname is not None:
+            r.mainDir(r.maindirname)
+        else:
+            r.mainDir(r.upstreamname + '-' + r.version)
+
+        # if author is specified that takes precedence as a way
+        # to find package
+        if r.author:
+            r.serverdir = 'authors/id/%s/%s/%s/' % (r.author[0], r.author[0:2], r.author)
+        else:
+            if r.module is None:
+                r.module = r.pname.split('-')[0]
+            r.serverdir = 'modules/by-module/%s/' % r.module
+
+        r.macros.upstreamname = r.upstreamname
+        r.macros.installtarget = r.installtarget
+        r.macros.extraConfig = r.extraConfig
+        r.macros.installConfig = r.installConfig
+        r.macros.preConfigure = r.preConfigure
+        r.macros.pname = r.pname
+        r.macros.server = r.server
+        r.macros.serverdir = r.serverdir
+
+        r.macros.pversion = r.pversion
+        r.macros.perldir = '%(libdir)s/perl5/vendor_perl/%(pversion)s'
+
+
+    def unpack(r):
+        r.addArchive('%(server)s%(serverdir)s%(upstreamname)s-%(version)s.tar.gz')
+
+
+    def build(r):
+        r.Run('%(preConfigure)s CFLAGS="%(cflags)s" perl Makefile.PL'
+              ' %(extraConfig)s OPTIMIZE="%(cflags)s"'
+              ' PREFIX=%(prefix)s INSTALLDIRS=vendor'
+              ' < /dev/null')
+        # support perl 5.8.0 MakeMaker
+        r.Run(r"sed -i 's,^\(INSTALL.* = \)/usr,\1$(DESTDIR)/usr,g' Makefile")
+        r.Make()
+
+    def install(r):
+        r.MakeDirs('%(perldir)s', '%(bindir)s')
+
+        r.MakeInstall('BINDIR=%(destdir)s%(bindir)s'
+                      ' PERL5DIR=%(destdir)s%(perldir)s %(installConfig)s',
+                      installtarget='%(installtarget)s')
+
+    def installDocs(r):
+        if r.docs is not None:
+            r.Doc(*r.docs)
+
+
+    def post(r):
+        pass
+
+
+    def setup(r):
+        if r.__class__.__name__ == 'CPANPackageRecipe':
+            return
+        r.disableParallelMake()
+        r.unpack()
+        r.build()
+        r.install()
+        r.installDocs()
+        r.post()
