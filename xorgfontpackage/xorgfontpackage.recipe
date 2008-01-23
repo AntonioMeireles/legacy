@@ -1,0 +1,53 @@
+#
+# Copyright (c) 2005 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('xorgdatapackage.recipe')
+class XorgFontPackageRecipe(XorgDataPackageRecipe):
+    name = 'xorgfontpackage'
+    version = '1'
+
+    buildRequires = [ 'bdftopcf:runtime', 'font-util:devel',
+        'font-util:runtime', 'fontconfig:runtime', 'mkfontdir:runtime',
+        'mkfontscale:runtime', 'pkgconfig:devel', 'ttmkfdir' ]
+
+    def setup(r):
+        if r.__class__.__name__ == 'XorgFontPackageRecipe':
+            return
+
+        # XXX: the upstream tarballs should really use something like
+        # --with-top-fontdir, but until then we use this lovely pattern matching
+        r.macros.fonttype = r.name.split('-')[-1]
+
+        # Type 1 fonts are for both fontconfig & xfs so they go in
+        # %(datadir)s/fonts; other fonts are only for xfs so they go in
+        # %(datadir)s/X11/fonts
+        if r.macros.fonttype == 'type1':
+            r.macros.fontdir = '%(datadir)s/fonts/default/Type1'
+        elif r.macros.fonttype in ('100dpi', '75dpi', 'cyrillic', 'misc'):
+            r.macros.fontdir = '%(datadir)s/X11/fonts/%(fonttype)s'
+        elif r.macros.fonttype == 'ttf':
+            r.macros.fontdir = '%(datadir)s/X11/fonts/TTF'
+        elif r.macros.fonttype == 'meltho':
+            r.macros.fontdir = '%(datadir)s/X11/fonts/OTF'
+        elif r.macros.fonttype == 'speedo':
+            r.macros.fontdir = '%(datadir)s/X11/fonts/Speedo'
+        elif r.macros.fonttype == 'ethiopic':
+            r.macros.fontdir = '%(datadir)s/X11/fonts'
+            r.extraConfig = ' --with-otf-fontdir=%(datadir)s/X11/fonts/OTF'
+            r.extraConfig += ' --with-ttf-fontdir=%(datadir)s/X11/fonts/TTF'
+        else:
+            raise Exception('Don\'t know where to package unknown font '
+                'type \'%s\'; please update XorgFontPackageRecipe'
+                % r.macros.fonttype)
+        
+        if r.macros.fonttype != 'ethiopic':
+            r.extraConfig = ' --with-fontdir=%(fontdir)s'
+
+        XorgDataPackageRecipe.setup(r)
+
+        if r.macros.fonttype == 'type1':
+            r.TagSpec('cacheable-font', '%(fontdir)s')
+        r.TagSpec('x-font', '%(fontdir)s')
