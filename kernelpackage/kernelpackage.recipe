@@ -1,0 +1,618 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('gcc')
+
+class KernelPackageRecipe(CPackageRecipe):
+    buildRequires = [ 'perl:runtime', 'module-init-tools:runtime' ]
+
+    name = 'kernelpackage'
+    version = '0.0.0'
+    #serial = '1'
+    # If you are not trying to manage binary kernel module compatibility,
+    # then do not set a serial string, and the source count will be used
+    # instead.
+    #
+    # If you are trying to manage binary kernel module compatibility,
+    # you will need to set the serial string manually.
+    #
+    # Every change that is expected to change interfaces requires
+    # a change in serial string.  No two kernels of the same flavor
+    # and serial can be installed at once due to path conflicts.
+    # The serial string has no semantic content; a higher number
+    # is not necessarily "more recent" than a lower number.
+    # The same serial string may be re-used on different branches;
+    # it only differentiates kernels with the same %(version)s
+    # within a branch or set of related branches.
+    #
+    # Pure integer serial strings are reserved for rPath, Inc.
+    # Inheriting repositories should use some other rule (decimal
+    # numbers, letters, etc.) than all repositories above them in
+    # their inheritance tree; especially a different rule from their
+    # direct parent.  The example.com@linux repository might use
+    # serial = 'example.n'.  As long as the string is different
+    # for every kernel with the same %(version)s on all branches
+    # that might be installed on a single machine, it will work.
+    #
+    # This is needed because patches to the kernel, changes in
+    # compilation flags, and changes in configuration can all make
+    # changes to binary interfaces within the kernel.
+
+    Flags.debug = False
+    Flags.debug.setShortDoc('Enable kernel debugging options')
+    Flags.smp = True
+    Flags.smp.setShortDoc('Enable SMP support')
+    Flags.pae = False
+    Flags.pae.setShortDoc('Enable PAE support')
+    Flags.numa = False
+    Flags.numa.setShortDoc('Enable NUMA support')
+    Flags.debugdata = False
+    Flags.debugdata.setShortDoc('Enable saving debug data in :debuginfo')
+
+    # configs is a base list of configurations; subclasses will normally
+    # be able to just use this list; if not, they can extend it or replace
+    # it.
+    configs = [
+        # list of (basearch, flaglist, dictlist) tuples:
+        # basearch is Arch.basearch
+        # flaglist is read as Arch.basearch.<flag> for flag in flaglist
+        #  except that 'flags.<flag>' is read as Flags.<flag> to allow
+        #  for flavors based on additional local flavors and
+        #  'use.<flag>' is read as Use.<flag>;
+        #  where the most specific match "wins"
+        # dictlist is list of sets of keyword args to the
+        # addConfigs.do_one() function -- see the available keys and
+        # default values in the addConfigs.do_one() definition
+        # This list must be maintained in order from least specific
+        # to most specific.
+        ('x86', (), (
+            {},
+        )),
+        ('x86', ('i586',), (
+            {},
+            {'smp':True}
+        )),
+        ('x86', ('i686',), (
+            {},
+            {'smp':True},
+            {'smp':True, 'pae':True},
+        )),
+        ('x86', ('i686', 'use.xen', 'use.dom0'), (
+            {'smp':True},
+            {'smp':True, 'pae':True},
+        )),
+        ('x86', ('i686', 'use.xen', 'use.domU'), (
+            {'smp':True},
+            {'smp':True, 'pae':True},
+        )),
+        ('x86_64', (), (
+            {},
+            {'smp':True},
+        )),
+        ('x86_64', ('use.xen', 'use.dom0'), (
+            {'smp':True},
+        )),
+        ('x86_64', ('use.xen', 'use.domU'), (
+            {'smp':True},
+        )),
+    ]
+
+    def setup(r):
+        """
+        subclasses should only have to override unpack() and perhaps
+        policy(); everything else should normally work fine without
+        an override. However, if a user wants to use a totally different
+        .config, it may be necessary to override configure(). See
+        http://wiki.rpath.com/KernelDotOrgTemplate
+        """
+        # pure virtual
+        if r.__class__.__name__ == 'KernelPackageRecipe':
+            return
+        r.setMacros()
+        r.unpackBase()
+        r.setCompileInfo()
+        r.unpack() # patches go here
+        r.distCleanup()
+        r.createLocalVersion()
+        r.configure() # manually generated .config's go here
+        r.buildBase()
+        r.build() # extra build actions go here
+        r.policyBase()
+        r.policy() # extra policy goes here
+
+    def setMacros(r):
+        r.macros.majorversion = ".".join(r.version.split('.')[0:2])
+        r.macros.sublevel = r.version.split('.')[2]
+        if 'serial' in r.__dict__:
+            r.macros.serial = r.serial
+        else:
+            if 'sourceVersion' in r.__dict__:
+                if hasattr(r.sourceVersion, 'trailingRevision'):
+                    # if r.sourceVersion is a NewVersion object, it may
+                    # not have a trailingRevision object
+                    r.macros.serial = str(r.sourceVersion.trailingRevision(
+                        ).getSourceCount())
+                else:
+                    r.macros.serial = ''
+            else:
+                raise KernelPackageError(
+                    'no serial number set and source version is unavailable')
+        # r.macros.cfgver is set later while creating configurations
+        # This works because macros have delayed evaluation
+        r.macros.localversion = '-%(serial)s%(cfgver)s'
+        r.macros.kver = '%(version)s%(localversion)s'
+        r.macros.sourcever = '%(version)s-%(serial)s'
+        r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
+
+        # get the last 64 (UTS_LEN) or fewer characters of the parts of
+        # the buildLabel to use instead of the username and hostname the
+        # kernel was built by/on.
+        if '@' not in r.macros.buildlabel:
+            # we need an @, use a default string with an @...
+            r.macros.buildlabel = 'local@local:LOCAL'
+        buildrep, branchname = r.macros.buildlabel.split('@')
+        r.macros.buildrep = buildrep[-64:]
+        r.macros.branchname = branchname[-64:]
+
+        if not r.Flags.debugdata:
+            r.Strip(debuginfo=False)
+
+    def unpackBase(r):
+        r.addArchive(
+            'ftp://ftp2.kernel.org/pub/linux/kernel/v%(majorversion)s/'
+            'linux-%(version)s.tar.bz2',
+            keyid='517D0F0E'
+        )
+        # Conary preserves world-write/execute permissions in the tarball,
+        # which we do not want to preserve on the installed system or in
+        # the build
+        r.addAction('chmod -R go-w .')
+        # avoid requests for interactive response
+        r.addPatch('linux-2.4.0-nonintconfig.patch')
+
+    def setCompileInfo(r):
+        r.addAction(r"""sed -i '
+            s/`whoami`/%(buildrep)s/
+            s/`hostname | $UTS_TRUNCATE`/%(branchname)s/
+            s/ ."`dnsdomainname | $UTS_TRUNCATE`."//
+            s/ ."`domainname | $UTS_TRUNCATE`."//
+            ' scripts/mkcompile_h""")
+
+    def unpack(r):
+        """
+        Add any special patches here
+        """
+        pass
+
+    def distCleanup(r):
+        # Override any "-pre" or premature increment of SUBLEVEL from patches
+        r.addAction('sed -i "s/^SUBLEVEL.*/SUBLEVEL = %(sublevel)s/" Makefile')
+        # Since we will get kernel-source:tree out of this tree, clean it up
+        r.addAction('find . -name "*.orig" | xargs rm -f')
+        r.addAction('find . -name "*~" | xargs rm -f')
+        r.addAction('make -s mrproper')
+
+    def createLocalVersion(r):
+        r.Create('localversion.rpl', contents='%(localversion)s')
+
+    def configure(r):
+        r.extraSource(addConfigs(r))
+        r.Make('nonint_oldconfig 2>oc.err ||'
+               ' { cat oc.err; diff -u .config.old .config > config.changes;'
+               '   echo "missing config items:"; cat config.changes ;'
+               '   exit 1; }')
+        # if we get here, this file is empty, remove it
+        r.Remove('oc.err')
+
+    def buildBase(r):
+        if Use.xen:
+            r.Make('vmlinuz modules')
+        else:
+            r.Make('bzImage modules')
+        r.Make('-s INSTALL_MOD_PATH=%(destdir)s modules_install'
+               ' KERNELRELEASE=%(kver)s')
+        r.Install('System.map', '/boot/System.map-%(kver)s', mode=0644)
+        r.Install('.config', '/boot/config-%(kver)s', mode=0644)
+        if Use.xen:
+            r.Install('vmlinuz', '/boot/vmlinuz-%(kver)s', mode=0644)
+        else:
+            r.Install('arch/*/boot/bzImage', '/boot/vmlinuz-%(kver)s', mode=0644)
+        r.Install('vmlinux', '/lib/modules/%(kver)s/', mode=0644)
+        r.Symlink('/lib/modules/%(kver)s/vmlinux', '/boot/vmlinux-%(kver)s')
+        # remove autogenerated files
+        r.Remove('/lib/modules/%(kver)s/modules.*')
+        # remove old symlink
+        r.Remove('/lib/modules/%(kver)s/pcmcia', recursive=True)
+
+        # replace build symlink, install headers properly
+        r.Remove('/lib/modules/%(kver)s/build', recursive=True)
+        r.MakeDirs('/lib/modules/%(kver)s/build')
+        r.extraBuild(CreateBuildTree(r))
+        r.Remove('/lib/modules/%(kver)s/source', recursive=True)
+        r.Symlink('build', '/lib/modules/%(kver)s/source')
+        r.Install('configs/*', '/lib/modules/%(kver)s/configs/')
+        r.Install('localversion.rpl', '/lib/modules/%(kver)s/build/')
+
+        r.ComponentSpec('configs', '/lib/modules/[^/]*/configs/')
+        r.ComponentSpec('build-tree', '/lib/modules/[^/]*/build/')
+        r.ComponentSpec('debuginfo', '%(debugsrcdir)s/', '%(debuglibdir)s/')
+        r.ComponentSpec('runtime', '.*')
+        # do not depend on mkinitrd's kernel tagdescription file
+        r.TagSpec('kernel', '/boot/vmlinuz-.*', '/lib/modules/.*/.*\.k?o$')
+        if Arch.x86:
+            r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
+        if Arch.x86_64:
+            r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
+            r.Provides('abi: ELF64(SysV x86_64)', '/boot/vmlinu.*')
+
+    def build(r):
+        """
+        Add any special build actions here
+        """
+        pass
+
+    def policyBase(r):
+        # Disable Autodoc. Users tend to have more than 1 kernel installed
+        r.AutoDoc(exceptions='.*')
+        # perl scripts in build-tree are not required to build most
+        # modules, and perl is a constraint on some systems, therefore
+        # push the perl deps up to modules that require perl to build
+        r.Requires(exceptions=r'.*(kernel-doc|\.pl)')
+        r.Provides(exceptions=r'/lib/modules/%(kver)s/.*\.ko$')
+        r.Provides('soname: libkconfig.so',
+                   '/lib/modules/.*/build/scripts/kconfig/libkconfig.so')
+        r.Requires('mkinitrd:runtime',
+                   r'/lib/modules/%(kver)s/.*\.ko$')
+        r.ComponentProvides(('%(kver)s', '%(gccver)s'))
+
+    def policy(r):
+        """
+        Add any extra policy here
+        """
+        pass
+
+
+
+####################################################################
+# The rest of this file contains only supporting classes that
+# should not normally need to be modified when modifying the
+# kernel package
+####################################################################
+
+class CreateBuildTree(build.BuildAction):
+    import time
+    def do(self, macros):
+        builddir = macros.builddir % macros
+        bldincdir = builddir+'/include/'
+        destdir = '%(destdir)s/lib/modules/%(kver)s/build/' %macros
+        destincdir = '%(destdir)s/lib/modules/%(kver)s/build/include/' %macros
+
+        # get the kernel's idea of the architecture we have selected
+        asmarch = os.readlink('%(builddir)s/include/asm' %macros)
+        arch = asmarch.split('-')[1]
+
+        # Copy config, dependency files, and Makefiles
+        os.path.walk(builddir, self.copyDepinfo,
+                     (destdir, len(builddir), self.time.time(), arch,
+                      re.compile(
+                        r'(Kconfig(|\.[^/]*)|\.config|\.h?depend|Rules\.make|Makefile(\..+)?'
+                         '|asm-offsets\.s|\.tmp_versions|gcc-version\.sh)$')))
+        util.copyfile('Module.symvers', destdir)
+
+        # now get all the scripts
+        util.copytree('scripts', destdir)
+        util.remove('%s/scripts/*.o'%destdir)
+        util.remove('%s/scripts/*/*.o'%destdir)
+        scriptsdir = 'arch/%s/scripts'%arch
+        if os.path.exists(scriptsdir):
+            util.copytree(scriptsdir, '%s/arch/%s/' %(destdir, arch))
+        util.copyfile('arch/%s/*.lds'%arch, '%s/arch/%s/' %(destdir, arch))
+
+        # Create and populate include directories -- do this last to make
+        # timestamps work out for dependencies when building against this tree
+        util.mkdirChain(destincdir)
+        for entry in os.listdir(bldincdir):
+            dir = util.joinPaths(destincdir, entry)
+            if entry in ('asm-generic', asmarch) or not entry.startswith('asm'):
+                srcpath = util.joinPaths(bldincdir, entry)
+                util.copytree(srcpath, destincdir)
+        os.symlink(asmarch, destincdir+'/asm')
+        if Arch.x86_64:
+            srcpath = util.joinPaths(bldincdir, 'asm-i386')
+            util.copytree(srcpath, destincdir)
+
+    def copyDepinfo(self, data, dirname, names):
+        destdir, srclen, timestamp, arch, regex = data
+        subpath = dirname[srclen+1:]
+        pathlist = subpath.split('/')
+        topdir = pathlist[0]
+        nextdir = ''
+        if len(pathlist) > 1:
+            nextdir = pathlist[1]
+        if topdir in ('include', 'scripts', 'Documentation'):
+            return
+        if topdir in ('arch',):
+            if nextdir != arch:
+                return
+        util.mkdirChain(util.joinPaths(destdir, subpath))
+        for name in names:
+            if regex.match(name):
+                srcpath = util.joinPaths(dirname, name)
+                if not os.path.isdir(srcpath):
+                    destpath = util.joinPaths(destdir, subpath, name)
+                    util.copyfile(util.joinPaths(dirname, name), destpath)
+                    # set the timestamp the same on all files to say
+                    # the configuration is up-to-date
+                    os.utime(destpath, (timestamp, timestamp))
+
+
+
+class addConfigs(action.RecipeAction):
+    from conary.build import lookaside
+
+    def __init__(self, *args, **keywords):
+        self.sourcemap = {}
+        self.failed = False
+        self.fetching=False
+        action.RecipeAction.__init__(self, *args, **keywords)
+        # we need to reference the entire flavor from __init__
+        # so that the flavor is determined entirely during the
+        # setup phase of loading the recipe, and not modified
+        # while cooking (i.e. doAction)
+        for flag in Flags.values():
+            if flag: pass
+        for basearch, flaglist, dictlist in self.recipe.configs:
+            for flag in flaglist:
+                if flag.startswith('flags.'):
+                    pass
+                elif flag.startswith('use.'):
+                    if Use[flag.split('.')[1]]: pass
+                else:
+                    if Arch[basearch][flag]: pass
+
+    def doAction(self):
+        self.confdir = '%(builddir)s/%(maindir)s/configs/' %self.recipe.macros
+        action.RecipeAction.doAction(self)
+
+    def fetch(self, refreshFilter=None):
+        self.fetching=True
+        self.do()
+        self.fetching=False
+        return self.sourcemap.values()
+
+    def do(self):
+        if not self.fetching:
+            util.mkdirChain(self.confdir)
+        for basearch, flaglist, dictlist in self.recipe.configs:
+            for dict in dictlist:
+                self.do_one(basearch, flaglist, **dict)
+        if self.failed:
+            raise KernelConfigError, 'all keys set in any config file must be in config.base,\nbecause the order of the keys matters'
+
+
+    def do_one(self, arch, flaglist, smp=False, pae=False, numa=False):
+        print 'Creating configuration file for flavor [%s %s is: %s]' %(
+            {True: 'kernel.smp', False:''}[smp] +
+            {True: 'kernel.pae', False:''}[pae] +
+            {True: 'kernel.numa', False:''}[numa],
+            ', '.join(flaglist), arch,
+        )
+        config = self.config()
+
+        thisArch = True and Arch[arch]
+        if not thisArch:
+            print ' disallowing this config for architecture mismatch'
+
+        if self.recipe.Flags.debug:
+            self.mergefile(config, 'config.debug', unamePrefix=True)
+
+        if smp:
+            self.mergefile(config, 'config.smp', unamePrefix=True)
+        if smp != self.recipe.Flags.smp:
+            if thisArch and not self.fetching:
+                print ' disallowing this config for SMP mismatch'
+            thisArch = False
+
+        if pae:
+            self.mergefile(config, 'config.pae', unamePrefix=True)
+        if pae != self.recipe.Flags.pae:
+            if thisArch and not self.fetching:
+                print ' disallowing this config for PAE mismatch'
+            thisArch = False
+
+        if numa:
+            self.mergefile(config, 'config.numa', unamePrefix=True)
+        if numa != self.recipe.Flags.numa:
+            if thisArch and not self.fetching:
+                print ' disallowing this config for NUMA mismatch'
+            thisArch = False
+
+        flaglen = len(flaglist)
+        self.mergefile(config, 'config.' + arch, unameArch=(flaglen == 0))
+
+        selection = arch
+        for index in range(flaglen):
+            flag = flaglist[index]
+            allowThisConfig = True
+            isLocalFlag = flag.startswith('flags.')
+            isUseFlag = flag.startswith('use.')
+            if isLocalFlag:
+                flag = flag.split('.')[1]
+                allowThisConfig = self.recipe.Flags[flag]
+            elif isUseFlag:
+                flag = flag.split('.')[1]
+                allowThisConfig = Use[flag]
+            else:
+                if thisArch and not Arch[arch][flag]:
+                    allowThisConfig = False
+            if not allowThisConfig:
+                if thisArch and not self.fetching:
+                    print ' disallowing this config for unset', flag
+                thisArch = False
+            selection += '.' + flag
+            baseInFile = 'config.' + flag
+            currentInFile = 'config.' + selection
+            # config.<arch>.<foo>.<bar>.<flag> overrides config.<flag>
+            self.mergefile(config, baseInFile)
+            self.mergefile(config, currentInFile, unameArch=(index == flaglen-1))
+            # some feature-specific flags require platform-specific changes
+            if self.recipe.Flags.debug:
+                self.mergefile(config, currentInFile + '.debug')
+            if smp:
+                self.mergefile(config, currentInFile + '.smp')
+            if pae:
+                self.mergefile(config, currentInFile + '.pae')
+            if numa:
+                self.mergefile(config, currentInFile + '.numa')
+
+        self.mergefile(config, 'config.%s' % self.recipe.macros.gccver,
+                       unamePrefix=True)
+
+        # must come last
+        self.mergefile(config, 'config.override')
+
+        if not self.fetching:
+            if config.failed:
+                self.failed = True
+                return
+
+            config.write(self.confdir)
+
+            if thisArch:
+                # This is the one true .config, unless something more
+                # specific comes along later
+                util.copyfile(config.filename(self.confdir),
+                    '%(builddir)s/%(maindir)s/.config' %self.recipe.macros)
+                self.recipe.macros.cfgver = config.unamePrefix+config.unameArch
+                print 'building with cfgver = "%s"' %self.recipe.macros.cfgver
+
+    def config(self):
+        f = self.lookaside.findAll(self.recipe.cfg, self.recipe.laReposCache,
+                'config.base', self.recipe.name, self.recipe.srcdirs)
+        self.sourcemap['config.base'] = f
+        if self.fetching:
+            return None
+        return KernelConfig(self.sourcemap['config.base'])
+
+    def mergefile(self, config, filename, unamePrefix=False, unameArch=False):
+        # searchAll because it is allowed to fail
+        f = self.lookaside.searchAll(self.recipe.cfg, self.recipe.laReposCache,
+            filename, self.recipe.name, self.recipe.srcdirs, localOnly=True)
+        if f:
+            self.sourcemap[filename] = f
+
+        if self.fetching:
+            return
+
+        if f:
+            config.mergefile(f)
+
+        # chop off the config part
+        configdata = filename[6:]
+        if unamePrefix:
+            config.setUnamePrefix(configdata)
+        elif unameArch:
+            config.setUnameArch(configdata)
+
+
+class KernelConfig(list):
+    """
+    A list of key=value pairs that can be addressed as a dictionary
+    that maps key to value, in which setting self[key]=otherval will
+    modify the list in-place.
+    """
+    def __init__(self, filename):
+        self.dict = {}
+        self.index = {}
+        self.unamePrefix = ''
+        self.unameArch = ''
+        self.warn = False
+        self.failed = False
+        self.basefilename = filename
+        print 'reading', filename
+        f = file(filename)
+        self.extend(f.read().split('\n'))
+        f.close
+        self.warn = True
+    def setUnamePrefix(self, data):
+        self.unamePrefix += data
+    def setUnameArch(self, data):
+        self.unameArch = data
+    def mergefile(self, filename):
+        if os.path.exists(filename):
+            print ' merging', filename
+            f = file(filename)
+            self.applylines(f.read().split('\n'))
+            f.close()
+    def write(self, dirname):
+        f = file(self.filename(dirname), 'w')
+        # kernel config files need weird syntax
+        self.commentNo()
+        f.write("\n".join(self))
+        f.close()
+    def filename(self, dirname):
+        return dirname+'/config'+self.unamePrefix+self.unameArch
+    def extend(self, items):
+        for item in items:
+            self.append(item)
+    def append(self, item):
+        if self._isval(item):
+            key, val = item.split("=")
+            if self.warn:
+                if key not in self:
+                    print 'warning: key %s not found in %s' %(key, self.basefilename)
+                    self.failed = True
+            else:
+                if key in self:
+                    # need value stored more than one place
+                    list.append(self, item)
+                    self.index[key].append(len(self)-1)
+            self[key] = val
+        else:
+            # probably a comment or empty line; just preserve it
+            list.append(self, item)
+    def applyline(self, line):
+        "Do not append a line, only change a value if it is a key=value"
+        if self._isval(line):
+            self.append(line)
+    def applylines(self, lines):
+        for line in lines:
+            self.applyline(line)
+    def _isval(self, item):
+        return item.find("=") != -1 and not item.startswith('#')
+    def commentNo(self):
+        # unusual comment-for-no syntax
+        for index in range(len(self)):
+            line = self[index]
+            if line.endswith("=n"):
+                key = line.split("=")[0]
+                list.__setitem__(self, index, "# %s is not set" %key)
+    def __getitem__(self, key):
+        if type(key) == type(""):
+            return self.dict[key]
+        else:
+            return list.__getitem__(self, key)
+    def __setitem__(self, key, val):
+        line = "=".join((key, val))
+        if key in self.dict:
+            for index in self.index[key]:
+                # make sure all instances are consistent
+                list.__setitem__(self, index, line)
+            self.dict[key] = val
+        else:
+            list.append(self, line)
+            self.dict[key] = val
+            self.index[key] = [ len(self)-1 ]
+    def __delitem__(self, key):
+        raise IndexError, 'dictionary is append/modify-only'
+    def __contains__(self, item):
+        return item in self.dict
+
+class KernelConfigError(Exception):
+    pass
+
+class KernelPackageError(Exception):
+    pass
