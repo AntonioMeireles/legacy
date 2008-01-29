@@ -19,17 +19,85 @@ if [ -f /etc/sysconfig/ntpd ];then
     . /etc/sysconfig/ntpd
 fi
 
+if [ "${SLOW_PRECISE_INITIAL_SYNC}" = "yes" -o \
+     "${SLOW_PRECISE_INITIAL_SYNC}" = "true" ] ; then
+    SLOW_PRECISE_INITIAL_SYNC="yes"
+    INITIAL_SYNC="yes"
+fi
+if [ "${INITIAL_SYNC}" != "no" -a "${INITIAL_SYNC}" != "false" ] ; then
+    INITIAL_SYNC="yes"
+fi
+
 # Check that networking is up.
 [ ${NETWORKING} = "no" ] && exit 0
 
 ntpconf=/etc/ntp.conf
+ntpstep=/etc/ntp/step-tickers
 
 [ -x /usr/bin/ntpd -a -f $ntpconf ] || exit 0
 
 RETVAL=0
 prog="ntpd"
 
+sync_hwclock() {
+	ARC=0
+	SRM=0
+	UTC=0
+
+	if [ -f /etc/sysconfig/clock ]; then
+	   . /etc/sysconfig/clock
+
+	   # convert old style clock config to new values
+	   if [ "${CLOCKMODE}" = "GMT" ]; then
+	      UTC=true
+	   elif [ "${CLOCKMODE}" = "ARC" ]; then
+	      ARC=true
+	   fi
+	fi
+
+	CLOCKFLAGS="$CLOCKFLAGS --systohc"
+
+	case "$UTC" in
+	    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --utc";;
+	    no|false)	CLOCKFLAGS="$CLOCKFLAGS --localtime";;
+	esac
+	case "$ARC" in
+	    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --arc";;
+	esac
+	case "$SRM" in
+	    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --srm";;
+	esac
+
+	action $"Syncing hardware clock to system time" %(essentialsbindir)s/hwclock $CLOCKFLAGS
+}
+
+
 start() {
+    if [ "${INITIAL_SYNC}" = "yes" ] ; then
+	echo -n $"Synchronizing with time server: "
+	if [ "${SLOW_PRECISE_INITIAL_SYNC}" = "yes" ] ; then
+	    %(bindir)s/ntpd -g -q >/dev/null
+	else
+	    tickers=''
+	    if [ -s "$ntpstep" ]; then
+		tickers=$(sed 's/#.*//' $ntpstep)
+		echo "$tickers" | grep -qi '[a-z0-9]' || tickers=''
+	    fi
+	    if [ -z "$tickers" ]; then
+		# step-tickers doesn't exist or contain anything useful, 
+		# use servers from ntp.conf instead
+		tickers=$(egrep -v '127\.127\.[0-9]+\.[0-9]+' $ntpconf | \
+		    awk '$1=="peer"||$1=="server"{print $2;exit}')
+	    fi
+	    %(bindir)s/ntpdate -s -b $NTPDATE_OPTIONS $tickers >/dev/null
+	fi
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && success || failure
+	echo
+	if [ $RETVAL -eq 0 -a "$SYNC_HWCLOCK" = "yes" ]; then
+	    sync_hwclock
+	fi
+    fi
     # Start daemons.
     echo -n $"Starting $prog: "
     daemon ntpd $OPTIONS
@@ -53,10 +121,10 @@ stop() {
 case "$1" in
   start)
     start
-        ;;
+	;;
   stop)
     stop
-        ;;
+	;;
   status)
     status ntpd
     RETVAL=$?
@@ -68,9 +136,9 @@ case "$1" in
     ;;
   condrestart)
     if [ -f /var/lock/subsys/ntpd ]; then
-        stop
-        start
-        RETVAL=$?
+	stop
+	start
+	RETVAL=$?
     fi
     ;;
   *)
