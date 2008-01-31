@@ -1,15 +1,12 @@
 #
-# Copyright 2007 Elliot Peele <elliot@bentlogic.net>
+# Copyright 2007-2008 Elliot Peele <elliot@bentlogic.net>
 #
 
-import sys
-sys.path.append('/usr/lib/anaconda/installclasses')
-
-import rpathbase
 from constants import *
 from rhpl.translate import *
+from rpathbase import rPathBaseInstallClass
 
-class InstallClass(rpathbase.InstallClass):
+class InstallClass(rPathBaseInstallClass):
     hidden = 0
 
     id = "foresight"
@@ -21,7 +18,7 @@ class InstallClass(rpathbase.InstallClass):
     showLoginChoice = 1
 
     def setSteps(self, anaconda):
-        rpathbase.InstallClass.setSteps(self, anaconda);
+        rPathBaseInstallClass.setSteps(self, anaconda);
         anaconda.dispatch.skipStep("accounts")
         anaconda.dispatch.skipStep("group-selection")
         #anaconda.dispatch.skipStep("postselection")
