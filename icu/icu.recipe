@@ -1,14 +1,16 @@
 #
-# Copyright (c) 2006 rPath, Inc.
+# Copyright (c) 2006-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 #
 
 class ICU(CPackageRecipe):
-
     name = 'icu'
-    version = '3.8'
+    version = '3.8.1'
+    # icu doesn't always release new docs for each release, so we use the most
+    # up-to-date available
+    docs_version = '3.8'
 
     buildRequires = [
         'libstdc++:devel', 'unzip:runtime', 'perl:runtime'
@@ -17,14 +19,19 @@ class ICU(CPackageRecipe):
     def setup(r):
         r.disableParallelMake()
         r.macros.site = 'http://download.icu-project.org/files/icu4c/%(version)s'
-        r.macros.version_ = r.version.replace('.', '_')
+        r.macros.upver = r.version.replace('.', '_')
+        r.macros.docs_version = r.docs_version.replace('.', '_')
 
-        r.addArchive('%(site)s/%(name)s4c-%(version_)s-src.tgz')
+        r.addArchive('%(site)s/%(name)s4c-%(upver)s-src.tgz')
 
-        r.addArchive('%(site)s/%(name)s4c-%(version_)s-docs.zip', dir='icu/docs')
-        r.addArchive('%(site)s/%(name)s-%(version_)s-userguide.zip', dir='icu/userguide')
+        r.addArchive('%(site)s/%(name)s4c-%(docs_version)s-docs.zip', dir='icu/docs')
+        r.addArchive('%(site)s/%(name)s-%(docs_version)s-userguide.zip', dir='icu/userguide')
 
-        r.Configure('--enable-samples=no --enable-tests=no', dir='source')
+        # RPL-2199 CVE-2007-4770 CVE-2007-4771
+        srpm = 'http://download.fedora.redhat.com/pub/fedora/linux/development/source/SRPMS/icu-3.8.1-4.fc9.src.rpm'
+        r.addPatch('icu.regexp.patch', rpm=srpm)
+
+        r.Configure('--enable-samples=no --enable-tests=yes', dir='source')
         r.Make(dir='source')
         r.MakeInstall(dir='source')
         r.Move('%(sbindir)s/*', '%(bindir)s/')
