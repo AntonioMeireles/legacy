@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2006-2007 rPath, Inc.
+# Copyright (c) 2006-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -9,14 +9,13 @@ loadInstalled('xulrunner')
 class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
     name = 'nspluginwrapper'
     version = '0.9.91.5'
-    rpmRelease = '14.fc9'
-    rpmURL = 'http://koji.fedoraproject.org/packages/%(name)s/%(version)s/%(rpmRelease)s/src/'
+    rpmRelease = '17.fc8'
 
     buildRequires = [ 'glib:devel', 'gtk:devel', 'libX11:devel', 'libXt:devel',
                       'zlib:devel', 'expat:devel', 'nspr:devel', 'gcc-c++:runtime',
                       'GConf:runtime', 'pkgconfig:devel', 'which:runtime',
-                      'xextproto:devel', 'firefox:devel', 'xulrunner:devel',
-                      'firefox:runtime', 'alsa-plugins:devellib'
+                      'xextproto:devel', 'xulrunner:devel',
+                      'alsa-plugins:devellib'
                       ]
 
     rpmPatches = [ 'nspluginwrapper-0.9.91.5-rpc-error.patch',
@@ -24,8 +23,11 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
                    'nspluginwrapper-0.9.91.5-rh.patch',
                    'nspluginwrapper-0.9.91.5-runtime-restart.patch',
                    'nspluginwrapper-0.9.91.5-fork.patch',
-                   'nspluginwrapper-0.9.91.5-xulrunner.patch',
+                   'nspluginwrapper-0.9.91.5-npviewer-gthread.patch',
+                   'nspluginwrapper-0.9.91.5-shutdown.patch',
+                   'plugin-config-exclude.patch',
                    ]
+
 
     plugin_config_version = '1.8'
     rpmArchives = ['plugin-config-%s.tar.gz' % plugin_config_version]
@@ -33,12 +35,10 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
     # This is x86_64 ONLY
 
     def configure(r):
-        # we need fc9 srpm due to xulrunner, but we need the one bellow only available in fc8 (yet)
-        r.addPatch('nspluginwrapper-0.9.91.5-npviewer-flash-crash-cpu-affinity-workaround.patch', 
-                   rpm='http://koji.fedoraproject.org/packages/nspluginwrapper/0.9.91.5/14.fc8/src/nspluginwrapper-0.9.91.5-14.fc8.src.rpm')
         r.addSource('plugin-config.sh.in', rpm=r.srpm)
         r.addSource('%(name)s.sh.in', rpm=r.srpm)
-	r.addPatch('plugin-config-setuid.patch' , rpm=r.srpm, dir = '%(plugin_config_name)s')
+
+        r.addPatch('plugin-config-setuid.patch' , rpm=r.srpm, dir = '%(plugin_config_name)s')
 
         # Define libraries for 32/64 arches
         r.macros.lib32 = 'lib'
@@ -69,7 +69,7 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
                          ' --with-x11-prefix=%(prefix)s'
                          ' --pkgdir=%(name)s'
                          ' --pkglibdir=%(libdir)s/%(name)s'
-                         ' --with-xpcom=yes'
+                         ' --with-xpcom=no'
                          ' --target-cpu=i386'
                          )
         else:
@@ -80,11 +80,11 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
                          ' --with-x11-prefix=%(prefix)s'
                          ' --pkgdir=%(name)s'
                          ' --pkglibdir=%(libdir)s/%(name)s'
-                         ' --with-xpcom=yes'
+                         ' --with-xpcom=no'
                          ' --target-cpu=x86_64'
                          )
 
-	# FIXME - simplify this
+        # FIXME - simplify this
         r.macros.plugin_config_version = r.plugin_config_version
         r.macros.plugin_config_binary = 'plugin-config'
         r.macros.plugin_config_name= '%(plugin_config_binary)s-%(plugin_config_version)s'
@@ -105,18 +105,16 @@ class NsPluginwrapper(RPMPackageRecipe,AutoPackageRecipe):
         r.Move('%(bindir)s/%(plugin_config_binary)s', '%(libdir)s/%(name)s/%(plugin_config_binary)s')
         r.Remove('/usr/doc', recursive=True)
 
-        r.SetModes('%(libdir)s/nspluginwrapper/plugin-config', 04755)	
+        r.SetModes('%(libdir)s/nspluginwrapper/plugin-config', 04755)
 
-        r.macros.xulrunnerVersion = XULRunner.version
-
-        r.Replace(('FIREFOX_VERSION','%(xulrunnerVersion)s'),
+        r.Replace(('-FIREFOX_VERSION',''),
                   ('USE_XPCOM', '0' ),
-                  ('-1.8.1.4',''),
+                  ('-'+XULRunner.version,''),
                   'plugin-config.sh.in')
 
         r.Install('plugin-config.sh.in', '%(bindir)s/mozilla-plugin-config', mode = 0755)
 
-        r.Replace('EXCLUDE_LIST', '\"libtotem-*\"', '%(name)s.sh.in')
+        r.Replace('EXCLUDE_LIST', '\"libtotem-*:libjavaplugin*\"', '%(name)s.sh.in')
         r.Install('%(name)s.sh.in', '%(sysconfdir)s/sysconfig/%(name)s', mode = 0644)
 
         r.MakeDirs('%(libdir)s/xulrunner/plugins-wrapped')
