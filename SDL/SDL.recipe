@@ -1,13 +1,62 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class SDL(RedirectRecipe):
+loadSuperClass('rpmpackage')
+class SDL(RPMPackageRecipe,AutoPackageRecipe):
     name = 'SDL'
-    version = '0'
+    version = '1.2.13'
+    rpmRelease = '2.fc8'
 
-    def setup(r):
-        # FIXME - get a way to fetch dinamically the label we are cooking.
-        r.addRedirect('SDL', 'conary.rpath.com@rpl:2-qa')
+    buildRequires = [ 'nasm:runtime', 'alsa-lib:devel',
+                      'glibc:devel[!bootstrap]', 'glib:devel', 'pkgconfig:devel',
+                      'libXt:devel', 'libX11:devel', 'libXrandr:devel', 'libICE:devel',
+                      'libSM:devel', 'Mesa:devel', 'libusb:devel', 'libXext:devel',
+                      'libXrender:devel', 'DirectFB:lib-core', 'audiofile:devel', 'esound:devel',
+                      'pulseaudio:devel', 'zlib:devel', 'DirectFB:devel', 'nas:devel']
+
+    rpmPatches = [ 'SDL-1.2.10-byteorder.patch',
+                   'SDL-1.2.13-libdir.patch',
+                   'SDL-1.2.12-preferalsa.patch',
+                   'SDL-1.2.12-multilib.patch',
+                   'SDL-1.2.11-dynamic-esd.patch',
+                   'SDL-1.2.12-x11dyn64.patch',
+                   'SDL-1.2.12-disable_yasm.patch',
+                   'SDL-1.2.13-dynamic-pulse.patch',
+                   ]
+    rpmSources = [ 'SDL_config.h',
+                   # Temporary hack: Use pulseaudio via esd so SDL apps don't lock up when they
+                   # attempt to use ALSA via pulseaudio.  This will be removed when...
+                   # 1) SDL's pulseaudio support is working natively without problems
+                   # 2) it conditionally switches to pulseaudio or ALSA automatically
+                   'SDL_pulseaudio_hack.csh',
+                   'SDL_pulseaudio_hack.sh',
+                   ]
+
+    def configure(r):
+        r.Configure( '--disable-video-svga '
+                     '--disable-video-ggi '
+                     '--disable-video-aalib '
+                     '--disable-debug '
+                     '--enable-sdl-dlopen '
+                     '--enable-dlopen '
+                     '--enable-arts-shared '
+                     '--enable-esd-shared '
+                     '--enable-pulseaudio-shared '
+                     '--enable-alsa '
+                     '--disable-rpath ')
+
+    def policy(r):
+        if Arch.x86:
+            r.Move('%(includedir)s/SDL/SDL_config.h', '%(includedir)s/SDL/SDL_config-i386.h')
+        else:
+            r.Move('%(includedir)s/SDL/SDL_config.h', '%(includedir)s/SDL/SDL_config-x86_64.h')
+
+        r.Install('SDL_config.h', '%(includedir)s/SDL/SDL_config.h', mode = 0644)
+
+        r.Install('SDL_pulseaudio_hack.csh', '%(sysconfdir)s/profile.d/', mode = 0755)
+        r.Install('SDL_pulseaudio_hack.sh', '%(sysconfdir)s/profile.d/', mode = 0755)
+
+        r.Doc('WhatsNew', 'docs.html', 'docs/html/*', 'docs/index.html')
