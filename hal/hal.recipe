@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -23,7 +23,11 @@ class Hal(RPMPackageRecipe,CPackageRecipe):
 
     name = 'hal'
     version = '0.5.10'
-    rpmRelease = '2.fc9'
+    rpmRelease = '4.fc9'
+    rpmPatches = [ 'hal-0.5.10-fdi-endless-loop.patch',
+                   'hal-0.5.10-fdi-cache-regen.patch',
+                   'hal-0.5.10-fdi-empty-match-rule.patch',
+                   ]
 
     def setup(r):
         r.unpack()
@@ -33,7 +37,7 @@ class Hal(RPMPackageRecipe,CPackageRecipe):
                      ' --disable-docbook-docs --with-dell-backlight=yes '
                      ' --with-pid-file=%(localstatedir)s/run/haldaemon.pid '
                      ' --enable-sonypic --enable-acpi-acpid '
-                     ' --with-cpufreq --disable-acpi-proc '
+                     ' --with-cpufreq '
                      ' --enable-parted --with-macbookpro --with-macbook --with-usb-csr'
                      ' --with-os-type=redhat --enable-console-kit --enable-policy-kit' 
                      ' --enable-acl-management --enable-umount-helper --enable-acpi-ibm'
@@ -61,3 +65,16 @@ class Hal(RPMPackageRecipe,CPackageRecipe):
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/hal/fdi/policy')
 
         r.UtilizeUser('haldaemon', r'%(sysconfdir)s/.*/hal\.conf')
+
+        r.SetModes('%(localstatedir)s/cache/hald', 0700)
+        r.SetModes('%(localstatedir)s/lib/hal', 0700)
+        r.Ownership('haldaemon','haldaemon', '%(localstatedir)s/cache/hald')
+        r.Ownership('haldaemon','haldaemon', '%(localstatedir)s/lib/hal')
+
+        r.addSource('hal.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/hal')
+        r.addSource('hal.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/hal', mode=0755)
+
+        r.Requires('file: /usr/bin/polkit-auth', '%(taghandlerdir)s/hal')
+        r.TagSpec('hal', '%(sbindir)s/hald')
