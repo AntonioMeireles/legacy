@@ -1,0 +1,55 @@
+#
+# Copyright (c) 2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage=conary.rpath.com@rpl:devel')
+class CClient(RPMPackageRecipe, CPackageRecipe):
+    name = 'c-client'
+    version = '2004g'
+    rpmRelease = '2.2.1'
+    isRHEL = True
+    distroVersion = '5Server'
+    tarballName = 'imap-%(version)s.tar.Z'
+    rpmName = 'libc-client'
+    
+    buildRequires = ['pam:devel', 'autoconf:runtime',
+                     'krb5:devel', 'openssl:devel' ]
+
+    
+    rpmPatches = [ 'imap-2002e-redhat-ssl.patch',
+                   'imap-2004g-linux.patch',
+                   'imap-2002b-krbpath.patch',
+                   'imap-2001a-overflow.patch',
+                   'imap-2004g-redhat-version.patch',
+                   'imap-2002d-ssltype.patch',
+                   'imap-2002e-cclient-only.patch',
+                   'imap-2002e-shared.patch',
+                   'imap-2002e-authmd5.patch' ]
+
+    def setup(r):
+        r.unpack()
+
+        r.addPatch('imap-2001a-mbox-disable.patch', rpm=r.srpm, level=0)
+        r.macros.cflags += ' -DDISABLE_POP_PROXY=1 -DIGNORE_LOCK_EACCES_ERRORS=1'
+        r.macros.cflags += ' -I/usr/include/openssl'
+        r.macros.cflags += ' -fPIC -fno-strict-aliasing'
+        r.macros.cflags += ' -Wall -Wno-pointer-sign -Wno-parentheses'
+
+        r.Replace(r'\)/lib', ')/%(lib)s', 'src/osdep/unix/Makefile.gss')
+
+        r.Make('lnp EXTRAAUTHENTICATORS=gss SSLTYPE=unix SHLIBBASE=c-client SHLIBNAME=libc-client.so.1')
+
+        # static lib
+        r.Install('c-client/c-client.a', '%(libdir)s/', mode=0644)
+        r.Symlink('%(libdir)s/c-client.a', '%(libdir)s/libc-client.a')
+
+        # dynamic lib
+        r.Install('c-client/libc-client.so.1', '%(libdir)s/', mode=0755)
+        r.Symlink('%(libdir)s/libc-client.so.1', '%(libdir)s/libc-client.so')
+
+        # headers (& one c code file)
+        r.Install('c-client/*.h', '%(includedir)s/imap/', mode=0644)
+        r.Install('c-client/linkage.c', '%(includedir)s/imap/', mode=0644)
+        r.Install('src/osdep/tops-20/shortsym.h', '%(includedir)s/imap/', mode=0644)
