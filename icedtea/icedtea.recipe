@@ -6,7 +6,7 @@
 class IcedTea(AutoPackageRecipe):
 
     name = 'icedtea'
-    version = '1.7.0.0+r432'
+    version = '1.7.0.0+b24+1.6'
 
     if not Use.bootstrap:
         buildRequires = [
@@ -36,7 +36,7 @@ class IcedTea(AutoPackageRecipe):
 
     # For loadInstalled()
     java_version = version.split('+')[0]
-    java_release = version[:version.rindex('.')]
+    java_release = '1.7.0'
 
     java_name = 'java-'+java_release+'-icedtea'
     java_full_name = java_name+'-'+java_version
@@ -51,12 +51,13 @@ class IcedTea(AutoPackageRecipe):
         centos_site = 'http://dev.centos.org/centos/5/testing'
 
         # For cooking
-        rev=r.version.split('+')[1][1:]
-        r.macros.openjdk_snapshot = 'b24'
+        icedtea_version=r.version.split('+')[2]
+        r.macros.openjdk_snapshot = r.version.split('+')[1]
         openjdk_src = 'icedtea-java7_7~%(openjdk_snapshot)s-1.5.orig'
 
-        r.addMercurialSnapshot(
-            'http://icedtea.classpath.org/hg/icedtea', tag=rev,
+        r.macros.archive_version = r.version.split('+')[2]
+        r.addArchive(
+            'http://icedtea.classpath.org/download/source/',
             use=(not Use.bootstrap)
         )
         r.addArchive(
@@ -136,6 +137,9 @@ class IcedTea(AutoPackageRecipe):
                           '-L%(libdir)s/xulrunner -lgtkembedmoz -lxpcom -lplds4 -lplc4 '
                           '-lnspr4 -lpthread -ldl -Wl,--rpath,%(libdir)s/xulrunner')
 
+            # configure/make complains about it
+            r.Environment('JAVA_HOME', '')
+
             r.Configure(
                 ' --with-icedtea'
                 ' --with-openjdk-src-zip=openjdk-%(openjdk_snapshot)s.zip'
@@ -165,14 +169,13 @@ class IcedTea(AutoPackageRecipe):
                      contents = 'export JAVA_HOME="%s"' % r.jdk_home)
             r.Create('%(sysconfdir)s/profile.d/icedtea-jdk.csh', mode=0755,
                      contents = 'setenv JAVA_HOME "%s"' % r.jdk_home)
+        
+            # move man pages to a better location...
+            r.Move(r.java_home+'/man/*', '%(mandir)s/')
 
         # Split into icedtea-(jre|jdk):runtime
-
         r.ComponentSpec('icedtea-jre:runtime', r.jre_home+'/')
         r.ComponentSpec('icedtea-jdk:runtime', r.java_home+'/')
-
-        # move man pages to a better location...
-        r.Move(r.java_home+'/man/*', '%(mandir)s/')
 
         # move docs (as we want icedtea empty)
         r.PackageSpec('icedtea-jre', '%(mandir)s/.*')
