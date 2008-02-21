@@ -1,0 +1,53 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class UnixODBC(AutoPackageRecipe):
+    name = 'unixODBC'
+    version = '2.2.11'
+
+    buildRequires = [ 'bison:runtime', 'flex:runtime', 'fontconfig:devel',
+                      'freetype:devel', 'libjpeg:devel', 'libpng:devel',
+                      'libstdc++:devel', 'ncurses:devel', 'qt:devel',
+                      'readline:devel', 'zlib:devel', 'file:runtime',
+                      'libICE:devel', 'libSM:devel', 'libX11:devel',
+                      'libXcursor:devel', 'libXext:devel', 'libXft:devel',
+                      'libXi:devel', 'libXinerama:devellib', 'libXt:devel',
+                      'libXrandr:devel', 'libXrender:devel', 'nas:devel',
+                      'autoconf:runtime', 'automake:runtime',
+                      'libtool:runtime' ]
+
+    def unpack(r):
+        r.addArchive('http://www.unixodbc.org/%(name)s-%(version)s.tar.gz')
+        # RPL-645. pulled from Fedora CVS (rev. 1.1)
+        r.addPatch('unixODBC-2.2.11-symbols.patch')
+
+    def configure(r):
+        # the libtool version included with 2.2.11 is
+        # ancient & causes problems building the Qt parts
+        r.Run('libtoolize -c -f --ltdl')
+        r.Automake(autoMakeArgs='--add-missing --copy --force-missing')
+        r.Automake(dir='libltdl')
+        r.Run('cp -v libltdl/install-sh .')
+        r.Configure('--x-includes=%(includedir)s --x-libraries=%(libdir)s')
+
+    def make(r):
+        r.Make('all')
+
+    def policy(r):
+
+        r.AutoDoc(exceptions='/.+/')
+
+        for dir in (
+            'AdministratorManual', 'UserManual', 'lst',
+            'ProgrammerManual', 'ProgrammerManual/Tutorial'
+        ):
+            r.Doc('doc/'+dir+'/*.{html,gif,vsd,sql,css}', dir=dir)
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/ODBCDataSources')
+        r.PackageSpec('%(name)s-qt',
+            '%(libdir)s/libodbcinstQ\..*'
+        )
+        r.Requires('%(name)s-qt:lib', '%(bindir)s/ODBCConfig')
