@@ -1,12 +1,12 @@
 #
-# Copyright (c) 2005-2008 rPath, Inc.
+# Copyright (c) 2005-2007 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class FoomaticDbEngine(CPackageRecipe):
     name = 'foomatic-db-engine'
-    version = '3.0_20071218'
+    version = '3.0_20070618'
 
     buildRequires = [ 'foomatic-db:data', 'foomatic-filters:runtime',
         'perl:runtime', 'perl:lib', 'curl:devel', 'a2ps:runtime',
@@ -15,21 +15,9 @@ class FoomaticDbEngine(CPackageRecipe):
         'findutils:runtime', ]
 
     def setup(r):
-        r.macros.archive_version = r.version.replace('_', '-')
-        r.addArchive('http://www.linuxprinting.org/download/foomatic/')
+        r.macros.upver = r.version.replace('_', '-')
+        r.addArchive('http://www.linuxprinting.org/download/foomatic/%(name)s-%(upver)s.tar.gz')
         r.addPatch('perl-module-3.0.1.diff')
-        r.Replace(
-            'packagename=foomatic-filters-ppds-.date ..Y.m.d.;',
-            'packagename=foomatic-filters-ppds;',
-            'Makefile.in'
-        )
-        r.Replace(
-            '^LIBSEARCHPATH=.*',
-            'LIBSEARCHPATH=%(libdir)s:%(libexecdir)s',
-            'configure'
-        )
-
-        r.Remove('debian', recursive=True)
 
         r.disableParallelMake()
         r.macros.ldflags += ' -lxml2'
@@ -51,8 +39,11 @@ class FoomaticDbEngine(CPackageRecipe):
                   'lib/Foomatic/Defaults.pm')
 
         r.Make('filters-ppds')
+        # this is ugly, but we can't use any shell expansion because conary
+        # passes the dir arg to cd with '' not ""
+        import time
         r.Run('./install -d %(destdir)s -p %(prefix)s -z',
-              dir='foomatic-filters-ppds')
+              dir='foomatic-filters-ppds-%s' % time.strftime('%Y%m%d') )
 
         # somehow the destdir gets embedded twice for these four perl files, but
         # the makefile is 991 lines long to install only these four so simply
@@ -60,9 +51,10 @@ class FoomaticDbEngine(CPackageRecipe):
         r.Run('cd %(destdir)s/%(destdir)s ; for x in `find . -type f` ; do mkdir -p %(destdir)s/`dirname $x`; mv $x %(destdir)s/`dirname $x` ; done ; cd ; rm -rf %(destdir)s/%(destdir)s')
 
         # Provided by foomatic-filters
-        r.Remove('%(bindir)s/foomatic-rip')
+        r.Remove('%(bindir)s/foomatic-*')
+        r.Remove('%(mandir)s/man1/foomatic-*.1')
 
         # Provided by hplip
         r.Remove('%(datadir)s/ppd/HP/', recursive=True)
 
-        r.ComponentSpec('runtime', '%(libdir)s/cups/')
+        r.Install('foomatic-ppdfile', '%(bindir)s/')
