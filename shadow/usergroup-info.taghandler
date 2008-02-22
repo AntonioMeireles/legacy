@@ -64,26 +64,44 @@ while read tags; do
             else
                 UIDARG="-r"
             fi
-            useradd \
-                ${UIDARG} \
-                ${GROUPARG} \
-                -M -d "${HOMEDIR}" \
+            ADDARGS=("-M" "-d" "${HOMEDIR}" \
                 ${COMMENT:+-c "${COMMENT}"} \
                 ${SHELL:+-s "${SHELL}"} \
                 ${PASSWORD:+-p "${PASSWORD}"} \
-                $USER >/dev/null 2>&1
-            if [ $? -eq 9 -a -z "$GROUPARG" ] ; then
+                $USER)
+            useradd \
+                ${UIDARG} \
+                ${GROUPARG} \
+                "${ADDARGS[@]}" >/dev/null 2>&1
+            RETCODE=$?
+            if [ ${RETCODE} -eq 4 ] ; then
+                # 4 uid already in use - allocate new one
+                useradd \
+                    ${GROUPARG} \
+                    "${ADDARGS[@]}" >/dev/null 2>&1
+                RETCODE=$?
+                # if got 9 here, gonna get 4 again first and then 0, below
+            fi
+            if [ ${RETCODE} -eq 9 -a -z "$GROUPARG" ] ; then
                 # 9 can be user *or* group already exists, so if we did
                 # not specify a group and got exit code 9, try again
                 # with the group specified explictly
                 useradd \
                     ${UIDARG} \
                     -g ${GROUP:-$USER} \
-                    -M -d "${HOMEDIR}" \
-                    ${COMMENT:+-c "${COMMENT}"} \
-                    ${SHELL:+-s "${SHELL}"} \
-                    ${PASSWORD:+-p "${PASSWORD}"} \
-                    $USER >/dev/null 2>&1
+                    "${ADDARGS[@]}" >/dev/null 2>&1
+                RETCODE=$?
+                if [ ${RETCODE} -eq 4 ] ; then
+                    # 4 uid already in use - allocate new one
+                    useradd \
+                        -g ${GROUP:-$USER} \
+                        "${ADDARGS[@]}" >/dev/null 2>&1
+                    RETCODE=$?
+                fi
+            fi
+            if [ ${RETCODE} -ne 0 -a ${RETCODE} -ne 9 ] ; then
+              echo "Warning: useradd error, exit code ${RETCODE}, probably"\
+                   "user is not created"
             fi
             if [ -n "$SUPPLEMENTAL" ] ; then
                 GRPS=$(id -Gn ${USER}) || :
