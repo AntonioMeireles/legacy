@@ -1,4 +1,4 @@
-#!/bin/bash
+#!%(essentialbindir)s/bash
 #
 # named           This shell script takes care of starting and stopping
 #                 named (BIND DNS server).
@@ -9,10 +9,10 @@
 # probe: true
 
 # Source function library.
-. /etc/rc.d/init.d/functions
+. %(sysconfdir)s/rc.d/init.d/functions
 
 # Source networking configuration.
-[ -r /etc/sysconfig/network ] && . /etc/sysconfig/network
+[ -r %(sysconfdir)s/sysconfig/network ] && . %(sysconfdir)s/sysconfig/network
 
 RETVAL=0
 prog="named"
@@ -20,42 +20,42 @@ prog="named"
 # Check that networking is up.
 [ "${NETWORKING}" = "no" ] && exit 0
 
-[ -r /etc/sysconfig/named ] && . /etc/sysconfig/named
+[ -r %(sysconfdir)s/sysconfig/named ] && . %(sysconfdir)s/sysconfig/named
 
-[ -x /usr/sbin/named ] || exit 0 
+[ -x %(sbindir)s/named ] || exit 0 
 
-[ -r ${ROOTDIR}/etc/named.conf ] || exit 0 
+[ -r ${ROOTDIR}%(sysconfdir)s/named.conf ] || exit 0 
 
 
 start() {
         # Start daemons.
-	if [ -n "`/sbin/pidof named`" ]; then
+	if [ -n "`%(essentialsbindir)s/pidof named`" ]; then
 		echo -n $"$prog: already running"
 		return 1
 	fi
 	# Set up key if necessary
-	if grep '@KEY@' /etc/rndc.key &>/dev/null ; then
-		sed -i "s/@KEY@/$(/usr/sbin/dns-keygen)/" /etc/rndc.key
+	if grep '@KEY@' %(sysconfdir)s/rndc.key &>/dev/null ; then
+		sed -i "s/@KEY@/$(%(sbindir)s/dns-keygen)/" %(sysconfdir)s/rndc.key
 	fi
         echo -n $"Starting $prog: "
 	if [ -n "${ROOTDIR}" -a "x${ROOTDIR}" != "x/" ]; then
 		OPTIONS="${OPTIONS} -t ${ROOTDIR}"
 	fi
-	daemon /usr/sbin/named -u named ${OPTIONS}
+	daemon %(sbindir)s/named -u named ${OPTIONS}
 	RETVAL=$?
- 	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/named 
+ 	[ $RETVAL -eq 0 ] && touch %(localstatedir)s/lock/subsys/named 
         echo
 	return $RETVAL
 }
 stop() {
         # Stop daemons.
         echo -n $"Stopping $prog: "
-	/usr/sbin/rndc stop
+	%(sbindir)s/rndc stop
 	RETVAL=$?
-	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/named || {
+	[ $RETVAL -eq 0 ] && rm -f %(localstatedir)s/lock/subsys/named || {
         	killproc named
 		RETVAL=$?
-		[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/named
+		[ $RETVAL -eq 0 ] && rm -f %(localstatedir)s/lock/subsys/named
 		echo
 		return $RETVAL 
 	}
@@ -64,12 +64,12 @@ stop() {
 	return $RETVAL
 }
 status() {
-	if [ -z "`/sbin/pidof named`" ]; then
+	if [ -z "`%(essentialsbindir)s/pidof named`" ]; then
 	    # not running, start it
 	    echo $"$prog not running"
 	    return 1
 	fi
-	/usr/sbin/rndc status
+	%(sbindir)s/rndc status
 	return $?
 }	
 restart() {
@@ -80,12 +80,12 @@ restart() {
 }	
 reload() {
         echo -n $"Reloading $prog: "
-	if [ -z "`/sbin/pidof named`" ]; then
+	if [ -z "`%(essentialsbindir)s/pidof named`" ]; then
 	    # not running, start it
 	    failure $"$prog reload"
 	    start
 	fi
-	/usr/sbin/rndc reload >/dev/null 2>&1 || /usr/bin/kill -HUP `/sbin/pidof -o %PPID named`
+	%(sbindir)s/rndc reload >/dev/null 2>&1 || %(essentialbindir)s/kill -HUP `%(essentialsbindir)s/pidof -o %%PPID named`
 	[ "$?" -eq 0 ] && success $"$prog reload" || failure $"$prog reload"
         echo
 	return $?
@@ -93,7 +93,7 @@ reload() {
 probe() {
 	# named knows how to reload intelligently; we don't want linuxconf
 	# to offer to restart every time
-	/usr/sbin/rndc reload >/dev/null 2>&1 || echo start
+	%(sbindir)s/rndc reload >/dev/null 2>&1 || echo start
 	return $?
 }  
 
@@ -112,7 +112,7 @@ case "$1" in
 		restart
 		;;
 	condrestart)
-		if [ -e /var/lock/subsys/named ]; then restart; fi
+		if [ -e %(localstatedir)s/lock/subsys/named ]; then restart; fi
 		;;
 	reload)
 		reload
