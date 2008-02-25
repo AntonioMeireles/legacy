@@ -1,8 +1,43 @@
+Linux Infrared Remote Control drivers (http://lirc.org/)
+
+Signed-off-by: Jarod Wilson <jwilson@redhat.com>
+
+ drivers/input/Kconfig                 |    2 +
+ drivers/input/Makefile                |    1 +
+ drivers/input/lirc/Kconfig            |  127 +++
+ drivers/input/lirc/Makefile           |   24 +
+ drivers/input/lirc/commandir.c        | 1009 +++++++++++++++++++++++
+ drivers/input/lirc/commandir.h        |   41 +
+ drivers/input/lirc/kcompat.h          |  150 ++++
+ drivers/input/lirc/lirc.h             |  101 +++
+ drivers/input/lirc/lirc_atiusb.c      | 1326 ++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_bt829.c       |  393 +++++++++
+ drivers/input/lirc/lirc_cmdir.c       |  605 ++++++++++++++
+ drivers/input/lirc/lirc_cmdir.h       |   27 +
+ drivers/input/lirc/lirc_dev.c         |  827 +++++++++++++++++++
+ drivers/input/lirc/lirc_dev.h         |  264 ++++++
+ drivers/input/lirc/lirc_i2c.c         |  671 +++++++++++++++
+ drivers/input/lirc/lirc_igorplugusb.c |  624 ++++++++++++++
+ drivers/input/lirc/lirc_imon.c        | 1165 +++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_it87.c        | 1012 +++++++++++++++++++++++
+ drivers/input/lirc/lirc_it87.h        |  116 +++
+ drivers/input/lirc/lirc_mceusb.c      |  890 ++++++++++++++++++++
+ drivers/input/lirc/lirc_mceusb2.c     | 1042 ++++++++++++++++++++++++
+ drivers/input/lirc/lirc_parallel.c    |  745 +++++++++++++++++
+ drivers/input/lirc/lirc_parallel.h    |   26 +
+ drivers/input/lirc/lirc_pvr150.c      | 1431 +++++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_sasem.c       |  971 ++++++++++++++++++++++
+ drivers/input/lirc/lirc_serial.c      | 1348 +++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_sir.c         | 1323 ++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_streamzap.c   |  810 +++++++++++++++++++
+ drivers/input/lirc/lirc_ttusbir.c     |  393 +++++++++
+ 29 files changed, 17464 insertions(+), 0 deletions(-)
+
 diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
-index 2d87357..61fd0ca 100644
+index 63512d9..de4b170 100644
 --- a/drivers/input/Kconfig
 +++ b/drivers/input/Kconfig
-@@ -183,5 +183,7 @@ source "drivers/input/gameport/Kconfig"
+@@ -161,5 +161,7 @@ source "drivers/input/gameport/Kconfig"
  
  endmenu
  
@@ -11,15 +46,14 @@ index 2d87357..61fd0ca 100644
  endmenu
  
 diff --git a/drivers/input/Makefile b/drivers/input/Makefile
-index 15eb752..195d342 100644
+index 99af903..78b0420 100644
 --- a/drivers/input/Makefile
 +++ b/drivers/input/Makefile
-@@ -22,4 +22,4 @@ obj-$(CONFIG_INPUT_JOYSTICK)	+= joystick/
- obj-$(CONFIG_INPUT_TABLET)	+= tablet/
+@@ -22,3 +22,4 @@ obj-$(CONFIG_INPUT_TABLET)	+= tablet/
  obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= touchscreen/
  obj-$(CONFIG_INPUT_MISC)	+= misc/
--
-+obj-$(CONFIG_INPUT_LIRC)	+= lirc/
+ 
++obj-$(CONFIG_INPUT_LIRC)       += lirc/
 diff --git a/drivers/input/lirc/Kconfig b/drivers/input/lirc/Kconfig
 new file mode 100644
 index 0000000..138e58a
@@ -185,10 +219,10 @@ index 0000000..71124ef
 +obj-$(CONFIG_LIRC_TTUSBIR)	+= lirc_ttusbir.o
 diff --git a/drivers/input/lirc/commandir.c b/drivers/input/lirc/commandir.c
 new file mode 100644
-index 0000000..32f46aa
+index 0000000..a49d996
 --- /dev/null
 +++ b/drivers/input/lirc/commandir.c
-@@ -0,0 +1,999 @@
+@@ -0,0 +1,1009 @@
 +
 +/*
 + *
@@ -275,8 +309,7 @@ index 0000000..32f46aa
 +int debug_commandir;
 +
 +/* Structure to hold all of our device specific stuff */
-+struct usb_skel
-+{
++struct usb_skel {
 +	struct usb_device *udev; /* the usb device for this device */
 +	struct usb_interface *interface; /* the interface for this device */
 +	unsigned char *bulk_in_buffer; /* the buffer to receive data */
@@ -447,7 +480,8 @@ index 0000000..32f46aa
 +
 +	/* check whether minor already includes base */
 +	minor = interface->minor;
-+	if (minor >= USB_CMDIR_MINOR_BASE) minor = minor-USB_CMDIR_MINOR_BASE;
++	if (minor >= USB_CMDIR_MINOR_BASE)
++		minor = minor-USB_CMDIR_MINOR_BASE;
 +
 +	/* let the user know what node this device is now attached to */
 +	info("CommandIR USB device now attached to commandir%d", minor);
@@ -461,6 +495,7 @@ index 0000000..32f46aa
 +		kref_put(&dev->kref, cmdir_delete);
 +	return retval;
 +}
++
 +
 +static void cmdir_disconnect(struct usb_interface *interface)
 +{
@@ -482,7 +517,8 @@ index 0000000..32f46aa
 +		kref_put(&dev->kref, cmdir_delete);
 +
 +	/* check whether minor already includes base */
-+	if (minor >= USB_CMDIR_MINOR_BASE) minor = minor-USB_CMDIR_MINOR_BASE;
++	if (minor >= USB_CMDIR_MINOR_BASE)
++		minor = minor-USB_CMDIR_MINOR_BASE;
 +
 +	info("CommandIR #%d now disconnected", minor);
 +
@@ -491,7 +527,8 @@ index 0000000..32f46aa
 +		/* decrement until find next valid device */
 +		while (rx_device > 0) {
 +			rx_device--;
-+			if (cmdir_check(rx_device) == 0) break;
++			if (cmdir_check(rx_device) == 0)
++				break;
 +		}
 +		if (minor > 0)
 +			info("Active Receiver is on CommandIR #%d", rx_device);
@@ -509,7 +546,7 @@ index 0000000..32f46aa
 +		return -ENODEV;
 +
 +	/* decrement the count on our device */
-+	kref_put(&dev->kref, cmdir_delete);
++		kref_put(&dev->kref, cmdir_delete);
 +	return retval;
 +}
 +
@@ -595,19 +632,22 @@ index 0000000..32f46aa
 +	}
 +	if (transmitters & (multiplier*0x02)) {
 +		cmdir_var[next_pos] = '2';
-+		if (next_comma > 0) cmdir_var[next_pos-2] = ',';
++		if (next_comma > 0)
++			cmdir_var[next_pos-2] = ',';
 +		next_pos += 3;
 +		next_comma++;
 +	}
 +	if (transmitters & (multiplier*0x04)) {
 +		cmdir_var[next_pos] = '3';
-+		if (next_comma > 0) cmdir_var[next_pos-2] = ',';
++		if (next_comma > 0)
++			cmdir_var[next_pos-2] = ',';
 +		next_pos += 3;
 +		next_comma++;
 +	}
 +	if (transmitters & (multiplier*0x08)) {
 +		cmdir_var[next_pos] = '4';
-+		if (next_comma > 0) cmdir_var[next_pos-2] = ',';
++		if (next_comma > 0)
++			cmdir_var[next_pos-2] = ',';
 +		next_pos += 3;
 +		next_comma++;
 +	}
@@ -905,7 +945,8 @@ index 0000000..32f46aa
 +			/* start it up: */
 +
 +			last_sent = nexttosend - 1;
-+			if (last_sent < 0) last_sent = QUEUELENGTH - 1;
++			if (last_sent < 0)
++				last_sent = QUEUELENGTH - 1;
 +			/* Final check - is it TIME to send this packet yet? */
 +			/* if (wait_to_tx(waitusecs[last_sent]) == 0) { */
 +			/* always send if there's room,
@@ -966,8 +1007,10 @@ index 0000000..32f46aa
 +	 * for non-zero last_tx's. */
 +	int wait_until_sec = 0, wait_until_usec = 0;
 +	int now_sec = 0, now_usec = 0;
-+	if (debug_commandir == 1) printk(KERN_INFO "waittotx(%d)\n", usecs);
-+	if (usecs == 0) return 0;
++	if (debug_commandir == 1)
++		printk(KERN_INFO "waittotx(%d)\n", usecs);
++	if (usecs == 0)
++		return 0;
 +
 +	if (!(last_tx_sec == 0 && last_tx_usec == 0)) {
 +		/* calculate wait time: */
@@ -1166,7 +1209,8 @@ index 0000000..32f46aa
 +	struct usb_skel *dev;
 +	dev = (struct usb_skel *)urb->context;
 +	send_status = SEND_IDLE;
-+	if (debug_commandir == 1) printk(KERN_INFO "callback()\n");
++	if (debug_commandir == 1)
++		printk(KERN_INFO "callback()\n");
 +	/* free up our allocated buffer */
 +
 +	usb_buffer_free(urb->dev, urb->transfer_buffer_length,
@@ -1237,11 +1281,11 @@ index 0000000..90a297f
 +
 diff --git a/drivers/input/lirc/kcompat.h b/drivers/input/lirc/kcompat.h
 new file mode 100644
-index 0000000..545e9c9
+index 0000000..7792a88
 --- /dev/null
 +++ b/drivers/input/lirc/kcompat.h
-@@ -0,0 +1,107 @@
-+/*      $Id: kcompat.h,v 5.30 2007/01/02 21:45:08 lirc Exp $      */
+@@ -0,0 +1,150 @@
++/*      $Id: kcompat.h,v 5.32 2007/12/15 17:28:00 lirc Exp $      */
 +
 +#ifndef _KCOMPAT_H
 +#define _KCOMPAT_H
@@ -1250,14 +1294,46 @@ index 0000000..545e9c9
 +
 +#define LIRC_THIS_MODULE(x)
 +
++
 +#include <linux/device.h>
 +
 +
 +#define LIRC_HAVE_SYSFS
 +
++
++
 +#define lirc_class_device_create class_device_create
 +#define LIRC_DEVFS_PREFIX
 +
++
++typedef struct class lirc_class_t;
++
++
++
++#ifndef LIRC_DEVFS_PREFIX
++#define LIRC_DEVFS_PREFIX "usb/"
++#endif
++
++
++#include <linux/moduleparam.h>
++
++/* DevFS header */
++#if defined(LIRC_HAVE_DEVFS)
++#include <linux/devfs_fs_kernel.h>
++#endif
++
++
++
++#define KERNEL_2_5
++
++/*
++ * We still are using MOD_INC_USE_COUNT/MOD_DEC_USE_COUNT in the set_use_inc
++ * function of all modules for 2.4 kernel compatibility.
++ *
++ * For 2.6 kernels reference counting is done in lirc_dev by
++ * try_module_get()/module_put() because the old approach is racy.
++ *
++ */
 +#ifdef MOD_INC_USE_COUNT
 +#undef MOD_INC_USE_COUNT
 +#endif
@@ -1268,29 +1344,27 @@ index 0000000..545e9c9
 +#endif
 +#define MOD_DEC_USE_COUNT
 +
-+typedef struct class lirc_class_t;
++#ifdef EXPORT_NO_SYMBOLS
++#undef EXPORT_NO_SYMBOLS
++#endif
++#define EXPORT_NO_SYMBOLS
 +
 +
-+#ifndef LIRC_DEVFS_PREFIX
-+#define LIRC_DEVFS_PREFIX "usb/"
++#ifndef MODULE_LICENSE
++#define MODULE_LICENSE(x)
 +#endif
 +
-+/* DevFS header */
-+#if defined(LIRC_HAVE_DEVFS)
-+#include <linux/devfs_fs_kernel.h>
++#ifndef MODULE_PARM_DESC
++#define MODULE_PARM_DESC(x, y)
 +#endif
 +
-+#ifndef LIRC_HAVE_SYSFS
-+#define class_destroy(x) do { } while (0)
-+#define class_create(x, y) NULL
-+#define class_device_destroy(x, y) do { } while (0)
-+#define lirc_class_device_create(x, y, z, xx, yy, zz) 0
-+#define IS_ERR(x) 0
-+typedef struct class_simple
-+{
-+	int notused;
-+} lirc_class_t;
-+#endif /* No SYSFS */
++#ifndef MODULE_ALIAS_CHARDEV_MAJOR
++#define MODULE_ALIAS_CHARDEV_MAJOR(x)
++#endif
++
++#ifndef MODULE_DEVICE_TABLE
++#define MODULE_DEVICE_TABLE(x, y)
++#endif
 +
 +#include <linux/interrupt.h>
 +#ifndef IRQ_RETVAL
@@ -1311,6 +1385,9 @@ index 0000000..545e9c9
 +#endif
 +
 +
++#if 0
++#endif /* kernel >= 2.4.0 */
++
 +/*************************** I2C specific *****************************/
 +#include <linux/i2c.h>
 +
@@ -1321,14 +1398,15 @@ index 0000000..545e9c9
 +#error "********************************************************"
 +#endif
 +
++
 +/* removed in 2.6.14 */
 +#ifndef I2C_ALGO_BIT
-+#define I2C_ALGO_BIT 0
++#   define I2C_ALGO_BIT 0
 +#endif
 +
 +/* removed in 2.6.16 */
 +#ifndef I2C_DRIVERID_EXP3
-+#define I2C_DRIVERID_EXP3 0xf003
++#  define I2C_DRIVERID_EXP3 0xf003
 +#endif
 +
 +/*************************** USB specific *****************************/
@@ -1347,19 +1425,28 @@ index 0000000..545e9c9
 +/******************************* pm.h *********************************/
 +
 +
++/*************************** interrupt.h ******************************/
++/* added in 2.6.18, old defines removed in 2.6.24 */
++#ifndef IRQF_DISABLED
++#define IRQF_DISABLED SA_INTERRUPT
++#endif
++#ifndef IRQF_SHARED
++#define IRQF_SHARED SA_SHIRQ
++#endif
++
 +#endif /* _KCOMPAT_H */
 diff --git a/drivers/input/lirc/lirc.h b/drivers/input/lirc/lirc.h
 new file mode 100644
-index 0000000..cbf8c9a
+index 0000000..ee76bc9
 --- /dev/null
 +++ b/drivers/input/lirc/lirc.h
 @@ -0,0 +1,101 @@
-+/*      $Id: lirc.h,v 5.12 2007/04/14 15:57:21 lirc Exp $      */
++/*      $Id: lirc.h,v 5.13 2007/09/27 19:47:18 lirc Exp $      */
 +
 +#ifndef _LINUX_LIRC_H
 +#define _LINUX_LIRC_H
 +
-+#include <linux/types.h>
++#include <asm/types.h>
 +#include <linux/ioctl.h>
 +
 +#define PULSE_BIT  0x01000000
@@ -1457,10 +1544,10 @@ index 0000000..cbf8c9a
 +#endif
 diff --git a/drivers/input/lirc/lirc_atiusb.c b/drivers/input/lirc/lirc_atiusb.c
 new file mode 100644
-index 0000000..ba1e933
+index 0000000..9a78d13
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_atiusb.c
-@@ -0,0 +1,1314 @@
+@@ -0,0 +1,1326 @@
 +/* lirc_atiusb - USB remote support for LIRC
 + * (currently only supports X10 USB remotes)
 + * (supports ATI Remote Wonder and ATI Remote Wonder II, too)
@@ -1479,7 +1566,7 @@ index 0000000..ba1e933
 + *   Vassilis Virvilis <vasvir@iit.demokritos.gr> 2006
 + *      reworked the patch for lirc submission
 + *
-+ * $Id: lirc_atiusb.c,v 1.63 2007/07/22 07:37:30 lirc Exp $
++ * $Id: lirc_atiusb.c,v 1.67 2007/11/08 21:27:28 lirc Exp $
 + */
 +
 +/*
@@ -1521,7 +1608,7 @@ index 0000000..ba1e933
 +#include "kcompat.h"
 +#include "lirc_dev.h"
 +
-+#define DRIVER_VERSION		"$Revision: 1.63 $"
++#define DRIVER_VERSION		"$Revision: 1.67 $"
 +#define DRIVER_AUTHOR		"Paul Miller <pmiller9@users.sourceforge.net>"
 +#define DRIVER_DESC		"USB remote driver for LIRC"
 +#define DRIVER_NAME		"lirc_atiusb"
@@ -2007,7 +2094,8 @@ index 0000000..ba1e933
 +	mode = buf[0];
 +
 +	/* Squash the mode indicator if unique wasn't set non-zero */
-+	if (!unique) buf[0] = 0;
++	if (!unique)
++		buf[0] = 0;
 +
 +	if (iep->ep->bEndpointAddress == EP_KEYS_ADDR) {
 +		/* ignore mouse navigation indicator key and
@@ -2015,7 +2103,8 @@ index 0000000..ba1e933
 +		if (buf[2] == RW2_MODENAV_KEYCODE) {
 +			if (emit_modekeys >= 2) /* emit raw */
 +				buf[0] = mode;
-+			else if (emit_modekeys == 1) { /* translate */
++			else if (emit_modekeys == 1) {
++				/* translate */
 +				buf[0] = mode;
 +				if (ir->mode != mode) {
 +					buf[1] = 0x03;
@@ -2215,7 +2304,8 @@ index 0000000..ba1e933
 +{
 +	struct irctl *ir;
 +	dprintk(DRIVER_NAME ": free_in_endpt(%p, %d)\n", iep, mem_failure);
-+	if (!iep) return;
++	if (!iep)
++		return;
 +
 +	ir = iep->ir;
 +	if (!ir) {
@@ -2272,23 +2362,27 @@ index 0000000..ba1e933
 +
 +	mem_failure = 0;
 +	iep = kmalloc(sizeof(*iep), GFP_KERNEL);
-+	if (!iep)
++	if (!iep) {
 +		mem_failure = 1;
-+	else {
-+		memset(iep, 0, sizeof(*iep));
-+		iep->ir = ir;
-+		iep->ep = ep;
-+		iep->len = len;
-+
-+		iep->buf = usb_buffer_alloc(dev, len, GFP_ATOMIC, &iep->dma);
-+		if (!iep->buf)
-+			mem_failure = 2;
-+		else {
-+			iep->urb = usb_alloc_urb(0, GFP_KERNEL);
-+			if (!iep->urb)
-+				mem_failure = 3;
-+		}
++		goto new_in_endpt_failure_check;
 +	}
++	memset(iep, 0, sizeof(*iep));
++	iep->ir = ir;
++	iep->ep = ep;
++	iep->len = len;
++
++	iep->buf = usb_buffer_alloc(dev, len, GFP_ATOMIC, &iep->dma);
++	if (!iep->buf) {
++		mem_failure = 2;
++		goto new_in_endpt_failure_check;
++	}
++
++	iep->urb = usb_alloc_urb(0, GFP_KERNEL);
++	if (!iep->urb)
++		mem_failure = 3;
++
++new_in_endpt_failure_check:
++
 +	if (mem_failure) {
 +		free_in_endpt(iep, mem_failure);
 +		printk(DRIVER_NAME "[%d]: ep=0x%x out of memory (code=%d)\n",
@@ -2437,7 +2531,6 @@ index 0000000..ba1e933
 +{
 +	struct irctl *ir;
 +	struct lirc_plugin *plugin;
-+	struct lirc_buffer *rbuf;
 +	int type, devnum;
 +	int mem_failure;
 +
@@ -2465,53 +2558,59 @@ index 0000000..ba1e933
 +	/* allocate kernel memory */
 +	mem_failure = 0;
 +	ir = kmalloc(sizeof(*ir), GFP_KERNEL);
-+	if (!ir)
++	if (!ir) {
 +		mem_failure = 1;
-+	else {
-+		/* at this stage we cannot use the macro [DE]CODE_LENGTH: ir
-+		 * is not yet setup */
-+		const int dclen = decode_length[type];
-+		memset(ir, 0, sizeof(*ir));
-+		/* add this infrared remote struct to remote_list, keeping track
-+		 * of the number of drivers registered. */
-+		dprintk(DRIVER_NAME "[%d]: adding remote to list\n", devnum);
-+		list_add_tail(&ir->remote_list_link, &remote_list);
-+		ir->dev_refcount = 1;
-+
-+		plugin = kmalloc(sizeof(*plugin), GFP_KERNEL);
-+		if (!plugin)
-+			mem_failure = 2;
-+		else {
-+			rbuf = kmalloc(sizeof(*rbuf), GFP_KERNEL);
-+			if (!rbuf)
-+				mem_failure = 3;
-+			else if (lirc_buffer_init(rbuf, dclen, 1))
-+				mem_failure = 4;
-+			else {
-+				memset(plugin, 0, sizeof(*plugin));
-+				strcpy(plugin->name, DRIVER_NAME " ");
-+				plugin->minor = -1;
-+				plugin->code_length = dclen * 8;
-+				plugin->features = LIRC_CAN_REC_LIRCCODE;
-+				plugin->data = ir;
-+				plugin->rbuf = rbuf;
-+				plugin->set_use_inc = &set_use_inc;
-+				plugin->set_use_dec = &set_use_dec;
-+#ifdef LIRC_HAVE_SYSFS
-+				plugin->dev = &dev->dev;
-+#endif
-+				plugin->owner = THIS_MODULE;
-+				ir->usbdev = dev;
-+				ir->p = plugin;
-+				ir->remote_type = type;
-+				ir->devnum = devnum;
-+				ir->mode = RW2_NULL_MODE;
-+
-+				init_MUTEX(&ir->lock);
-+				INIT_LIST_HEAD(&ir->iep_listhead);
-+			}
-+		}
++		goto new_irctl_failure_check;
 +	}
++
++	/* at this stage we cannot use the macro [DE]CODE_LENGTH: ir
++	 * is not yet setup */
++	const int dclen = decode_length[type];
++	memset(ir, 0, sizeof(*ir));
++	/* add this infrared remote struct to remote_list, keeping track
++	 * of the number of drivers registered. */
++	dprintk(DRIVER_NAME "[%d]: adding remote to list\n", devnum);
++	list_add_tail(&ir->remote_list_link, &remote_list);
++	ir->dev_refcount = 1;
++
++	plugin = kmalloc(sizeof(*plugin), GFP_KERNEL);
++	if (!plugin) {
++		mem_failure = 2;
++		goto new_irctl_failure_check;
++	}
++
++	memset(plugin, 0, sizeof(*plugin));
++	ir->p = plugin;
++	plugin->rbuf = kmalloc(sizeof(*(plugin->rbuf)), GFP_KERNEL);
++	if (!plugin->rbuf) {
++		mem_failure = 3;
++		goto new_irctl_failure_check;
++	}
++
++	if (lirc_buffer_init(plugin->rbuf, dclen, 1)) {
++		mem_failure = 4;
++		goto new_irctl_failure_check;
++	}
++
++	strcpy(plugin->name, DRIVER_NAME " ");
++	plugin->minor = -1;
++	plugin->code_length = dclen * 8;
++	plugin->features = LIRC_CAN_REC_LIRCCODE;
++	plugin->data = ir;
++	plugin->set_use_inc = &set_use_inc;
++	plugin->set_use_dec = &set_use_dec;
++	plugin->dev = &dev->dev;
++	plugin->owner = THIS_MODULE;
++	ir->usbdev = dev;
++	ir->remote_type = type;
++	ir->devnum = devnum;
++	ir->mode = RW2_NULL_MODE;
++
++	init_MUTEX(&ir->lock);
++	INIT_LIST_HEAD(&ir->iep_listhead);
++
++new_irctl_failure_check:
++
 +	if (mem_failure) {
 +		free_irctl(ir, mem_failure);
 +		printk(DRIVER_NAME "[%d]: out of memory (code=%d)\n",
@@ -2697,7 +2796,7 @@ index 0000000..ba1e933
 +	       DRIVER_VERSION "\n");
 +	printk(DRIVER_NAME ": " DRIVER_AUTHOR "\n");
 +	dprintk(DRIVER_NAME ": debug mode enabled: "
-+		"$Id: lirc_atiusb.c,v 1.63 2007/07/22 07:37:30 lirc Exp $\n");
++		"$Id: lirc_atiusb.c,v 1.67 2007/11/08 21:27:28 lirc Exp $\n");
 +
 +	request_module("lirc_dev");
 +
@@ -2777,10 +2876,10 @@ index 0000000..ba1e933
 +EXPORT_NO_SYMBOLS;
 diff --git a/drivers/input/lirc/lirc_bt829.c b/drivers/input/lirc/lirc_bt829.c
 new file mode 100644
-index 0000000..8e57cd2
+index 0000000..d9e65e7
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_bt829.c
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,393 @@
 +/*
 + * Remote control driver for the TV-card based on bt829
 + *
@@ -2841,7 +2940,8 @@ index 0000000..8e57cd2
 +static int debug;
 +#define dprintk(fmt, args...)					\
 +	do {							\
-+		if (debug) printk(KERN_DEBUG fmt, ## args);	\
++		if (debug)					\
++			printk(KERN_DEBUG fmt, ## args);	\
 +	} while (0)
 +
 +static int atir_minor;
@@ -2921,9 +3021,7 @@ index 0000000..8e57cd2
 +	atir_plugin.add_to_buf  = atir_add_to_buf;
 +	atir_plugin.set_use_inc = atir_set_use_inc;
 +	atir_plugin.set_use_dec = atir_set_use_dec;
-+#ifdef LIRC_HAVE_SYSFS
 +	atir_plugin.dev         = &pdev->dev;
-+#endif
 +	atir_plugin.owner       = THIS_MODULE;
 +
 +	atir_minor = lirc_register_plugin(&atir_plugin);
@@ -3177,11 +3275,11 @@ index 0000000..8e57cd2
 + */
 diff --git a/drivers/input/lirc/lirc_cmdir.c b/drivers/input/lirc/lirc_cmdir.c
 new file mode 100644
-index 0000000..1f1ebe9
+index 0000000..6b906f1
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_cmdir.c
-@@ -0,0 +1,598 @@
-+/*      $Id: lirc_cmdir.c,v 1.7 2007/07/13 16:24:04 innovationone Exp $      */
+@@ -0,0 +1,605 @@
++/*      $Id: lirc_cmdir.c,v 1.8 2007/09/27 19:47:20 lirc Exp $      */
 +
 +/*
 + * lirc_cmdir.c - Driver for InnovationOne's COMMANDIR USB Transceiver
@@ -3231,11 +3329,11 @@ index 0000000..1f1ebe9
 +static int debug;
 +#define dprintk(fmt, args...)					\
 +	do {							\
-+		if (debug) printk(KERN_DEBUG fmt, ## args);	\
++		if (debug)					\
++			printk(KERN_DEBUG fmt, ## args);	\
 +	} while (0)
 +
-+struct lirc_cmdir
-+{
++struct lirc_cmdir {
 +	int features;
 +};
 +
@@ -3421,7 +3519,8 @@ index 0000000..1f1ebe9
 +	memcpy((unsigned char *)tmp_int_buffer, tmp_char_buffer,
 +						(num_data_values*4));
 +
-+	if (orig_rxbuffer[5] < 255) { /* space */
++	if (orig_rxbuffer[5] < 255) {
++		/* space */
 +		final_data_buffer[0] = get_time_value(last_mc_time,
 +						tmp_int_buffer[0],
 +						orig_rxbuffer[5]);
@@ -3589,7 +3688,8 @@ index 0000000..1f1ebe9
 +			num_bytes_already_sent += MAX_PACKET;
 +			time_elapse = 0;
 +
-+			if ((i + 1) < count) { /* still more to send: */
++			if ((i + 1) < count) {
++				/* still more to send: */
 +				cmdir_char[0] =	TX_HEADER;  /* Next Packet */
 +				cmdir_char[1] = signal_num;
 +				cmdir_cnt = 2; /* reset the count */
@@ -3624,6 +3724,10 @@ index 0000000..1f1ebe9
 +	dprintk("Real time elapsed was %u.\n", real_time_elapsed);
 +	if (real_time_elapsed < (total_time_elapsed - 1000))
 +		wait_this = total_time_elapsed - real_time_elapsed - 1000;
++
++#if 0 /* enable this for backwards compatibility */
++	safe_udelay(wait_this);
++#endif
 +
 +	return(n);
 +}
@@ -3757,6 +3861,7 @@ index 0000000..1f1ebe9
 +module_param(debug, bool, 0644);
 +MODULE_PARM_DESC(debug, "Enable debugging messages");
 +
++
 +int init_module(void)
 +{
 +	plugin.features = hardware.features;
@@ -3781,11 +3886,11 @@ index 0000000..1f1ebe9
 +
 diff --git a/drivers/input/lirc/lirc_cmdir.h b/drivers/input/lirc/lirc_cmdir.h
 new file mode 100644
-index 0000000..e8a22ae
+index 0000000..2de23da
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_cmdir.h
 @@ -0,0 +1,27 @@
-+/*      $Id: lirc_cmdir.h,v 1.2 2005/09/25 12:03:39 lirc Exp $      */
++/*      $Id: lirc_cmdir.h,v 1.3 2007/09/27 19:47:20 lirc Exp $      */
 +
 +/*
 + *   lirc_cmdir.h
@@ -3814,10 +3919,10 @@ index 0000000..e8a22ae
 +#endif
 diff --git a/drivers/input/lirc/lirc_dev.c b/drivers/input/lirc/lirc_dev.c
 new file mode 100644
-index 0000000..495cb70
+index 0000000..cbbc436
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.c
-@@ -0,0 +1,866 @@
+@@ -0,0 +1,827 @@
 +/*
 + * LIRC base driver
 + *
@@ -3837,7 +3942,7 @@ index 0000000..495cb70
 + *  along with this program; if not, write to the Free Software
 + *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 + *
-+ * $Id: lirc_dev.c,v 1.51 2007/02/13 06:45:15 lirc Exp $
++ * $Id: lirc_dev.c,v 1.55 2007/11/08 21:27:29 lirc Exp $
 + *
 + */
 +
@@ -3856,18 +3961,18 @@ index 0000000..495cb70
 +#include <linux/fs.h>
 +#include <linux/poll.h>
 +#include <linux/smp_lock.h>
++#include <linux/completion.h>
 +#include <linux/uaccess.h>
 +#include <linux/errno.h>
 +#include <asm/semaphore.h>
 +#define __KERNEL_SYSCALLS__
 +#include <linux/unistd.h>
++#include <linux/kthread.h>
 +
 +#include "kcompat.h"
 +
 +/* SysFS header */
-+#if defined(LIRC_HAVE_SYSFS)
 +#include <linux/device.h>
-+#endif
 +
 +#include "lirc.h"
 +#include "lirc_dev.h"
@@ -3875,7 +3980,8 @@ index 0000000..495cb70
 +static int debug;
 +#define dprintk(fmt, args...)					\
 +	do {							\
-+		if (debug) printk(KERN_DEBUG fmt, ## args);	\
++		if (debug)					\
++			printk(KERN_DEBUG fmt, ## args);	\
 +	} while (0)
 +
 +#define IRCTL_DEV_NAME    "BaseRemoteCtl"
@@ -3883,8 +3989,7 @@ index 0000000..495cb70
 +#define NOPLUG            -1
 +#define LOGHEAD           "lirc_dev (%s[%d]): "
 +
-+struct irctl
-+{
++struct irctl {
 +	struct lirc_plugin p;
 +	int attached;
 +	int open;
@@ -3892,15 +3997,9 @@ index 0000000..495cb70
 +	struct semaphore buffer_sem;
 +	struct lirc_buffer *buf;
 +
-+	int tpid;
-+	struct semaphore *t_notify;
-+	struct semaphore *t_notify2;
-+	int shutdown;
++	struct task_struct *task;
 +	long jiffies_to_wait;
 +
-+#ifdef LIRC_HAVE_DEVFS_24
-+	devfs_handle_t devfs_handle;
-+#endif
 +};
 +
 +DECLARE_MUTEX(plugin_lock);
@@ -3920,10 +4019,7 @@ index 0000000..495cb70
 +	sema_init(&ir->buffer_sem, 1);
 +	ir->p.minor = NOPLUG;
 +
-+	ir->tpid = -1;
-+	ir->t_notify = NULL;
-+	ir->t_notify2 = NULL;
-+	ir->shutdown = 0;
++	ir->task = NULL;
 +	ir->jiffies_to_wait = 0;
 +
 +	ir->open = 0;
@@ -3934,9 +4030,6 @@ index 0000000..495cb70
 +{
 +	dprintk(LOGHEAD "cleaning up\n", ir->p.name, ir->p.minor);
 +
-+#ifdef LIRC_HAVE_DEVFS_24
-+	devfs_unregister(ir->devfs_handle);
-+#endif
 +#ifdef LIRC_HAVE_DEVFS_26
 +	devfs_remove(DEV_LIRC "/%u", ir->p.minor);
 +#endif
@@ -3980,7 +4073,7 @@ index 0000000..495cb70
 +		}
 +
 +		if (res == -ENODEV)
-+			ir->shutdown = 1;
++			kthread_stop(ir->task);
 +
 +		return (got_data ? SUCCESS : res);
 +	}
@@ -3997,10 +4090,6 @@ index 0000000..495cb70
 +	/* This thread doesn't need any user-level access,
 +	 * so get rid of all our resources
 +	 */
-+	daemonize("lirc_dev");
-+
-+	if (ir->t_notify != NULL)
-+		up(ir->t_notify);
 +
 +	dprintk(LOGHEAD "poll thread started\n", ir->p.name, ir->p.minor);
 +
@@ -4013,7 +4102,7 @@ index 0000000..495cb70
 +				interruptible_sleep_on(
 +					ir->p.get_queue(ir->p.data));
 +			}
-+			if (ir->shutdown)
++			if (kthread_should_stop())
 +				break;
 +			if (!add_to_buf(ir))
 +				wake_up_interruptible(&ir->buf->wait_poll);
@@ -4022,14 +4111,7 @@ index 0000000..495cb70
 +			set_current_state(TASK_INTERRUPTIBLE);
 +			schedule_timeout(HZ/2);
 +		}
-+	} while (!ir->shutdown);
-+
-+	if (ir->t_notify2 != NULL)
-+		down(ir->t_notify2);
-+
-+	ir->tpid = -1;
-+	if (ir->t_notify != NULL)
-+		up(ir->t_notify);
++	} while (!kthread_should_stop());
 +
 +	dprintk(LOGHEAD "poll thread ended\n", ir->p.name, ir->p.minor);
 +
@@ -4042,10 +4124,7 @@ index 0000000..495cb70
 +	int minor;
 +	int bytes_in_key;
 +	int err;
-+#ifdef LIRC_HAVE_DEVFS_24
-+	char name[16];
-+#endif
-+	DECLARE_MUTEX_LOCKED(tn);
++	DECLARE_COMPLETION(tn);
 +
 +	if (!p) {
 +		printk(KERN_ERR "lirc_dev: lirc_register_plugin: "
@@ -4170,13 +4249,7 @@ index 0000000..495cb70
 +	ir->p = *p;
 +	ir->p.minor = minor;
 +
-+#if defined(LIRC_HAVE_DEVFS_24)
-+	sprintf(name, DEV_LIRC "/%d", ir->p.minor);
-+	ir->devfs_handle = devfs_register(NULL, name, DEVFS_FL_DEFAULT,
-+					  IRCTL_DEV_MAJOR, ir->p.minor,
-+					  S_IFCHR | S_IRUSR | S_IWUSR,
-+					  &fops, NULL);
-+#elif defined(LIRC_HAVE_DEVFS_26)
++#if   defined(LIRC_HAVE_DEVFS_26)
 +	devfs_mk_cdev(MKDEV(IRCTL_DEV_MAJOR, ir->p.minor),
 +			S_IFCHR|S_IRUSR|S_IWUSR,
 +			DEV_LIRC "/%u", ir->p.minor);
@@ -4187,17 +4260,14 @@ index 0000000..495cb70
 +
 +	if (p->sample_rate || p->get_queue) {
 +		/* try to fire up polling thread */
-+		ir->t_notify = &tn;
-+		ir->tpid = kernel_thread(lirc_thread, (void *)ir, 0);
-+		if (ir->tpid < 0) {
++		ir->task = kthread_run(lirc_thread, (void *)ir, "lirc_dev");
++		if (IS_ERR(ir->task)) {
 +			printk(KERN_ERR "lirc_dev: lirc_register_plugin: "
 +			       "cannot run poll thread for minor = %d\n",
 +			       p->minor);
 +			err = -ECHILD;
 +			goto out_sysfs;
 +		}
-+		down(&tn);
-+		ir->t_notify = NULL;
 +	}
 +	ir->attached = 1;
 +	up(&plugin_lock);
@@ -4226,8 +4296,8 @@ index 0000000..495cb70
 +int lirc_unregister_plugin(int minor)
 +{
 +	struct irctl *ir;
-+	DECLARE_MUTEX_LOCKED(tn);
-+	DECLARE_MUTEX_LOCKED(tn2);
++	DECLARE_COMPLETION(tn);
++	DECLARE_COMPLETION(tn2);
 +
 +	if (minor < 0 || minor >= MAX_IRCTL_DEVICES) {
 +		printk(KERN_ERR "lirc_dev: lirc_unregister_plugin: "
@@ -4248,19 +4318,9 @@ index 0000000..495cb70
 +	}
 +
 +	/* end up polling thread */
-+	if (ir->tpid >= 0) {
-+		ir->t_notify = &tn;
-+		ir->t_notify2 = &tn2;
-+		ir->shutdown = 1;
-+		struct task_struct *p;
-+
-+		p = find_task_by_pid(ir->tpid);
-+		wake_up_process(p);
-+
-+		up(&tn2);
-+		down(&tn);
-+		ir->t_notify = NULL;
-+		ir->t_notify2 = NULL;
++	if (ir->task) {
++		wake_up_process(ir->task);
++		kthread_stop(ir->task);
 +	}
 +
 +	dprintk("lirc_dev: plugin %s unregistered from minor number = %d\n",
@@ -4278,6 +4338,11 @@ index 0000000..495cb70
 +	} else
 +		cleanup(ir);
 +	up(&plugin_lock);
++
++/*
++ * Recent kernels should handle this autmatically by increasing/decreasing
++ * use count when a dependant module is loaded/unloaded.
++ */
 +
 +	return SUCCESS;
 +}
@@ -4534,7 +4599,8 @@ index 0000000..495cb70
 +			 * returned as less than 'length', instead of blocking
 +			 * again, returning -EWOULDBLOCK, or returning
 +			 * -ERESTARTSYS */
-+			if (written) break;
++			if (written)
++				break;
 +			if (file->f_flags & O_NONBLOCK) {
 +				ret = -EWOULDBLOCK;
 +				break;
@@ -4686,17 +4752,17 @@ index 0000000..495cb70
 + */
 diff --git a/drivers/input/lirc/lirc_dev.h b/drivers/input/lirc/lirc_dev.h
 new file mode 100644
-index 0000000..9516af5
+index 0000000..c3a0c0f
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.h
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,264 @@
 +/*
 + * LIRC base driver
 + *
 + * (L) by Artur Lipowski <alipowski@interia.pl>
 + *        This code is licensed under GNU GPL
 + *
-+ * $Id: lirc_dev.h,v 1.20 2007/04/22 10:21:37 lirc Exp $
++ * $Id: lirc_dev.h,v 1.21 2007/09/27 19:47:20 lirc Exp $
 + *
 + */
 +
@@ -4708,15 +4774,14 @@ index 0000000..9516af5
 +
 +/* #define LIRC_BUFF_POWER_OF_2 */
 +#ifdef LIRC_BUFF_POWER_OF_2
-+#define mod(n, div) ((n) & ((div) -1))
++#define mod(n, div) ((n) & ((div) - 1))
 +#else
 +#define mod(n, div) ((n) % (div))
 +#endif
 +#include <linux/slab.h>
 +#include <linux/fs.h>
 +
-+struct lirc_buffer
-+{
++struct lirc_buffer {
 +	wait_queue_head_t wait_poll;
 +	spinlock_t lock;
 +
@@ -4862,8 +4927,7 @@ index 0000000..9516af5
 +	lirc_buffer_unlock(buf, &flags);
 +}
 +
-+struct lirc_plugin
-+{
++struct lirc_plugin {
 +	char name[40];
 +	int minor;
 +	int code_length;
@@ -4956,605 +5020,13 @@ index 0000000..9516af5
 +void *lirc_get_pdata(struct file *file);
 +
 +#endif
-diff --git a/drivers/input/lirc/lirc_gpio.c b/drivers/input/lirc/lirc_gpio.c
-new file mode 100644
-index 0000000..7a6896e
---- /dev/null
-+++ b/drivers/input/lirc/lirc_gpio.c
-@@ -0,0 +1,586 @@
-+/*
-+ * Remote control driver for the TV-card
-+ * key codes are obtained from GPIO port
-+ *
-+ * (L) by Artur Lipowski <alipowski@interia.pl>
-+ *     patch for the AverMedia by Santiago Garcia Mantinan <manty@i.am>
-+ *			    and Christoph Bartelmus <lirc@bartelmus.de>
-+ *     patch for the BestBuy by Miguel Angel Alvarez <maacruz@navegalia.com>
-+ *     patch for the Winfast TV2000 by Juan Toledo
-+ *     <toledo@users.sourceforge.net>
-+ *     patch for the I-O Data GV-BCTV5/PCI by Jens C. Rasmussen
-+ *     <jens.rasmussen@ieee.org>
-+ *
-+ *  This program is free software; you can redistribute it and/or modify
-+ *  it under the terms of the GNU General Public License as published by
-+ *  the Free Software Foundation; either version 2 of the License, or
-+ *  (at your option) any later version.
-+ *
-+ *  This program is distributed in the hope that it will be useful,
-+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ *  GNU General Public License for more details.
-+ *
-+ *  You should have received a copy of the GNU General Public License
-+ *  along with this program; if not, write to the Free Software
-+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-+ *
-+ * $Id: lirc_gpio.c,v 1.49 2007/02/13 06:45:15 lirc Exp $
-+ *
-+ */
-+
-+#include <linux/version.h>
-+
-+#include <linux/version.h>
-+#include <linux/module.h>
-+#include <linux/kmod.h>
-+#include <linux/sched.h>
-+#include <linux/errno.h>
-+
-+#include "../drivers/media/video/bt8xx/bttv.h"
-+#include "../drivers/media/video/bt8xx/bttvp.h"
-+
-+#include "kcompat.h"
-+#include "lirc_dev.h"
-+
-+/* insmod parameters */
-+static int debug;
-+static int card;
-+static int minor = -1;
-+static int bttv_id = BTTV_BOARD_UNKNOWN;
-+static unsigned long gpio_mask;
-+static unsigned long gpio_enable;
-+static unsigned long gpio_lock_mask;
-+static unsigned long gpio_xor_mask;
-+static int soft_gap;
-+static int sample_rate = 10;
-+
-+#define dprintk(fmt, args...)					\
-+	do {							\
-+		if (debug)					\
-+			printk(KERN_DEBUG fmt, ## args);	\
-+	} while (0)
-+
-+struct rcv_info {
-+	int bttv_id;
-+	int card_id;
-+	unsigned long gpio_mask;
-+	unsigned long gpio_enable;
-+	unsigned long gpio_lock_mask;
-+	unsigned long gpio_xor_mask;
-+	int soft_gap;
-+	int sample_rate;
-+	unsigned char code_length;
-+};
-+
-+static struct rcv_info rcv_infos[] = {
-+	{BTTV_BOARD_UNKNOWN,
-+		0, 0, 0, 0, 0, 0, 1, 0},
-+	{BTTV_BOARD_PXELVWPLTVPAK,
-+		0, 0x00003e00, 0, 0x0010000, 0, 0, 15, 32},
-+	{BTTV_BOARD_PXELVWPLTVPRO,
-+		0, 0x00001f00, 0, 0x0008000, 0, 500, 12, 32},
-+	{BTTV_BOARD_PV_BT878P_9B,
-+		0, 0x00001f00, 0, 0x0008000, 0, 500, 12, 32},
-+	{BTTV_BOARD_PV_BT878P_PLUS,
-+		0, 0x00001f00, 0, 0x0008000, 0, 500, 12, 32},
-+#ifdef BTTV_BOARD_PV_M4900
-+	{BTTV_BOARD_PV_M4900,
-+		0, 0x00001f00, 0, 0x0008000, 0, 500, 12, 32},
-+#endif
-+	{BTTV_BOARD_AVERMEDIA,
-+		0, 0x00f88000, 0, 0x0010000, 0x00010000, 0, 10, 32},
-+
-+	/* mapped to Capture98 */
-+	{BTTV_BOARD_AVPHONE98,
-+		0x00011461, 0x003b8000, 0x00004000,
-+		0x0800000, 0x00800000, 0, 10, 0},
-+	{BTTV_BOARD_AVERMEDIA98,
-+		0x00021461, 0x003b8000, 0x00004000,
-+		0x0800000, 0x00800000, 0, 10, 0},
-+
-+	/* mapped to Phone98 */
-+	{BTTV_BOARD_AVPHONE98,
-+		0x00031461, 0x00f88000, 0, 0x0010000, 0x00010000, 0, 10, 32},
-+	/* is this one correct? */
-+	{BTTV_BOARD_AVERMEDIA98,
-+		0x00041461, 0x00f88000, 0, 0x0010000, 0x00010000, 0, 10, 32},
-+	/* work-around for VDOMATE */
-+	{BTTV_BOARD_AVERMEDIA98,
-+		0x03001461, 0x00f88000, 0, 0x0010000, 0x00010000, 0, 10, 32},
-+	/* reported by Danijel Korzinek, AVerTV GOw/FM */
-+	{BTTV_BOARD_AVERMEDIA98,
-+		0x00000000, 0x00f88000, 0, 0x0010000, 0x00010000, 0, 10, 32},
-+
-+	{BTTV_BOARD_CHRONOS_VS2,
-+		0, 0x000000f8,	0, 0x0000100, 0, 0, 20, 0},
-+	/* CPH031 and CPH033 cards (?) */
-+	/* MIRO was just a work-around */
-+	{BTTV_BOARD_MIRO,
-+		0, 0x00001f00, 0, 0x0004000, 0, 0, 10, 32},
-+	{BTTV_BOARD_DYNALINK,
-+		0, 0x00001f00, 0, 0x0004000, 0, 0, 10, 32},
-+#ifdef BTTV_BOARD_ASKEY_CPH03X
-+	{BTTV_BOARD_ASKEY_CPH03X,
-+		0, 0x00001f00, 0, 0x0004000, 0, 0, 10, 32},
-+#endif
-+	{BTTV_BOARD_WINVIEW_601,
-+		0, 0x00001f00, 0, 0x0004000, 0, 0, 0, 32},
-+#ifdef BTTV_BOARD_KWORLD
-+	{BTTV_BOARD_KWORLD,
-+		0, 0x00007f00, 0, 0x0004000, 0, 0, 12, 32},
-+#endif
-+	/* just a guess */
-+	{BTTV_BOARD_MAGICTVIEW061,
-+		0, 0x0028e000, 0, 0x0020000, 0, 0, 20, 32},
-+	{BTTV_BOARD_MAGICTVIEW063,
-+		0, 0x0028e000, 0, 0x0020000, 0, 0, 20, 32},
-+	{BTTV_BOARD_PHOEBE_TVMAS,
-+		0, 0x0028e000, 0, 0x0020000, 0, 0, 20, 32},
-+#ifdef BTTV_BOARD_BESTBUY_EASYTV2
-+	{BTTV_BOARD_BESTBUY_EASYTV,
-+		0, 0x00007F00, 0, 0x0004000, 0, 0, 10, 8},
-+	{BTTV_BOARD_BESTBUY_EASYTV2,
-+		0, 0x00007F00, 0, 0x0008000, 0, 0, 10, 8},
-+#endif
-+	/* lock_mask probably also 0x100, or maybe it is 0x0 for all others? */
-+	{BTTV_BOARD_FLYVIDEO,
-+		0, 0x000000f8, 0, 0, 0, 0, 0, 42},
-+	{BTTV_BOARD_FLYVIDEO_98,
-+		0, 0x000000f8,	0, 0x0000100, 0, 0, 0, 42},
-+	{BTTV_BOARD_TYPHOON_TVIEW,
-+		0, 0x000000f8, 0, 0x0000100, 0, 0, 0, 42},
-+#ifdef BTTV_BOARD_FLYVIDEO_98FM
-+	/* smorar@alfonzo.smuts.uct.ac.za */
-+	{BTTV_BOARD_FLYVIDEO_98FM,
-+		0, 0x000000f8, 0, 0x0000100, 0, 0, 0, 42},
-+#endif
-+	/* The Leadtek WinFast TV 2000 XP card (id 0x6606107d) uses an
-+	 * extra gpio bit compared to the original TV 2000 card (id
-+	 * 0x217d6606); as the bttv-0.7.100 driver does not
-+	 * distinguish between the two cards, we enable the extra bit
-+	 * based on the card id: */
-+	{BTTV_BOARD_WINFAST2000,
-+		0x6606107d, 0x000008f8, 0, 0x0000100, 0, 0, 0, 32},
-+	{BTTV_BOARD_WINFAST2000,
-+		0x6609107d, 0x000008f8, 0, 0x0000100, 0, 0, 0, 32},
-+	{BTTV_BOARD_WINFAST2000,
-+		0xff06107d, 0x000008f8, 0, 0x0000100, 0, 0, 0, 32},
-+	/* default: */
-+	{BTTV_BOARD_WINFAST2000,
-+		0, 0x000000f8,	0, 0x0000100, 0, 0, 0, 32},
-+#ifdef BTTV_BOARD_GVBCTV5PCI
-+	{BTTV_BOARD_GVBCTV5PCI,
-+		0, 0x00f0b000, 0, 0, 0, 0, 20, 8},
-+#endif
-+};
-+
-+static unsigned char code_length;
-+static unsigned char code_bytes = 1;
-+
-+#define MAX_BYTES 8
-+
-+#define SUCCESS 0
-+#define LOGHEAD "lirc_gpio (%d): "
-+
-+/* how many bits GPIO value can be shifted right before processing
-+ * it is computed from the value of gpio_mask_parameter
-+ */
-+static unsigned char gpio_pre_shift;
-+
-+static inline int reverse(int data, int bits)
-+{
-+	int i;
-+	int c;
-+
-+	for (c = 0, i = 0; i < bits; i++)
-+		c |= (((data & (1<<i)) ? 1:0)) << (bits-1-i);
-+
-+	return c;
-+}
-+
-+static int build_key(unsigned long gpio_val, unsigned char codes[MAX_BYTES])
-+{
-+	unsigned long mask = gpio_mask;
-+	unsigned char shift = 0;
-+
-+	dprintk(LOGHEAD "gpio_val is %lx\n", card, (unsigned long) gpio_val);
-+
-+	gpio_val ^= gpio_xor_mask;
-+
-+	if (gpio_lock_mask && (gpio_val & gpio_lock_mask))
-+		return -EBUSY;
-+
-+	switch (bttv_id) {
-+	case BTTV_BOARD_AVERMEDIA98:
-+		if (bttv_write_gpio(card, gpio_enable, gpio_enable)) {
-+			dprintk(LOGHEAD "cannot write to GPIO\n", card);
-+			return -EIO;
-+		}
-+		if (bttv_read_gpio(card, &gpio_val)) {
-+			dprintk(LOGHEAD "cannot read GPIO\n", card);
-+			return -EIO;
-+		}
-+		if (bttv_write_gpio(card, gpio_enable, 0)) {
-+			dprintk(LOGHEAD "cannot write to GPIO\n", card);
-+			return -EIO;
-+		}
-+		break;
-+	default:
-+		break;
-+	}
-+
-+	/* extract bits from "raw" GPIO value using gpio_mask */
-+	codes[0] = 0;
-+	gpio_val >>= gpio_pre_shift;
-+	while (mask) {
-+		if (mask & 1u)
-+			codes[0] |= (gpio_val & 1u) << shift++;
-+		mask >>= 1;
-+		gpio_val >>= 1;
-+	}
-+
-+	dprintk(LOGHEAD "code is %lx\n", card, (unsigned long) codes[0]);
-+	switch (bttv_id) {
-+	case BTTV_BOARD_AVERMEDIA:
-+		codes[2] = (codes[0]<<2)&0xff;
-+		codes[3] = (~codes[2])&0xff;
-+		codes[0] = 0x02;
-+		codes[1] = 0xFD;
-+		break;
-+	case BTTV_BOARD_AVPHONE98:
-+		codes[2] = ((codes[0]&(~0x1))<<2)&0xff;
-+		codes[3] = (~codes[2])&0xff;
-+		if (codes[0]&0x1) {
-+			codes[0] = 0xc0;
-+			codes[1] = 0x3f;
-+		} else {
-+			codes[0] = 0x40;
-+			codes[1] = 0xbf;
-+		}
-+		break;
-+	case BTTV_BOARD_AVERMEDIA98:
-+		break;
-+	case BTTV_BOARD_FLYVIDEO:
-+	case BTTV_BOARD_FLYVIDEO_98:
-+	case BTTV_BOARD_TYPHOON_TVIEW:
-+#ifdef BTTV_BOARD_FLYVIDEO_98FM
-+	case BTTV_BOARD_FLYVIDEO_98FM:
-+#endif
-+		codes[4] = codes[0]<<3;
-+		codes[5] = ((~codes[4])&0xff);
-+
-+		codes[0] = 0x00;
-+		codes[1] = 0x1A;
-+		codes[2] = 0x1F;
-+		codes[3] = 0x2F;
-+		break;
-+	case BTTV_BOARD_MAGICTVIEW061:
-+	case BTTV_BOARD_MAGICTVIEW063:
-+	case BTTV_BOARD_PHOEBE_TVMAS:
-+		codes[0] = (codes[0]&0x01)
-+			| ((codes[0]&0x02)<<1)
-+			| ((codes[0]&0x04)<<2)
-+			| ((codes[0]&0x08)>>2)
-+			| ((codes[0]&0x10)>>1);
-+		/* FALLTHROUGH */
-+	case BTTV_BOARD_MIRO:
-+	case BTTV_BOARD_DYNALINK:
-+#ifdef BTTV_BOARD_ASKEY_CPH03X
-+	case BTTV_BOARD_ASKEY_CPH03X:
-+#endif
-+	case BTTV_BOARD_PXELVWPLTVPAK:
-+	case BTTV_BOARD_PXELVWPLTVPRO:
-+	case BTTV_BOARD_PV_BT878P_9B:
-+	case BTTV_BOARD_PV_BT878P_PLUS:
-+#ifdef BTTV_BOARD_PV_M4900
-+	case BTTV_BOARD_PV_M4900:
-+#endif
-+#ifdef BTTV_BOARD_KWORLD
-+	case BTTV_BOARD_KWORLD:
-+#endif
-+		codes[2] = reverse(codes[0], 8);
-+		codes[3] = (~codes[2])&0xff;
-+		codes[0] = 0x61;
-+		codes[1] = 0xD6;
-+		break;
-+	case BTTV_BOARD_WINFAST2000:
-+		/* shift extra bit */
-+		codes[0] = (codes[0]&0x1f) | ((codes[0]&0x20) << 1);
-+	case BTTV_BOARD_WINVIEW_601:
-+		codes[2] = reverse(codes[0], 8);
-+		codes[3] = (~codes[2])&0xff;
-+		codes[0] = 0xC0;
-+		codes[1] = 0x3F;
-+		break;
-+	default:
-+		break;
-+	}
-+
-+	return SUCCESS;
-+}
-+
-+/* add_to_buf - copy a code to the buffer */
-+static int add_to_buf(void *data, struct lirc_buffer *buf)
-+{
-+	static unsigned long next_time;
-+	static unsigned char prev_codes[MAX_BYTES];
-+	unsigned long code = 0;
-+	unsigned char cur_codes[MAX_BYTES];
-+
-+	if (bttv_read_gpio(card, &code)) {
-+		dprintk(LOGHEAD "cannot read GPIO\n", card);
-+		return -EIO;
-+	}
-+
-+	if (build_key(code, cur_codes))
-+		return -EFAULT;
-+
-+	if (soft_gap) {
-+		if (!memcmp(prev_codes, cur_codes, code_bytes) &&
-+			jiffies < next_time)
-+			return -EAGAIN;
-+
-+		next_time = jiffies + soft_gap;
-+	}
-+	memcpy(prev_codes, cur_codes, code_bytes);
-+
-+	lirc_buffer_write_1(buf, cur_codes);
-+
-+	return SUCCESS;
-+}
-+
-+static int set_use_inc(void *data)
-+{
-+	return 0;
-+}
-+
-+static void set_use_dec(void *data)
-+{
-+	return;
-+}
-+
-+static wait_queue_head_t *get_queue(void *data)
-+{
-+	return bttv_get_gpio_queue(card);
-+}
-+
-+static struct lirc_plugin plugin = {
-+	.name		= "lirc_gpio  ",
-+	.add_to_buf	= add_to_buf,
-+	.get_queue	= get_queue,
-+	.set_use_inc	= set_use_inc,
-+	.set_use_dec	= set_use_dec,
-+	.dev		= NULL,
-+	.owner		= THIS_MODULE,
-+};
-+
-+/*
-+ *
-+ */
-+static int gpio_remote_init(void)
-+{
-+	int ret;
-+	unsigned int mask;
-+
-+	/* "normalize" gpio_mask
-+	 * this means shift it right until first bit is set
-+	 */
-+	while (!(gpio_mask & 1u)) {
-+		gpio_pre_shift++;
-+		gpio_mask >>= 1;
-+	}
-+
-+	if (code_length)
-+		plugin.code_length = code_length;
-+	else {
-+		/* calculate scan code length in bits if needed */
-+		plugin.code_length = 1;
-+		mask = gpio_mask >> 1;
-+		while (mask) {
-+			if (mask & 1u)
-+				plugin.code_length++;
-+			mask >>= 1;
-+		}
-+	}
-+
-+	code_bytes = (plugin.code_length/8) + (plugin.code_length % 8 ? 1 : 0);
-+	if (MAX_BYTES < code_bytes) {
-+		printk(LOGHEAD "scan code too long (%d bytes)\n",
-+			minor, code_bytes);
-+		return -EBADRQC;
-+	}
-+
-+	if (gpio_enable) {
-+		if (bttv_gpio_enable(card, gpio_enable, gpio_enable)) {
-+			printk(LOGHEAD "gpio_enable failure\n", minor);
-+			return -EIO;
-+		}
-+	}
-+
-+
-+	/* translate ms to jiffies */
-+	soft_gap = (soft_gap*HZ) / 1000;
-+
-+	plugin.minor = minor;
-+	plugin.sample_rate = sample_rate;
-+
-+	ret = lirc_register_plugin(&plugin);
-+
-+	if (0 > ret) {
-+		printk(LOGHEAD "device registration failed with %d\n",
-+			minor, ret);
-+		return ret;
-+	}
-+
-+	minor = ret;
-+	printk(LOGHEAD "driver registered\n", minor);
-+
-+	return SUCCESS;
-+}
-+
-+#ifdef MODULE
-+/*
-+ *
-+ */
-+int init_module(void)
-+{
-+	int type, cardid, card_type;
-+
-+	if (MAX_IRCTL_DEVICES < minor) {
-+		printk(KERN_INFO "lirc_gpio: parameter minor (%d) "
-+		       "must be less than %d!\n",
-+		       minor, MAX_IRCTL_DEVICES - 1);
-+		return -EBADRQC;
-+	}
-+
-+	request_module("bttv");
-+
-+	/* if gpio_mask not zero then use module parameters
-+	 * instead of autodetecting TV card
-+	 */
-+	if (gpio_mask) {
-+		if (sample_rate != 0 &&
-+		    (2 > sample_rate || HZ < sample_rate)) {
-+			printk(LOGHEAD "parameter sample_rate "
-+			       "must be between 2 and %d!\n", minor, HZ);
-+			return -EBADRQC;
-+		}
-+
-+		if (sample_rate != 0 && soft_gap &&
-+		    ((2000/sample_rate) > soft_gap || 1000 < soft_gap)) {
-+			printk(LOGHEAD "parameter soft_gap "
-+			       "must be between %d and 1000!\n",
-+			       minor, 2000/sample_rate);
-+			return -EBADRQC;
-+		}
-+	} else {
-+		if (bttv_get_cardinfo(card, &type, &cardid) == -1) {
-+			printk(LOGHEAD "could not get card type\n", minor);
-+			return -EBADRQC;
-+		}
-+		printk(LOGHEAD "card type 0x%x, id 0x%x\n", minor,
-+		       type, cardid);
-+
-+		if (type == BTTV_BOARD_UNKNOWN) {
-+			printk(LOGHEAD "cannot detect TV card nr %d!\n",
-+			       minor, card);
-+			return -EBADRQC;
-+		}
-+		for (card_type = 1;
-+		     card_type < sizeof(rcv_infos)/sizeof(struct rcv_info);
-+		     card_type++) {
-+			if (rcv_infos[card_type].bttv_id == type &&
-+			    (rcv_infos[card_type].card_id == 0 ||
-+			     rcv_infos[card_type].card_id == cardid)) {
-+				bttv_id = rcv_infos[card_type].bttv_id;
-+				gpio_mask = rcv_infos[card_type].gpio_mask;
-+				gpio_enable = rcv_infos[card_type].gpio_enable;
-+				gpio_lock_mask =
-+					rcv_infos[card_type].gpio_lock_mask;
-+				gpio_xor_mask =
-+					rcv_infos[card_type].gpio_xor_mask;
-+				soft_gap = rcv_infos[card_type].soft_gap;
-+				sample_rate = rcv_infos[card_type].sample_rate;
-+				code_length = rcv_infos[card_type].code_length;
-+				break;
-+			}
-+		}
-+		if (type == BTTV_BOARD_AVPHONE98 && cardid == 0x00011461)
-+			bttv_id = BTTV_BOARD_AVERMEDIA98;
-+
-+		if (type == BTTV_BOARD_AVERMEDIA98 && cardid == 0x00041461)
-+			bttv_id = BTTV_BOARD_AVPHONE98;
-+
-+		if (type == BTTV_BOARD_AVERMEDIA98 && cardid == 0x03001461)
-+			bttv_id = BTTV_BOARD_AVPHONE98;
-+
-+		if (type == BTTV_BOARD_AVERMEDIA98 && cardid == 0x00000000)
-+			bttv_id = BTTV_BOARD_AVPHONE98;
-+
-+		if (card_type == sizeof(rcv_infos)/sizeof(struct rcv_info)) {
-+			printk(LOGHEAD "TV card type 0x%x not supported!\n",
-+			       minor, type);
-+			return -EBADRQC;
-+		}
-+	}
-+
-+	request_module("lirc_dev");
-+
-+	return gpio_remote_init();
-+}
-+
-+/*
-+ *
-+ */
-+void cleanup_module(void)
-+{
-+	lirc_unregister_plugin(minor);
-+
-+	dprintk(LOGHEAD "module successfully unloaded\n", minor);
-+}
-+
-+/* Dont try to use it as a static version !  */
-+MODULE_DESCRIPTION("Driver module for remote control (data "
-+		   "from bt848 GPIO port)");
-+MODULE_AUTHOR("Artur Lipowski");
-+MODULE_LICENSE("GPL");
-+
-+module_param(minor, int, 0444);
-+MODULE_PARM_DESC(minor, "Preferred minor device number");
-+
-+module_param(card, int, 0444);
-+MODULE_PARM_DESC(card, "TV card number to attach to");
-+
-+module_param(gpio_mask, long, 0444);
-+MODULE_PARM_DESC(gpio_mask, "gpio_mask");
-+
-+module_param(gpio_lock_mask, long, 0444);
-+MODULE_PARM_DESC(gpio_lock_mask, "gpio_lock_mask");
-+
-+module_param(gpio_xor_mask, long, 0444);
-+MODULE_PARM_DESC(gpio_xor_mask, "gpio_xor_mask");
-+
-+module_param(soft_gap, int, 0444);
-+MODULE_PARM_DESC(soft_gap, "Time between keypresses (in ms)");
-+
-+module_param(sample_rate, int, 0444);
-+MODULE_PARM_DESC(sample_rate, "Sample rate (between 2 and HZ)");
-+
-+module_param(bttv_id, int, 0444);
-+MODULE_PARM_DESC(bttv_id, "BTTV card type");
-+
-+module_param(debug, bool, 0644);
-+MODULE_PARM_DESC(debug, "Enable debugging messages");
-+
-+EXPORT_NO_SYMBOLS;
-+
-+#endif /* MODULE */
-+
-+/*
-+ * Overrides for Emacs so that we follow Linus's tabbing style.
-+ * ---------------------------------------------------------------------------
-+ * Local variables:
-+ * c-basic-offset: 8
-+ * End:
-+ */
 diff --git a/drivers/input/lirc/lirc_i2c.c b/drivers/input/lirc/lirc_i2c.c
 new file mode 100644
-index 0000000..0c69817
+index 0000000..ed1092b
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_i2c.c
-@@ -0,0 +1,665 @@
-+/*      $Id: lirc_i2c.c,v 1.42 2007/09/09 17:37:13 lirc Exp $      */
+@@ -0,0 +1,671 @@
++/*      $Id: lirc_i2c.c,v 1.44 2007/11/08 21:07:18 lirc Exp $      */
 +
 +/*
 + * i2c IR lirc plugin for Hauppauge and Pixelview cards - new 2.3.x i2c stack
@@ -5636,8 +5108,9 @@ index 0000000..0c69817
 +
 +#define dprintk(fmt, args...)						\
 +	do {								\
-+		if (debug) printk(KERN_DEBUG DEVICE_NAME ": " fmt,	\
-+				 ## args);				\
++		if (debug)						\
++			printk(KERN_DEBUG DEVICE_NAME ": " fmt,		\
++			       ## args);				\
 +	} while (0)
 +
 +/* ----------------------------------------------------------------------- */
@@ -5939,6 +5412,7 @@ index 0000000..0c69817
 +		     unsigned short flags, int kind)
 +{
 +	struct IR *ir;
++	int err;
 +
 +	client_template.adapter = adap;
 +	client_template.addr = addr;
@@ -6029,7 +5503,11 @@ index 0000000..0c69817
 +	       adap->id, addr, ir->c.name);
 +
 +	/* register device */
-+	i2c_attach_client(&ir->c);
++	err = i2c_attach_client(&ir->c);
++	if (err) {
++		kfree(ir);
++		return err;
++	}
 +	ir->l.minor = lirc_register_plugin(&ir->l);
 +
 +	return 0;
@@ -6221,10 +5699,10 @@ index 0000000..0c69817
 + */
 diff --git a/drivers/input/lirc/lirc_igorplugusb.c b/drivers/input/lirc/lirc_igorplugusb.c
 new file mode 100644
-index 0000000..9d99bee
+index 0000000..0c2ca5a
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_igorplugusb.c
-@@ -0,0 +1,626 @@
+@@ -0,0 +1,624 @@
 +/* lirc_igorplugusb - USB remote support for LIRC
 + *
 + * Supports the standard homebrew IgorPlugUSB receiver with Igor's firmware.
@@ -6286,6 +5764,7 @@ index 0000000..9d99bee
 +#include "kcompat.h"
 +#include "lirc.h"
 +#include "lirc_dev.h"
++
 +
 +/* lock irctl structure */
 +#define IRLOCK			down_interruptible(&ir->lock)
@@ -6662,7 +6141,7 @@ index 0000000..9d99bee
 +	ir = kmalloc(sizeof(struct irctl), GFP_KERNEL);
 +	if (!ir) {
 +		mem_failure = 1;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	memset(ir, 0, sizeof(struct irctl));
@@ -6670,29 +6149,28 @@ index 0000000..9d99bee
 +	plugin = kmalloc(sizeof(struct lirc_plugin), GFP_KERNEL);
 +	if (!plugin) {
 +		mem_failure = 2;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	rbuf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
 +	if (!rbuf) {
 +		mem_failure = 3;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	if (lirc_buffer_init(rbuf, bytes_in_key,
 +			DEVICE_BUFLEN+ADDITIONAL_LIRC_BYTES)) {
 +		mem_failure = 4;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	ir->buf_in = usb_buffer_alloc(dev,
-+			      DEVICE_BUFLEN + DEVICE_HEADERLEN,
++			      DEVICE_BUFLEN+DEVICE_HEADERLEN,
 +			      GFP_ATOMIC, &ir->dma_in);
 +	if (!ir->buf_in) {
 +		mem_failure = 5;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
-+
 +
 +	memset(plugin, 0, sizeof(struct lirc_plugin));
 +
@@ -6706,9 +6184,7 @@ index 0000000..9d99bee
 +	plugin->set_use_dec = &set_use_dec;
 +	plugin->sample_rate = SAMPLE_RATE;    /* per second */
 +	plugin->add_to_buf = &usb_remote_poll;
-+#ifdef LIRC_HAVE_SYSFS
 +	plugin->dev = &dev->dev;
-+#endif
 +	plugin->owner = THIS_MODULE;
 +
 +	init_MUTEX(&ir->lock);
@@ -6718,7 +6194,7 @@ index 0000000..9d99bee
 +	if (minor < 0)
 +		mem_failure = 9;
 +
-+failure_switch:
++mem_failure_switch:
 +
 +	/* free allocated memory in case of failure */
 +	switch (mem_failure) {
@@ -6853,14 +6329,14 @@ index 0000000..9d99bee
 + */
 diff --git a/drivers/input/lirc/lirc_imon.c b/drivers/input/lirc/lirc_imon.c
 new file mode 100644
-index 0000000..a77d12c
+index 0000000..9bf63b4
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_imon.c
-@@ -0,0 +1,1156 @@
+@@ -0,0 +1,1165 @@
 +/*
 + *   lirc_imon.c:  LIRC plugin/VFD driver for Ahanix/Soundgraph IMON IR/VFD
 + *
-+ *   $Id: lirc_imon.c,v 1.19 2007/04/29 14:23:04 lirc Exp $
++ *   $Id: lirc_imon.c,v 1.21 2007/09/30 09:58:45 lirc Exp $
 + *
 + *   Version 0.3
 + *		Supports newer iMON models that send decoded IR signals.
@@ -6904,6 +6380,7 @@ index 0000000..a77d12c
 + */
 +#include <linux/version.h>
 +
++
 +#include <linux/autoconf.h>
 +
 +#include <linux/errno.h>
@@ -6940,7 +6417,7 @@ index 0000000..a77d12c
 +
 +
 +/* ------------------------------------------------------------
-+ *                     P R O T O T Y P E S
++ *		     P R O T O T Y P E S
 + * ------------------------------------------------------------
 + */
 +
@@ -6966,7 +6443,7 @@ index 0000000..a77d12c
 +static void __exit imon_exit(void);
 +
 +/* ------------------------------------------------------------
-+ *                     G L O B A L S
++ *		     G L O B A L S
 + * ------------------------------------------------------------
 + */
 +
@@ -7060,8 +6537,9 @@ index 0000000..a77d12c
 +
 +static int debug;
 +
++
 +/* ------------------------------------------------------------
-+ *                     M O D U L E   C O D E
++ *		     M O D U L E   C O D E
 + * ------------------------------------------------------------
 + */
 +
@@ -7082,7 +6560,8 @@ index 0000000..a77d12c
 +	kfree(context->plugin);
 +	kfree(context);
 +
-+	if (debug) info("%s: context deleted", __FUNCTION__);
++	if (debug)
++		info("%s: context deleted", __FUNCTION__);
 +}
 +
 +static inline void deregister_from_lirc(struct imon_context *context)
@@ -7153,7 +6632,7 @@ index 0000000..a77d12c
 +}
 +
 +/**
-+ * Called when the VFD device(e.g. /dev/lcd)
++ * Called when the VFD device(e.g. /dev/usb/lcd)
 + * is closed by the application.
 + */
 +static int vfd_close(struct inode *inode, struct file *file)
@@ -7333,6 +6812,7 @@ index 0000000..a77d12c
 +static struct attribute_group imon_attribute_group = {
 +	.attrs = imon_sysfs_entries
 +};
++
 +
 +
 +
@@ -7568,6 +7048,9 @@ index 0000000..a77d12c
 +	int octet, bit;
 +	unsigned char mask;
 +	int chunk_num;
++#ifdef DEBUG
++	int i;
++#endif
 +
 +	if (len != 8) {
 +		warn("%s: invalid incoming packet size(%d)",
@@ -7577,8 +7060,7 @@ index 0000000..a77d12c
 +
 +	/* iMON 2.4G associate frame */
 +	if (buf[0] == 0x00 &&
-+	    /* REFID */
-+	    buf[2] == 0xFF &&
++	    buf[2] == 0xFF &&				/* REFID */
 +	    buf[3] == 0xFF &&
 +	    buf[4] == 0xFF &&
 +	    buf[5] == 0xFF &&				/* iMON 2.4G */
@@ -7604,7 +7086,6 @@ index 0000000..a77d12c
 +		return;		/* filler frame, no data here */
 +
 +#ifdef DEBUG
-+	int i;
 +	for (i = 0; i < 8; ++i)
 +		printk(KERN_INFO "%02x ", buf[i]);
 +	printk(KERN_INFO "\n");
@@ -7720,6 +7201,7 @@ index 0000000..a77d12c
 +
 +	info("%s: found IMON device", __FUNCTION__);
 +
++
 +	dev = usb_get_dev(interface_to_usbdev(interface));
 +	iface_desc = interface->cur_altsetting;
 +	num_endpoints = iface_desc->desc.bNumEndpoints;
@@ -7810,36 +7292,39 @@ index 0000000..a77d12c
 +	if (!context) {
 +		err("%s: kmalloc failed for context", __FUNCTION__);
 +		alloc_status = 1;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	plugin = kmalloc(sizeof(struct lirc_plugin), GFP_KERNEL);
 +	if (!plugin) {
 +		err("%s: kmalloc failed for lirc_plugin", __FUNCTION__);
 +		alloc_status = 2;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	rbuf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
 +	if (!rbuf) {
 +		err("%s: kmalloc failed for lirc_buffer", __FUNCTION__);
 +		alloc_status = 3;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	if (lirc_buffer_init(rbuf, BUF_CHUNK_SIZE, BUF_SIZE)) {
 +		err("%s: lirc_buffer_init failed", __FUNCTION__);
 +		alloc_status = 4;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 +	if (!rx_urb) {
 +		err("%s: usb_alloc_urb failed for IR urb", __FUNCTION__);
 +		alloc_status = 5;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
-+	tx_urb = usb_alloc_urb(0, GFP_KERNEL);
-+	if (vfd_ep_found && !tx_urb) {
-+		err("%s: usb_alloc_urb failed for VFD urb", __FUNCTION__);
-+		alloc_status = 6;
-+		goto status_switch;
++	if (vfd_ep_found) {
++		tx_urb = usb_alloc_urb(0, GFP_KERNEL);
++		if (!tx_urb) {
++			err("%s: usb_alloc_urb failed for VFD urb",
++			    __FUNCTION__);
++			alloc_status = 6;
++			goto alloc_status_switch;
++		}
 +	}
 +
 +	/* clear all members of imon_context and lirc_plugin */
@@ -7861,23 +7346,22 @@ index 0000000..a77d12c
 +	plugin->rbuf = rbuf;
 +	plugin->set_use_inc = ir_open;
 +	plugin->set_use_dec = ir_close;
-+#ifdef LIRC_HAVE_SYSFS
 +	plugin->dev = &dev->dev;
-+#endif
 +	plugin->owner = THIS_MODULE;
 +
 +	LOCK_CONTEXT;
 +
 +	lirc_minor = lirc_register_plugin(plugin);
-+	if (lirc_minor) {
++	if (lirc_minor < 0) {
 +		err("%s: lirc_register_plugin failed", __FUNCTION__);
 +		alloc_status = 7;
 +		UNLOCK_CONTEXT;
++		goto alloc_status_switch;
 +	} else
 +		info("%s: Registered iMON plugin(minor:%d)",
 +		     __FUNCTION__, lirc_minor);
 +
-+status_switch:
++alloc_status_switch:
 +
 +	switch (alloc_status) {
 +	case 7:
@@ -7896,7 +7380,6 @@ index 0000000..a77d12c
 +		context = NULL;
 +	case 1:
 +		retval = -ENOMEM;
-+		goto exit;
 +	}
 +
 +	/* Needed while unregistering! */
@@ -7939,7 +7422,8 @@ index 0000000..a77d12c
 +			__FUNCTION__, dev->bus->busnum, dev->devnum);
 +
 +	UNLOCK_CONTEXT;
-+exit:
++
++ exit:
 +	return retval;
 +}
 +
@@ -8013,12 +7497,13 @@ index 0000000..a77d12c
 +
 +module_init(imon_init);
 +module_exit(imon_exit);
++
 diff --git a/drivers/input/lirc/lirc_it87.c b/drivers/input/lirc/lirc_it87.c
 new file mode 100644
-index 0000000..27ed75a
+index 0000000..003c249
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_it87.c
-@@ -0,0 +1,1011 @@
+@@ -0,0 +1,1012 @@
 +/*
 + * LIRC driver for ITE IT8712/IT8705 CIR port
 + *
@@ -8129,7 +7614,7 @@ index 0000000..27ed75a
 +static int it87_enable_demodulator;
 +
 +static int timer_enabled;
-+static spinlock_t timer_lock = SPIN_LOCK_UNLOCKED;
++static DEFINE_SPINLOCK(timer_lock);
 +static struct timer_list timerlist;
 +/* time of last signal change detected */
 +static struct timeval last_tv = {0, 0};
@@ -8139,8 +7624,8 @@ index 0000000..27ed75a
 +
 +static DECLARE_WAIT_QUEUE_HEAD(lirc_read_queue);
 +
-+static spinlock_t hardware_lock = SPIN_LOCK_UNLOCKED;
-+static spinlock_t dev_lock = SPIN_LOCK_UNLOCKED;
++static DEFINE_SPINLOCK(hardware_lock);
++static DEFINE_SPINLOCK(dev_lock);
 +
 +static lirc_t rx_buf[RBUF_LEN];
 +unsigned int rx_tail, rx_head;
@@ -8344,7 +7829,8 @@ index 0000000..27ed75a
 +
 +	/* statistically pulses are ~TIME_CONST/2 too long: we could
 +	   maybe make this more exactly but this is good enough */
-+	if (flag) /* pulse */ {
++	if (flag) {
++		/* pulse */
 +		if (newval > TIME_CONST / 2)
 +			newval -= TIME_CONST / 2;
 +		else /* should not ever happen */
@@ -8638,6 +8124,7 @@ index 0000000..27ed75a
 +	long count = len / stime;
 +	long time_left = 0;
 +	static unsigned char byte_out;
++	unsigned long hw_flags;
 +
 +	dprintk("%s: len=%ld, sb=%d\n", __FUNCTION__, len, send_byte);
 +
@@ -8656,14 +8143,13 @@ index 0000000..27ed75a
 +				IT87_CIR_TSR_TXFBC);
 +
 +			while ((inb(io + IT87_CIR_TSR) &
-+			       IT87_CIR_TSR_TXFBC) >= IT87_CIR_FIFO_SIZE) {
-+				unsigned long hw_flags;
++				IT87_CIR_TSR_TXFBC) >= IT87_CIR_FIFO_SIZE)
++				;
 +
-+				spin_lock_irqsave(&hardware_lock, hw_flags);
-+				outb(byte_out, io + IT87_CIR_DR);
-+				spin_unlock_irqrestore(&hardware_lock,
-+						       hw_flags);
-+			}
++			spin_lock_irqsave(&hardware_lock, hw_flags);
++			outb(byte_out, io + IT87_CIR_DR);
++			spin_unlock_irqrestore(&hardware_lock, hw_flags);
++
 +			it87_bits_in_byte_out = 0;
 +			it87_send_counter++;
 +			byte_out = 0;
@@ -8893,7 +8379,7 @@ index 0000000..27ed75a
 +	/* Leaving MB PnP Mode */
 +	it87_write(IT87_CFGCTRL, 0x2);
 +
-+	retval = request_irq(irq, it87_interrupt, 0 /*SA_INTERRUPT*/,
++	retval = request_irq(irq, it87_interrupt, 0 /*IRQF_DISABLED*/,
 +			     LIRC_DRIVER_NAME, NULL);
 +	if (retval < 0) {
 +		printk(KERN_ERR LIRC_DRIVER_NAME
@@ -9154,10 +8640,10 @@ index 0000000..2bbbfa3
 +/********************************* ITE IT87xx ************************/
 diff --git a/drivers/input/lirc/lirc_mceusb.c b/drivers/input/lirc/lirc_mceusb.c
 new file mode 100644
-index 0000000..93c8c93
+index 0000000..aed3f6f
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_mceusb.c
-@@ -0,0 +1,877 @@
+@@ -0,0 +1,890 @@
 +/*
 + * USB Microsoft IR Transceiver driver - 0.2
 + *
@@ -9448,6 +8934,21 @@ index 0000000..93c8c93
 +	 * see what is actually different and why the device takes
 +	 * issue with them
 +	 */
++#if 0
++	/* this is some custom control message they send */
++	res = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++			      0x04, USB_TYPE_VENDOR,
++			      0x0808, 0x0000, NULL, 0, HZ * 3);
++
++	dprintk("%s - res = %d", __func__, res);
++
++	/* this is another custom control message they send */
++	res = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++			      0x02, USB_TYPE_VENDOR,
++			      0x0000, 0x0100, NULL, 0, HZ * 3);
++
++	dprintk("%s - res = %d", __func__, res);
++#endif
 +}
 +
 +static void msir_cleanup(struct usb_skel *dev)
@@ -9724,7 +9225,7 @@ index 0000000..93c8c93
 +			keys_to_copy = dev->lirccnt;
 +
 +		lirc_buffer_write_n(buf,
-+			(unsigned char *) & (dev->lircdata[dev->lircidx]),
++			(unsigned char *) &(dev->lircdata[dev->lircidx]),
 +			keys_to_copy);
 +		dev->lircidx += keys_to_copy;
 +		dev->lirccnt -= keys_to_copy;
@@ -9838,7 +9339,7 @@ index 0000000..93c8c93
 +		}
 +
 +		if (((endpoint->bEndpointAddress & USB_ENDPOINT_DIR_MASK)
-+		     == 0x00)
++		    == 0x00)
 +		    && ((endpoint->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) ==
 +		    USB_ENDPOINT_XFER_BULK)) {
 +			dprintk("we found a bulk out endpoint");
@@ -9909,9 +9410,7 @@ index 0000000..93c8c93
 +	plugin->sample_rate = 80;   /* sample at 100hz (10ms) */
 +	plugin->add_to_buf = &mceusb_add_to_buf;
 +	/* plugin->fops = &mceusb_fops; */
-+#ifdef LIRC_HAVE_SYSFS
 +	plugin->dev = &udev->dev;
-+#endif
 +	plugin->owner = THIS_MODULE;
 +	if (lirc_register_plugin(plugin) < 0) {
 +		kfree(plugin);
@@ -9926,16 +9425,16 @@ index 0000000..93c8c93
 +	 * this also flushes in case we have random ir data queued up
 +	 */
 +	for (i = 0; i < 40; i++)
-+		retval = usb_bulk_msg(udev,
-+			    usb_rcvbulkpipe(udev, dev->bulk_in_endpointAddr),
-+			 junk, 64, &partial, HZ*10);
++		(void) usb_bulk_msg(udev,
++				    usb_rcvbulkpipe(udev,
++						    dev->bulk_in_endpointAddr),
++				    junk, 64, &partial, HZ*10);
 +
 +	msir_cleanup(dev);
 +	mceusb_setup(udev);
 +
 +	/* we can register the device now, as it is ready */
 +	usb_set_intfdata(interface, dev);
-+
 +	/* let the user know what node this device is now attached to */
 +	/* info("USB Microsoft IR Transceiver device now attached to msir%d",
 +		dev->minor); */
@@ -10037,10 +9536,10 @@ index 0000000..93c8c93
 +EXPORT_NO_SYMBOLS;
 diff --git a/drivers/input/lirc/lirc_mceusb2.c b/drivers/input/lirc/lirc_mceusb2.c
 new file mode 100644
-index 0000000..778ac50
+index 0000000..85dc1ce
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_mceusb2.c
-@@ -0,0 +1,1037 @@
+@@ -0,0 +1,1042 @@
 +/*
 + * LIRC driver for Philips eHome USB Infrared Transciever
 + * and the Microsoft MCE 2005 Remote Control
@@ -10098,7 +9597,7 @@ index 0000000..778ac50
 +#include "kcompat.h"
 +#include "lirc_dev.h"
 +
-+#define DRIVER_VERSION	"$Revision: 1.34 $"
++#define DRIVER_VERSION	"$Revision: 1.39 $"
 +#define DRIVER_AUTHOR	"Daniel Melander <lirc@rajidae.se>, " \
 +			"Martin Blatter <martin_a_blatter@yahoo.com>"
 +#define DRIVER_DESC	"Philips eHome USB IR Transciever and Microsoft " \
@@ -10157,7 +9656,7 @@ index 0000000..778ac50
 +#define VENDOR_SHUTTLE		0x1308
 +#define VENDOR_MITSUMI		0x03ee
 +#define VENDOR_TOPSEED		0x1784
-+#define VENDOR_RICAVISION       0x179d
++#define VENDOR_RICAVISION	0x179d
 +#define VENDOR_ITRON		0x195d
 +#define VENDOR_FIC		0x1509
 +#define VENDOR_LG		0x043e
@@ -10189,6 +9688,8 @@ index 0000000..778ac50
 +	/* Topseed HP eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_TOPSEED, 0x0006) },
 +	/* Topseed eHome Infrared Transceiver */
++	{ USB_DEVICE(VENDOR_TOPSEED, 0x0007) },
++	/* Topseed eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_TOPSEED, 0x0008) },
 +	/* Ricavision internal Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_RICAVISION, 0x0010) },
@@ -10202,8 +9703,10 @@ index 0000000..778ac50
 +	{ USB_DEVICE(VENDOR_MICROSOFT, 0x00a0) },
 +	/* Formosa eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe015) },
++	/* Formosa aim / Trust MCE Infrared Receiver */
++	{ USB_DEVICE(VENDOR_FORMOSA, 0xe017) },
 +	/* Fintek eHome Infrared Transceiver */
-+	{ USB_DEVICE(VENDOR_FINTEK, 0x1934) },
++	{ USB_DEVICE(VENDOR_FINTEK, 0x0602) },
 +	/* Terminating entry */
 +	{ }
 +};
@@ -10661,6 +10164,7 @@ index 0000000..778ac50
 +	      ir->usbdev->descriptor.idProduct == 0x0334)) ||
 +	    (ir->usbdev->descriptor.idVendor == VENDOR_TOPSEED &&
 +	     (ir->usbdev->descriptor.idProduct == 0x0001 ||
++	      ir->usbdev->descriptor.idProduct == 0x0007 ||
 +	      ir->usbdev->descriptor.idProduct == 0x0008)))
 +		ir->transmitter_mask = mask;
 +	else
@@ -10866,7 +10370,7 @@ index 0000000..778ac50
 +	ir = kmalloc(sizeof(struct irctl), GFP_KERNEL);
 +	if (!ir) {
 +		mem_failure = 1;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	memset(ir, 0, sizeof(struct irctl));
@@ -10874,30 +10378,30 @@ index 0000000..778ac50
 +	plugin = kmalloc(sizeof(struct lirc_plugin), GFP_KERNEL);
 +	if (!plugin) {
 +		mem_failure = 2;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	rbuf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
 +	if (!rbuf) {
 +		mem_failure = 3;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	if (lirc_buffer_init(rbuf, sizeof(lirc_t), LIRCBUF_SIZE)) {
 +		mem_failure = 4;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	ir->buf_in = usb_buffer_alloc(dev, maxp, GFP_ATOMIC, &ir->dma_in);
 +	if (!ir->buf_in) {
 +		mem_failure = 5;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	ir->urb_in = usb_alloc_urb(0, GFP_KERNEL);
 +	if (!ir->urb_in) {
 +		mem_failure = 7;
-+		goto failure_switch;
++		goto mem_failure_switch;
 +	}
 +
 +	memset(plugin, 0, sizeof(struct lirc_plugin));
@@ -10925,16 +10429,16 @@ index 0000000..778ac50
 +	if (minor < 0)
 +		mem_failure = 9;
 +
-+failure_switch:
++mem_failure_switch:
 +
 +	/* free allocated memory incase of failure */
 +	switch (mem_failure) {
 +	case 9:
-+		lirc_buffer_free(rbuf);
-+	case 7:
 +		usb_free_urb(ir->urb_in);
-+	case 5:
++	case 7:
 +		usb_buffer_free(dev, maxp, ir->buf_in, ir->dma_in);
++	case 5:
++		lirc_buffer_free(rbuf);
 +	case 4:
 +		kfree(rbuf);
 +	case 3:
@@ -11080,11 +10584,11 @@ index 0000000..778ac50
 +EXPORT_NO_SYMBOLS;
 diff --git a/drivers/input/lirc/lirc_parallel.c b/drivers/input/lirc/lirc_parallel.c
 new file mode 100644
-index 0000000..674b529
+index 0000000..dec0f94
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_parallel.c
-@@ -0,0 +1,726 @@
-+/*      $Id: lirc_parallel.c,v 5.37 2007/04/29 14:23:04 lirc Exp $      */
+@@ -0,0 +1,745 @@
++/*      $Id: lirc_parallel.c,v 5.39 2007/12/17 19:53:52 lirc Exp $      */
 +
 +/****************************************************************************
 + ** lirc_parallel.c *********************************************************
@@ -11171,6 +10675,8 @@ index 0000000..674b529
 + ***********************************************************************/
 +
 +static int debug;
++static int check_pselecd;
++
 +unsigned int irq = LIRC_IRQ;
 +unsigned int io = LIRC_PORT;
 +#ifdef LIRC_TIMER
@@ -11201,7 +10707,7 @@ index 0000000..674b529
 + *************************   Interne Funktionen  ***********************
 + ***********************************************************************/
 +
-+static unsigned int __inline__ in(int offset)
++static inline unsigned int in(int offset)
 +{
 +	switch (offset) {
 +	case LIRC_LP_BASE:
@@ -11214,7 +10720,7 @@ index 0000000..674b529
 +	return 0; /* make compiler happy */
 +}
 +
-+static void __inline__ out(int offset, int value)
++static inline void out(int offset, int value)
 +{
 +	switch (offset) {
 +	case LIRC_LP_BASE:
@@ -11230,22 +10736,22 @@ index 0000000..674b529
 +	}
 +}
 +
-+static unsigned int __inline__ lirc_get_timer(void)
++static inline unsigned int lirc_get_timer(void)
 +{
 +	return (in(LIRC_PORT_TIMER)&LIRC_PORT_TIMER_BIT);
 +}
 +
-+static unsigned int __inline__  lirc_get_signal(void)
++static inline  unsigned int lirc_get_signal(void)
 +{
 +	return (in(LIRC_PORT_SIGNAL)&LIRC_PORT_SIGNAL_BIT);
 +}
 +
-+static void __inline__ lirc_on(void)
++static inline void lirc_on(void)
 +{
 +	out(LIRC_PORT_DATA, tx_mask);
 +}
 +
-+static void __inline__ lirc_off(void)
++static inline void lirc_off(void)
 +{
 +	out(LIRC_PORT_DATA, 0);
 +}
@@ -11327,7 +10833,8 @@ index 0000000..674b529
 +	unsigned int nwptr;
 +
 +	nwptr = (wptr + 1) & (RBUF_SIZE - 1);
-+	if (nwptr == rptr) { /* no new signals will be accepted */
++	if (nwptr == rptr) {
++		/* no new signals will be accepted */
 +		lost_irqs++;
 +		printk(KERN_NOTICE "%s: buffer overrun\n", LIRC_DRIVER_NAME);
 +		return;
@@ -11357,7 +10864,7 @@ index 0000000..674b529
 +	  disable_irq(irq);
 +	  out(LIRC_PORT_IRQ, in(LIRC_PORT_IRQ) & (~LP_PINTEN));
 +	*/
-+	if (in(1) & LP_PSELECD)
++	if (check_pselecd && (in(1) & LP_PSELECD))
 +		return;
 +
 +#ifdef LIRC_TIMER
@@ -11365,18 +10872,20 @@ index 0000000..674b529
 +		do_gettimeofday(&tv);
 +
 +		signal = tv.tv_sec - lasttv.tv_sec;
-+		if (signal > 15) {
-+			data = PULSE_MASK;  /* really long time */
-+		} else
++		if (signal > 15)
++			/* really long time */
++			data = PULSE_MASK;
++		else
 +			data = (lirc_t) (signal*1000000 +
 +					 tv.tv_usec - lasttv.tv_usec +
 +					 LIRC_SFH506_DELAY);
 +
 +		rbuf_write(data); /* space */
 +	} else {
-+		if (timer == 0) { /* wake up; we'll lose this signal
-+				   * but it will be garbage if the device
-+				   * is turned on anyway */
++		if (timer == 0) {
++			/* wake up; we'll lose this signal
++			 * but it will be garbage if the device
++			 * is turned on anyway */
 +			timer = init_lirc_timer();
 +			/* enable_irq(irq); */
 +			return;
@@ -11394,7 +10903,8 @@ index 0000000..674b529
 +		level = newlevel;
 +
 +		/* giving up */
-+		if (signal > timeout || (in(1) & LP_PSELECD)) {
++		if (signal > timeout
++		    || (check_pselecd && (in(1) & LP_PSELECD))) {
 +			signal = 0;
 +			printk(KERN_NOTICE "%s: timeout\n", LIRC_DRIVER_NAME);
 +			break;
@@ -11500,7 +11010,8 @@ index 0000000..674b529
 +		return -EFAULT;
 +
 +#ifdef LIRC_TIMER
-+	if (timer == 0) { /* try again if device is ready */
++	if (timer == 0) {
++		/* try again if device is ready */
 +		timer = init_lirc_timer();
 +		if (timer == 0)
 +			return(-EIO);
@@ -11526,7 +11037,7 @@ index 0000000..674b529
 +			if (level == 0 && newlevel != 0)
 +				counttimer++;
 +			level = newlevel;
-+			if (in(1) & LP_PSELECD) {
++			if (check_pselecd && (in(1) & LP_PSELECD)) {
 +				lirc_off();
 +				local_irq_restore(flags);
 +				return -EIO;
@@ -11543,7 +11054,7 @@ index 0000000..674b529
 +			if (level == 0 && newlevel != 0)
 +				counttimer++;
 +			level = newlevel;
-+			if (in(1) & LP_PSELECD) {
++			if (check_pselecd && (in(1) & LP_PSELECD)) {
 +				local_irq_restore(flags);
 +				return -EIO;
 +			}
@@ -11766,6 +11277,15 @@ index 0000000..674b529
 +
 +	timer = init_lirc_timer();
 +
++#if 0	/* continue even if device is offline */
++	if (timer == 0) {
++		is_claimed = 0;
++		parport_release(pport);
++		parport_unregister_device(ppdevice);
++		return -EIO;
++	}
++
++#endif
 +	if (debug)
 +		out(LIRC_PORT_DATA, 0);
 +#endif
@@ -11807,6 +11327,9 @@ index 0000000..674b529
 +module_param(debug, bool, 0644);
 +MODULE_PARM_DESC(debug, "Enable debugging messages");
 +
++module_param(check_pselecd, bool, 0644);
++MODULE_PARM_DESC(debug, "Check for printer (default: 0)");
++
 +EXPORT_NO_SYMBOLS;
 +
 +#endif /* MODULE */
@@ -11844,10 +11367,10 @@ index 0000000..59679c6
 +#endif
 diff --git a/drivers/input/lirc/lirc_pvr150.c b/drivers/input/lirc/lirc_pvr150.c
 new file mode 100644
-index 0000000..0d8cde3
+index 0000000..bef6eb4
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_pvr150.c
-@@ -0,0 +1,1455 @@
+@@ -0,0 +1,1431 @@
 +/*      $Id: $      */
 +
 +/*
@@ -11868,7 +11391,7 @@ index 0000000..0d8cde3
 + * modified for Hauppauge PVR-150 IR TX device by
 + *      Mark Weaver <mark@npsl.co.uk>
 + *
-+ * parts are cut&pasted from the lirc_pvr150.c driver
++ * parts are cut&pasted from the lirc_i2c.c driver
 + *
 + *  This program is free software; you can redistribute it and/or modify
 + *  it under the terms of the GNU General Public License as published by
@@ -11901,6 +11424,7 @@ index 0000000..0d8cde3
 +#include <linux/string.h>
 +#include <linux/timer.h>
 +#include <linux/delay.h>
++#include <linux/completion.h>
 +#include <linux/errno.h>
 +#include <linux/slab.h>
 +#include <linux/i2c.h>
@@ -11909,6 +11433,7 @@ index 0000000..0d8cde3
 +#include <linux/vmalloc.h>
 +
 +#include <asm/semaphore.h>
++#include <linux/kthread.h>
 +
 +#include "kcompat.h"
 +#include "lirc_dev.h"
@@ -11918,8 +11443,7 @@ index 0000000..0d8cde3
 +struct ivtv;
 +void ivtv_reset_ir_gpio(struct ivtv *itv);
 +
-+struct IR
-+{
++struct IR {
 +	struct lirc_plugin l;
 +
 +	/* Device info */
@@ -11934,10 +11458,7 @@ index 0000000..0d8cde3
 +	struct semaphore   buf_sem;
 +
 +	/* RX polling thread data */
-+	struct semaphore   *t_notify;
-+	struct semaphore   *t_notify2;
-+	int		shutdown;
-+	int		tpid;
++	struct task_struct *task;
 +
 +	/* RX read data */
 +	unsigned char      b[3];
@@ -11957,8 +11478,7 @@ index 0000000..0d8cde3
 +#define TX_BLOCK_SIZE	99
 +
 +/* Hauppuage IR transmitter data */
-+typedef struct TX_DATA_s
-+{
++typedef struct TX_DATA_s {
 +	/* Boot block */
 +	unsigned char *boot_data;
 +
@@ -11995,7 +11515,8 @@ index 0000000..0d8cde3
 +
 +#define dprintk(fmt, args...)						\
 +	do {								\
-+		if (debug) printk(KERN_DEBUG DEVICE_NAME ": " fmt,	\
++		if (debug)						\
++			printk(KERN_DEBUG DEVICE_NAME ": " fmt,		\
 +				 ## args);				\
 +	} while (0)
 +
@@ -12101,11 +11622,6 @@ index 0000000..0d8cde3
 +	/* This thread doesn't need any user-level access,
 +	 * so get rid of all our resources
 +	 */
-+	daemonize("lirc_pvr150");
-+
-+	if (ir->t_notify != NULL)
-+		up(ir->t_notify);
-+
 +	dprintk("poll thread started\n");
 +
 +	do {
@@ -12124,7 +11640,7 @@ index 0000000..0d8cde3
 +			   lost keypresses.
 +			*/
 +			schedule_timeout((260 * HZ) / 1000);
-+			if (ir->shutdown)
++			if (kthread_should_stop())
 +				break;
 +			if (!add_to_buf(ir))
 +				wake_up_interruptible(&ir->buf.wait_poll);
@@ -12133,14 +11649,7 @@ index 0000000..0d8cde3
 +			set_current_state(TASK_INTERRUPTIBLE);
 +			schedule_timeout(HZ/2);
 +		}
-+	} while (!ir->shutdown);
-+
-+	if (ir->t_notify2 != NULL)
-+		down(ir->t_notify2);
-+
-+	ir->tpid = -1;
-+	if (ir->t_notify != NULL)
-+		up(ir->t_notify);
++	} while (!kthread_should_stop());
 +
 +	dprintk("poll thread ended\n");
 +	return 0;
@@ -12156,8 +11665,10 @@ index 0000000..0d8cde3
 +	/* lock bttv in memory while /dev/lirc is in use  */
 +	/* this is completely broken code. lirc_unregister_plugin()
 +	   must be possible even when the device is open */
-+	if (ir->c_rx.addr) i2c_use_client(&ir->c_rx);
-+	if (ir->c_tx.addr) i2c_use_client(&ir->c_tx);
++	if (ir->c_rx.addr)
++		i2c_use_client(&ir->c_rx);
++	if (ir->c_tx.addr)
++		i2c_use_client(&ir->c_tx);
 +	MOD_INC_USE_COUNT;
 +
 +	return 0;
@@ -12167,15 +11678,17 @@ index 0000000..0d8cde3
 +{
 +	struct IR *ir = data;
 +
-+	if (ir->c_rx.addr) i2c_release_client(&ir->c_rx);
-+	if (ir->c_tx.addr) i2c_release_client(&ir->c_tx);
++	if (ir->c_rx.addr)
++		i2c_release_client(&ir->c_rx);
++	if (ir->c_tx.addr)
++		i2c_release_client(&ir->c_tx);
 +	MOD_DEC_USE_COUNT;
 +	if (ir->l.owner != NULL)
 +		module_put(ir->l.owner);
 +}
 +
 +/* safe read of a uint32 (always network byte order) */
-+static __inline int read_uint32(unsigned char **data,
++static inline int read_uint32(unsigned char **data,
 +				     unsigned char *endp, unsigned int *val)
 +{
 +	if (*data + 4 > endp)
@@ -12187,7 +11700,7 @@ index 0000000..0d8cde3
 +}
 +
 +/* safe read of a uint8 */
-+static __inline int read_uint8(unsigned char **data,
++static inline int read_uint8(unsigned char **data,
 +				    unsigned char *endp, unsigned char *val)
 +{
 +	if (*data + 1 > endp)
@@ -12197,7 +11710,7 @@ index 0000000..0d8cde3
 +}
 +
 +/* safe skipping of N bytes */
-+static __inline int skip(unsigned char **data,
++static inline int skip(unsigned char **data,
 +			      unsigned char *endp, unsigned int distance)
 +{
 +	if (*data + distance > endp)
@@ -12616,7 +12129,8 @@ index 0000000..0d8cde3
 +			 * returned as less than 'n', instead of blocking
 +			 * again, returning -EWOULDBLOCK, or returning
 +			 * -ERESTARTSYS */
-+			if (written) break;
++			if (written)
++				break;
 +			if (filep->f_flags & O_NONBLOCK) {
 +				ret = -EWOULDBLOCK;
 +				break;
@@ -12831,7 +12345,7 @@ index 0000000..0d8cde3
 +}
 +
 +/* copied from lirc_dev */
-+static unsigned int poll(struct file *filep, poll_table * wait)
++static unsigned int poll(struct file *filep, poll_table *wait)
 +{
 +	struct IR *ir = (struct IR *)filep->private_data;
 +	unsigned int ret;
@@ -13050,11 +12564,7 @@ index 0000000..0d8cde3
 +	init_MUTEX(&ir->buf_sem);
 +	ir->open = 0;
 +	ir->devs = 0;
-+	ir->tpid = 0;
 +	ir->need_boot = 1;
-+	ir->shutdown = 0;
-+	ir->t_notify = NULL;
-+	ir->t_notify2 = NULL;
 +	for (i = 0; i < sizeof(ir->b); ++i)
 +		ir->b[0] = 0;
 +
@@ -13065,7 +12575,7 @@ index 0000000..0d8cde3
 +	client_template.adapter = adap;
 +	memcpy(&ir->c_rx, &client_template, sizeof(struct i2c_client));
 +	if (have_rx) {
-+		DECLARE_MUTEX_LOCKED(tn);
++		DECLARE_COMPLETION(tn);
 +
 +		/* I2C attach to device */
 +		ir->c_rx.addr = 0x71;
@@ -13075,16 +12585,14 @@ index 0000000..0d8cde3
 +			goto err;
 +
 +		/* try to fire up polling thread */
-+		ir->t_notify = &tn;
-+		ir->tpid = kernel_thread(lirc_thread, ir, 0);
-+		if (ir->tpid < 0) {
++		ir->task = kthread_run(lirc_thread, ir, "lirc_pvr150");
++		if (IS_ERR(ir->task)) {
 +			printk(KERN_ERR "lirc_pvr150: lirc_register_plugin: "
 +			       "cannot run poll thread\n");
 +			ret = -ECHILD;
 +			goto err;
 +		}
-+		down(&tn);
-+		ir->t_notify = NULL;
++		kthread_stop(ir->task);
 +	}
 +
 +	/* initialise TX device */
@@ -13134,8 +12642,10 @@ index 0000000..0d8cde3
 +
 +err:
 +	/* undo everything, hopefully... */
-+	if (ir->c_rx.addr) ir_detach(&ir->c_rx);
-+	if (ir->c_tx.addr) ir_detach(&ir->c_tx);
++	if (ir->c_rx.addr)
++		ir_detach(&ir->c_rx);
++	if (ir->c_tx.addr)
++		ir_detach(&ir->c_tx);
 +	return ret;
 +}
 +
@@ -13145,24 +12655,13 @@ index 0000000..0d8cde3
 +	down(&ir->lock);
 +
 +	if (client == &ir->c_rx) {
-+		DECLARE_MUTEX_LOCKED(tn);
-+		DECLARE_MUTEX_LOCKED(tn2);
++		DECLARE_COMPLETION(tn);
++		DECLARE_COMPLETION(tn2);
 +
 +		/* end up polling thread */
-+		if (ir->tpid >= 0) {
-+			ir->t_notify = &tn;
-+			ir->t_notify2 = &tn2;
-+			ir->shutdown = 1;
-+			{
-+				struct task_struct *p;
-+
-+				p = find_task_by_pid(ir->tpid);
-+				wake_up_process(p);
-+			}
-+			up(&tn2);
-+			down(&tn);
-+			ir->t_notify = NULL;
-+			ir->t_notify2 = NULL;
++		if (ir->task) {
++			wake_up_process(ir->task);
++			kthread_stop(ir->task);
 +		}
 +
 +		/* unregister device */
@@ -13305,11 +12804,11 @@ index 0000000..0d8cde3
 + */
 diff --git a/drivers/input/lirc/lirc_sasem.c b/drivers/input/lirc/lirc_sasem.c
 new file mode 100644
-index 0000000..4f7a288
+index 0000000..0d3e55f
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_sasem.c
-@@ -0,0 +1,966 @@
-+/*      $Id: lirc_sasem.c,v 1.19 2007/04/29 14:23:04 lirc Exp $      */
+@@ -0,0 +1,971 @@
++/*      $Id: lirc_sasem.c,v 1.21 2007/09/30 09:58:46 lirc Exp $      */
 +
 +/* lirc_sasem.c - USB remote support for LIRC
 + * Version 0.5
@@ -13504,6 +13003,7 @@ index 0000000..4f7a288
 +static DECLARE_MUTEX(disconnect_sem);
 +
 +static int debug;
++
 +
 +/* ------------------------------------------------------------
 + *		     M O D U L E   C O D E
@@ -14028,6 +13528,7 @@ index 0000000..4f7a288
 +
 +	info("%s: found Sasem device", __FUNCTION__);
 +
++
 +	dev = usb_get_dev(interface_to_usbdev(interface));
 +	iface_desc = interface->cur_altsetting;
 +	num_endpoints = iface_desc->desc.bNumEndpoints;
@@ -14082,43 +13583,47 @@ index 0000000..4f7a288
 +	if (!vfd_ep_found)
 +		info("%s: no valid output (VFD) endpoint found.", __FUNCTION__);
 +
++
 +	/* Allocate memory */
 +	alloc_status = SUCCESS;
 +
-+	context = kmalloc(sizeof(struct imon_context), GFP_KERNEL);
++	context = kmalloc(sizeof(struct sasem_context), GFP_KERNEL);
 +	if (!context) {
 +		err("%s: kmalloc failed for context", __FUNCTION__);
 +		alloc_status = 1;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	plugin = kmalloc(sizeof(struct lirc_plugin), GFP_KERNEL);
 +	if (!plugin) {
 +		err("%s: kmalloc failed for lirc_plugin", __FUNCTION__);
 +		alloc_status = 2;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	rbuf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
 +	if (!rbuf) {
 +		err("%s: kmalloc failed for lirc_buffer", __FUNCTION__);
 +		alloc_status = 3;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	if (lirc_buffer_init(rbuf, BUF_CHUNK_SIZE, BUF_SIZE)) {
 +		err("%s: lirc_buffer_init failed", __FUNCTION__);
 +		alloc_status = 4;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
 +	rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 +	if (!rx_urb) {
 +		err("%s: usb_alloc_urb failed for IR urb", __FUNCTION__);
 +		alloc_status = 5;
-+		goto status_switch;
++		goto alloc_status_switch;
 +	}
-+	tx_urb = usb_alloc_urb(0, GFP_KERNEL);
-+	if (vfd_ep_found && !tx_urb) {
-+		err("%s: usb_alloc_urb failed for VFD urb", __FUNCTION__);
-+		alloc_status = 6;
-+		goto status_switch;
++	if (vfd_ep_found) {
++		tx_urb = usb_alloc_urb(0, GFP_KERNEL);
++		if (!tx_urb) {
++			err("%s: usb_alloc_urb failed for VFD urb",
++			    __FUNCTION__);
++			alloc_status = 6;
++			goto alloc_status_switch;
++		}
 +	}
 +
 +	/* clear all members of sasem_context and lirc_plugin */
@@ -14136,9 +13641,7 @@ index 0000000..4f7a288
 +	plugin->rbuf = rbuf;
 +	plugin->set_use_inc = ir_open;
 +	plugin->set_use_dec = ir_close;
-+#ifdef LIRC_HAVE_SYSFS
 +	plugin->dev   = &dev->dev;
-+#endif
 +	plugin->owner = THIS_MODULE;
 +
 +	LOCK_CONTEXT;
@@ -14152,7 +13655,7 @@ index 0000000..4f7a288
 +		info("%s: Registered Sasem plugin (minor:%d)",
 +			__FUNCTION__, lirc_minor);
 +
-+status_switch:
++alloc_status_switch:
 +
 +	switch (alloc_status) {
 +
@@ -14275,13 +13778,14 @@ index 0000000..4f7a288
 +
 +module_init(sasem_init);
 +module_exit(sasem_exit);
++
 diff --git a/drivers/input/lirc/lirc_serial.c b/drivers/input/lirc/lirc_serial.c
 new file mode 100644
-index 0000000..5095afb
+index 0000000..1a28a5c
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_serial.c
-@@ -0,0 +1,1312 @@
-+/*      $Id: lirc_serial.c,v 5.82 2007/08/03 19:42:59 lirc Exp $      */
+@@ -0,0 +1,1348 @@
++/*      $Id: lirc_serial.c,v 5.87 2007/12/15 17:28:01 lirc Exp $      */
 +
 +/****************************************************************************
 + ** lirc_serial.c ***********************************************************
@@ -14395,7 +13899,7 @@ index 0000000..5095afb
 +#warning "Software carrier only affects transmitting"
 +#endif
 +
-+#if defined(rdtsc)
++#if defined(rdtscl)
 +
 +#define USE_RDTSC
 +#warning "Note: using rdtsc instruction"
@@ -14412,8 +13916,7 @@ index 0000000..5095afb
 +
 +#define LIRC_DRIVER_NAME "lirc_serial"
 +
-+struct lirc_serial
-+{
++struct lirc_serial {
 +	int signal_pin;
 +	int signal_pin_change;
 +	int on;
@@ -14634,14 +14137,45 @@ index 0000000..5095afb
 +static unsigned long pulse_width;
 +static unsigned long space_width;
 +
++#if defined(__i386__)
++/*
++  From:
++  Linux I/O port programming mini-HOWTO
++  Author: Riku Saikkonen <Riku.Saikkonen@hut.fi>
++  v, 28 December 1997
++
++  [...]
++  Actually, a port I/O instruction on most ports in the 0-0x3ff range
++  takes almost exactly 1 microsecond, so if you're, for example, using
++  the parallel port directly, just do additional inb()s from that port
++  to delay.
++  [...]
++*/
++/* transmitter latency 1.5625us 0x1.90 - this figure arrived at from
++ * comment above plus trimming to match actual measured frequency.
++ * This will be sensitive to cpu speed, though hopefully most of the 1.5us
++ * is spent in the uart access.  Still - for reference test machine was a
++ * 1.13GHz Athlon system - Steve
++ */
++
 +/* changed from 400 to 450 as this works better on slower machines;
-+ * faster machines will use the rdtsc code anyway */
++   faster machines will use the rdtsc code anyway */
++
 +#define LIRC_SERIAL_TRANSMITTER_LATENCY 450
++
++#else
++
++/* does anybody have information on other platforms ? */
++/* 256 = 1<<8 */
++#define LIRC_SERIAL_TRANSMITTER_LATENCY 256
++
++#endif  /* __i386__ */
 +
 +static inline unsigned int sinp(int offset)
 +{
 +#if defined(LIRC_ALLOW_MMAPPED_IO)
-+	if (iommap != 0) { /* the register is memory-mapped */
++	if (iommap != 0) {
++		/* the register is memory-mapped */
 +		offset <<= ioshift;
 +		return readb(io + offset);
 +	}
@@ -14652,7 +14186,8 @@ index 0000000..5095afb
 +static inline void soutp(int offset, int value)
 +{
 +#if defined(LIRC_ALLOW_MMAPPED_IO)
-+	if (iommap != 0) { /* the register is memory-mapped */
++	if (iommap != 0) {
++		/* the register is memory-mapped */
 +		offset <<= ioshift;
 +		writeb(value, io + offset);
 +	}
@@ -14666,7 +14201,7 @@ index 0000000..5095afb
 +	/* On NSLU2, we put the transmit diode between the output of the green
 +	   status LED and ground */
 +	if (type == LIRC_NSLU2) {
-+		gpio_line_set(NSLU2_LED_GRN, IXP4XX_GPIO_LOW);
++		gpio_line_set(NSLU2_LED_GRN_GPIO, IXP4XX_GPIO_LOW);
 +		return;
 +	}
 +#endif
@@ -14680,7 +14215,7 @@ index 0000000..5095afb
 +{
 +#if defined(LIRC_SERIAL_NSLU2)
 +	if (type == LIRC_NSLU2) {
-+		gpio_line_set(NSLU2_LED_GRN, IXP4XX_GPIO_HIGH);
++		gpio_line_set(NSLU2_LED_GRN_GPIO, IXP4XX_GPIO_HIGH);
 +		return;
 +	}
 +#endif
@@ -14758,10 +14293,10 @@ index 0000000..5095afb
 + * IE multiplied by 256. */
 +	if (256*1000000L/new_freq*new_duty_cycle/100 <=
 +	    LIRC_SERIAL_TRANSMITTER_LATENCY)
-+		return(-EINVAL);
++		return -EINVAL;
 +	if (256*1000000L/new_freq*(100-new_duty_cycle)/100 <=
 +	    LIRC_SERIAL_TRANSMITTER_LATENCY)
-+		return(-EINVAL);
++		return -EINVAL;
 +	duty_cycle = new_duty_cycle;
 +	freq = new_freq;
 +	period = 256*1000000L/freq;
@@ -14919,7 +14454,8 @@ index 0000000..5095afb
 +
 +static inline void rbwrite(lirc_t l)
 +{
-+	if (lirc_buffer_full(&rbuf)) { /* no new signals will be accepted */
++	if (lirc_buffer_full(&rbuf)) {
++		/* no new signals will be accepted */
 +		dprintk("Buffer overrun\n");
 +		return;
 +	}
@@ -15044,7 +14580,8 @@ index 0000000..5095afb
 +				data = PULSE_MASK;
 +			} else if (deltv > 15) {
 +				data = PULSE_MASK; /* really long time */
-+				if (!(dcd^sense)) { /* sanity check */
++				if (!(dcd^sense)) {
++					/* sanity check */
 +					printk(KERN_WARNING LIRC_DRIVER_NAME
 +					       ": AIEEEE: "
 +					       "%d %d %lx %lx %lx %lx\n",
@@ -15087,8 +14624,8 @@ index 0000000..5095afb
 +	sinp(UART_MSR);
 +
 +#if defined(LIRC_SERIAL_NSLU2)
-+	if (type == LIRC_NSLU2) { /* Setup NSLU2 UART */
-+		/* Enable UART */
++	if (type == LIRC_NSLU2) {
++		/* Setup NSLU2 UART */
 +		soutp(UART_IER, sinp(UART_IER) | UART_IE_IXP42X_UUE);
 +		/* Disable Receiver data Time out interrupt */
 +		soutp(UART_IER, sinp(UART_IER) & ~UART_IE_IXP42X_RTOIE);
@@ -15154,7 +14691,7 @@ index 0000000..5095afb
 +		       ": or compile the serial port driver as module and\n");
 +		printk(KERN_WARNING LIRC_DRIVER_NAME
 +		       ": make sure this module is loaded first\n");
-+		return(-EBUSY);
++		return -EBUSY;
 +	}
 +
 +	hardware_init_port();
@@ -15203,7 +14740,7 @@ index 0000000..5095afb
 +	do_gettimeofday(&lasttv);
 +
 +	result = request_irq(irq, irq_handler,
-+			   SA_INTERRUPT | (share_irq ? SA_SHIRQ:0),
++			   IRQF_DISABLED | (share_irq ? IRQF_SHARED:0),
 +			   LIRC_DRIVER_NAME, (void *)&hardware);
 +
 +	switch (result) {
@@ -15263,12 +14800,15 @@ index 0000000..5095afb
 +	long delta = 0;
 +
 +	if (!(hardware[type].features&LIRC_CAN_SEND_PULSE))
-+		return(-EBADF);
++		return -EBADF;
 +
-+	if (n%sizeof(lirc_t)) return(-EINVAL);
-+	count = n/sizeof(lirc_t);
-+	if (count > WBUF_LEN || count%2 == 0) return(-EINVAL);
-+	if (copy_from_user(wbuf, buf, n)) return -EFAULT;
++	if (n % sizeof(lirc_t))
++		return -EINVAL;
++	count = n / sizeof(lirc_t);
++	if (count > WBUF_LEN || count % 2 == 0)
++		return -EINVAL;
++	if (copy_from_user(wbuf, buf, n))
++		return -EFAULT;
 +	local_irq_save(flags);
 +	if (type == LIRC_IRDEO) {
 +		/* DTR, RTS down */
@@ -15282,7 +14822,7 @@ index 0000000..5095afb
 +	}
 +	off();
 +	local_irq_restore(flags);
-+	return(n);
++	return n;
 +}
 +
 +static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
@@ -15295,7 +14835,7 @@ index 0000000..5095afb
 +	switch (cmd) {
 +	case LIRC_GET_SEND_MODE:
 +		if (!(hardware[type].features&LIRC_CAN_SEND_MASK))
-+			return(-ENOIOCTLCMD);
++			return -ENOIOCTLCMD;
 +
 +		result = put_user(LIRC_SEND2MODE
 +				  (hardware[type].features&LIRC_CAN_SEND_MASK),
@@ -15306,7 +14846,7 @@ index 0000000..5095afb
 +
 +	case LIRC_SET_SEND_MODE:
 +		if (!(hardware[type].features&LIRC_CAN_SEND_MASK))
-+			return(-ENOIOCTLCMD);
++			return -ENOIOCTLCMD;
 +
 +		result = get_user(value, (unsigned long *) arg);
 +		if (result)
@@ -15563,7 +15103,7 @@ index 0000000..5095afb
 +
 +/* some architectures (e.g. intel xscale) align the 8bit serial registers
 +   on 32bit word boundaries.
-+   See linux-kernel/drivers/serial/8250.c serial_in()/out() */
++   See linux-kernel/serial/8250.c serial_in()/out() */
 +module_param(ioshift, int, 0444);
 +MODULE_PARM_DESC(ioshift, "shift I/O register offset (0 = no shift)");
 +#endif
@@ -15595,10 +15135,10 @@ index 0000000..5095afb
 +#endif /* MODULE */
 diff --git a/drivers/input/lirc/lirc_sir.c b/drivers/input/lirc/lirc_sir.c
 new file mode 100644
-index 0000000..072e306
+index 0000000..2553316
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_sir.c
-@@ -0,0 +1,1314 @@
+@@ -0,0 +1,1323 @@
 +/*
 + * LIRC SIR driver, (C) 2000 Milan Pikula <www@fornax.sk>
 + *
@@ -15671,10 +15211,10 @@ index 0000000..072e306
 +#include <linux/delay.h>
 +#include <linux/poll.h>
 +#include <asm/system.h>
-+#include <linux/uaccess.h>
-+#include <linux/io.h>
-+#include <linux/irq.h>
-+#include <linux/fcntl.h>
++#include <asm/uaccess.h>
++#include <asm/io.h>
++#include <asm/irq.h>
++#include <asm/fcntl.h>
 +#ifdef LIRC_ON_SA1100
 +#include <asm/hardware.h>
 +#ifdef CONFIG_SA1100_COLLIE
@@ -15717,8 +15257,7 @@ index 0000000..072e306
 +
 +/******************************* SA1100 ********************************/
 +#ifdef LIRC_ON_SA1100
-+struct sa1100_ser2_registers
-+{
++struct sa1100_ser2_registers {
 +	/* HSSP control register */
 +	unsigned char hscr0;
 +	/* UART registers */
@@ -15775,7 +15314,7 @@ index 0000000..072e306
 +static int threshold = 3;
 +#endif
 +
-+static spinlock_t timer_lock = SPIN_LOCK_UNLOCKED;
++static DEFINE_SPINLOCK(timer_lock);
 +static struct timer_list timerlist;
 +/* time of last signal change detected */
 +static struct timeval last_tv = {0, 0};
@@ -15785,8 +15324,8 @@ index 0000000..072e306
 +
 +static DECLARE_WAIT_QUEUE_HEAD(lirc_read_queue);
 +
-+static spinlock_t hardware_lock = SPIN_LOCK_UNLOCKED;
-+static spinlock_t dev_lock = SPIN_LOCK_UNLOCKED;
++static DEFINE_SPINLOCK(hardware_lock);
++static DEFINE_SPINLOCK(dev_lock);
 +
 +static lirc_t rx_buf[RBUF_LEN];
 +static unsigned int rx_tail, rx_head;
@@ -15795,7 +15334,8 @@ index 0000000..072e306
 +static int debug;
 +#define dprintk(fmt, args...)						\
 +	do {								\
-+		if (debug) printk(KERN_DEBUG LIRC_DRIVER_NAME ": "	\
++		if (debug)						\
++			printk(KERN_DEBUG LIRC_DRIVER_NAME ": "		\
 +				fmt, ## args);				\
 +	} while (0)
 +
@@ -16071,7 +15611,8 @@ index 0000000..072e306
 +
 +	/* statistically pulses are ~TIME_CONST/2 too long: we could
 +	   maybe make this more exactly but this is good enough */
-+	if (flag) { /* pulse */
++	if (flag) {
++		/* pulse */
 +		if (newval > TIME_CONST/2)
 +			newval -= TIME_CONST/2;
 +		else /* should not ever happen */
@@ -16265,6 +15806,10 @@ index 0000000..072e306
 +			(void) inb(io + UART_LSR);
 +			break;
 +		case UART_IIR_THRI:
++#if 0
++			if (lsr & UART_LSR_THRE) /* FIFO is empty */
++				outb(data, io + UART_TX)
++#endif
 +			break;
 +		case UART_IIR_RDI:
 +			/* avoid interference with timer */
@@ -16380,9 +15925,13 @@ index 0000000..072e306
 +	}
 +	while (bytes_out--) {
 +		outb(PULSE, io + UART_TX);
-+		/* FIXME treba seriozne cakanie z drivers/char/serial.c */
++		/* FIXME treba seriozne cakanie z char/serial.c */
 +		while (!(inb(io + UART_LSR) & UART_LSR_THRE));
 +	}
++#if 0
++	if (time_left > 0)
++		safe_udelay(time_left);
++#endif
 +}
 +#endif
 +
@@ -16603,7 +16152,7 @@ index 0000000..072e306
 +		return -EBUSY;
 +	}
 +#endif
-+	retval = request_irq(irq, sir_interrupt, SA_INTERRUPT,
++	retval = request_irq(irq, sir_interrupt, IRQF_DISABLED,
 +			     LIRC_DRIVER_NAME, NULL);
 +	if (retval < 0) {
 +#               ifndef LIRC_ON_SA1100
@@ -16781,7 +16330,7 @@ index 0000000..072e306
 +#endif
 +
 +#ifdef LIRC_SIR_ACTISYS_ACT220L
-+/* Derived from linux IrDA driver (drivers/net/irda/actisys.c)
++/* Derived from linux IrDA driver (net/irda/actisys.c)
 + * Drop me a mail for any kind of comment: maxx@spaceboyz.net */
 +
 +void init_act220(void)
@@ -16915,11 +16464,11 @@ index 0000000..072e306
 +#endif /* MODULE */
 diff --git a/drivers/input/lirc/lirc_streamzap.c b/drivers/input/lirc/lirc_streamzap.c
 new file mode 100644
-index 0000000..d18a3ea
+index 0000000..147f3a9
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_streamzap.c
-@@ -0,0 +1,801 @@
-+/*      $Id: lirc_streamzap.c,v 1.22 2007/04/29 14:23:04 lirc Exp $      */
+@@ -0,0 +1,810 @@
++/*      $Id: lirc_streamzap.c,v 1.25 2007/11/08 21:27:30 lirc Exp $      */
 +
 +/*
 + * Streamzap Remote Control driver
@@ -16969,7 +16518,7 @@ index 0000000..d18a3ea
 +#include "kcompat.h"
 +#include "lirc_dev.h"
 +
-+#define DRIVER_VERSION	"$Revision: 1.22 $"
++#define DRIVER_VERSION	"$Revision: 1.25 $"
 +#define DRIVER_NAME	"lirc_streamzap"
 +#define DRIVER_DESC	"Streamzap Remote Control driver"
 +
@@ -17003,10 +16552,9 @@ index 0000000..d18a3ea
 +#define STREAMZAP_RESOLUTION 256
 +
 +/* number of samples buffered */
-+#define STREAMZAP_BUFFER_SIZE 64
++#define STREAMZAP_BUFFER_SIZE 128
 +
-+enum StreamzapDecoderState
-+{
++enum StreamzapDecoderState {
 +	PulseSpace,
 +	FullPulse,
 +	FullSpace,
@@ -17128,16 +16676,17 @@ index 0000000..d18a3ea
 +
 +	spin_lock_irqsave(&sz->timer_lock, flags);
 +
-+	if (!lirc_buffer_empty(&sz->delay_buf)) {
++	if (!lirc_buffer_empty(&sz->delay_buf) &&
++	    !lirc_buffer_full(&sz->lirc_buf)) {
 +		lirc_buffer_read_1(&sz->delay_buf, (unsigned char *) &data);
 +		lirc_buffer_write_1(&sz->lirc_buf, (unsigned char *) &data);
 +	}
-+
 +	if (!lirc_buffer_empty(&sz->delay_buf)) {
 +		while (lirc_buffer_available(&sz->delay_buf) <
-+		       STREAMZAP_BUFFER_SIZE/2) {
++		      STREAMZAP_BUFFER_SIZE/2 &&
++		      !lirc_buffer_full(&sz->lirc_buf)) {
 +			lirc_buffer_read_1(&sz->delay_buf,
-+					    (unsigned char *) &data);
++					   (unsigned char *) &data);
 +			lirc_buffer_write_1(&sz->lirc_buf,
 +					    (unsigned char *) &data);
 +		}
@@ -17163,9 +16712,15 @@ index 0000000..d18a3ea
 +	while (!lirc_buffer_empty(&sz->delay_buf)) {
 +		empty = 0;
 +		lirc_buffer_read_1(&sz->delay_buf, (unsigned char *) &data);
-+		lirc_buffer_write_1(&sz->lirc_buf, (unsigned char *) &data);
++		if (!lirc_buffer_full(&sz->lirc_buf)) {
++			lirc_buffer_write_1(&sz->lirc_buf,
++					    (unsigned char *) &data);
++		} else {
++			dprintk("buffer overflow\n", sz->plugin.minor);
++		}
 +	}
-+	if (!empty) wake_up(&sz->lirc_buf.wait_poll);
++	if (!empty)
++		wake_up(&sz->lirc_buf.wait_poll);
 +}
 +
 +static inline void push(struct usb_streamzap *sz, unsigned char *data)
@@ -17177,9 +16732,12 @@ index 0000000..d18a3ea
 +		lirc_t data;
 +
 +		lirc_buffer_read_1(&sz->delay_buf, (unsigned char *) &data);
-+		lirc_buffer_write_1(&sz->lirc_buf, (unsigned char *) &data);
-+
-+		dprintk("buffer overflow", sz->plugin.minor);
++		if (!lirc_buffer_full(&sz->lirc_buf)) {
++			lirc_buffer_write_1(&sz->lirc_buf,
++					    (unsigned char *) &data);
++		} else {
++			dprintk("buffer overflow", sz->plugin.minor);
++		}
 +	}
 +
 +	lirc_buffer_write_1(&sz->delay_buf, data);
@@ -17331,6 +16889,7 @@ index 0000000..d18a3ea
 +		}
 +	}
 +
++	/* resubmit only for 2.6 */
 +	usb_submit_urb(urb, GFP_ATOMIC);
 +
 +	return;
@@ -17409,7 +16968,7 @@ index 0000000..d18a3ea
 +		goto error;
 +
 +	sz->urb_in = usb_alloc_urb(0, GFP_KERNEL);
-+	if (!(sz->urb_in))
++	if (sz->urb_in == NULL)
 +		goto error;
 +
 +	/***************************************************
@@ -17442,9 +17001,7 @@ index 0000000..d18a3ea
 +	sz->plugin.set_use_inc = &streamzap_use_inc;
 +	sz->plugin.set_use_dec = &streamzap_use_dec;
 +	sz->plugin.ioctl = streamzap_ioctl;
-+#ifdef LIRC_HAVE_SYSFS
 +	sz->plugin.dev = &udev->dev;
-+#endif
 +	sz->plugin.owner = THIS_MODULE;
 +
 +	sz->idle = 1;
@@ -17505,9 +17062,10 @@ index 0000000..d18a3ea
 +		if (sz->urb_in)
 +			usb_free_urb(sz->urb_in);
 +
-+		if (sz->buf_in)
++		if (sz->buf_in) {
 +			usb_buffer_free(udev, sz->buf_in_len,
 +					sz->buf_in, sz->dma_in);
++		}
 +		kfree(sz);
 +	}
 +
@@ -17722,10 +17280,10 @@ index 0000000..d18a3ea
 +#endif /* MODULE */
 diff --git a/drivers/input/lirc/lirc_ttusbir.c b/drivers/input/lirc/lirc_ttusbir.c
 new file mode 100644
-index 0000000..b80dbf8
+index 0000000..929583d
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_ttusbir.c
-@@ -0,0 +1,361 @@
+@@ -0,0 +1,393 @@
 +/****************************************************************************
 + ** lirc_ttusbir.c ***********************************************************
 + ****************************************************************************
@@ -17749,6 +17307,16 @@ index 0000000..b80dbf8
 + *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 + *
 + */
++
++/* This LIRC driver provides access to the TechnoTrend USB IR Receiver.
++ * The receiver delivers the IR signal as raw sampled true/false data in
++ * isochronous USB packets each of size 128 byte.
++ * Currently the driver reduces the sampling rate by factor of 8 as this
++ * is still more than enough to decode RC-5 - others should be analyzed.
++ * But the driver does not rely on RC-5 it should be able to decode every
++ * IR signal that is not too fast.
++ */
++
 +#include <linux/version.h>
 +#include <linux/kernel.h>
 +#include <linux/init.h>
@@ -17765,9 +17333,6 @@ index 0000000..b80dbf8
 +MODULE_AUTHOR("Stefan Macher (st_maker-lirc@yahoo.de)");
 +MODULE_LICENSE("GPL");
 +
-+/* @TODO Is it enough to have only two, I guess yes */
-+#define NUM_URBS 4 /* Number of URBs used in the queue */
-+
 +/* #define DEBUG */
 +#ifdef DEBUG
 +#define DPRINTK printk
@@ -17781,6 +17346,12 @@ index 0000000..b80dbf8
 +static void urb_complete(struct urb *urb);
 +static int set_use_inc(void *data);
 +static void set_use_dec(void *data);
++
++static int num_urbs = 2;
++module_param(num_urbs, int, 0444);
++MODULE_PARM_DESC(num_urbs,
++		 "Number of URBs in queue. Try to increase to 4 in case "
++		 "of problems (default: 2; minimum: 2)");
 +
 +/* table of devices that work with this driver */
 +static struct usb_device_id device_id_table[] = {
@@ -17798,8 +17369,7 @@ index 0000000..b80dbf8
 +};
 +
 +/* USB device definition */
-+struct ttusbir_device
-+{
++struct ttusbir_device {
 +	struct usb_driver *driver;
 +	struct usb_device *udev;
 +	struct usb_interface *interf;
@@ -17807,8 +17377,8 @@ index 0000000..b80dbf8
 +	unsigned int ifnum; /* Interface number to use */
 +	unsigned int alt_setting; /* alternate setting to use */
 +	unsigned int endpoint; /* Endpoint to use */
-+	struct urb *urb[NUM_URBS];
-+	char buffer[NUM_URBS][128];
++	struct urb **urb; /* num_urb URB pointers*/
++	char **buffer; /* 128 byte buffer for each URB */
 +	struct lirc_buffer rbuf; /* Buffer towards LIRC */
 +	struct lirc_plugin plugin;
 +	int minor;
@@ -17826,10 +17396,10 @@ index 0000000..b80dbf8
 +	struct ttusbir_device *ttusbir = data;
 +
 +	DPRINTK("Sending first URBs\n");
-+
++	/* @TODO Do I need to check if I am already opened */
 +	ttusbir->opened = 1;
 +
-+	for (i = 0; i < NUM_URBS; i++)
++	for (i = 0; i < num_urbs; i++)
 +		usb_submit_urb(ttusbir->urb[i], GFP_KERNEL);
 +
 +	return 0;
@@ -17848,11 +17418,12 @@ index 0000000..b80dbf8
 + * USB specific functions
 + */
 +
-+/* This mapping table is used to do a very simple filtering of the input signal
-+ * For a value with at least 4 bits set it returns 0xFF otherwise 0x00.
-+ * For faster IR signals this can not be used. But for RC-5 we still have
-+ * about 14 bytes per pulse/space
-+ */
++/* This mapping table is used to do a very simple filtering of the
++ * input signal.
++ * For a value with at least 4 bits set it returns 0xFF otherwise
++ * 0x00.  For faster IR signals this can not be used. But for RC-5 we
++ * still have about 14 samples per pulse/space, i.e. we sample with 14
++ * times higher frequency than the signal frequency */
 +const unsigned char map_table[] =
 +{
 +	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -17904,6 +17475,7 @@ index 0000000..b80dbf8
 +	buf = (unsigned char *)urb->transfer_buffer;
 +
 +	for (i = 0; i < 128; i++) {
++		/* Here we do the filtering and some kind of down sampling */
 +		buf[i] = ~map_table[buf[i]];
 +		if (ttusbir->last_pulse == buf[i]) {
 +			if (ttusbir->last_num < PULSE_MASK/63)
@@ -17933,6 +17505,7 @@ index 0000000..b80dbf8
 +	int alt_set, endp;
 +	int found = 0;
 +	int i, j;
++	int struct_size;
 +	struct usb_host_interface *host_interf;
 +	struct usb_interface_descriptor *interf_desc;
 +	struct usb_host_endpoint *host_endpoint;
@@ -17940,12 +17513,27 @@ index 0000000..b80dbf8
 +
 +	DPRINTK("Module ttusbir probe\n");
 +
-+	ttusbir = (struct ttusbir_device *)
-+		  kzalloc(sizeof(struct ttusbir_device), GFP_KERNEL);
++	/* To reduce memory fragmentation we use only one allocation */
++	struct_size =  sizeof(struct ttusbir_device) +
++		(sizeof(struct urb *) * num_urbs) +
++		(sizeof(char *) * num_urbs) +
++		(num_urbs * 128);
++	ttusbir = kmalloc(struct_size, GFP_KERNEL);
 +	if (!ttusbir)
 +		return -ENOMEM;
++	memset(ttusbir, 0, struct_size);
++
++	ttusbir->urb = (struct urb **)((char *)ttusbir +
++				      sizeof(struct ttusbir_device));
++	ttusbir->buffer = (char **)((char *)ttusbir->urb +
++				   (sizeof(struct urb *) * num_urbs));
++	for (i = 0; i < num_urbs; i++)
++		ttusbir->buffer[i] = (char *)ttusbir->buffer +
++			(sizeof(char *)*num_urbs) + (i * 128);
++
 +	ttusbir->driver = &driver;
 +	ttusbir->alt_setting = -1;
++	/* @TODO check if error can be returned */
 +	ttusbir->udev = usb_get_dev(interface_to_usbdev(intf));
 +	ttusbir->interf = intf;
 +	ttusbir->last_pulse = 0x00;
@@ -18014,7 +17602,7 @@ index 0000000..b80dbf8
 +	}
 +
 +	/* Allocate and setup the URB that we will use to talk to the device */
-+	for (i = 0; i < NUM_URBS; i++) {
++	for (i = 0; i < num_urbs; i++) {
 +		ttusbir->urb[i] = usb_alloc_urb(8, GFP_KERNEL);
 +		if (!ttusbir->urb[i]) {
 +			err("Could not allocate memory for the URB\n");
@@ -18053,14 +17641,16 @@ index 0000000..b80dbf8
 +
 +	DPRINTK("Module ttusbir disconnect\n");
 +
-+	lock_kernel();
 +	ttusbir = (struct ttusbir_device *) usb_get_intfdata(intf);
 +	usb_set_intfdata(intf, NULL);
 +	lirc_unregister_plugin(ttusbir->minor);
-+	unlock_kernel();
++	DPRINTK("unregistered\n");
 +
-+	for (i = 0; i < NUM_URBS; i++)
++	for (i = 0; i < num_urbs; i++) {
++		usb_kill_urb(ttusbir->urb[i]);
 +		usb_free_urb(ttusbir->urb[i]);
++	}
++	DPRINTK("URBs killed\n");
 +	lirc_buffer_free(&ttusbir->rbuf);
 +	kfree(ttusbir);
 +}
