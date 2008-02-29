@@ -20,4 +20,4 @@ case $branch in
     ;;
 esac
 
-time cvc cook --context $CONTEXT --build-label=$BRANCH 'group-desktop-platform=$BRANCH[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen  is: x86 x86_64]' 'group-desktop-platform=$BRANCH[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]'
+time cvc cook --context $CONTEXT --build-label=$BRANCH group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen  is: x86 x86_64]' group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]'
