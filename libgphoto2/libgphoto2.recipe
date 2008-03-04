@@ -1,39 +1,90 @@
 #
-# Copyright (c) 2006 rPath, Inc.
+# Copyright (c) 2006-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class LibGphoto2(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class LibGphoto2(RPMPackageRecipe,CPackageRecipe):
     name = 'libgphoto2'
     version = '2.4.0'
+    rpmRelease = '6.fc9'
+
+    rpmArchives = [ 'gphoto2-%(version)s.tar.bz2']
+
+    rpmName = 'gphoto2'
+
 
     buildRequires = [ 'gtk:devel', 'findutils:runtime', 'flex:runtime',
                       'libexif:devel', 'libusb:devel', 'bison:runtime',
                       'lockdev:devel', 'libjpeg:devel', 'swig:runtime',
                       'pkgconfig:devel', 'libtool:runtime', 'libtool:devel',
                       'gettext:runtime', 'libexif:devel', 'doxygen:runtime',
-                      'dbus:devel', 'hal:devel']
+                      'dbus:devel', 'hal:devel', 'graphviz:runtime', 'popt:devel',
+                      'readline:devel']
 
     def setup(r):
-        r.addArchive('mirror://sourceforge/gphoto/')
-        r.addSource('usbcam.console')
+        RPMPackageRecipe.unpack(r)
 
-        r.Run('libtoolize -f')
-        r.Configure('--disable-rpath --with-doc-dir=%(thisdocdir)s')
+        # ugly... 
+        for p in ['gphoto2-pkgcfg.patch']:
+            r.addSource(p, rpm=r.srpm)
+            r.addAction(""" ln -s ../../%(name)s-%(version)s gphoto2-%(version)s
+sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s/@@' gphoto2-pkgcfg.patch """)
 
+            r.addPatch( p)
+
+        for p in  [ 'gphoto2-storage.patch',
+                        'gphoto2-ixany.patch',
+                        ]:
+            r.addSource(p, rpm=r.srpm)
+        r.addAction(""" sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s@%(name)s-%(version)s@'  gphoto2-storage.patch""")
+        r.addAction(""" sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s@%(name)s-%(version)s@'  gphoto2-ixany.patch""")
+        # %s does not work if i use macros ...
+        for p in  [ 'gphoto2-storage.patch',
+                        'gphoto2-ixany.patch',
+                        ]:
+            r.addPatch(p)
+
+        r.Create('gphoto2-%(version)s/gphoto2.pc.in', contents = """
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+VERSION=@VERSION@
+
+Name: gphoto2
+Description: Library for easy access to digital cameras
+Requires:
+Version: @VERSION@
+Libs: -L%(libdir)s -lgphoto2 -lgphoto2_port -lm
+Cflags: -I%(includedir)s -I%(includedir)s/gphoto2
+""")
+        r.Copy('gphoto2-%(version)s/gphoto2.pc.in', 'gphoto2-%(version)s/gphoto2-port.pc.in')
+        r.Replace('gphoto2','gphoto2-port','gphoto2-%(version)s/gphoto2-port.pc.in')
+
+        r.Configure(" --with-drivers=all  --with-doc-dir=%(docdir)s/%(name)s  --disable-static --without-aalib")
         r.Make()
+
         r.MakeInstall()
 
-        r.Remove('%(libdir)s/libgphoto2/%(version)s/*.a')
-        r.Provides(exceptions=['%(libdir)s/gphoto2/%(version)s/'])
+        r.Environment('LIBGPHOTO2_LIBS', '-L../libgphoto2/.libs -L../libgphoto2_port/libgphoto2/.libs -lgphoto2 -lgphoto2_port')
+        r.Environment('LIBGPHOTO2_CFLAGS', '-I../ -I../libgphoto2_port')
 
-#FIXME.need to look at this carefully. but now i need it cooking
-        # use the filewrap hack and LD_LIBRARY_PATH to bootstrap usbcam.usermap
-#        r.Run('LD_LIBRARY_PATH=%(destdir)s/%(libdir)s'
-#              ' %(destdir)s/%(libdir)s/libgphoto2/print-usb-usermap'
-#              ' > usbcam.usermap </dev/null',
-#              filewrap=True)
-#        r.Install('usbcam.usermap','%(sysconfdir)s/hotplug/usb/usbcam.usermap')
-#        r.Install('usbcam.console','%(sysconfdir)s/hotplug/usb/usbcam',
-#                  mode=0755)
+        r.Configure('--enable-docs --enable-lockdev --with-doc-dir=%(docdir)s/%(name)s', dir = 'gphoto2-%(version)s')
+        r.Make(dir = 'gphoto2-%(version)s')
+        r.MakeInstall(dir = 'gphoto2-%(version)s')
+
+        r.Install('gphoto2-%(version)s/gphoto2.pc', '%(libdir)s/pkgconfig/', mode = 0644)
+        r.Install('gphoto2-%(version)s/gphoto2-port.pc', '%(libdir)s/pkgconfig/', mode = 0644)
+
+        r.MakeDirs('%(datadir)s/hal/fdi/information/20thirdparty')
+        r.Run("""
+export LIBDIR=%(destdir)s/%(libdir)s
+export CAMLIBS=%(destdir)s/%(libdir)s/%(name)s/%(version)s
+export LD_LIBRARY_PATH=%(destdir)s/%(libdir)s
+%(destdir)s/%(libdir)s/%(name)s/print-camera-list hal-fdi | \
+grep -v "<!-- This file was generated" > %(destdir)s/%(datadir)s/hal/fdi/information/20thirdparty/10-camera-libgphoto2.fdi
+""")
+
+
