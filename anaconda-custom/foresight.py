@@ -6,7 +6,7 @@ from constants import *
 from rhpl.translate import *
 from rpathbase import rPathBaseInstallClass
 
-class rPathBaseInstallClass(rPathBaseInstallClass):
+class InstallClass(rPathBaseInstallClass):
     hidden = 0
 
     id = "foresight"
