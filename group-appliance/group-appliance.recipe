@@ -6,7 +6,7 @@
 
 class ApplianceGroupRecipe(GroupRecipe):
     name = 'group-appliance'
-    version= 'beta1'
+    version = 'beta1'
 
     def startGroup(r, name, parentGroup, depCheck=False, byDefault=True,
                    checkPathConflicts=None):
@@ -96,13 +96,72 @@ class ApplianceGroupRecipe(GroupRecipe):
             kernelFlavor = '~!dom0,~!domU,~!kernel.core,~!kernel.debug,~!kernel.debugdata,~kernel.debuginfo,~!kernel.numa,~!kernel.pae,~kernel.smp,~!xen is: x86_64'
             releaseFlavor = None
 
+
+    initialSearchPath = None
+    additionalSearchPath = []
     rPathGroupSearchPath = 'group-os=' + groupLabel + '[' + groupCoreFlavor +']'
+    rPathAppliancePlatformAgentSearchPath = [ rapaLabel ]
+    finalSearchPath = []
+
+
+    def setApplianceSearchPath(r):
+        searchPath = r.getInitialSearchPath() + r.getAdditionalSearchPath() + r.getAppliancePlatformSearchPath() + r.getFinalSearchPath()
+        r.setSearchPath(*searchPath)
+
+    def _makeList(r, searchPath):
+        if isinstance(searchPath, str):
+            return [searchPath]
+        if isinstance(searchPath, list):
+            return searchPath
+        if isinstance(searchPath, tuple):
+            return list(searchPath)
+        raise TypeError('search path element %s must be a string, list, or tuple'%searchPath)
+
+    def getInitialSearchPath(r):
+        """
+        Override this method to provide initial elements in the search path.
+        It is strongly recommended that you take the default of the buildlabel.
+        In almost all cases, getAdditionalSearchPath(), which provides the
+        next elements of the search path, is preferred.
+        """
+        if r.initialSearchPath is None:
+            # now we have access to the buildlabel
+            r.initialSearchPath = r.macros.buildlabel
+        return r._makeList(r.initialSearchPath)
+
+    def getAdditionalSearchPath(r):
+        """
+        Override this method to provide additional elements besides the
+        buildlabel and the appliance platform.
+        """
+        return r._makeList(r.additionalSearchPath)
+
+    def getAppliancePlatformSearchPath(r):
+        """
+        This method provides the elements of the search path that provide
+        the operating system and platform elements of the rPath Appliance
+        Platform.  It should not normally be overridden.
+        """
+        return r._makeList(r.rPathGroupSearchPath) + r._makeList(
+            r.rPathAppliancePlatformAgentSearchPath)
+
+    def getFinalSearchPath(r):
+        """
+        Override this method to provide final elements in the search path.
+        This is a rarely-used method in order to provide search path
+        elements of last resort.  Its main use is during bootstrapping,
+        while temporarily fetching packages as part of a "mashup" that
+        will be later unified in the labels provided in the
+        additionalSearchPath.  See r.getAdditionalSearchPath().
+        """
+        return r._makeList(r.finalSearchPath)
 
     def setup(r):
-        r.setSearchPath(r.macros.buildlabel, r.rPathGroupSearchPath)
+        r.setApplianceSearchPath()
         r.addAppliancePlatform()
         r.addrPathAppliancePlatformAgent()
-        r.addTroves()
+        r.setDefaultGroup(r.name)
+        r.addPackages()
 
     def addAppliancePlatform(r):
         r.startGroup('group-core', parentGroup=r.name)
@@ -111,13 +170,13 @@ class ApplianceGroupRecipe(GroupRecipe):
 
     def addrPathAppliancePlatformAgent(r):
         r.addAll('group-turbogears', r.turboGearsLabel)
-        r.addAll('group-raa', r.rapaLabel)
+        r.addAll('group-raa')
         r.add('logrotate:config')
         r.add('logrotate:lib')
         r.add('logrotate:runtime')
 
-    def addTroves(r):
+    def addPackages(r):
         """
-        Add application troves here
+        Add application packages by overriding this method in the subclass
         """
         pass
