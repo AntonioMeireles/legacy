@@ -1,4 +1,5 @@
 DESTDIR = 
+LIBDIR = 
 
 .PHONY: clean uninstall
 
@@ -8,10 +9,10 @@ clean:
 	rm -rf *.o *.so *~
 
 install: all
-	install -D gkrellm-entropy.so $(DESTDIR)/usr/lib/gkrellm2/plugins/gkrellm-entropy.so
+	install -D gkrellm-entropy.so $(DESTDIR)/$(LIBDIR)/gkrellm2/plugins/gkrellm-entropy.so
 
 uninstall:
-	rm /usr/lib/gkrellm2/plugins/gkrellm-entropy.so
+	rm $(LIBDIR)/gkrellm2/plugins/gkrellm-entropy.so
 
 gkrellm-entropy.so: gkrellm-entropy.o
 	gcc -shared -Wl -o gkrellm-entropy.so gkrellm-entropy.o
