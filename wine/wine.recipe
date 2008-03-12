@@ -1,36 +1,114 @@
-#
-# Copyright (c) 2004-2008 rPath, Inc.
-# This file is distributed under the terms of the MIT License.
-# A copy is available at http://www.rpath.com/permanent/mit-license.html
-#
 
-class Wine(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Wine(RPMPackageRecipe,AutoPackageRecipe):
     name = 'wine'
-    version = '0.9.53'
+    version = '0.9.57'
 
-    buildRequires = [ 'alsa-lib:devel', 'arts:devel', 'flex:runtime',
-                      'freeglut:devel','freetype:devel', 'glib:devel',
-                      'lcms:devel', 'libieee1284:devel', 'libjpeg:devel',
-                      'libusb:devel', 'libxml2:devel', 'libxslt:devel',
-                      'openldap:devel','pkgconfig:devel',
-                      'sane-backends:devel', 'xorg-x11:devel', 'zlib:devel',
-                      'audiofile:devel', 'esound:devel', 'nas:devel',
-                      'esound:devel', 'perl:lib', 'fontconfig:runtime',
-                      'fontforge:runtime', 'libgphoto2:devel',
+    rpmRelease = '1.fc8'
+    rpmPatches = [ 'wine-wineshelllink.patch', 'wine-prefixfonts.patch', 'wine-rpath.patch' ]
+
+    rpmSources = [ 'wine.init',
+                   'wine-32.conf',
+
+                   'wine-notepad.desktop',
+                   'wine-regedit.desktop',
+                   'wine-uninstaller.desktop',
+                   'wine-winecfg.desktop',
+                   'wine-winefile.desktop',
+                   'wine-winemine.desktop',
+                   'wine-winhelp.desktop',
+                   'wine-wineboot.desktop',
+
+                   # desktop dir
+                   'wine.menu',
+                   'wine.directory',
+
+                   # mime types
+                   'wine-mime-msi.desktop',
+
+                   'wineshelllink-fedora',
+                   ]
+
+
+    externalArchive = 'mirror://sourceforge/wine/'
+
+
+    buildRequires = [
+                      'bison:runtime',
+                      'alsa-lib:devel',
+                      'audiofile:devel',
                       'bison:runtime', 'hal:devel', 'dbus:devel', 'cups:devel',
-                      'ncurses:devel', 'libungif:devel', ]
+                      'desktop-file-utils:runtime',
+                      'esound:devel',
+                      'flex:runtime',
+                      'fontconfig:runtime',
+                      'fontforge:runtime',
+                      'freeglut:devel',
+                      'freetype:devel',
+                      'glib:devel',
+                      'lcms:devel',
+                      'libICE:devel',
+                      'libSM:devel',
+                      'libX11:devel',
+                      'libXext:devel',
+                      'libXxf86vm:devel',
+                      'libgphoto2:devel',
+                      'libxml2:devel',
+                      'libxslt:devel',
+                      'libieee1284:devel',
+                      'libjpeg:devel',
+                      'libusb:devel',
+                      'openldap:devel',
+                      'perl:devel',
+                      'perl:runtime',
+                      'perl:lib',
+                      'pkgconfig:devel',
+                      'sane-backends:devel',
+                      'zlib:devel',
+                      'ncurses:devel', 'giflib:devel',
+                    ]
 
-    def setup(r):
 
-        r.addArchive('http://ibiblio.org/pub/linux/system/emulators/wine/')
+    def configure(r):
+        r.macros.cflags += ' -L%(libdir)s/xorg.mesa.3d '
+        r.Configure('--sysconfdir=%(sysconfdir)s/wine  --disable-static')
 
-        r.Configure('--sysconfdir=%(sysconfdir)s/wine')
-        r.Make()
+    def makeinstall(r):
         r.MakePathsInstall('includedir=%(destdir)s%(includedir)s/wine '
                            'sysconfdir=%(destdir)s%(sysconfdir)s/wine '
                            'dlldir=%(destdir)s%(libdir)s/wine '
                            'LDCONFIG=/bin/true UPDATE_DESKTOP_DATABASE=/bin/true')
 
+        r.MakeDirs('%(sysconfdir)s/wine')
+
+        # Allow users to launch Windows programs by just clicking on the .exe file...
+
+        r.Install('wine.init','%(initdir)s/wine', mode = 0755)
+
+        # add wine dir to desktop
+        r.MakeDirs('%(sysconfdir)s/xdg/menus/applications-merged')
+        r.Install('wine.menu','%(sysconfdir)s/xdg/menus/applications-merged/', mode = 0644)
+
+        r.MakeDirs('%(datadir)s/desktop-directories')
+        r.Install('wine.directory','%(datadir)s/desktop-directories/', mode = 0644)
+
+        r.Install('wine-32.conf','%(sysconfdir)s/ld.so.conf.d/', mode = 0644)
+
+        r.Install('wineshelllink-fedora','%(bindir)s/wineshelllink-fedora', mode = 0644)
+
+    def policy(r):
         r.CheckSonames(exceptions='%(libdir)s/libwine.*')
 
         r.TagSpec('desktop-file', '%(datadir)s/applications/wine.desktop')
+
+        for i in [ 'wine-notepad.desktop',
+                   'wine-regedit.desktop',
+                   'wine-uninstaller.desktop',
+                   'wine-winecfg.desktop',
+                   'wine-winefile.desktop',
+                   'wine-winemine.desktop',
+                   'wine-winhelp.desktop',
+                   'wine-wineboot.desktop',
+                   'wine-mime-msi.desktop',
+                   ]:
+                   r.Desktopfile(i)
