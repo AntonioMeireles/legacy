@@ -13,7 +13,9 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
     buildRequires = [ 'popt:devel', 'device-mapper:devel', 'e2fsprogs:devel',
         'glib:devel', 'parted:devel', 'pkgconfig:devel', 'libdhcp:devel',
         'pump:devel', 'libdhcp:devel', 'openssl:devel', 'python:devel',
-        'libdhcp4client:devel', 'libdhcp6client:devel', 'libnl:devel', ]
+        'libdhcp4client:devel', 'libdhcp6client:devel', 'libnl:devel',
+        'initscripts:runtime', # see discussion below of get_numeric_dev
+        ]
 
     def setup(r):
         r.disableParallelMake()
@@ -67,6 +69,12 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         r.addPatch('http://git.fedoraproject.org/git/?p=mkinitrd;a=commitdiff_plain;h=0a9dd7ee53246b490888d5f167a219e3321fcce9')
         r.addPatch('util.h.save_errno.patch')
 
+        # define an internal copy of get_numeric_dev, normally provided by
+        # /etc/init.d/functions. this eases transitions from rpl:1, whose
+        # initscripts do not define this function
+        r.addSource('get_numeric_dev.sh')
+        r.extraBuild(Add_get_numeric_dev(r))
+
         # change branding
         r.Replace(('redhat-release', 'distro-release'),
                   ('/redhat', '/rpath'),
@@ -77,11 +85,10 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         r.Make()
         r.MakeInstall('makdir=%(mandir)s')
 
-        # FIXME: remove once conary-policy with CNP-55 fixed is released
-        r.Move('%(prefix)s/lib/pkgconfig/*', '%(libdir)s/pkgconfig/')
-
-        for req in ('/bin/awk', '/sbin/dmsetup', '/sbin/ip', '/sbin/insmod',
-                    '/sbin/lvm', '/sbin/ldconfig', '/dev/null',
+        for req in ('%(essentialbindir)s/awk', '%(essentialsbindir)s/dmsetup',
+                    '%(essentialsbindir)s/ip', '%(essentialsbindir)s/insmod',
+                    '%(essentialsbindir)s/lvm',
+                    '%(essentialsbindir)s/ldconfig', '/dev/null',
                     '%(bindir)s/head', '%(bindir)s/tail',
                     '%(essentialbindir)s/cat',
                     '%(essentialbindir)s/chmod',
@@ -106,3 +113,22 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
                     '%(essentialsbindir)s/bommy',
                     'initscripts:runtime',):
             r.Requires(req, '%(essentialsbindir)s/mkinitrd')
+
+# unfortunatly, it is difficult to do these actions efficiently in shell, and
+# doing them in python requires a build action
+class Add_get_numeric_dev(build.BuildAction):
+    def do(self, macros):
+            g_n_d = open('get_numeric_dev.sh').read()
+            mkinitrdContents = open('mkinitrd').read()
+            if not g_n_d in open('%(initdir)s/functions' % macros).read():
+                raise Exception, 'the function in get_numeric_dev.sh appears' \
+                    ' to have changed in the most recent version of' \
+                    ' initscripts:runtime. please correct before continuing'
+            comment = '# this is necessary for migrations from rpl:1. see RPL-2288'
+            inLine = '. /etc/rc.d/init.d/functions'
+            outLine = '\n'.join((comment,g_n_d,'',inLine))
+            new_mkinitrdContents = mkinitrdContents.replace(inLine, outLine)
+            if new_mkinitrdContents == mkinitrdContents:
+                raise Exception, 'no replacement was made'
+            open('mkinitrd', 'w').write(new_mkinitrdContents)
+
