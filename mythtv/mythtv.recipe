@@ -1,0 +1,68 @@
+
+class MythTV(CPackageRecipe):
+    name = 'mythtv'
+    version = '0.20'
+
+    buildRequires = [ 'mysql:devel', 'freetype:devel', 'qt:devel', 'lame:devel', 'alsa-lib:devel', 'arts:devel', 'glib:devel','chkconfig:runtime', 'jack:devel', 'lirc:devel', 'libstdc++:devel', 'zlib:devel', 'Mesa:devel', 'libX11:devel', 'libXext:devel', 'libXinerama:devellib', 'libXmu:devel', 'libXrandr:devel', 'libXv:devel', 'libXvMC:devel', 'libXxf86vm:devel', 'lm_sensors:devel' ]
+
+    def setup(r):
+        r.addArchive('http://www.mythtv.org/mc/%(name)s-%(version)s.tar.bz2')
+        r.macros.arch = ''
+        r.macros.tune = ''
+
+        if Arch.x86.threednowext:
+            r.macros.arch = 'k8'
+        elif Arch.x86.threednow:
+            r.macros.arch = 'pentiumpro'
+            r.macros.tune = 'mmx'
+        # FIXME: need something for nocona (Intel x86_64)
+        #elif Arch.x86.sse3:
+        #    r.macros.arch = 'prescott'
+        elif Arch.x86.sse2:
+            r.macros.arch = 'pentium4'
+        elif Arch.x86.sse:
+            r.macros.arch = 'pentium3'
+        elif Arch.x86.mmx and Arch.x86.i686:
+            r.macros.arch = 'pentium2'
+        elif Arch.x86.mmx:
+            r.macros.arch = 'pentium-mmx'
+        elif Arch.x86.i586:
+            r.macros.arch = 'pentium'
+
+        if r.macros.arch: r.macros.arch = '--arch=%(arch)s'
+        if r.macros.tune: r.macros.tune = '--tune=%(tune)s'
+            
+        r.macros.kver = os.uname()[2]
+        r.macros.extraconfig = '--prefix=%(prefix)s --enable-dvb --disable-opengl-vsync --dvb-path=%(essentiallibdir)s/modules/%(kver)s/build/include/ --enable-xvmc --disable-distcc'
+        r.ManualConfigure('%(arch)s %(tune)s %(extraconfig)s')
+        r.Run('qmake mythtv.pro')
+        r.Make('qmake')
+        r.Make()
+        r.MakeInstall(rootVar='INSTALL_ROOT')
+
+        r.Replace(('/etc/rc.d/init.d/mythbackend', '%(initdir)s/mythbackend'),
+                  ('/usr/local/bin', '%(bindir)s'),
+                  'contrib/etc.rc.d.init.d.mythbackend',
+                  'contrib/etc.sysconfig.mythbackend')
+        r.Install('contrib/etc.rc.d.init.d.mythbackend',
+                  '%(initdir)s/mythbackend')
+        r.Install('contrib/etc.sysconfig.mythbackend',
+                  '%(sysconfdir)s/sysconfig/mythbackend')
+
+        r.Doc('docs')
+        r.Doc('contrib/mkiconmap.pl')
+        r.Doc('database/mc.sql')
+        r.Replace('# MBE_LOGFILE.*', 
+                  'MBE_LOGFILE="%(localstatedir)s/log/mythbackend.log"',
+                  '%(sysconfdir)s/sysconfig/mythbackend')
+
+        r.Requires('wget:runtime', '%(bindir)s/.*')
+        r.Requires('mysql-server:runtime', '%(bindir)s/mythbackend')
+        r.Requires('qt:runtime', '%(bindir)s/mythfrontend')
+        # XXX more r.Requires needed!
+        # look at group-mythtv additions for ideas - cdrecord?  
+        # mysql:runtime?  mplayer?
+
+        for file in '%(initdir)s/mythbackend', '%(sysconfdir)s/sysconfig/mythbackend', '%(bindir)s/mythbackend':
+            r.PackageSpec('mythtv-backend', file)
+
