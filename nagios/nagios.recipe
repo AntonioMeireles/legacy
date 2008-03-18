@@ -1,0 +1,84 @@
+#
+# Copyright (c) 2006-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Nagios(AutoPackageRecipe):
+    name = 'nagios'
+    version = '2.10'
+
+    buildRequires = ['gd:devel', 'libjpeg:devel', 'libpng:devel', 
+                     'libtool:devel', 'zlib:devel', 'chkconfig:runtime',
+                     'nail:runtime', 'perl:runtime', 'traceroute:runtime']
+
+    def setup(r):
+        r.macros.initdir = r.macros.initdir % r.macros
+        r.macros.oldsysconfdir = '%(sysconfdir)s' % r.macros
+        r.macros.sysconfdir = '%(oldsysconfdir)s/%(name)s'
+        r.macros.statusdir = '%(localstatedir)s/lib/%(name)s'
+        r.macros.wwwdir = '%(servicedir)s/%(name)s/www'
+        r.macros.cgidir = '%(servicedir)s/%(name)s/cgi-bin'
+
+        r.addArchive('mirror://sourceforge/%(name)s/')
+        r.addSource('apache.conf', macros=True,
+                    dest='%(oldsysconfdir)s/httpd/conf.d/%(name)s.conf')
+        r.addSource('%(name)s.init', macros=True, mode=0755,
+                    dest='%(initdir)s/%(name)s')
+        r.addSource('custom.cfg', dest='%(sysconfdir)s/')
+
+        # Disable ownership changes in make file.
+        r.Replace('^((INSTALL|COMMAND)_OPTS=)".*"$', r'\1""', 'configure')
+
+        r.Configure('--with-init-dir=%(initdir)s')
+
+        r.Make('all')
+
+        r.MakeInstall()
+        r.MakeInstall(installtarget='install-commandmode')
+        r.MakeInstall(installtarget='install-config')
+
+        r.MakeDirs('%(statusdir)s')
+
+        # Fix config file to use our directory structure
+        for file in ('nagios', 'cgi'):
+            r.Move('%%(sysconfdir)s/%s.cfg-sample' % file,
+                   '%%(sysconfdir)s/%s.cfg' % file)
+
+        r.Replace(('\/var', '%(statusdir)s'),
+                  ('%(statusdir)s/nagios.log',
+                   '%(localstatedir)s/log/nagios.log'),
+                  ('^cfg_file.*', ''),
+                  ('check_external_commands=1',
+                   'check_external_commands=0'),
+                  ('#cfg_dir=/etc/nagios/routers',
+                   'cfg_file=%(sysconfdir)s/custom.cfg'),
+                  '%(destdir)s/%(sysconfdir)s/nagios.cfg')
+
+        r.Move('%(localstatedir)s/archives', '%(statusdir)s/')
+        r.Move('%(localstatedir)s/rw', '%(statusdir)s/')
+
+        r.MakeDirs('%(wwwdir)s')
+        r.Move('%(datadir)s/*', '%(wwwdir)s/')
+
+        r.MakeDirs('%(cgidir)s')
+        r.Move('%(sbindir)s/*', '%(cgidir)s/')
+
+        r.ExcludeDirectories(exceptions='%(statusdir)s/archives')
+        r.ExcludeDirectories(exceptions='%(statusdir)s/rw')
+
+        r.Ownership('nagios', 'nagios',
+                    '%(statusdir)s',
+                    '%(statusdir)s/rw', 
+                    '%(statusdir)s/archives',
+                    '%(sysconfdir)s', # Remember that sysconfdir here 
+                                      # is /etc/nagios.
+                    '%(sysconfdir)s/bigger.cfg-sample', 
+                    '%(sysconfdir)s/cgi.cfg-sample', 
+                    '%(sysconfdir)s/checkcommands.cfg-sample', 
+                    '%(sysconfdir)s/minimal.cfg-sample', 
+                    '%(sysconfdir)s/misccommands.cfg-sample', 
+                    '%(sysconfdir)s/nagios.cfg-sample', 
+                    '%(sysconfdir)s/resource.cfg-sample')
+
+        r.SetModes('%(localstatedir)s/lib/nagios/rw', 02775)
