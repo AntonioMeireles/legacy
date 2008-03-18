@@ -1,0 +1,35 @@
+#
+# Copyright (c) 2005-2006 rPath, Inc
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class NRPE(AutoPackageRecipe):
+    buildRequires = [ 'openssl:devel' ]
+
+    name = 'nrpe'
+    version = '2.0'
+
+    def unpack(r):
+        r.macros.user = 'nagios'
+        r.macros.port = '35000'
+        r.addArchive('%(name)s-%(version)s.tar.gz')
+
+    def configure(r):
+        # Configure with root user and change ownership later.
+        r.Configure('--with-nrpe-user=root --with-nrpe-group=root '
+                    '--with-nrpe-port=%(port)s')
+
+    def makeinstall(r):
+        r.MakeDirs('%(libexecdir)s', '%(sysconfdir)s', '%(sbindir)s')
+        r.Install('src/check_nrpe', '%(libexecdir)s/')
+        r.Install('src/nrpe', '%(sbindir)s/')
+        r.Replace('root', '%(user)s', 'nrpe.cfg')
+        r.Install('nrpe.cfg', '%(sysconfdir)s/')
+        r.Replace('%(bindir)s', '%(sbindir)s', 'init-script')
+        r.Install('init-script', '%(initdir)s/%(name)s', mode=0755)
+
+    def policy(r):
+        r.Ownership('%(user)s', '%(user)s', '%(sysconfdir)s/nrpe.cfg')
+        r.PackageSpec('nrpe-check', '%(libexecdir)s/check_.*')
+        r.Requires('nagios-plugins:runtime', '%(sbindir)s/nrpe')
