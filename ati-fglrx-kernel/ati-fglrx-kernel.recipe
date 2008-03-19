@@ -1,0 +1,53 @@
+
+class AtiFglrxKernel(AutoPackageRecipe):
+
+    buildRequires = ['kernel:build-tree', 'mkinitrd:runtime',
+                     'elfutils:runtime', 'binutils:runtime']
+
+    name = 'ati-fglrx-kernel'
+    version = '8.3'
+
+    def setup(r):
+
+        r.macros.kver = os.uname()[2]
+
+        r.macros.version = r.version.replace('.', '-')
+        r.addSource('https://a248.e.akamai.net/f/674/9206/0/www2.ati.com/drivers/linux/ati-driver-installer-%(version)s-x86.x86_64.run')
+        r.Run('sh ./ati-driver-installer-%(version)s-x86.x86_64.run --extract archive_files')
+
+        if Arch.x86_64:
+            r.Copy('archive_files/arch/x86_64/*', 'src/')
+            r.Copy('archive_files/x710_64a/*', 'src/')
+        else:
+            r.Copy('archive_files/arch/x86/*', 'src/')
+            r.Copy('archive_files/x710/*', 'src/')
+
+        r.Copy('archive_files/common/*', 'src/')
+
+        r.Copy('src/lib/modules/fglrx/build_mod/2.6.x/Makefile', 'src/lib/modules/fglrx/build_mod/')
+
+        # For 2.6.23 and later
+        # r.Replace('CONFIG_SUSPEND_SMP', 'CONFIG_PM_SLEEP_SMP', 'src/lib/modules/fglrx/build_mod/firegl_public.h')
+
+        r.macros.ksrcdir = '/lib/modules/%(kver)s/build'
+        r.macros.modpath = '/lib/modules/%(kver)s/updates/'
+        r.macros.cflags += ' -I%(ksrcdir)s/include'
+
+        r.Make('KERNELPATH=%(ksrcdir)s MODULEPATH=%(modpath)s', dir='src/lib/modules/fglrx/build_mod/') 
+
+        r.Install('src/lib/modules/fglrx/build_mod/fglrx.ko',
+                  '%(destdir)s/lib/modules/%(kver)s/updates/fglrx.ko')
+
+        r.addSource('fglrx.modules')
+        r.Install('fglrx.modules', '%(sysconfdir)s/sysconfig/modules/')
+
+        # We want to make sure that the userspace code can require the
+        # matching kernel-space code
+        r.ComponentProvides('%(version)s')
+        r.ComponentSpec('runtime', '/lib/modules/')
+
+        # We need the kernel module and userspace versions to match
+        r.Requires('ati-fglrx:lib(%(version)s)',
+                   '/lib/modules/%(kver)s/updates/fglrx.ko')
+
+        r.AutoDoc(exceptions = '.*')
