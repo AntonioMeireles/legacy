@@ -22,7 +22,6 @@ esac
 ##
 if [ -x "/usr/bin/mozilla-plugin-config" ]
 then
-  /usr/bin/mozilla-plugin-config 2>/dev/null >/dev/null
   MOZ_PLUGIN_DIR="plugins-wrapped"
 else
   MOZ_PLUGIN_DIR="plugins"
