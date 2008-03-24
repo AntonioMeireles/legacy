@@ -20,16 +20,47 @@ class NRPE(AutoPackageRecipe):
         r.Configure('--with-nrpe-user=root --with-nrpe-group=root '
                     '--with-nrpe-port=%(port)s')
 
+        # this is a workaround to the oddity that rmake does not include
+        # /dev/random in the chroot. reference
+        # http://www.nagios.org/faqs/viewfaq.php?faq_id=386. when RMK-839 is
+        # fixed, this should be removed
+        r.Create('include/dh.h', contents='''#ifndef HEADER_DH_H
+#include <openssl/dh.h>
+#endif
+DH *get_dh512()
+        {
+        static unsigned char dh512_p[]={
+                0xC9,0x01,0x49,0xA0,0xEF,0xD0,0x49,0xCC,0x9E,0x3B,0x41,0x8A,
+                0xDD,0xF0,0x60,0x48,0x11,0x23,0x82,0x77,0x0D,0x7C,0xFE,0xD8,
+                0xEC,0xD4,0xF3,0xA5,0x01,0xEA,0x34,0x9F,0x1D,0x55,0x45,0xB4,
+                0x9A,0xD5,0xC8,0xD9,0xEB,0x4D,0xCB,0x4E,0x6A,0xEE,0xD0,0x45,
+                0xF4,0xC9,0x70,0x45,0x9C,0xB0,0x31,0xCE,0x80,0x2C,0xB6,0xF2,
+                0xE8,0x1E,0xA5,0xE3,
+                };
+        static unsigned char dh512_g[]={
+                0x02,
+                };
+        DH *dh;
+
+        if ((dh=DH_new()) == NULL) return(NULL);
+        dh->p=BN_bin2bn(dh512_p,sizeof(dh512_p),NULL);
+        dh->g=BN_bin2bn(dh512_g,sizeof(dh512_g),NULL);
+        if ((dh->p == NULL) || (dh->g == NULL))
+                { DH_free(dh); return(NULL); }
+        return(dh);
+        }
+''')
+
     def makeinstall(r):
         r.MakeDirs('%(libexecdir)s', '%(sysconfdir)s', '%(sbindir)s')
         r.Install('src/check_nrpe', '%(libexecdir)s/')
         r.Install('src/nrpe', '%(sbindir)s/')
-#        r.Replace('root', '%(user)s', 'nrpe.cfg')
-#        r.Install('nrpe.cfg', '%(sysconfdir)s/')
+        r.Replace('root', '%(user)s', 'sample-config/nrpe.cfg')
+        r.Install('sample-config/nrpe.cfg', '%(sysconfdir)s/')
         r.Replace('%(bindir)s', '%(sbindir)s', 'init-script')
         r.Install('init-script', '%(initdir)s/%(name)s', mode=0755)
 
     def policy(r):
- #       r.Ownership('%(user)s', '%(user)s', '%(sysconfdir)s/nrpe.cfg')
+        r.Ownership('%(user)s', '%(user)s', '%(sysconfdir)s/nrpe.cfg')
         r.PackageSpec('nrpe-check', '%(libexecdir)s/check_.*')
         r.Requires('nagios-plugins:runtime', '%(sbindir)s/nrpe')
