@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2006-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('phpapppackage') 
+class MyDNSConfig(PHPAppPackageRecipe):
+    name = 'mydnsconfig'
+    version = '1.1.0'
+
+    def unpack(r):
+        # http://www.mydnsconfig.org/
+        r.macros.archive_name = 'MyDNSConfig'
+        r.extractArchive('mirror://sourceforge/mydnsconfig/')
+        r.addSource('mydnsconfiginit', dir='%(sbindir)s/')
+        # Make more of the interface default to english instead of german
+        r.addPatch('english.patch')
+
+        r.Move('%(approot)s/install/*', '%(thisdocdir)s/')
+        r.Remove('%(approot)s/install', recursive=True)
+        r.Move('%(approot)s/interface/*', '%(approot)s/')
+        r.Remove('%(approot)s/interface', recursive=True)
+
+        r.Replace(('= "/usr/share/mydnsconfig', '= "%(approot)s'),
+                  (r'\$conf.*db_password.*',
+                   '\n'.join((
+                     r'// get db password from mydns config file',
+                     r'$pwlines = file("/etc/mydns.conf");',
+                     r"$pwlines = preg_grep('/^db-password.*=/', $pwlines);",
+                     r'$pwlines = array_values($pwlines);',
+                     r"preg_match('/.*=\s*([^ #][^ #]*).*/', $pwlines[0], $matches);",
+                     r'$conf["db_password"] = $matches[1];',
+                   ))),
+                  (r'\$conf\["programs"\]\["wput"',
+                   '//$conf["programs"]["wput"'),
+                  '%(approot)s/lib/config.inc.php')
+        r.Run('echo >> %(destdir)s%(approot)s/lib/config.inc.php')
+
+        r.MakeWriteableDirs('%(approot)s/temp', '%(approot)s/cache')
+
+    def policy(r):
+        r.Config('%(approot)s/lib/config.inc.php')
+        r.Requires('mysql:runtime', '%(approot)s/web/index.php')
+        r.Requires('mydns:runtime', '%(approot)s/web/index.php')
+        r.Requires('httpd:runtime', '%(approot)s/web/index.php')
+        r.Requires('php-mysql:runtime', '%(approot)s/lib/classes/db_mysql.inc.php')

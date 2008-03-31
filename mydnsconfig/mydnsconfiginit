@@ -1,0 +1,106 @@
+#!/bin/sh
+
+# only set up database elements if they haven't been initialized
+existsIn ()
+{
+    initialized=$(echo "select count($1) from $2;" | mysql -u root mydns 2>&1)
+    case $initialized in
+        ERROR*) return 1 ; ;;
+        count*) return 0 ; ;;
+    esac
+}
+
+if existsIn sys_groupid rr; then : ; else
+    mysql -u root mydns <<'EOF'
+ALTER TABLE `rr` ADD `sys_userid` INT NOT NULL,
+ADD `sys_groupid` INT NOT NULL AFTER `sys_userid`,
+ADD `sys_perm_user` VARCHAR( 5 ) NOT NULL AFTER `sys_groupid`,
+ADD `sys_perm_group` VARCHAR( 5 ) NOT NULL AFTER `sys_perm_user`,
+ADD `sys_perm_other` VARCHAR( 5 ) NOT NULL AFTER `sys_perm_group`;
+EOF
+fi
+
+if existsIn sys_groupid soa; then : ; else
+    mysql -u root mydns <<'EOF'
+ALTER TABLE `soa` ADD `sys_userid` INT NOT NULL,
+ADD `sys_groupid` INT NOT NULL AFTER `sys_userid`,
+ADD `sys_perm_user` VARCHAR( 5 ) NOT NULL AFTER `sys_groupid`,
+ADD `sys_perm_group` VARCHAR( 5 ) NOT NULL AFTER `sys_perm_user`,
+ADD `sys_perm_other` VARCHAR( 5 ) NOT NULL AFTER `sys_perm_group`;
+ALTER TABLE `soa` ADD COLUMN active ENUM('Y','N') NOT NULL;
+ALTER TABLE `soa` ADD INDEX (active);
+ALTER TABLE `soa` ADD COLUMN xfer CHAR(255) NOT NULL;
+EOF
+fi
+
+if existsIn userid sys_user; then : ; else
+    mysql -u root mydns <<'EOF'
+CREATE TABLE `sys_user` (
+`userid` int(11) NOT NULL auto_increment,
+`sys_userid` int(11) NOT NULL default '0',
+`sys_groupid` int(11) NOT NULL default '0',
+`sys_perm_user` varchar(5) NOT NULL default '',
+`sys_perm_group` varchar(5) NOT NULL default '',
+`sys_perm_other` varchar(5) NOT NULL default '',
+`username` varchar(100) NOT NULL default '',
+`passwort` varchar(100) NOT NULL default '',
+`modules` varchar(255) NOT NULL default '',
+`startmodule` varchar(255) NOT NULL default '',
+`app_theme` varchar(100) NOT NULL default 'default',
+`typ` varchar(20) NOT NULL default 'user',
+`active` tinyint(4) NOT NULL default '1',
+`name` varchar(100) NOT NULL default '',
+`vorname` varchar(100) NOT NULL default '',
+`unternehmen` varchar(100) NOT NULL default '',
+`strasse` varchar(100) NOT NULL default '',
+`ort` varchar(100) NOT NULL default '',
+`plz` varchar(10) NOT NULL default '',
+`land` varchar(50) NOT NULL default '',
+`email` varchar(100) NOT NULL default '',
+`url` varchar(255) NOT NULL default '',
+`telefon` varchar(100) NOT NULL default '',
+`fax` varchar(100) NOT NULL default '',
+`language` varchar(10) NOT NULL default 'en',
+`groups` varchar(255) NOT NULL default '',
+`default_group` int(11) NOT NULL default '0',
+PRIMARY KEY (`userid`)
+) TYPE=MyISAM AUTO_INCREMENT=2 ;
+
+INSERT INTO `sys_user` (`userid`, `sys_userid`, `sys_groupid`, `sys_perm_user`, `sys_perm_group`, `sys_perm_other`, `username`, `passwort`, `modules`, `startmodule`, `app_theme`, `typ`, `active`, `name`, `vorname`, `unternehmen`, `strasse`, `ort`, `plz`, `land`, `email`, `url`, `telefon`, `fax`, `language`, `groups`, `default_group`) VALUES (1, 1, 0, 'riud', 'riud', '', 'admin', '21232f297a57a5a743894a0e4a801fc3', 'admin,designer,resellers,sites,dns', 'dns', 'default', 'admin', 1, '', 'Administrator', '', '', '', '', '', '', '', '', '', 'en', '1,2', 1);
+EOF
+fi
+
+
+# 1.1.0 schema items
+
+
+if existsIn datalog_id sys_datalog; then : ; else
+    mysql -u root mydns <<'EOF'
+CREATE TABLE `sys_datalog` (
+  `datalog_id` bigint(20) NOT NULL auto_increment,
+  `dbtable` varchar(255) NOT NULL default '',
+  `dbidx` varchar(255) NOT NULL default '',
+  `action` char(1) NOT NULL default '',
+  `tstamp` bigint(20) NOT NULL default '0',
+  `user` varchar(255) NOT NULL default '',
+  `data` text NOT NULL,
+  PRIMARY KEY  (`datalog_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1 AUTO_INCREMENT=1 ;
+EOF
+fi
+
+if existsIn groupid sys_group; then : ; else
+    mysql -u root mydns <<'EOF'
+CREATE TABLE `sys_group` (
+  `groupid` int(11) NOT NULL auto_increment,
+  `name` varchar(255) NOT NULL default '',
+  `description` text NOT NULL,
+  PRIMARY KEY  (`groupid`)
+) ENGINE=MyISAM  DEFAULT CHARSET=latin1 AUTO_INCREMENT=3 ;
+
+INSERT INTO `sys_group` (`groupid`, `name`, `description`) VALUES
+(1, 'admin', 'Administrators group'),
+(2, 'user', 'Users Group');
+EOF
+fi
+
