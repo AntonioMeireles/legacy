@@ -1,0 +1,47 @@
+#
+# Copyright (c) 2006-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class MyDNS(AutoPackageRecipe):
+    name = 'mydns'
+    version = '1.1.0'
+
+    buildRequires = [
+        'install-info:runtime', 'chkconfig:runtime', 
+        'perl-DBI:perl', 'sed:runtime', 'zlib:devel',
+        'perl:runtime', 'openssl:devel',
+        'mysql:devel', 'perl-DBD-MySQL:perl',
+    ]
+
+    def unpack(r):
+        r.addArchive('http://mydns.bboy.net/download/')
+        # script that implements the QUICKSTART steps
+        r.addSource('mydnsinit.mysql', dest='%(sbindir)s/mydnsinit')
+
+    def configure(r):
+        r.Configure('--with-openssl --without-pgsql')
+        # make automatic initial configuration work
+        r.Run(r'''sed -i '/echo -n ..Starting/a\
+    %(sbindir)s/mydnsinit' contrib/mydns.redhat''')
+
+    def policy(r):
+        r.Run(r'''
+            src/mydns/mydns --dump-config > mydns.conf
+            sed -i '/^##  \(Mon\|Tue\|Wed\|Thu\|Fri\|Sat\|Sun\) .*/d' mydns.conf
+               ''')
+        r.Replace('db-user = username', 'db-user = mydns', 'mydns.conf')
+        r.Install('mydns.conf', '%(sysconfdir)s/')
+        r.UtilizeUser('nobody', '%(sysconfdir)s/mydns.conf')
+        r.Install('contrib/mydns.redhat', '%(initdir)s/mydns', mode=0755)
+        # start after mysqld
+        r.Replace('52 50', '80 10', '%(initdir)s/mydns')
+        r.Install('contrib/MyDNS.pm', '%(libdir)s/perl5/vendor_perl/')
+        r.Doc('contrib/create_domain.pl')
+        r.AutoDoc('QUICK.*')
+        r.Requires(exceptDeps='perl: DBD::Pg')
+        r.Requires('mysql:runtime', '%(sbindir)s/mydnsinit')
+        r.Requires('mysql-server:runtime', '%(sbindir)s/mydnsinit')
+        r.Requires('sed:runtime', '%(sbindir)s/mydnsinit')
+        r.Requires('coreutils:runtime', '%(sbindir)s/mydnsinit')

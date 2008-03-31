@@ -1,0 +1,23 @@
+#!/bin/sh
+
+if grep "db-password = password" /etc/mydns.conf ; then
+
+    PW=$(dd if=/dev/random bs=16 count=1 2>/dev/null | od -x | head -1 |
+         sed 's/[^ ]* //
+              s/ *//g')
+
+    sed -i "s/db-password = password/db-password = ${PW}/" /etc/mydns.conf
+
+    mysql -u root <<EOF
+CREATE DATABASE mydns;
+CREATE USER mydns;
+GRANT ALL ON mydns.* TO mydns@localhost IDENTIFIED BY '${PW}';
+EOF
+
+    mydns --create-tables | mysql -u root mydns
+
+fi
+
+if [ -x /usr/sbin/mydnsconfiginit ] ; then
+    /usr/sbin/mydnsconfiginit
+fi
