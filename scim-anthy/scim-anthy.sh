@@ -1,3 +1,5 @@
+#!/bin/sh
 scim -d -e anthy
 XIM=SCIM
 GTK_IM_MODULE=scim
+export XMODIFIERS=@im=$XIM
