@@ -1,5 +1,5 @@
---- src/splashy_functions.c.original	2007-10-22 13:24:48.000000000 +0300
-+++ src/splashy_functions.c	2007-10-24 13:54:30.000000000 +0300
+--- src/splashy_functions.c.orig	2008-04-07 20:22:45.000000000 +0300
++++ src/splashy_functions.c	2008-04-07 20:23:17.000000000 +0300
 @@ -60,6 +60,8 @@
  #include <sys/types.h>          /* needed by regex.h regcomp() */
  #include <regex.h>              /* regexec() regcomp() */
@@ -9,16 +9,16 @@
  #ifdef __linux__
  /*
   * #include <sys/mount.h> USE for mounting /proc if not mounted yet 
-@@ -91,7 +93,7 @@ static gboolean read_console = FALSE;   
+@@ -89,7 +91,7 @@ static gboolean exiting = FALSE;        
+                                          * to true at cmd_exit() */
+ static gboolean read_console = FALSE;   /* flag to turn on/off reading the
                                           * /dev/vcs* files */
- static gboolean show_textbox_area = FALSE;      /* flag to toggle showing
-                                                  * textbox area */
 -static gboolean switched_to_verbose = FALSE;    /* flag to know when verbose
 +/*static gboolean switched_to_verbose = FALSE;    * flag to know when verbose
                                                   * image is displayed */
  static gboolean F2_toggle_pressed = FALSE;      /* keeps track of the depress 
                                                   * F2 key */
-@@ -682,6 +684,216 @@ _switch_to_verbose_image ()
+@@ -643,6 +645,218 @@ _switch_to_verbose_image ()
   * - make use of real console
   * - this is a slow function
   */
@@ -58,6 +58,8 @@
 +}
 +
 +// diff, but with a lot of assumptions
++// - *scrollp is set to 0 if new line should overwrites previous one,
++//   so to reproduce screen layout we don't need to scroll when printing
 +char *
 +find_new(char *buf_old, char *buf_new, int width, int height, int *scrollp) {
 +  char *cp_old, *cp_new;
@@ -235,7 +237,7 @@
  inline void *
  verbose_text_loop (void *data)
  {
-@@ -907,6 +1119,7 @@ verbose_text_loop (void *data)
+@@ -868,6 +1082,7 @@ verbose_text_loop (void *data)
          g_string_free (device, TRUE);   /* never reached */
          pthread_exit (NULL);    /* never reached */
  }
@@ -243,10 +245,35 @@
  inline void *
  socket_loop (void *data)
  {
---- src/splashy_video.c.orig	2007-10-18 16:25:18.000000000 +0300
-+++ src/splashy_video.c	2007-10-23 20:30:34.000000000 +0300
-@@ -1340,6 +1340,19 @@ splashy_reset_splash () {
-     splashy_change_splash(_current_background);
+@@ -1127,11 +1342,11 @@ _splashy_child (const gchar * seq)
+                                                  * to manage  our keyboard  
+                                                  * events and SplashyClient */
+ 
+-        /*gint thr_id_f;          * Handles /dev/vcs1 text to be displayed to
++        gint thr_id_f;          /* Handles /dev/vcs1 text to be displayed to
+                                  * splashy overlay textbox ... when pressing
+                                  * F2 we launch a thread to handle the
+                                  * console text */
+-        /*pthread_t p_thread_f;*/
++        pthread_t p_thread_f;
+ 
+         gboolean _preview = FALSE;
+ 
+@@ -1205,8 +1420,8 @@ _splashy_child (const gchar * seq)
+          */
+         thr_id_d = pthread_create (&p_thread_d, NULL, keyevent_loop, NULL);
+ 
+-        /*thr_id_f =
+-                pthread_create (&p_thread_f, NULL, verbose_text_loop, NULL);*/
++        thr_id_f =
++                pthread_create (&p_thread_f, NULL, verbose_text_loop, NULL);
+ 
+         /*
+          * Wait till thread is finished reading the socket... ie 'forever' 
+--- src/splashy_video.c.orig	2008-04-07 20:24:54.000000000 +0300
++++ src/splashy_video.c	2008-04-07 20:26:18.000000000 +0300
+@@ -1431,6 +1431,19 @@ splashy_reset_splash ()
+         splashy_change_splash (_current_background);
  }
  
 +void
@@ -263,36 +290,39 @@
 +	splashy_printline_scroll (string, 0);
 +}
  /**
-  * Print a line of text in the textbox.
-  *
-@@ -1404,6 +1417,12 @@ splashy_printline (const char * string)
+  * Prints a line of text in the textbox. Supports multi-lines split by new-lines (\n)
+  * This displays regardless of whether the user wants
+@@ -1496,6 +1509,12 @@ splashy_printline (const char *string)
  void
- splashy_printline_s (const char * string)
+ splashy_printline_s (const char *string)
  {
 +	splashy_printline_scroll (string, 1);
 +}
-+
++ 
 +void
 +splashy_printline_scroll (const char * string, const int scroll)
 +{
-         if (video.textbox == NULL)
-                 return;
+         char *str;
+         DFBRectangle rect;
+         int x, y = 0, ls;
+@@ -1513,7 +1532,12 @@ splashy_printline_s (const char *string)
+         video.font->GetStringExtents (video.font, "_", -1, NULL, &rect);
+         video.font->GetHeight (video.font, &ls);
+         x = rect.w;
+-        y = (ls / 2 + last_text_y_position) + ls;
++        if (scroll) {
++                y = (ls / 2 + last_text_y_position) + ls;
++        }
++        else {
++                y = last_text_y_position;
++        }
  
-@@ -1429,7 +1448,9 @@ splashy_printline_s (const char * string
-                                          video.textbox->offscreen,
-                                          NULL, 0, 0);
- 
--        last_text_y_position += abs (video.fontdesc.height * 2);
-+	if (scroll || last_text_y_position == 0) {
-+		last_text_y_position += abs (video.fontdesc.height * 2);
-+	}
- 
+         str = strdup (string);
          /*
-          * Draw string to the clipped surface 
---- src/splashy.h.orig	2007-10-23 17:38:09.000000000 +0300
-+++ src/splashy.h	2007-10-23 20:10:09.000000000 +0300
-@@ -47,11 +47,16 @@ void splashy_set_progressbar_visible(int
- void splashy_reset_progressbar_counters();
+--- src/splashy.h.orig	2008-04-07 18:11:38.000000000 +0300
++++ src/splashy.h	2008-04-07 18:41:27.000000000 +0300
+@@ -72,12 +72,18 @@ void splashy_set_textbox_area_visible (i
+ int splashy_get_textbox_area_visible (void);
  
  /*
 - * allows to print a single message to the center of the textbox area
@@ -300,12 +330,14 @@
 + * allows to print a single message to the top of the textbox area
 + * reseting all text
   */
- void splashy_printline (const char * string);
+ void splashy_printline (const char *string);
+ 
  /*
 + * allows to print a single message to the current pos of the textbox area
 + * on the top of the old one
 + */
 +void splashy_printline_ns (const char * string);
++
 +/*
   * allows to print a message appended to the end of the textbox area
   * keeping the old one

@@ -1,12 +1,12 @@
 #
-# Copyright (c) 2007 rPath, Inc.
+# Copyright (c) 2007-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Splashy(AutoPackageRecipe):
     name = 'splashy'
-    version = '0.3.5'
+    version = '0.3.9'
 
     buildRequires = [ 'DirectFB:devel', 'file:devel', 'glib:devel',
         'pkgconfig:devel', 'zlib:devel', 'sysfsutils:devellib',
@@ -18,7 +18,7 @@ class Splashy(AutoPackageRecipe):
                              ' %(libdir)s/libdirect.a'
                              ' %(libdir)s/libfusion.a')
 
-        r.addArchive('http://alioth.debian.org/frs/download.php/2071/'
+        r.addArchive('http://alioth.debian.org/frs/download.php/2336/'
                      '%(name)s_%(version)s.tar.gz')
         r.addSource('splashy-theme.tagdescription', macros=True,
                     dest='%(tagdescriptiondir)s/splashy-theme')
@@ -26,14 +26,20 @@ class Splashy(AutoPackageRecipe):
                     dest='%(taghandlerdir)s/splashy-theme', mode=0755)
         r.addSource('splashy-bootloader.conf',
                     dest='%(sysconfdir)s/bootloader.d/')
-        #r.addPatch('dfb-no-vt-switch.patch')
-        r.Replace('\/usr\/lib', '%(libdir)s', 'src/libglib-2.0.la')
         # RPL-1776:
         # - only check tty1 in F2 loop
         # - create /dev/vcs1 if it doesn't exist (if removed by switchroot)
         # - sleep after scanning screen to consume less CPU
         # rewrite verbose_text_loop() (RPL-1844)
         r.addPatch('text_loop.patch', level=0)
+
+        # Enable static linking (RPL-2289)
+        r.Replace(' -lgcc_s ', ' ', 'src/Makefile.in')
+        r.macros.ldflags += ' -static'
+        r.addPatch('static.patch', level=1)
+
+        r.addPatch('splashy-0.3.9.default_quiet.patch', level=1) # RPL-2289
+
         # RPL-1840, RPL-1804
         r.Replace(('@EXPANDED_SYSCONFDIR@\/splashy\/themes\/default',
                    '%(datadir)s/splashy/themes/rpath'),
@@ -47,8 +53,10 @@ class Splashy(AutoPackageRecipe):
                   'src/xml_format.h.in');
 
     def policy(r):
-        # Package theme separately, in /usr/share/splashy/themes
-        r.Remove('%(sysconfdir)s/splashy/themes', recursive=True)
-        r.MakeDirs('%(datadir)s/%(name)s/themes')
+        # Package theme separately
+        r.Remove('%(sysconfdir)s/%(name)s/themes')
+        r.Remove('%(datadir)s/%(name)s/themes/default', recursive=True)
+        #r.MakeDirs('%(datadir)s/%(name)s/themes')
+        r.ExcludeDirectories(exceptions='%(datadir)s/%(name)s/themes')
         r.Remove('%(initdir)s/splashy')
         r.Requires('%(name)s-theme:data', '%(sbindir)s/splashy')
