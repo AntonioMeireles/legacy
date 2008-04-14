@@ -1,7 +1,15 @@
+
+Restrict the abilities of /dev/mem and /dev/kmem
+Make them read-only, and also restrict which areas of
+memory can be read.
+
+Original by Arjan van de Ven
+Signed-off-by: Dave Jones <davej@redhat.com>
+
 Index: linux-2.6/arch/i386/mm/init.c
 ===================================================================
---- linux-2.6.orig/arch/i386/mm/init.c
-+++ linux-2.6/arch/i386/mm/init.c
+--- linux-2.6.orig/arch/x86/mm/init_32.c
++++ linux-2.6/arch/x86/mm/init_32.c
 @@ -233,6 +233,25 @@ int page_is_ram(unsigned long pagenr)
  	return 0;
  }
@@ -18,11 +26,11 @@ Index: linux-2.6/arch/i386/mm/init.c
 + */
 +int devmem_is_allowed(unsigned long pagenr)
 +{
-+   if (pagenr <= 256)
-+       return 1;
-+   if (!page_is_ram(pagenr))
-+       return 1;
-+   return 0;
++	if (pagenr <= 256)
++		return 1;
++	if (!page_is_ram(pagenr))
++		return 1;
++	return 0;
 +}
 +
  #ifdef CONFIG_HIGHMEM
@@ -32,14 +40,13 @@ Index: linux-2.6/arch/ia64/mm/init.c
 ===================================================================
 --- linux-2.6.orig/arch/ia64/mm/init.c
 +++ linux-2.6/arch/ia64/mm/init.c
-@@ -263,6 +263,13 @@ free_initrd_mem (unsigned long start, un
+@@ -263,6 +263,12 @@ free_initrd_mem (unsigned long start, un
  	}
  }
  
 +int page_is_ram(unsigned long pagenr)
 +{
 +      //FIXME: implement w/efi walk
-+      printk("page is ram is called!!!!!\n");	
 +      return 1;
 +}
 +
@@ -84,7 +91,7 @@ Index: linux-2.6/arch/powerpc/mm/mem.c
  	free_area_init_nodes(max_zone_pfns);
  }
  
-+int page_is_ram (unsigned long pagenr)
++int page_is_ram(unsigned long pagenr)
 +{
 +	return pagenr < max_mapnr;
 +}
@@ -94,13 +101,13 @@ Index: linux-2.6/arch/powerpc/mm/mem.c
  	unsigned long codesize, reservedpages, datasize, initsize;
 Index: linux-2.6/arch/x86_64/mm/init.c
 ===================================================================
---- linux-2.6.orig/arch/x86_64/mm/init.c
-+++ linux-2.6/arch/x86_64/mm/init.c
+--- linux-2.6.orig/arch/x86/mm/init_64.c
++++ linux-2.6/arch/x86/mm/init_64.c
 @@ -452,6 +452,28 @@ void __init clear_kernel_mapping(unsigne
  	__flush_tlb_all();
  } 
  
-+static int page_is_ram (unsigned long pagenr)
++static int page_is_ram(unsigned long pagenr)
 +{
 +	int i;
 +
@@ -134,10 +141,10 @@ Index: linux-2.6/arch/x86_64/mm/init.c
 + * valid. The argument is a physical page number.
 + *
 + *
-+ * On x86-64, access has to be given to the first megabyte of ram because that area
++ * On x86-64, access has to be given to the first 1MB of ram because that area
 + * contains bios code and data regions used by X and dosemu and similar apps.
-+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
-+ * mmio resources as well as potential bios/acpi data regions.
++ * Access has to be given to non-kernel-ram areas as well, these contain the
++ * PCI MMIO resources as well as potential bios/acpi data regions.
 + */
 +int devmem_is_allowed(unsigned long pagenr)
 +{
@@ -152,202 +159,6 @@ Index: linux-2.6/arch/x86_64/mm/init.c
  static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
  			 kcore_vsyscall;
  
-Index: linux-2.6/drivers/char/mem.c
-===================================================================
---- linux-2.6.orig/drivers/char/mem.c
-+++ linux-2.6/drivers/char/mem.c
-@@ -102,6 +102,22 @@ static inline int valid_mmap_phys_addr_r
- }
- #endif
- 
-+static inline int range_is_allowed(unsigned long from, unsigned long to)
-+{
-+	unsigned long cursor;
-+
-+	cursor = from >> PAGE_SHIFT;
-+	while ((cursor << PAGE_SHIFT) < to) {
-+		if (!devmem_is_allowed(cursor)) {
-+			printk ("Program %s tried to read /dev/mem between %lx->%lx.\n",
-+					current->comm, from, to);
-+			return 0;
-+		}
-+		cursor++;
-+	}
-+	return 1;
-+}
-+
- /*
-  * This funcion reads the *physical* memory. The f_pos points directly to the 
-  * memory location. 
-@@ -151,6 +167,8 @@ static ssize_t read_mem(struct file * fi
- 		 */
- 		ptr = xlate_dev_mem_ptr(p);
- 
-+		if (!range_is_allowed(p, p+count))
-+			return -EPERM;
- 		if (copy_to_user(buf, ptr, sz))
- 			return -EFAULT;
- 		buf += sz;
-@@ -208,6 +226,8 @@ static ssize_t write_mem(struct file * f
- 		 */
- 		ptr = xlate_dev_mem_ptr(p);
- 
-+		if (!range_is_allowed(ptr, ptr+sz))
-+			return -EPERM;
- 		copied = copy_from_user(ptr, buf, sz);
- 		if (copied) {
- 			written += sz - copied;
-@@ -357,6 +377,8 @@ static ssize_t read_kmem(struct file *fi
- 	ssize_t low_count, read, sz;
- 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
- 
-+	return -EPERM;
-+
- 	read = 0;
- 	if (p < (unsigned long) high_memory) {
- 		low_count = count;
-@@ -454,125 +454,6 @@ static ssize_t read_kmem(struct file *fi
- }
- 
- 
--static inline ssize_t
--do_write_kmem(void *p, unsigned long realp, const char __user * buf,
--	      size_t count, loff_t *ppos)
--{
--	ssize_t written, sz;
--	unsigned long copied;
--
--	written = 0;
--#ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
--	/* we don't have page 0 mapped on sparc and m68k.. */
--	if (realp < PAGE_SIZE) {
--		unsigned long sz = PAGE_SIZE - realp;
--		if (sz > count)
--			sz = count;
--		/* Hmm. Do something? */
--		buf += sz;
--		p += sz;
--		realp += sz;
--		count -= sz;
--		written += sz;
--	}
--#endif
--
--	while (count > 0) {
--		char *ptr;
--		/*
--		 * Handle first page in case it's not aligned
--		 */
--		if (-realp & (PAGE_SIZE - 1))
--			sz = -realp & (PAGE_SIZE - 1);
--		else
--			sz = PAGE_SIZE;
--
--		sz = min_t(unsigned long, sz, count);
--
--		/*
--		 * On ia64 if a page has been mapped somewhere as
--		 * uncached, then it must also be accessed uncached
--		 * by the kernel or data corruption may occur
--		 */
--		ptr = xlate_dev_kmem_ptr(p);
--
--		copied = copy_from_user(ptr, buf, sz);
--		if (copied) {
--			written += sz - copied;
--			if (written)
--				break;
--			return -EFAULT;
--		}
--		buf += sz;
--		p += sz;
--		realp += sz;
--		count -= sz;
--		written += sz;
--	}
--
--	*ppos += written;
--	return written;
--}
--
--
--/*
-- * This function writes to the *virtual* memory as seen by the kernel.
-- */
--static ssize_t write_kmem(struct file * file, const char __user * buf, 
--			  size_t count, loff_t *ppos)
--{
--	unsigned long p = *ppos;
--	ssize_t wrote = 0;
--	ssize_t virtr = 0;
--	ssize_t written;
--	char * kbuf; /* k-addr because vwrite() takes vmlist_lock rwlock */
--
--	if (p < (unsigned long) high_memory) {
--
--		wrote = count;
--		if (count > (unsigned long) high_memory - p)
--			wrote = (unsigned long) high_memory - p;
--
--		written = do_write_kmem((void*)p, p, buf, wrote, ppos);
--		if (written != wrote)
--			return written;
--		wrote = written;
--		p += wrote;
--		buf += wrote;
--		count -= wrote;
--	}
--
--	if (count > 0) {
--		kbuf = (char *)__get_free_page(GFP_KERNEL);
--		if (!kbuf)
--			return wrote ? wrote : -ENOMEM;
--		while (count > 0) {
--			int len = count;
--
--			if (len > PAGE_SIZE)
--				len = PAGE_SIZE;
--			if (len) {
--				written = copy_from_user(kbuf, buf, len);
--				if (written) {
--					if (wrote + virtr)
--						break;
--					free_page((unsigned long)kbuf);
--					return -EFAULT;
--				}
--			}
--			len = vwrite(kbuf, (char *)p, len);
--			count -= len;
--			buf += len;
--			virtr += len;
--			p += len;
--		}
--		free_page((unsigned long)kbuf);
--	}
--
-- 	*ppos = p;
-- 	return virtr + wrote;
--}
--
- #ifdef CONFIG_DEVPORT
- static ssize_t read_port(struct file * file, char __user * buf,
- 			 size_t count, loff_t *ppos)
-@@ -818,7 +720,6 @@ static const struct file_operations mem_
- static const struct file_operations kmem_fops = {
- 	.llseek		= memory_lseek,
- 	.read		= read_kmem,
--	.write		= write_kmem,
- 	.mmap		= mmap_kmem,
- 	.open		= open_kmem,
- 	.get_unmapped_area = get_unmapped_area_mem,
-@@ -859,7 +859,6 @@ static const struct {
- 	const struct file_operations	*fops;
- } devlist[] = { /* list of minor devices */
- 	{1, "mem",     S_IRUSR | S_IWUSR | S_IRGRP, &mem_fops},
--	{2, "kmem",    S_IRUSR | S_IWUSR | S_IRGRP, &kmem_fops},
- 	{3, "null",    S_IRUGO | S_IWUGO,           &null_fops},
- #ifdef CONFIG_DEVPORT
- 	{4, "port",    S_IRUSR | S_IWUSR | S_IRGRP, &port_fops},
 Index: linux-2.6/fs/proc/kcore.c
 ===================================================================
 --- linux-2.6.orig/fs/proc/kcore.c
@@ -415,8 +226,8 @@ Index: linux-2.6/include/asm-h8300/page.h
  #endif /* _H8300_PAGE_H */
 Index: linux-2.6/include/asm-i386/page.h
 ===================================================================
---- linux-2.6.orig/include/asm-i386/page.h
-+++ linux-2.6/include/asm-i386/page.h
+--- linux-2.6.orig/include/asm-x86/page_32.h
++++ linux-2.6/include/asm-x86/page_32.h
 @@ -108,6 +108,8 @@ extern int sysctl_legacy_va_layout;
  
  extern int page_is_ram(unsigned long pagenr);
@@ -600,8 +411,8 @@ Index: linux-2.6/include/asm-v850/page.h
  #endif /* __V850_PAGE_H__ */
 Index: linux-2.6/include/asm-x86_64/page.h
 ===================================================================
---- linux-2.6.orig/include/asm-x86_64/page.h
-+++ linux-2.6/include/asm-x86_64/page.h
+--- linux-2.6.orig/include/asm-x86/page_64.h
++++ linux-2.6/include/asm-x86/page_64.h
 @@ -138,6 +138,10 @@ typedef struct { unsigned long pgprot; }
  #include <asm-generic/memory_model.h>
  #include <asm-generic/page.h>
@@ -620,7 +431,7 @@ Index: linux-2.6/include/asm-x86_64/page.h
  
  #define CORE_STR "CORE"
 -
-+unsigned int allow_kcore_access = 0;
++unsigned int allow_kcore_access;
  static int open_kcore(struct inode * inode, struct file * filp)
  {
 -	return -EPERM;
@@ -628,18 +439,144 @@ Index: linux-2.6/include/asm-x86_64/page.h
  }
  
  static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);
---- linux-2.6.20.noarch/arch/x86_64/kernel/machine_kexec.c.orig	2007-06-04 15:50:52.000000000 -0400
-+++ linux-2.6.20.noarch/arch/x86_64/kernel/machine_kexec.c	2007-06-04 15:52:14.000000000 -0400
-@@ -236,10 +236,12 @@
-  * Useful for holding code to do something appropriate
-  * after a kernel panic.
-  */
+--- linux-2.6.23.noarch/arch/x86/kernel/setup_32.c~	2007-10-22 01:29:17.000000000 -0400
++++ linux-2.6.23.noarch/arch/x86/kernel/setup_32.c	2007-10-22 01:29:41.000000000 -0400
+@@ -391,12 +391,16 @@ static inline unsigned long long get_tot
+ }
+ 
+ #ifdef CONFIG_KEXEC
 +extern int allow_kcore_access;
- static int __init setup_crashkernel(char *arg)
++
+ static void __init reserve_crashkernel(void)
  {
- 	unsigned long size, base;
- 	char *p;
-+	allow_kcore_access = 1; /*enable ability to read /proc/kcore*/
- 	if (!arg)
- 		return -EINVAL;
- 	size = memparse(arg, &p);
+ 	unsigned long long total_mem;
+ 	unsigned long long crash_size, crash_base;
+ 	int ret;
+ 
++	allow_kcore_access = 1;	/*enable ability to read /proc/kcore*/
++
+ 	total_mem = get_total_mem();
+ 
+ 	ret = parse_crashkernel(boot_command_line, total_mem,
+--- linux-2.6.23.noarch/drivers/char/Kconfig~	2007-11-15 14:10:18.000000000 -0500
++++ linux-2.6.23.noarch/drivers/char/Kconfig	2007-11-15 14:10:40.000000000 -0500
+@@ -1062,6 +1062,20 @@ config DEVPORT
+ 	depends on ISA || PCI
+ 	default y
+ 
++config WRITABLE_DEVMEM
++	bool "Allow writing to /dev/mem"
++	help
++	  Very little software actually requires a writable /dev/mem
++	  Disabling this feature will close off a potential attack
++	  vector for kernel rootkits.
++
++config WRITABLE_DEVKMEM
++	bool "Allow writing to /dev/kmem"
++	help
++	  Very little software actually requires a writable /dev/kmem
++	  Disabling this feature will close off a potential attack
++	  vector for kernel rootkits.
++
+ source "drivers/s390/char/Kconfig"
+ 
+ endmenu
+--- vanilla/drivers/char/mem.c	2007-11-15 14:15:27.000000000 -0500
++++ linux-2.6.23.noarch/drivers/char/mem.c	2007-11-15 14:13:54.000000000 -0500
+@@ -108,6 +108,23 @@ static inline int valid_mmap_phys_addr_r
+ }
+ #endif
+ 
++static inline int range_is_allowed(unsigned long from, unsigned long to)
++{
++	unsigned long cursor;
++
++	cursor = from >> PAGE_SHIFT;
++	while ((cursor << PAGE_SHIFT) < to) {
++		if (!devmem_is_allowed(cursor)) {
++			printk(KERN_INFO "Program %s tried to read /dev/mem "
++				"between %lx->%lx.\n",
++				current->comm, from, to);
++			return 0;
++		}
++		cursor++;
++	}
++	return 1;
++}
++
+ /*
+  * This funcion reads the *physical* memory. The f_pos points directly to the 
+  * memory location. 
+@@ -157,6 +174,9 @@ static ssize_t read_mem(struct file * fi
+ 		 */
+ 		ptr = xlate_dev_mem_ptr(p);
+ 
++		//FIXME: Add write-once sysctl
++		//if (!range_is_allowed(p, p+count))
++		//	return -EPERM;
+ 		if (copy_to_user(buf, ptr, sz))
+ 			return -EFAULT;
+ 		buf += sz;
+@@ -169,6 +189,7 @@ static ssize_t read_mem(struct file * fi
+ 	return read;
+ }
+ 
++#ifdef CONFIG_WRITABLE_DEVMEM
+ static ssize_t write_mem(struct file * file, const char __user * buf, 
+ 			 size_t count, loff_t *ppos)
+ {
+@@ -214,6 +235,8 @@ static ssize_t write_mem(struct file * f
+ 		 */
+ 		ptr = xlate_dev_mem_ptr(p);
+ 
++		if (!range_is_allowed(ptr, ptr+sz))
++			return -EPERM;
+ 		copied = copy_from_user(ptr, buf, sz);
+ 		if (copied) {
+ 			written += sz - copied;
+@@ -230,6 +253,9 @@ static ssize_t write_mem(struct file * f
+ 	*ppos += written;
+ 	return written;
+ }
++#else
++#define write_mem 0
++#endif
+ 
+ #ifndef __HAVE_PHYS_MEM_ACCESS_PROT
+ static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+@@ -363,6 +389,9 @@ static ssize_t read_kmem(struct file *fi
+ 	ssize_t low_count, read, sz;
+ 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
+ 
++	//FIXME: Add write-once sysctl
++	//return -EPERM;
++
+ 	read = 0;
+ 	if (p < (unsigned long) high_memory) {
+ 		low_count = count;
+@@ -439,6 +468,7 @@ static ssize_t read_kmem(struct file *fi
+ }
+ 
+ 
++#ifdef CONFIG_WRITABLE_DEVKMEM
+ static inline ssize_t
+ do_write_kmem(void *p, unsigned long realp, const char __user * buf,
+ 	      size_t count, loff_t *ppos)
+@@ -557,6 +587,9 @@ static ssize_t write_kmem(struct file * 
+  	*ppos = p;
+  	return virtr + wrote;
+ }
++#else
++#define write_kmem 0
++#endif
+ 
+ #ifdef CONFIG_DEVPORT
+ static ssize_t read_port(struct file * file, char __user * buf,
+@@ -873,7 +906,6 @@ static const struct {
+ 	const struct file_operations	*fops;
+ } devlist[] = { /* list of minor devices */
+ 	{1, "mem",     S_IRUSR | S_IWUSR | S_IRGRP, &mem_fops},
+-	{2, "kmem",    S_IRUSR | S_IWUSR | S_IRGRP, &kmem_fops},
+ 	{3, "null",    S_IRUGO | S_IWUGO,           &null_fops},
+ #ifdef CONFIG_DEVPORT
+ 	{4, "port",    S_IRUSR | S_IWUSR | S_IRGRP, &port_fops},

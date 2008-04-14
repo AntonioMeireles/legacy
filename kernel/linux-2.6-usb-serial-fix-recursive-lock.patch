@@ -1,0 +1,54 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=b507cc9710d8b6e3013468b40522e235342fc84a
+Commit:     b507cc9710d8b6e3013468b40522e235342fc84a
+Parent:     cdeeeae056a429e729ae9e914fa8142ee45bee93
+Author:     Pete Zaitcev <zaitcev@redhat.com>
+AuthorDate: Tue Mar 4 23:28:42 2008 -0800
+Committer:  Greg Kroah-Hartman <gregkh@suse.de>
+CommitDate: Mon Mar 10 16:42:25 2008 -0700
+
+    USB: fix usb-serial generic recursive lock
+    
+    Nobody should be using the generic usb-serial for anything other than
+    testing. Still, it's not a good thing that it's easy to lock up. There
+    is a traceback from NMI oopser here:
+     https://bugzilla.redhat.com/show_bug.cgi?id=431379
+    
+    But in short, if a line discipline has a chance to echo anything, input
+    can loop back a write method. So, don't call tty_flip_buffer_push from
+    under a lock taken on write path.
+    
+    Signed-off-by: Pete Zaitcev <zaitcev@redhat.com>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+---
+ drivers/usb/serial/generic.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/serial/generic.c b/drivers/usb/serial/generic.c
+index 97fa3c4..7cfce9d 100644
+--- a/drivers/usb/serial/generic.c
++++ b/drivers/usb/serial/generic.c
+@@ -323,7 +323,7 @@ static void flush_and_resubmit_read_urb (struct usb_serial_port *port)
+ 		room = tty_buffer_request_room(tty, urb->actual_length);
+ 		if (room) {
+ 			tty_insert_flip_string(tty, urb->transfer_buffer, room);
+-			tty_flip_buffer_push(tty); /* is this allowed from an URB callback ? */
++			tty_flip_buffer_push(tty);
+ 		}
+ 	}
+ 
+@@ -349,10 +349,12 @@ void usb_serial_generic_read_bulk_callback (struct urb *urb)
+ 
+ 	/* Throttle the device if requested by tty */
+ 	spin_lock_irqsave(&port->lock, flags);
+-	if (!(port->throttled = port->throttle_req))
+-		/* Handle data and continue reading from device */
++	if (!(port->throttled = port->throttle_req)) {
++		spin_unlock_irqrestore(&port->lock, flags);
+ 		flush_and_resubmit_read_urb(port);
+-	spin_unlock_irqrestore(&port->lock, flags);
++	} else {
++		spin_unlock_irqrestore(&port->lock, flags);
++	}
+ }
+ EXPORT_SYMBOL_GPL(usb_serial_generic_read_bulk_callback);
+ 

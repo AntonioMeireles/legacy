@@ -1,0 +1,753 @@
+#
+# Patches under review and/or pending inclusion in the linux1394-git
+# tree, which we think we're going to want...
+#
+
+
+Increase reconnect management orb timeout.
+
+Signed-off-by: Jarod Wilson <jwilson@redhat.com>
+
+---
+
+ drivers/firewire/fw-sbp2.c |   15 +++++++++++++--
+ 1 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/firewire/fw-sbp2.c b/drivers/firewire/fw-sbp2.c
+index d6d62c6..da315cf 100644
+--- a/drivers/firewire/fw-sbp2.c
++++ b/drivers/firewire/fw-sbp2.c
+@@ -170,6 +170,7 @@ struct sbp2_target {
+  */
+ #define SBP2_MIN_LOGIN_ORB_TIMEOUT	5000U	/* Timeout in ms */
+ #define SBP2_MAX_LOGIN_ORB_TIMEOUT	40000U	/* Timeout in ms */
++#define SBP2_MAX_RECONNECT_ORB_TIMEOUT	10000U	/* Timeout in ms */
+ #define SBP2_ORB_TIMEOUT		2000U	/* Timeout in ms */
+ #define SBP2_ORB_NULL			0x80000000
+ #define SBP2_MAX_SG_ELEMENT_LENGTH	0xf000
+@@ -538,14 +539,24 @@ sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
+ 	orb->request.status_fifo.low  =
+ 		cpu_to_be32(lu->address_handler.offset);
+ 
+-	if (function == SBP2_LOGIN_REQUEST) {
++	switch (function) {
++
++	case SBP2_LOGIN_REQUEST:
+ 		/* Ask for 2^2 == 4 seconds reconnect grace period */
+ 		orb->request.misc |= cpu_to_be32(
+ 			MANAGEMENT_ORB_RECONNECT(2) |
+ 			MANAGEMENT_ORB_EXCLUSIVE(sbp2_param_exclusive_login));
+ 		timeout = lu->tgt->mgt_orb_timeout;
+-	} else {
++		break;
++
++	case SBP2_RECONNECT_REQUEST:
++		timeout = min(SBP2_MAX_RECONNECT_ORB_TIMEOUT,
++			      lu->tgt->mgt_orb_timeout);
++		break;
++
++	default:
+ 		timeout = SBP2_ORB_TIMEOUT;
++		break;
+ 	}
+ 
+ 	init_completion(&orb->done);
+
+
+
+Adds a goofy routine to dump the configuration ROM as far as it could be
+read, if fw-core failed to get it all.
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+---
+
+We may want to reduce it to printing
+  - any encountered Extended ROM keys,
+  - the number of quadlets that were successfully read
+    (in the last attempt, or in the most successfull attempt?),
+  - the return code of the last attempt
+before submitting to mainline.
+
+ drivers/firewire/fw-device.c |  126 ++++++++++++++++++++++-------------
+ drivers/firewire/fw-device.h |    1 
+ 2 files changed, 82 insertions(+), 45 deletions(-)
+
+Index: linux/drivers/firewire/fw-device.c
+===================================================================
+--- linux.orig/drivers/firewire/fw-device.c
++++ linux/drivers/firewire/fw-device.c
+@@ -18,6 +18,7 @@
+  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+  */
+ 
++#include <linux/bitops.h>
+ #include <linux/module.h>
+ #include <linux/wait.h>
+ #include <linux/errno.h>
+@@ -422,8 +423,12 @@ read_rom(struct fw_device *device, int g
+ 	return callback_data.rcode;
+ }
+ 
+-#define READ_BIB_ROM_SIZE	256
+-#define READ_BIB_STACK_SIZE	16
++#define MAX_CONFIG_ROM_SIZE ((CSR_CONFIG_ROM_END - CSR_CONFIG_ROM) / 4)
++
++struct config_rom_image {
++	u32 rom[MAX_CONFIG_ROM_SIZE];
++	DECLARE_BITMAP(read, MAX_CONFIG_ROM_SIZE);
++};
+ 
+ /*
+  * Read the bus info block, perform a speed probe, and read all of the rest of
+@@ -432,35 +437,36 @@ read_rom(struct fw_device *device, int g
+  * It's better to start all over in this case because the node from which we
+  * are reading the ROM may have changed the ROM during the reset.
+  */
+-static int read_bus_info_block(struct fw_device *device, int generation)
++static int read_bus_info_block(struct fw_device *device, int generation,
++			       struct config_rom_image *rom_img)
+ {
+-	u32 *rom, *stack, *old_rom, *new_rom;
++	u32 *rom, *old_rom, *new_rom;
++	u32 stack[16];
+ 	u32 sp, key;
+-	int i, end, length, ret = -1;
++	int i, end, length, ret;
+ 
+-	rom = kmalloc(sizeof(*rom) * READ_BIB_ROM_SIZE +
+-		      sizeof(*stack) * READ_BIB_STACK_SIZE, GFP_KERNEL);
+-	if (rom == NULL)
++	if (rom_img == NULL)
+ 		return -ENOMEM;
+-
+-	stack = &rom[READ_BIB_ROM_SIZE];
++	rom = rom_img->rom;
+ 
+ 	device->max_speed = SCODE_100;
+ 
+ 	/* First read the bus info block. */
+ 	for (i = 0; i < 5; i++) {
+-		if (read_rom(device, generation, i, &rom[i]) != RCODE_COMPLETE)
+-			goto out;
++		ret = read_rom(device, generation, i, &rom[i]);
++		if (ret != RCODE_COMPLETE)
++			return ret;
++		__set_bit(i, rom_img->read);
+ 		/*
+ 		 * As per IEEE1212 7.2, during power-up, devices can
+ 		 * reply with a 0 for the first quadlet of the config
+-		 * rom to indicate that they are booting (for example,
++		 * ROM to indicate that they are booting (for example,
+ 		 * if the firmware is on the disk of a external
+ 		 * harddisk).  In that case we just fail, and the
+ 		 * retry mechanism will try again later.
+ 		 */
+ 		if (i == 0 && rom[i] == 0)
+-			goto out;
++			return -EAGAIN;
+ 	}
+ 
+ 	device->max_speed = device->node->max_speed;
+@@ -484,15 +490,17 @@ static int read_bus_info_block(struct fw
+ 			device->max_speed = device->card->link_speed;
+ 
+ 		while (device->max_speed > SCODE_100) {
+-			if (read_rom(device, generation, 0, &dummy) ==
+-			    RCODE_COMPLETE)
++			ret = read_rom(device, generation, 0, &dummy);
++			if (ret == RCODE_COMPLETE)
+ 				break;
++			if (ret == RCODE_GENERATION)
++				return ret;
+ 			device->max_speed--;
+ 		}
+ 	}
+ 
+ 	/*
+-	 * Now parse the config rom.  The config rom is a recursive
++	 * Now parse the config ROM.  The config ROM is a recursive
+ 	 * directory structure so we parse it using a stack of
+ 	 * references to the blocks that make up the structure.  We
+ 	 * push a reference to the root directory on the stack to
+@@ -504,44 +512,49 @@ static int read_bus_info_block(struct fw
+ 	while (sp > 0) {
+ 		/*
+ 		 * Pop the next block reference of the stack.  The
+-		 * lower 24 bits is the offset into the config rom,
++		 * lower 24 bits is the offset into the config ROM,
+ 		 * the upper 8 bits are the type of the reference the
+ 		 * block.
+ 		 */
+ 		key = stack[--sp];
+ 		i = key & 0xffffff;
+-		if (i >= READ_BIB_ROM_SIZE)
++		if (i >= MAX_CONFIG_ROM_SIZE) {
+ 			/*
+ 			 * The reference points outside the standard
+-			 * config rom area, something's fishy.
++			 * config ROM area.
+ 			 */
+-			goto out;
+-
++			if (key >> 24 == (CSR_EXTENDED_ROM | CSR_LEAF))
++				fw_error("Extended ROM not supported\n");
++			return -EINVAL;
++		}
+ 		/* Read header quadlet for the block to get the length. */
+-		if (read_rom(device, generation, i, &rom[i]) != RCODE_COMPLETE)
+-			goto out;
++		ret = read_rom(device, generation, i, &rom[i]);
++		if (ret != RCODE_COMPLETE)
++			return ret;
++		__set_bit(i, rom_img->read);
+ 		end = i + (rom[i] >> 16) + 1;
+ 		i++;
+-		if (end > READ_BIB_ROM_SIZE)
++		if (end > MAX_CONFIG_ROM_SIZE) {
+ 			/*
+ 			 * This block extends outside standard config
+ 			 * area (and the array we're reading it
+ 			 * into).  That's broken, so ignore this
+ 			 * device.
+ 			 */
+-			goto out;
+-
++			return -EINVAL;
++		}
+ 		/*
+ 		 * Now read in the block.  If this is a directory
+ 		 * block, check the entries as we read them to see if
+ 		 * it references another block, and push it in that case.
+ 		 */
+ 		while (i < end) {
+-			if (read_rom(device, generation, i, &rom[i]) !=
+-			    RCODE_COMPLETE)
+-				goto out;
++			ret = read_rom(device, generation, i, &rom[i]);
++			if (ret != RCODE_COMPLETE)
++				return ret;
++			__set_bit(i, rom_img->read);
+ 			if ((key >> 30) == 3 && (rom[i] >> 30) > 1 &&
+-			    sp < READ_BIB_STACK_SIZE)
++			    sp < ARRAY_SIZE(stack))
+ 				stack[sp++] = i + rom[i];
+ 			i++;
+ 		}
+@@ -552,7 +565,7 @@ static int read_bus_info_block(struct fw
+ 	old_rom = device->config_rom;
+ 	new_rom = kmemdup(rom, length * 4, GFP_KERNEL);
+ 	if (new_rom == NULL)
+-		goto out;
++		return -ENOMEM;
+ 
+ 	down_write(&fw_device_rwsem);
+ 	device->config_rom = new_rom;
+@@ -560,14 +573,25 @@ static int read_bus_info_block(struct fw
+ 	up_write(&fw_device_rwsem);
+ 
+ 	kfree(old_rom);
+-	ret = 0;
+ 	device->cmc = rom[2] & 1 << 30;
+- out:
+-	kfree(rom);
+ 
+-	return ret;
++	return 0;
++}
++
++static void dump_config_rom(struct config_rom_image *rom_img)
++{
++	int i;
++
++	if (rom_img == NULL || !test_bit(0, rom_img->read))
++		return;
++
++	fw_notify("config ROM read so far:\n");
++	for_each_bit(i, rom_img->read, MAX_CONFIG_ROM_SIZE)
++		printk(KERN_NOTICE "%x: %08x\n",
++		       CSR_CONFIG_ROM + i * 4, rom_img->rom[i]);
+ }
+ 
++
+ static void fw_unit_release(struct device *dev)
+ {
+ 	struct fw_unit *unit = fw_unit(dev);
+@@ -697,27 +721,32 @@ static void fw_device_init(struct work_s
+ {
+ 	struct fw_device *device =
+ 		container_of(work, struct fw_device, work.work);
++	struct config_rom_image *rom_img;
+ 	int minor, err;
+ 
++	rom_img = kzalloc(sizeof(*rom_img), GFP_KERNEL);
++
+ 	/*
+ 	 * All failure paths here set node->data to NULL, so that we
+ 	 * don't try to do device_for_each_child() on a kfree()'d
+ 	 * device.
+ 	 */
+ 
+-	if (read_bus_info_block(device, device->generation) < 0) {
++	err = read_bus_info_block(device, device->generation, rom_img);
++	if (err) {
+ 		if (device->config_rom_retries < MAX_RETRIES &&
+ 		    atomic_read(&device->state) == FW_DEVICE_INITIALIZING) {
+ 			device->config_rom_retries++;
+ 			schedule_delayed_work(&device->work, RETRY_DELAY);
+ 		} else {
+-			fw_notify("giving up on config rom for node id %x\n",
+-				  device->node_id);
++			fw_notify("giving up on config ROM for node id %x "
++				  "(returned %d)\n", device->node_id, err);
++			dump_config_rom(rom_img);
+ 			if (device->node == device->card->root_node)
+ 				schedule_delayed_work(&device->card->work, 0);
+ 			fw_device_release(&device->device);
+ 		}
+-		return;
++		goto out;
+ 	}
+ 
+ 	err = -ENOMEM;
+@@ -786,7 +815,7 @@ static void fw_device_init(struct work_s
+ 	if (device->node == device->card->root_node)
+ 		schedule_delayed_work(&device->card->work, 0);
+ 
+-	return;
++	goto out;
+ 
+  error_with_cdev:
+ 	down_write(&fw_device_rwsem);
+@@ -796,6 +825,8 @@ static void fw_device_init(struct work_s
+ 	fw_device_put(device);		/* fw_device_idr's reference */
+ 
+ 	put_device(&device->device);	/* our reference */
++ out:
++	kfree(rom_img);
+ }
+ 
+ static int update_unit(struct device *dev, void *data)
+@@ -854,6 +885,7 @@ static void fw_device_refresh(struct wor
+ 		container_of(work, struct fw_device, work.work);
+ 	struct fw_card *card = device->card;
+ 	int node_id = device->node_id;
++	struct config_rom_image *rom_img = NULL;
+ 
+ 	switch (reread_bus_info_block(device, device->generation)) {
+ 	case REREAD_BIB_ERROR:
+@@ -890,13 +922,15 @@ static void fw_device_refresh(struct wor
+ 	 */
+ 	device_for_each_child(&device->device, NULL, shutdown_unit);
+ 
+-	if (read_bus_info_block(device, device->generation) < 0) {
++	rom_img = kzalloc(sizeof(*rom_img), GFP_KERNEL);
++
++	if (read_bus_info_block(device, device->generation, rom_img) != 0) {
+ 		if (device->config_rom_retries < MAX_RETRIES &&
+ 		    atomic_read(&device->state) == FW_DEVICE_INITIALIZING) {
+ 			device->config_rom_retries++;
+ 			schedule_delayed_work(&device->work, RETRY_DELAY);
+ 
+-			return;
++			goto out;
+ 		}
+ 		goto give_up;
+ 	}
+@@ -910,16 +944,18 @@ static void fw_device_refresh(struct wor
+ 
+ 	fw_notify("refreshed device %s\n", device->device.bus_id);
+ 	device->config_rom_retries = 0;
+-	goto out;
++	goto out_bm;
+ 
+  give_up:
+ 	fw_notify("giving up on refresh of device %s\n", device->device.bus_id);
+  gone:
+ 	atomic_set(&device->state, FW_DEVICE_SHUTDOWN);
+ 	fw_device_shutdown(work);
+- out:
++ out_bm:
+ 	if (node_id == card->root_node->node_id)
+ 		schedule_delayed_work(&card->work, 0);
++ out:
++	kfree(rom_img);
+ }
+ 
+ void fw_node_event(struct fw_card *card, struct fw_node *node, int event)
+Index: linux/drivers/firewire/fw-device.h
+===================================================================
+--- linux.orig/drivers/firewire/fw-device.h
++++ linux/drivers/firewire/fw-device.h
+@@ -142,6 +142,7 @@ static inline void fw_unit_put(struct fw
+ #define CSR_DEPENDENT_INFO	0x14
+ #define CSR_MODEL		0x17
+ #define CSR_INSTANCE		0x18
++#define CSR_EXTENDED_ROM	0x1b
+ #define CSR_DIRECTORY_ID	0x20
+ 
+ struct fw_csr_iterator {
+
+-- 
+Stefan Richter
+-=====-==--- --== -=---
+http://arcgraph.de/sr/
+
+
+Date: Tue, 11 Mar 2008 22:32:03 +0100 (CET)
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Subject: [PATCH] firewire: fw-sbp2: fix for SYM13FW500 bridge (Datafab disk)
+To: linux1394-devel@lists.sourceforge.net
+Cc: linux-kernel@vger.kernel.org
+
+Fix I/O errors due to SYM13FW500's inability to handle larger request
+sizes.  Reported by Piergiorgio Sartor <piergiorgio.sartor@nexgo.de> in
+https://bugzilla.redhat.com/show_bug.cgi?id=436879
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+---
+ drivers/firewire/fw-sbp2.c |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+Index: linux/drivers/firewire/fw-sbp2.c
+===================================================================
+--- linux.orig/drivers/firewire/fw-sbp2.c
++++ linux/drivers/firewire/fw-sbp2.c
+@@ -327,6 +327,11 @@ static const struct {
+ 		.model			= ~0,
+ 		.workarounds		= SBP2_WORKAROUND_128K_MAX_TRANS,
+ 	},
++	/* Datafab MD2-FW2 with Symbios/LSILogic SYM13FW500 bridge */ {
++		.firmware_revision	= 0x002600,
++		.model			= ~0,
++		.workarounds		= SBP2_WORKAROUND_128K_MAX_TRANS,
++	},
+ 
+ 	/*
+ 	 * There are iPods (2nd gen, 3rd gen) with model_id == 0, but
+
+-- 
+Stefan Richter
+-=====-==--- --== -=-==
+http://arcgraph.de/sr/
+
+
+Date: Sun, 16 Mar 2008 00:56:41 +0100 (CET)
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Subject: [PATCH] firewire: fix panic in handle_at_packet
+To: linux1394-devel@lists.sourceforge.net
+cc: linux-kernel@vger.kernel.org,
+ Johannes Berg <johannes@sipsolutions.net>,
+ Jarod Wilson <jwilson@redhat.com>
+
+This fixes a use-after-free bug in the handling of split transactions.
+The AT DMA handler of the request was occasionally executed after the
+AR DMA handler of the response.  The AT DMA handler then accessed an
+already freed packet.
+
+Reported by Johannes Berg <johannes@sipsolutions.net>.
+http://bugzilla.kernel.org/show_bug.cgi?id=9617
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Jarod Wilson <jwilson@redhat.com>
+---
+ drivers/firewire/fw-transaction.c |    6 ++++++
+ 1 file changed, 6 insertions(+)
+
+Index: linux/drivers/firewire/fw-transaction.c
+===================================================================
+--- linux.orig/drivers/firewire/fw-transaction.c
++++ linux/drivers/firewire/fw-transaction.c
+@@ -737,6 +737,12 @@ fw_core_handle_response(struct fw_card *
+ 		break;
+ 	}
+ 
++	/*
++	 * The response handler may be executed while the request handler
++	 * is still pending.  Cancel the request handler.
++	 */
++	card->driver->cancel_packet(card, &t->packet);
++
+ 	t->callback(card, rcode, data, data_length, t->callback_data);
+ }
+ EXPORT_SYMBOL(fw_core_handle_response);
+
+-- 
+Stefan Richter
+-=====-==--- --== =----
+http://arcgraph.de/sr/
+
+
+Oops, some of the important bits got dropped when back-porting to 2.6.24...
+Add 'em back right here. We'll sort out changelog entries later...
+
+diff -Naurp linux.orig/drivers/firewire/fw-ohci.c linux/drivers/firewire/fw-ohci.c
+--- linux.orig/drivers/firewire/fw-ohci.c	2008-03-17 16:52:40.000000000 -0400
++++ linux/drivers/firewire/fw-ohci.c	2008-03-17 16:54:58.000000000 -0400
+@@ -188,7 +188,7 @@ struct fw_ohci {
+ 	struct tasklet_struct bus_reset_tasklet;
+ 	int node_id;
+ 	int generation;
+-	int request_generation;
++	int request_generation; /* for timestamping incoming requests */
+ 	u32 bus_seconds;
+ 	bool old_uninorth;
+ 
+@@ -292,19 +292,13 @@ static int ar_context_add_page(struct ar
+ {
+ 	struct device *dev = ctx->ohci->card.device;
+ 	struct ar_buffer *ab;
+-	dma_addr_t ab_bus;
++	dma_addr_t uninitialized_var(ab_bus);
+ 	size_t offset;
+ 
+-	ab = (struct ar_buffer *) __get_free_page(GFP_ATOMIC);
++	ab = dma_alloc_coherent(dev, PAGE_SIZE, &ab_bus, GFP_ATOMIC);
+ 	if (ab == NULL)
+ 		return -ENOMEM;
+ 
+-	ab_bus = dma_map_single(dev, ab, PAGE_SIZE, DMA_BIDIRECTIONAL);
+-	if (dma_mapping_error(ab_bus)) {
+-		free_page((unsigned long) ab);
+-		return -ENOMEM;
+-	}
+-
+ 	memset(&ab->descriptor, 0, sizeof(ab->descriptor));
+ 	ab->descriptor.control        = cpu_to_le16(DESCRIPTOR_INPUT_MORE |
+ 						    DESCRIPTOR_STATUS |
+@@ -315,8 +309,6 @@ static int ar_context_add_page(struct ar
+ 	ab->descriptor.res_count      = cpu_to_le16(PAGE_SIZE - offset);
+ 	ab->descriptor.branch_address = 0;
+ 
+-	dma_sync_single_for_device(dev, ab_bus, PAGE_SIZE, DMA_BIDIRECTIONAL);
+-
+ 	ctx->last_buffer->descriptor.branch_address = cpu_to_le32(ab_bus | 1);
+ 	ctx->last_buffer->next = ab;
+ 	ctx->last_buffer = ab;
+@@ -505,6 +497,7 @@ static void ar_context_tasklet(unsigned 
+ 
+ 	if (d->res_count == 0) {
+ 		size_t size, rest, offset;
++		dma_addr_t buffer_bus;
+ 
+ 		/*
+ 		 * This descriptor is finished and we may have a
+@@ -513,9 +506,7 @@ static void ar_context_tasklet(unsigned 
+ 		 */
+ 
+ 		offset = offsetof(struct ar_buffer, data);
+-		dma_unmap_single(ohci->card.device,
+-			le32_to_cpu(ab->descriptor.data_address) - offset,
+-			PAGE_SIZE, DMA_BIDIRECTIONAL);
++		buffer_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
+ 
+ 		buffer = ab;
+ 		ab = ab->next;
+@@ -531,7 +522,8 @@ static void ar_context_tasklet(unsigned 
+ 		while (buffer < end)
+ 			buffer = handle_ar_packet(ctx, buffer);
+ 
+-		free_page((unsigned long)buffer);
++		dma_free_coherent(ohci->card.device, PAGE_SIZE,
++				  buffer, buffer_bus);
+ 		ar_context_add_page(ctx);
+ 	} else {
+ 		buffer = ctx->pointer;
+@@ -2376,8 +2368,8 @@ static void pci_remove(struct pci_dev *d
+ 	pci_iounmap(dev, ohci->registers);
+ 	pci_release_region(dev, 0);
+ 	pci_disable_device(dev);
+-	ohci_pmac_off(dev);
+ 	kfree(&ohci->card);
++	ohci_pmac_off(dev);
+ 
+ 	fw_notify("Removed fw-ohci device.\n");
+ }
+diff -Naurp linux.orig/drivers/firewire/fw-sbp2.c linux/drivers/firewire/fw-sbp2.c
+--- linux.orig/drivers/firewire/fw-sbp2.c	2008-03-17 16:52:40.000000000 -0400
++++ linux/drivers/firewire/fw-sbp2.c	2008-03-17 16:53:55.000000000 -0400
+@@ -847,7 +847,7 @@ static void sbp2_set_busy_timeout(struct
+ 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
+ 	DECLARE_COMPLETION_ONSTACK(done);
+ 	struct fw_transaction t;
+-	static u32 busy_timeout;
++	static __be32 busy_timeout;
+ 
+ 	busy_timeout = cpu_to_be32(SBP2_CYCLE_LIMIT | SBP2_RETRY_LIMIT);
+ 
+diff -Naurp linux.orig/drivers/firewire/fw-transaction.h linux/drivers/firewire/fw-transaction.h
+--- linux.orig/drivers/firewire/fw-transaction.h	2008-03-17 16:52:40.000000000 -0400
++++ linux/drivers/firewire/fw-transaction.h	2008-03-17 16:53:55.000000000 -0400
+@@ -224,8 +224,6 @@ struct fw_card {
+ 
+ 	int node_id;
+ 	int generation;
+-	/* This is the generation used for timestamping incoming requests. */
+-	int request_generation;
+ 	int current_tlabel, tlabel_mask;
+ 	struct list_head transaction_list;
+ 	struct timer_list flush_timer;
+
+
+
+Date: Thu, 20 Mar 2008 23:48:23 +0100 (CET)
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Subject: [PATCH] firewire: wait until PHY configuration packet was transmitted
+To: linux1394-devel@lists.sourceforge.net
+cc: linux-kernel@vger.kernel.org,
+ Jarod Wilson <jwilson@redhat.com>
+
+We now exit fw_send_phy_config /after/ the PHY config packet has been
+transmitted, instead of before.  A subsequent fw_core_initiate_bus_reset
+will therefore not overlap with the transmission.  This is meant to make
+the send PHY config packet + reset bus routine more deterministic.
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Jarod Wilson <jwilson@redhat.com>
+---
+ drivers/firewire/fw-transaction.c |   49 ++++++++++++++----------------
+ 1 file changed, 24 insertions(+), 25 deletions(-)
+
+Index: linux/drivers/firewire/fw-transaction.c
+===================================================================
+--- linux.orig/drivers/firewire/fw-transaction.c
++++ linux/drivers/firewire/fw-transaction.c
+@@ -18,6 +18,7 @@
+  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+  */
+ 
++#include <linux/completion.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
+@@ -294,42 +295,40 @@ fw_send_request(struct fw_card *card, st
+ }
+ EXPORT_SYMBOL(fw_send_request);
+ 
++struct fw_phy_packet {
++	struct fw_packet packet;
++	struct completion done;
++};
++
+ static void
+ transmit_phy_packet_callback(struct fw_packet *packet,
+ 			     struct fw_card *card, int status)
+ {
+-	kfree(packet);
+-}
+-
+-static void send_phy_packet(struct fw_card *card, u32 data, int generation)
+-{
+-	struct fw_packet *packet;
++	struct fw_phy_packet *p =
++			container_of(packet, struct fw_phy_packet, packet);
+ 
+-	packet = kzalloc(sizeof(*packet), GFP_ATOMIC);
+-	if (packet == NULL)
+-		return;
+-
+-	packet->header[0] = data;
+-	packet->header[1] = ~data;
+-	packet->header_length = 8;
+-	packet->payload_length = 0;
+-	packet->speed = SCODE_100;
+-	packet->generation = generation;
+-	packet->callback = transmit_phy_packet_callback;
+-
+-	card->driver->send_request(card, packet);
++	complete(&p->done);
+ }
+ 
+ void fw_send_phy_config(struct fw_card *card,
+ 			int node_id, int generation, int gap_count)
+ {
+-	u32 q;
+-
+-	q = PHY_IDENTIFIER(PHY_PACKET_CONFIG) |
+-		PHY_CONFIG_ROOT_ID(node_id) |
+-		PHY_CONFIG_GAP_COUNT(gap_count);
++	struct fw_phy_packet p;
++	u32 data = PHY_IDENTIFIER(PHY_PACKET_CONFIG) |
++		   PHY_CONFIG_ROOT_ID(node_id) |
++		   PHY_CONFIG_GAP_COUNT(gap_count);
++
++	p.packet.header[0] = data;
++	p.packet.header[1] = ~data;
++	p.packet.header_length = 8;
++	p.packet.payload_length = 0;
++	p.packet.speed = SCODE_100;
++	p.packet.generation = generation;
++	p.packet.callback = transmit_phy_packet_callback;
++	init_completion(&p.done);
+ 
+-	send_phy_packet(card, q, generation);
++	card->driver->send_request(card, &p.packet);
++	wait_for_completion(&p.done);
+ }
+ 
+ void fw_flush_transactions(struct fw_card *card)
+
+-- 
+Stefan Richter
+-=====-==--- --== =-=--
+http://arcgraph.de/sr/
+
+
+There's a minor memory leak in firewire-ohci's ar_context_tasklet(), in that
+we're not freeing up some of the memory we use for each ar_buffer, due to a
+moving pointer. The problem has been there for a while, but didn't start
+to be noticed until we were doing a coherent allocation for the ar_buffer --
+meaning we have a smaller pool of memory to work with now, so the problem
+crops up sooner. The manifestation of this comes after doing a bunch of I/O to
+a firewire disk, which eventually stalls, and this starts spewing to the
+console:
+
+PCI-DMA: Out of IOMMU space for 53248 bytes at device 0000:04:09.0
+
+The device there is one of my FireWire controllers trying to do I/O. The host
+is a fairly new rev. opteron.
+
+Just need to make sure we're freeing the correct memory range is pass through
+ar_context_tasklet to fix it. Probably something we ought to sneak into 2.6.25
+if its still doable...
+
+Signed-off-by: Jarod Wilson <jwilson@redhat.com>
+---
+
+ drivers/firewire/fw-ohci.c |    9 +++++----
+ 1 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/firewire/fw-ohci.c b/drivers/firewire/fw-ohci.c
+index 8ff9059..e1d50f7 100644
+--- a/drivers/firewire/fw-ohci.c
++++ b/drivers/firewire/fw-ohci.c
+@@ -579,7 +579,8 @@ static void ar_context_tasklet(unsigned long data)
+ 
+ 	if (d->res_count == 0) {
+ 		size_t size, rest, offset;
+-		dma_addr_t buffer_bus;
++		dma_addr_t start_bus;
++		void *start;
+ 
+ 		/*
+ 		 * This descriptor is finished and we may have a
+@@ -588,9 +589,9 @@ static void ar_context_tasklet(unsigned long data)
+ 		 */
+ 
+ 		offset = offsetof(struct ar_buffer, data);
+-		buffer_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
++		start = buffer = ab;
++		start_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
+ 
+-		buffer = ab;
+ 		ab = ab->next;
+ 		d = &ab->descriptor;
+ 		size = buffer + PAGE_SIZE - ctx->pointer;
+@@ -605,7 +606,7 @@ static void ar_context_tasklet(unsigned long data)
+ 			buffer = handle_ar_packet(ctx, buffer);
+ 
+ 		dma_free_coherent(ohci->card.device, PAGE_SIZE,
+-				  buffer, buffer_bus);
++				  start, start_bus);
+ 		ar_context_add_page(ctx);
+ 	} else {
+ 		buffer = ctx->pointer;

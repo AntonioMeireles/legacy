@@ -1,0 +1,43 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=401023710d73aaef1191ab4d6a79d39c51add828
+Commit:     401023710d73aaef1191ab4d6a79d39c51add828
+Parent:     459eea74104ad85c30e17541c2b30d776445e985
+Author:     Kim B. Heino <Kim.Heino@bluegiga.com>
+AuthorDate: Fri Feb 29 12:26:21 2008 -0800
+Committer:  David S. Miller <davem@davemloft.net>
+CommitDate: Fri Feb 29 12:26:21 2008 -0800
+
+    [TUN]: Fix RTNL-locking in tun/tap driver
+    
+    Current tun/tap driver sets also net device's hw address when asked to
+    change character device's hw address. This is a good idea, but it
+    misses RTLN-locking, resulting following error message in 2.6.25-rc3's
+    inetdev_event() function:
+    
+    RTNL: assertion failed at net/ipv4/devinet.c (1050)
+    
+    Attached patch fixes this problem.
+    
+    Signed-off-by: Kim B. Heino <Kim.Heino@bluegiga.com>
+    Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/tun.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/net/tun.c b/drivers/net/tun.c
+index 038c1ef..7b816a0 100644
+--- a/drivers/net/tun.c
++++ b/drivers/net/tun.c
+@@ -663,7 +663,11 @@ static int tun_chr_ioctl(struct inode *inode, struct file *file,
+ 	case SIOCSIFHWADDR:
+ 	{
+ 		/* try to set the actual net device's hw address */
+-		int ret = dev_set_mac_address(tun->dev, &ifr.ifr_hwaddr);
++		int ret;
++
++		rtnl_lock();
++		ret = dev_set_mac_address(tun->dev, &ifr.ifr_hwaddr);
++		rtnl_unlock();
+ 
+ 		if (ret == 0) {
+ 			/** Set the character device's hardware address. This is used when
+

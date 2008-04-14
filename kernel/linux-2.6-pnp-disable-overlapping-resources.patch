@@ -1,0 +1,132 @@
+Gitweb:     http://git.kernel.org/git/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=0509ad5e1a7d9220f09edd5be114bf3bd51a7023
+Commit:     0509ad5e1a7d9220f09edd5be114bf3bd51a7023
+Parent:     e0aca2330b59752193877da49c6e6b07df78690a
+Author:     Bjorn Helgaas <bjorn.helgaas@hp.com>
+AuthorDate: Tue Mar 11 15:24:41 2008 -0600
+Committer:  Linus Torvalds <torvalds@linux-foundation.org>
+CommitDate: Wed Mar 12 12:39:36 2008 -0700
+
+    PNP: disable PNP motherboard resources that overlap PCI BARs
+    
+    Some BIOSes have PNP motherboard devices with resources that
+    partially overlap PCI BARs.  The PNP system driver claims these
+    motherboard resources, which prevents the normal PCI driver from
+    requesting them later.
+    
+    This patch disables the PNP resources that conflict with PCI BARs
+    so they won't be claimed by the PNP system driver.
+    
+    Of course, this only works if PCI devices have already been enumerated.
+    Currently this is the case because PCI devices are discovered before
+    any PNP init via this path:
+    
+        acpi_pci_root_init() -> acpi_pci_root_add() -> pci_acpi_scan_root() ->
+    	pci_scan_bus_parented() -> pci_scan_child_bus() -> ...
+    
+    Avuton Olrich tested this and confirmed that it fixes his ALSA sound
+    card (see http://lkml.org/lkml/2008/1/27/168).
+    
+    References:
+        https://bugzilla.redhat.com/show_bug.cgi?id=280641
+        https://bugzilla.redhat.com/show_bug.cgi?id=313491
+        http://lkml.org/lkml/2008/1/9/449
+        http://thread.gmane.org/gmane.linux.acpi.devel/27312
+        http://lkml.org/lkml/2008/1/27/168
+    
+    Signed-off-by: Bjorn Helgaas <bjorn.helgaas@hp.com>
+    Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ drivers/pnp/quirks.c |   73 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 73 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/pnp/quirks.c b/drivers/pnp/quirks.c
+index e903b8c..3799320 100644
+--- a/drivers/pnp/quirks.c
++++ b/drivers/pnp/quirks.c
+@@ -108,6 +108,77 @@ static void quirk_sb16audio_resources(struct pnp_dev *dev)
+ 		       "pnp: SB audio device quirk - increasing port range\n");
+ }
+ 
++
++#include <linux/pci.h>
++
++static void quirk_system_pci_resources(struct pnp_dev *dev)
++{
++	struct pci_dev *pdev = NULL;
++	resource_size_t pnp_start, pnp_end, pci_start, pci_end;
++	int i, j;
++
++	/*
++	 * Some BIOSes have PNP motherboard devices with resources that
++	 * partially overlap PCI BARs.  The PNP system driver claims these
++	 * motherboard resources, which prevents the normal PCI driver from
++	 * requesting them later.
++	 *
++	 * This patch disables the PNP resources that conflict with PCI BARs
++	 * so they won't be claimed by the PNP system driver.
++	 */
++	for_each_pci_dev(pdev) {
++		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
++			if (!(pci_resource_flags(pdev, i) & IORESOURCE_MEM) ||
++			    pci_resource_len(pdev, i) == 0)
++				continue;
++
++			pci_start = pci_resource_start(pdev, i);
++			pci_end = pci_resource_end(pdev, i);
++			for (j = 0; j < PNP_MAX_MEM; j++) {
++				if (!pnp_mem_valid(dev, j) ||
++				    pnp_mem_len(dev, j) == 0)
++					continue;
++
++				pnp_start = pnp_mem_start(dev, j);
++				pnp_end = pnp_mem_end(dev, j);
++
++				/*
++				 * If the PNP region doesn't overlap the PCI
++				 * region at all, there's no problem.
++				 */
++				if (pnp_end < pci_start || pnp_start > pci_end)
++					continue;
++
++				/*
++				 * If the PNP region completely encloses (or is
++				 * at least as large as) the PCI region, that's
++				 * also OK.  For example, this happens when the
++				 * PNP device describes a bridge with PCI
++				 * behind it.
++				 */
++				if (pnp_start <= pci_start &&
++				    pnp_end >= pci_end)
++					continue;
++
++				/*
++				 * Otherwise, the PNP region overlaps *part* of
++				 * the PCI region, and that might prevent a PCI
++				 * driver from requesting its resources.
++				 */
++				dev_warn(&dev->dev, "mem resource "
++					"(0x%llx-0x%llx) overlaps %s BAR %d "
++					"(0x%llx-0x%llx), disabling\n",
++					(unsigned long long) pnp_start,
++					(unsigned long long) pnp_end,
++					pci_name(pdev), i,
++					(unsigned long long) pci_start,
++					(unsigned long long) pci_end);
++				pnp_mem_flags(dev, j) = 0;
++			}
++		}
++	}
++}
++
+ /*
+  *  PnP Quirks
+  *  Cards or devices that need some tweaking due to incomplete resource info
+@@ -128,6 +199,8 @@ static struct pnp_fixup pnp_fixups[] = {
+ 	{"CTL0043", quirk_sb16audio_resources},
+ 	{"CTL0044", quirk_sb16audio_resources},
+ 	{"CTL0045", quirk_sb16audio_resources},
++	{"PNP0c01", quirk_system_pci_resources},
++	{"PNP0c02", quirk_system_pci_resources},
+ 	{""}
+ };
+ 
