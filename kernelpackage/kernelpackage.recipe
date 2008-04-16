@@ -218,6 +218,9 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Install('.config', '/boot/config-%(kver)s', mode=0644)
         if Use.xen:
             r.Install('vmlinuz', '/boot/vmlinuz-%(kver)s', mode=0644)
+        # Unified arch leaves x86_64 with a symlink so */boot/bzImage doesnt work.
+        elif Arch.x86_64 or Arch.x86 and int(r.macros.sublevel) > 23:
+            r.Install('arch/x86/boot/bzImage', '/boot/vmlinuz-%(kver)s', mode=0644)
         else:
             r.Install('arch/*/boot/bzImage', '/boot/vmlinuz-%(kver)s', mode=0644)
         r.Install('vmlinux', '/lib/modules/%(kver)s/', mode=0644)
@@ -304,7 +307,7 @@ class CreateBuildTree(build.BuildAction):
         os.path.walk(builddir, self.copyDepinfo,
                      (destdir, len(builddir), self.time.time(), arch,
                       re.compile(
-                        r'(Kconfig(|\.[^/]*)|\.config|\.h?depend|Rules\.make|Makefile(\..+)?'
+                        r'(Kconfig(|\.[^/]*)|\.config|\.h?depend|Rules\.make|Makefile(.+)?'
                          '|asm-offsets\.s|\.tmp_versions|gcc-version\.sh)$')))
         util.copyfile('Module.symvers', destdir)
 
@@ -328,7 +331,8 @@ class CreateBuildTree(build.BuildAction):
         os.symlink(asmarch, destincdir+'/asm')
         if Arch.x86_64:
             srcpath = util.joinPaths(bldincdir, 'asm-i386')
-            util.copytree(srcpath, destincdir)
+            if os.path.exists(srcpath):
+                util.copytree(srcpath, destincdir)
 
     def copyDepinfo(self, data, dirname, names):
         destdir, srclen, timestamp, arch, regex = data
