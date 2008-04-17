@@ -1,0 +1,152 @@
+#
+# Copyright (c) 2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+import re
+from conary.lib import log
+
+loadInstalled('gcc.recipe')
+class JavaPackageRecipe(PackageRecipe):
+    buildRequires = [ 'unzip:runtime' ]
+
+    if Use.gcj:
+        buildRequires += [ 'gcc:runtime', 'gcc-java:runtime', 'gcc-java:devel',
+            'gcc-java:java' ]
+
+    name = 'javapackage'
+    version = '0'
+    abstractBaseClass = True
+
+    # Macros defined here were originally imported from the JPackage rpm
+    # macros. It is unclear if all macros are really required. The following
+    # macros have been moved into conary proper.
+    # jvmdir, javadir, javadocdir, thisjavadocdir
+
+    # Root directory where all Java VMs/SDK/JREs expose their jars
+    jvmjardir = '%(libdir)s/jvm-exports'
+
+    # Root directory for all Java VM/SDK/JRE's private things.
+    jvmprivdir = '%(libdir)s/jvm-private'
+
+    # Root directory for all architecture dependent parts of Java VM/SDK/JRE's
+    jvmlibdir = '%(libdir)s/java'
+
+    # Root directory for all architecture independent parts of
+    # Java VM/SDK/JRE's
+    jvmdatadir = '%(datadir)s/jvm'
+
+    # Root directory for all configurations parts of Java VM/SDK/JRE's
+    jvmsysconfdir = '%(sysconfdir)s/jvm'
+
+    # Root directory for all common architecture dependent parts of
+    # Java VM/SDK/JRE's
+    jvmcommonlibdir = '%(libdir)s/jvm-common'
+
+    # Root directory for all common architecture independent parts of
+    # Java VM/SDK/JRE's
+    jvmcommondatadir = '%(datadir)s/jvm-common'
+
+    # Root directory for all common configurations parts of Java VM/SDK/JRE's
+    jvmcommonsysconfdir = '%(sysconfdir)s/jvm-common'
+
+    # Directory where arch-specific (JNI) version-independent jars
+    # are installed.
+    #
+    # By extension:
+    # %{_jnidir}-ext:
+    #   - version dependent jars
+    # %{_jnidir}-x.y.z:
+    #   - jars for Java standard x.y.z (usually symlinks to  %{_jnidir}-ext)
+    # To simplify things only %{_jnidir} is defined.
+    jnidir = '%(libdir)s/java'
+
+    # Current default JVM home.
+    javahome = Gcc.javaHome
+
+    gccver = Gcc.version
+    classpath = '%(javadir)s/libgcj-%(gccver)s.jar:%(javadir)s/ecj.jar'
+
+    CleanExceptions = ()
+
+    def __init__(r, *args, **kwargs):
+        PackageRecipe.__init__(r, *args, **kwargs)
+        r.macros.jvmjardir = r.jvmjardir
+        r.macros.jvmprivdir = r.jvmprivdir
+        r.macros.jnidir = r.jnidir
+        r.macros.javahome = r.javahome
+        r.macros.gccver = r.gccver
+        r.macros.classpath = r.classpath
+
+    def setup(r):
+        if r.__class__.__name__ == 'JavaPackageRecipe':
+            return
+
+        r.preUnpack()
+        r.unpack()
+        r.postUnpack()
+
+        r.upstreamUnpack()
+
+        r.Environment('JAVA_HOME', '%(javahome)s')
+
+        if Use.gcj:
+            r.CleanBuildDir(*r.CleanExceptions)
+
+            r.preBuild()
+            r.build()
+            r.postBuild()
+
+            r.preInstall()
+            r.install()
+            r.postInstall()
+        else:
+            r.upstreamSetup()
+            del r.EnforceSonameBuildRequirements
+            del r.EnforceJavaBuildRequirements
+
+        r.JavaComponentSpec()
+
+        r.prePolicy()
+        r.policy()
+        r.postPolicy()
+
+    def preUnpack(r): pass
+    def unpack(r): pass
+    def postUnpack(r): pass
+    def preBuild(r): pass
+    def build(r): pass
+    def postBuild(r): pass
+    def preInstall(r): pass
+    def install(r): pass
+    def postInstall(r): pass
+    def prePolicy(r): pass
+    def policy(r): pass
+    def postPolicy(r): pass
+    def upstreamUnpack(r): pass
+    def upstreamSetup(r): pass
+
+    def JavaComponentSpec(r):
+        r.ComponentSpec('java', '%(javadir)s/.*')
+        r.ComponentSpec('java', '.*\.jar')
+
+    def CleanBuildDir(r, *args, **keywords):
+        r.extraBuild(JavaCleanBuildDir(r, *args, **keywords))
+
+    def CleanBuildDirExceptions(r, *args):
+        r.CleanExceptions = args
+
+class JavaCleanBuildDir(build.BuildCommand):
+    keywords = {}
+    template = ''
+
+    def do(self, macros):
+        extensions = ['jar', 'class', 'so']
+        exceptions = [ re.compile(x) for x in self.arglist ]
+        for path, dirs, files in os.walk(macros.builddir):
+            for file in [ x for x in files if len(x.split('.')) >= 2 and x.split('.')[-1] in extensions ]:
+                filepath = os.path.join(path, file)
+                if not [ x for x in exceptions if x.match(filepath) ]:
+                    log.info('Removing %s from the builddir' % filepath)
+                    util.remove(filepath)
