@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -20,7 +20,7 @@ class Python(CPackageRecipe):
         crossRequires = ['glibc:devel', 'userspace-kernel-headers:devel',
                          'openssl:devel', 'zlib:devel', 'bzip2:devel']
     else:
-        buildRequires.extend(['db:devel', 'gdbm:devel', 'ncurses:devel',
+        buildRequires.extend(['gdbm:devel', 'ncurses:devel',
             'libtermcap:devel', 'gcc:devel', 'libX11:devel',
             'libstdc++:devel', 'openssl:devel[!bootstrap]',
             'e2fsprogs:devel', 'readline:devel', 'tk:devel', 'tcl:devel',
@@ -78,6 +78,13 @@ class Python(CPackageRecipe):
         # RPL-1225
         r.addPatch('pydoc_html_docs.patch', macros=True)
 
+        # RPL-2424 CVE-2008-1679
+        r.addPatch('http://bugs.python.org/file9975/python-2.5-int-overflow-2.patch')
+
+        # RPL-2444, security related
+        r.addPatch('http://svn.python.org/view/python/trunk/Modules/zlibmodule.c?p2=%2Fpython%2Ftrunk%2FModules%2Fzlibmodule.c&p1=python%2Ftrunk%2FModules%2Fzlibmodule.c&r1=62235&r2=62234&rev=62235&view=diff&makepatch=1&diff_format=h'.replace('%', '%%')) # actual fix
+        r.addPatch('http://svn.python.org/view/python/trunk/Lib/test/test_zlib.py?p2=%2Fpython%2Ftrunk%2FLib%2Ftest%2Ftest_zlib.py&p1=python%2Ftrunk%2FLib%2Ftest%2Ftest_zlib.py&r1=62235&r2=62234&rev=62235&view=diff&makepatch=1&diff_format=h'.replace('%', '%%')) # test case
+
         # Now for the cross compiling version.
         # I wish I could use Use.cross here...
         r.addArchive('http://www.python.org/ftp/python/%(version)s/Python-'
@@ -116,6 +123,21 @@ class Python(CPackageRecipe):
         # Do not change the following configuration item!
         conf += ' --enable-unicode=ucs4'
 
+        # Use private version of Berkeley DB (RPL-1412)
+        r.macros.bdbversion = '4.5.20'
+        r.macros.bdbnamever = 'db-%(bdbversion)s'
+        r.addArchive('http://download.oracle.com/berkeley-db/%(bdbnamever)s.tar.gz',
+                     dir='bdbsrc')
+        r.Configure('--enable-compat185 --enable-posixmutexes'
+                    ' --enable-pthread_api',
+                    dir='../bdbsrc/%(bdbnamever)s/dist',
+                    objDir='build')
+        r.Make('-C ../bdbsrc/%(bdbnamever)s/dist/build')
+        r.MakeInstall('-C ../bdbsrc/%(bdbnamever)s/dist/build'
+                      ' DESTDIR=%(builddir)s/../bdbroot',
+                      rootVar='IGNOREIT')
+        r.Remove('../bdbroot/usr/%(lib)s/*.so') # need only static
+
         if Use.bootstrap:
             # first build a python for the $HOST platform
             buildconf = conf
@@ -149,13 +171,13 @@ class Python(CPackageRecipe):
 
         # Compile shared
         r.Configure(conf + ' --enable-shared')
-        r.Make('"OPT=%(cflags)s"', makeargs)
+        r.Make('"OPT=%(cflags)s" DBLIB=../bdbroot%(libdir)s', makeargs)
         r.MakeInstall(makeargs)
 
         # Compile without shared libpython
         #r.Make('distclean')
         r.Configure(conf)
-        r.Make('"OPT=%(cflags)s"', makeargs)
+        r.Make('"OPT=%(cflags)s" DBLIB=../bdbroot%(libdir)s', makeargs)
         r.MakeInstall(makeargs)
 
         r.Replace('#! /usr/local/bin/python', '#! /usr/bin/python',
