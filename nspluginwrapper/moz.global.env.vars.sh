@@ -22,6 +22,7 @@ esac
 ##
 if [ -x "/usr/bin/mozilla-plugin-config" ]
 then
+#  /usr/bin/mozilla-plugin-config 2>/dev/null >/dev/null
   MOZ_PLUGIN_DIR="plugins-wrapped"
 else
   MOZ_PLUGIN_DIR="plugins"
@@ -31,7 +32,7 @@ fi
 ## Make sure that we set the plugin path
 ##
 
-MOZ_PLUGIN_PATH=$MOZ_LIB_DIR/xulrunner/$MOZ_PLUGIN_DIR:$MOZ_LIB_DIR/xulrunner/plugins
+MOZ_PLUGIN_PATH=$MOZ_LIB_DIR/mozilla/$MOZ_PLUGIN_DIR:$MOZ_LIB_DIR/mozilla/plugins
 
 export MOZ_PLUGIN_PATH
 
