@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -8,10 +8,7 @@ loadSuperClass('rpmpackage')
 class NetSnmp(RPMPackageRecipe, CPackageRecipe):
     name = 'net-snmp'
     version = '5.4.1'
-
-    rpmUpVer = '5.4'
-    rpmRelease = '13.fc7'
-    externalArchive = 'mirror://sourceforge/net-snmp/'
+    rpmRelease = '14.fc9'
 
     buildRequires = [ 'openssl:devel', 'bzip2:devel',
         'elfutils:devel', 'perl:runtime', 'coreutils:runtime',
@@ -24,10 +21,18 @@ class NetSnmp(RPMPackageRecipe, CPackageRecipe):
 
     rpmPatches = [ 'ucd-snmp-4.2.4.pre3-mnttab.patch',
                    'net-snmp-5.0.8-readonly.patch',
+                   'net-snmp-5.4-64bit.patch',
                    'net-snmp-5.1.2-dir-fix.patch',
-                   'net-snmp-5.2.1-file_offset.patch' ]
+                   'net-snmp-5.2.1-file_offset.patch',
+                   'net-snmp-5.3.1-multilib.patch',
+                   'net-snmp-5.4.1-config_libdir.patch',
+                   'net-snmp-5.4.1-hostname.patch',
+                   'net-snmp-5.4.1-shared-ip.patch',
+                   'net-snmp-5.4-exec-crash.patch',
+                   'net-snmp-5.4.1-sensors3.patch',
+                   'net-snmp-5.4.1-xen-crash.patch', ]
 
-    rpmSources = [ 'net-snmpd.init', 'net-snmpd.logrotate', 'ucd5820stat' ]
+    rpmSources = [ 'net-snmpd.init', 'net-snmp-config', 'net-snmpd.logrotate', 'ucd5820stat' ]
 
     def setup(r):
         r.disableParallelMake()
@@ -42,37 +47,39 @@ class NetSnmp(RPMPackageRecipe, CPackageRecipe):
         r.addSource('snmpd.sysconfig', dest='%(sysconfdir)s/sysconfig/snmpd')
         r.addSource('snmptrapd.sysconfig',
                     dest='%(sysconfdir)s/sysconfig/snmptrapd')
-        r.addPatch('snmpd_sysconfig.patch', macros=True)
+        r.addPatch('net-snmp-5.4.1-strange_libpath.patch')
 
         r.Replace(r'\$install_libdir', '%(libdir)s', 'ltmain.sh')
 
-        extraConfig = ''
+        r.macros.MIBS = 'host agentx smux ucd-snmp/diskio tcp-mib ' \
+               'udp-mib mibII/mta_sendmail ip-mib/ipv4InterfaceTable ' \
+               'ip-mib/ipv6InterfaceTable ' \
+               'ip-mib/ipAddressPrefixTable/ipAddressPrefixTable '
         if Arch.x86 or Arch.x86_64:
-            extraConfig += ' --with-mib-modules="host agentx smux' \
-                           '   ucd-snmp/lmSensors ucd-snmp/diskio"'
+            r.macros.MIBS += 'ucd-snmp/lmsensorsMib '
         r.Configure(' --enable-static --enable-shared'
-                    ' --with-cflags="%(cflags)s -lcrypto"'
-                    ' --with-ldflags="-L%(libdir)s"'
+                    ' --with-cflags="%(cflags)s"'
+                    ' --with-ldflags="%(ldflags)s -lcrypto -lsensors"'
                     ' --with-sys-location="Unknown"'
                     ' --with-logfile="%(localstatedir)s/log/snmpd.log"'
                     ' --with-persistent-directory="/var/net-snmp"'
-                    ' --with-mib-modules="host agentx smux'
-                    '   ucd-snmp/lmSensors ucd-snmp/diskio"'
+                    ' --with-mib-modules="%(MIBS)s"'
+                    ' --with-libwrap="%(libdir)s"'
                     ' --sysconfdir=%(sysconfdir)s'
                     ' --enable-ipv6'
                     ' --enable-ucd-snmp-compatibility'
-                    ' --with-default-snmp-version=3'
                     ' --with-openssl'
                     ' --with-pic'
-                    ' --with-libwrap="%(prefix)s"'
-                    ' --with-sys-contact="root@localhost"' +
-                    extraConfig)
-        r.Make('LIBTOOL=%(bindir)s/libtool')
+                    ' --enable-embedded-perl'
+                    ' --enable-mfd-rewrites'
+                    ' --enable-local-smux'
+                    ' --with-sys-contact="root@localhost"' )
+        r.Make()
 
-        r.Run('cd perl ; perl Makefile.PL -NET-SNMP-IN-SOURCE=true INSTALLDIRS=vendor BINDIR=%(bindir)s PERL5DIR=%(perldir)s DESTDIR=%(destdir)s ;')
+        r.Run('export NETSNMP_DONT_CHECK_VERSION=1; cd perl ; perl Makefile.PL -NET-SNMP-IN-SOURCE=true INSTALLDIRS=vendor BINDIR=%(bindir)s PERL5DIR=%(perldir)s DESTDIR=%(destdir)s -NET-SNMP-CONFIG="sh ../../net-snmp-config" ;')
         for dir in 'default_store OID agent agent/default_store ASN SNMP TrapReceiver'.split(' '):
             r.Replace(('^LD_RUN_PATH.*', ''), (r'LD_RUN_PATH=\".*\" ', ''),
-                      'perl/%s/Makefile' % dir)
+                      'perl/%s/Makefile' % dir, allowNoChange=True )
 
         r.Make(dir='perl')
 
