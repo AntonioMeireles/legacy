@@ -1,0 +1,153 @@
+--- module-init-tools/module-init-tools-3.4/depmod.c	2008-05-06 13:58:56.000000000 -0500
++++ module-init-tools-3.4.boot_image/depmod.c	2008-05-06 14:10:15.000000000 -0500
+@@ -53,6 +53,8 @@
+ 	char *search_path;
+ };
+ 
++extern int boot_image_release(struct utsname *);
++
+ static int verbose;
+ static unsigned int skipchars;
+ 
+@@ -1057,7 +1059,7 @@
+ int main(int argc, char *argv[])
+ {
+ 	int opt, all = 0, maybe_all = 0, doing_stdout = 0;
+-	char *basedir = "", *dirname, *version, *badopt = NULL,
++	char *basedir = "", *dirname = NULL, *version, *badopt = NULL,
+ 		*system_map = NULL;
+ 	struct module *list = NULL;
+ 	int i;
+@@ -1124,7 +1126,21 @@
+ 		optind++;
+ 	} else {
+ 		struct utsname buf;
+-		uname(&buf);
++		if (boot_image_release(&buf) == 0) {
++			struct stat st;
++			dirname = NOFAIL(malloc(strlen(basedir)
++						+ strlen(MODULE_DIR)
++						+ strlen(buf.release) + 1));
++			sprintf(dirname, "%s%s%s", basedir, MODULE_DIR,
++				buf.release);
++			if ((stat(dirname, &st) != 0) || !S_ISDIR(st.st_mode)) {
++				free(dirname);
++				dirname = NULL;
++			}
++		}
++		if (!dirname) { /* fallback  */
++			uname(&buf);
++		}
+ 		version = NOFAIL(strdup(buf.release));
+ 	}
+ 
+@@ -1143,10 +1159,12 @@
+ 	if (optind == argc)
+ 		all = 1;
+ 
+-	dirname = NOFAIL(malloc(strlen(basedir)
+-			 + strlen(MODULE_DIR)
+-			 + strlen(version) + 1));
+-	sprintf(dirname, "%s%s%s", basedir, MODULE_DIR, version);
++	if (!dirname) {
++		dirname = NOFAIL(malloc(strlen(basedir)
++					+ strlen(MODULE_DIR)
++					+ strlen(version) + 1));
++		sprintf(dirname, "%s%s%s", basedir, MODULE_DIR, version);
++	}
+ 
+ 	if (maybe_all) {
+ 		if (!doing_stdout && !depfile_out_of_date(dirname))
+--- module-init-tools/module-init-tools-3.4/Makefile.am	2008-05-06 13:58:57.000000000 -0500
++++ module-init-tools-3.4.boot_image/Makefile.am	2008-05-06 14:02:53.000000000 -0500
+@@ -18,6 +18,10 @@
+ EXTRA_depmod_SOURCES = moduleops_core.c
+ EXTRA_modinfo_SOURCES = backwards_compat.c
+ 
++modprobe_SOURCES += boot_image_release.c
++depmod_SOURCES += boot_image_release.c
++modinfo_SOURCES += boot_image_release.c
++
+ MAN5 = modprobe.conf.5 modules.dep.5 depmod.conf.5
+ MAN8 = depmod.8 insmod.8 lsmod.8 rmmod.8 modprobe.8 modinfo.8
+ SGML = $(addprefix doc/,  $(MAN5:%.5=%.sgml) $(MAN8:%.8=%.sgml))
+--- module-init-tools/module-init-tools-3.4/modinfo.c	2007-10-07 16:51:46.000000000 -0500
++++ module-init-tools-3.4.boot_image/modinfo.c	2008-05-06 14:17:10.000000000 -0500
+@@ -22,6 +22,8 @@
+ #define MODULE_DIR "/lib/modules"
+ #endif
+ 
++extern int boot_image_release(struct utsname *);
++
+ static int elf_endian;
+ static int my_endian;
+ 
+@@ -293,12 +295,22 @@
+ 	/* Search for it in modules.dep. */
+ 	if (kernel) {
+ 		asprintf(&depname, "%s/%s/modules.dep", MODULE_DIR, kernel);
++		data = grab_file(depname, size);
+ 	} else {
+-		uname(&buf);
+-		asprintf(&depname, "%s/%s/modules.dep", MODULE_DIR,
+-			 buf.release);
++		if (boot_image_release(&buf) == 0) {
++			asprintf(&depname, "%s/%s/modules.dep", MODULE_DIR,
++				buf.release);
++			if (!(data = grab_file(depname, size))) {
++				free(depname);
++			}
++		}
++		if (!data) {            /* fallback */
++			uname(&buf);
++			asprintf(&depname, "%s/%s/modules.dep", MODULE_DIR,
++				buf.release);
++			data = grab_file(depname, size);
++		}
+ 	}
+-	data = grab_file(depname, size);
+ 	if (!data) {
+ 		fprintf(stderr, "modinfo: could not open %s\n", depname);
+ 		free(depname);
+--- module-init-tools/module-init-tools-3.4/modprobe.c	2008-05-06 13:58:57.000000000 -0500
++++ module-init-tools-3.4.boot_image/modprobe.c	2008-05-06 14:06:58.000000000 -0500
+@@ -49,6 +49,7 @@
+ 
+ extern long init_module(void *, unsigned long, const char *);
+ extern long delete_module(const char *, unsigned int);
++extern int boot_image_release(struct utsname *);
+ 
+ struct module {
+ 	struct list_head list;
+@@ -1448,7 +1449,7 @@
+ 	unsigned int i, num_modules;
+ 	char *type = NULL;
+ 	const char *config = NULL;
+-	char *dirname, *optstring;
++	char *dirname = NULL, *optstring;
+ 	char *newname = NULL;
+ 	char *aliasfilename, *symfilename;
+ 	errfn_t error = fatal;
+@@ -1466,7 +1467,21 @@
+ 	if (opt == argc)
+ 		try_old_version("modprobe", argv);
+ 
+-	uname(&buf);
++	if (boot_image_release(&buf) == 0) {
++		struct stat st;
++		dirname = NOFAIL(malloc(strlen(buf.release)
++					+ sizeof(MODULE_DIR) + 1));
++		sprintf(dirname, "%s/%s", MODULE_DIR, buf.release);
++		if ((stat(dirname, &st) != 0) || !S_ISDIR(st.st_mode)) {
++			free(dirname);
++			dirname = NULL;
++		}
++	}
++	if (!dirname) {         /* fallback */
++		uname(&buf);
++	}
++	free(dirname);
++
+ 	while ((opt = getopt_long(argc, argv, "vVC:o:rknqQsclt:aifbw", options, NULL)) != -1){
+ 		switch (opt) {
+ 		case 'v':

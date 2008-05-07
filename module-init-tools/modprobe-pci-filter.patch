@@ -1,0 +1,501 @@
+--- dist/module-init-tools-3.4/Makefile.am	2007-10-07 14:51:46.000000000 -0700
++++ module-init-tools-3.4/Makefile.am	2008-05-06 09:33:01.000000000 -0700
+@@ -1,6 +1,6 @@
+ insmod_SOURCES = insmod.c testing.h
+ lsmod_SOURCES = lsmod.c testing.h
+-modprobe_SOURCES = modprobe.c zlibsupport.c testing.h zlibsupport.h
++modprobe_SOURCES = modprobe.c pciscan.c zlibsupport.c testing.h zlibsupport.h pciscan.h
+ rmmod_SOURCES = rmmod.c testing.h
+ depmod_SOURCES = depmod.c moduleops.c tables.c zlibsupport.c depmod.h moduleops.h tables.h list.h testing.h  zlibsupport.h
+ modinfo_SOURCES = modinfo.c zlibsupport.c testing.h zlibsupport.h
+--- dist/module-init-tools-3.4/modprobe.c	2007-10-07 14:57:23.000000000 -0700
++++ module-init-tools-3.4/modprobe.c	2008-05-06 09:24:13.000000000 -0700
+@@ -45,6 +45,7 @@
+ #include "zlibsupport.h"
+ #include "list.h"
+ #include "backwards_compat.c"
++#include "pciscan.h"
+ 
+ extern long init_module(void *, unsigned long, const char *);
+ extern long delete_module(const char *, unsigned int);
+@@ -119,7 +120,7 @@
+ static void print_usage(const char *progname)
+ {
+ 	fprintf(stderr,
+-		"Usage: %s [-v] [-V] [-C config-file] [-n] [-i] [-q] [-b] [-o <modname>] [ --dump-modversions ] <modname> [parameters...]\n"
++		"Usage: %s [-v] [-V] [-C config-file] [-n] [-i] [-q] [-b] [-o <modname>] [ --dump-modversions ] [ --pci-filter ] <modname> [parameters...]\n"
+ 		"%s -r [-n] [-i] [-v] <modulename> ...\n"
+ 		"%s -l -t <dirname> [ -a <modulename> ...]\n",
+ 		progname, progname, progname);
+@@ -814,7 +815,8 @@
+ 		   int ignore_proc,
+ 		   int strip_vermagic,
+ 		   int strip_modversion,
+-		   const char *cmdline_opts)
++		   const char *cmdline_opts,
++		   int pci_filter)
+ {
+ 	int ret, fd;
+ 	unsigned long len;
+@@ -825,12 +827,27 @@
+ 	/* Take us off the list. */
+ 	list_del(&mod->list);
+ 
++	/* Apply PCI filter if appropriate */
++	if (pci_filter) {
++		fd = lock_file(mod->filename);
++		map = grab_fd(fd, &len);
++		if (!map) {
++			error("Could not read '%s': %s\n",
++			      mod->filename, strerror(errno));
++			goto out_unlock;
++		}
++		if (!validate_module_pci(map, len))
++			goto out;
++		release_file(map, len);
++		unlock_file(fd);
++	}
++
+ 	/* Do things we (or parent) depend on first, but don't die if
+ 	 * they fail. */
+ 	if (!list_empty(list)) {
+ 		insmod(list, NOFAIL(strdup("")), NULL, 0, warn,
+ 		       dry_run, verbose, options, commands, 0, ignore_proc,
+-		       strip_vermagic, strip_modversion, "");
++		       strip_vermagic, strip_modversion, "", 0);
+ 	}
+ 
+ 	/* Lock before we look, in case it's initializing. */
+@@ -1335,7 +1352,8 @@
+ 			  int strip_modversion,
+ 			  int unknown_silent,
+ 			  const char *cmdline_opts,
+-			  int flags)
++			  int flags,
++			  int pci_filter)
+ {
+ 	if (list_empty(todo_list)) {
+ 		const char *command;
+@@ -1362,7 +1380,7 @@
+ 		insmod(todo_list, NOFAIL(strdup(options)), newname,
+ 		       first_time, error, dry_run, verbose, modoptions,
+ 		       commands, ignore_commands, ignore_proc, strip_vermagic,
+-		       strip_modversion, cmdline_opts);
++		       strip_modversion, cmdline_opts, pci_filter);
+ }
+ 
+ static struct option options[] = { { "verbose", 0, NULL, 'v' },
+@@ -1389,6 +1407,7 @@
+ 				   { "show-depends", 0, NULL, 'D' },
+ 				   { "first-time", 0, NULL, 3 },
+ 				   { "use-blacklist", 0, NULL, 'b' },
++				   { "pci-filter", 0, NULL, 4 },
+ 				   { NULL, 0, NULL, 0 } };
+ 
+ #define MODPROBE_DEVFSD_CONF "/etc/modprobe.devfs"
+@@ -1426,6 +1445,7 @@
+ 	int ignore_proc = 0;
+ 	int first_time = 0;
+ 	int use_blacklist = 0;
++	int pci_filter = 0;
+ 	unsigned int i, num_modules;
+ 	char *type = NULL;
+ 	const char *config = NULL;
+@@ -1545,6 +1565,9 @@
+ 		case 3:
+ 			first_time = 1;
+ 			break;
++		case 4:
++			pci_filter = 1;
++			break;
+ 		default:
+ 			print_usage(argv[0]);
+ 		}
+@@ -1658,7 +1681,7 @@
+ 					      ignore_proc, strip_vermagic,
+ 					      strip_modversion,
+ 					      unknown_silent,
+-					      optstring, flags);
++					      optstring, flags, pci_filter);
+ 
+ 				aliases = aliases->next;
+ 				INIT_LIST_HEAD(&list);
+@@ -1673,7 +1696,8 @@
+ 				      verbose, modoptions, commands,
+ 				      ignore_commands, ignore_proc,
+ 				      strip_vermagic, strip_modversion,
+-				      unknown_silent, optstring, flags);
++				      unknown_silent, optstring, flags,
++				      pci_filter);
+ 		}
+ 	}
+ 	if (log)
+--- /dev/null	2008-04-28 09:47:01.957005046 -0700
++++ module-init-tools-3.4/pciscan.c	2008-05-06 10:14:59.000000000 -0700
+@@ -0,0 +1,359 @@
++/* ----------------------------------------------------------------------- *
++ *
++ *   Copyright 2008 rPath, Inc. - All Rights Reserved
++ *
++ *   This program is free software; you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
++ *   Boston MA 02110-1301, USA; either version 2 of the License, or
++ *   (at your option) any later version; incorporated herein by reference.
++ *
++ * ----------------------------------------------------------------------- */
++
++/*
++ * pciscan.c
++ *
++ * Scan for all PCI devices and make a list that can be checked for modules.
++ */
++
++#define _GNU_SOURCE 1
++#include <alloca.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++#include <dirent.h>
++#include <limits.h>
++#include <ctype.h>
++#include <inttypes.h>
++#include <elf.h>
++#include <endian.h>
++#include <stdio.h>
++
++#include "pciscan.h"
++
++#define PCI_ANY_ID ((uint32_t)~0)
++
++/* This is how this is defined by the kernel, even though several of the
++   entries are much wider than they need to be.  There is also no
++   support for revision ID. */
++
++struct pci_device_id {
++        uint32_t vendor, device;
++        uint32_t subvendor, subdevice;
++        uint32_t class, class_mask;
++        unsigned long driver_data;     /* Data private to the driver */
++};
++
++static int scan_pci_bus(struct pci_device_id *buf, int buflen)
++{
++	int count = 0;
++	char path_buf[PATH_MAX];
++	DIR *dp;
++	FILE *f;
++	struct dirent *de;
++	uint8_t cdata[64];
++	int rv;
++
++	dp = opendir("/sys/bus/pci/devices");
++	if (!dp)
++		return 0;
++
++	while ( (de = readdir(dp)) ) {
++		if (!isxdigit(de->d_name[0]))
++			continue;
++		snprintf(path_buf, sizeof path_buf,
++			 "/sys/bus/pci/devices/%s/config",
++			 de->d_name);
++
++		f = fopen(path_buf, "r");
++		if (!f)
++			continue;
++		rv = fread(cdata, 1, 64, f);
++		fclose(f);
++		if (rv != 64)
++			continue;
++
++		if (count++ < buflen) {
++			buf->vendor    = (cdata[0x01] << 8) + cdata[0x00];
++			buf->device    = (cdata[0x03] << 8) + cdata[0x02];
++			buf->subvendor = (cdata[0x2d] << 8) + cdata[0x2c];
++			buf->subdevice = (cdata[0x2f] << 8) + cdata[0x2e];
++			buf->class     = (cdata[0x0b] << 16) +
++				(cdata[0x0a] << 8) + cdata[0x09];
++			buf->class_mask = buf->driver_data = 0; /* Unused */
++			buf++;
++		}
++	}
++
++	closedir(dp);
++
++	return count;
++}
++
++/* XXX: a lot of the bounds checking here isn't strict */
++
++static ssize_t find_modinfo_elf32(const void *module, size_t len,
++				  size_t *milen)
++{
++	const uint8_t *mod = (const uint8_t *)module;
++	const Elf32_Ehdr *eh = (const Elf32_Ehdr *)mod;
++	const Elf32_Shdr *sh;
++	const char *stab;
++	int i;
++
++	if (eh->e_shstrndx >= eh->e_shnum || eh->e_shoff >= len)
++		return -1;
++
++	sh = (const Elf32_Shdr *)(mod + (eh->e_shoff +
++					 eh->e_shstrndx*eh->e_shentsize));
++
++	if (sh->sh_offset >= len)
++		return -1;
++
++	stab = (const char *)(mod + sh->sh_offset);
++
++	/* Now stab points to the string table */
++	for (i = 0; i < eh->e_shnum; i++, sh++) {
++		sh = (const Elf32_Shdr *)(mod + (eh->e_shoff +
++						 i*eh->e_shentsize));
++
++		if (!sh->sh_name || sh->sh_name >= len)
++			continue;
++
++		if (!strcmp(stab + sh->sh_name, ".modinfo")) {
++			*milen = sh->sh_size;
++			return sh->sh_offset;
++		}
++	}
++
++	return -1;
++}
++
++static ssize_t find_modinfo_elf64(const void *module, size_t len,
++				  size_t *milen)
++{
++	const uint8_t *mod = (const uint8_t *)module;
++	const Elf64_Ehdr *eh = (const Elf64_Ehdr *)mod;
++	const Elf64_Shdr *sh;
++	const char *stab;
++	int i;
++
++	if (eh->e_shstrndx >= eh->e_shnum || eh->e_shoff >= len)
++		return -1;
++
++	sh = (const Elf64_Shdr *)(mod + (eh->e_shoff +
++					 eh->e_shstrndx*eh->e_shentsize));
++
++	if (sh->sh_offset >= len)
++		return -1;
++
++	stab = (const char *)(mod + sh->sh_offset);
++
++	/* Now stab points to the string table */
++	for (i = 0; i < eh->e_shnum; i++, sh++) {
++		sh = (const Elf64_Shdr *)(mod + (eh->e_shoff +
++						 i*eh->e_shentsize));
++
++		if (!sh->sh_name || sh->sh_name >= len)
++			continue;
++
++		if (!strcmp(stab + sh->sh_name, ".modinfo")) {
++			*milen = sh->sh_size;
++			return sh->sh_offset;
++		}
++	}
++
++	return -1;
++}
++
++static ssize_t find_modinfo(const void *module, size_t len, size_t *milen)
++{
++	const uint8_t *ei = (const uint8_t *)module;
++
++	if (memcmp(ei, ELFMAG, SELFMAG))
++		return -1;	/* Bad ELF magic */
++
++	/* We only handle native endianness */
++#if BYTE_ORDER == LITTLE_ENDIAN
++	if (ei[EI_DATA] != ELFDATA2LSB)
++		return -1;
++#elif BYTE_ORDER == BIG_ENDIAN
++	if (ei[EI_DATA] != ELFDATA2MSB)
++		return -1;
++#else
++# error "No endianness detected..."
++#endif
++
++	if (ei[EI_VERSION] != EV_CURRENT)
++		return -1;
++
++	switch(ei[EI_CLASS]) {
++	case ELFCLASS32:
++		return find_modinfo_elf32(module, len, milen);
++	case ELFCLASS64:
++		return find_modinfo_elf64(module, len, milen);
++	default:
++		return -1;	/* Bad ELF class */
++	}
++}
++
++static bool scan_prefix(const char **str, size_t *len, const char *pat)
++{
++	const char *s = *str;
++	size_t l = *len;
++	while (*pat) {
++		if (!l)
++			return false;
++		if (*s != *pat)
++			return false;
++		l--;
++		s++;
++		pat++;
++	}
++	*str = s;
++	*len = l;
++	return true;
++}
++
++static int hexval(char c)
++{
++	int v = (unsigned char)c;
++	v |= 0x20;
++
++	if (v >= '0' && v <= '9')
++		return v - '0';
++	else if (v >= 'a' && v <= 'f')
++		return v - 'a' + 10;
++	else
++		return -1;
++}
++
++static uint32_t scan_val(const char **str, size_t *len)
++{
++	const char *s = *str;
++	size_t l = *len;
++	uint32_t v = 0;
++	char c;
++
++	if (l && *s== '*') {
++		l--;
++		s++;
++		*len = l;
++		*str = s;
++		return PCI_ANY_ID; /* Wildcard */
++	}
++
++	while (l && (c = *s)) {
++		if ((c >= '0' && c <= '9') ||
++		    (c >= 'A' && c <= 'F')) {
++			v = (v << 4) + hexval(c);
++		} else {
++			break;
++		}
++		l--;
++		s++;
++	}
++	*len = l;
++	*str = s;
++	return v;
++}
++
++static inline bool pci_match(uint32_t pat, uint32_t id)
++{
++	return (id == pat) || (pat == PCI_ANY_ID);
++}
++
++static bool validate_pci_string(const char *str, size_t len,
++				const struct pci_device_id *idlist, int nid)
++{
++	struct pci_device_id ip; /* ID pattern */
++	int cl;
++
++	ip.subvendor  = PCI_ANY_ID;
++	ip.subdevice  = PCI_ANY_ID;
++	ip.class      = 0;
++	ip.class_mask = 0;
++
++	if (!scan_prefix(&str, &len, "alias=pci:v"))
++		return false;
++	ip.vendor = scan_val(&str, &len);
++	if (!scan_prefix(&str, &len, "d"))
++		return false;
++	ip.device = scan_val(&str, &len);
++	if (scan_prefix(&str, &len, "sv"))
++		ip.subvendor = scan_val(&str, &len);
++	if (scan_prefix(&str, &len, "sd"))
++		ip.subdevice = scan_val(&str, &len);
++	if (scan_prefix(&str, &len, "bc")) {
++		cl = scan_val(&str, &len);
++		if (cl != PCI_ANY_ID) {
++			ip.class = (ip.class & ~(0xff << 16)) |
++				((cl & 0xff) << 16);
++			ip.class_mask |= 0xff << 16;
++		}
++	}
++	if (scan_prefix(&str, &len, "sc")) {
++		cl = scan_val(&str, &len);
++		if (cl != PCI_ANY_ID) {
++			ip.class = (ip.class & ~(0xff << 8)) |
++				((cl & 0xff) << 8);
++			ip.class_mask |= 0xff << 8;
++		}
++	}
++	if (scan_prefix(&str, &len, "i")) {
++		cl = scan_val(&str, &len);
++		if (cl != PCI_ANY_ID) {
++			ip.class = (ip.class & ~0xff) | (cl & 0xff);
++			ip.class_mask |= 0xff;
++		}
++	}
++
++	/* OK, now we have parsed the string. */
++	while (nid--) {
++		if (pci_match(ip.vendor, idlist->vendor) &&
++		    pci_match(ip.device, idlist->device) &&
++		    pci_match(ip.subvendor, idlist->subvendor) &&
++		    pci_match(ip.subdevice, idlist->subdevice) &&
++		    !((ip.class ^ idlist->class) & ip.class_mask))
++			return true;
++		idlist++;
++	}
++	return false;
++}
++
++bool validate_module_pci(const void *module, size_t len)
++{
++	size_t milen = 0;
++	ssize_t off = find_modinfo(module, len, &milen);
++	const char *modinfo;
++	struct pci_device_id *idlist;
++	int nids;
++
++	nids = scan_pci_bus(NULL, 0);
++	idlist = alloca(sizeof(struct pci_device_id)*nids);
++	scan_pci_bus(idlist, nids);
++
++	if (off < 0)
++		return false;
++
++	modinfo = (const char *)module + off;
++
++	while (milen) {
++		if (!*modinfo) {
++			modinfo++;
++			milen--;
++			continue;
++		}
++
++		if (validate_pci_string(modinfo, milen, idlist, nids))
++			return true;
++
++		/* Skip to the next string */
++		while (milen && *modinfo) {
++			modinfo++;
++			milen--;
++		}
++	}
++
++	return false;
++}
+--- /dev/null	2008-04-28 09:47:01.957005046 -0700
++++ module-init-tools-3.4/pciscan.h	2008-05-05 16:12:18.000000000 -0700
+@@ -0,0 +1,4 @@
++#include <stdlib.h>
++#include <stdbool.h>
++
++bool validate_module_pci(const void *module, size_t len);
