@@ -1,0 +1,253 @@
+diff --git a/drivers/char/drm/drm_edid.c b/drivers/char/drm/drm_edid.c
+index 41aa8f5..338a5f5 100644
+--- a/drivers/char/drm/drm_edid.c
++++ b/drivers/char/drm/drm_edid.c
+@@ -251,8 +251,10 @@ static int add_standard_modes(struct drm_output *output, struct edid *edid)
+ 			continue;
+ 
+ 		newmode = drm_mode_std(dev, &edid->standard_timings[i]);
+-		drm_mode_probed_add(output, newmode);
+-		modes++;
++		if (newmode) {
++			drm_mode_probed_add(output, newmode);
++			modes++;
++		}
+ 	}
+ 
+ 	return modes;
+@@ -282,12 +284,14 @@ static int add_detailed_info(struct drm_output *output, struct edid *edid)
+ 		/* Detailed mode timing */
+ 		if (timing->pixel_clock) {
+ 			newmode = drm_mode_detailed(dev, timing);
+-			/* First detailed mode is preferred */
+-			if (i == 0 && edid->preferred_timing)
+-				newmode->type |= DRM_MODE_TYPE_PREFERRED;
+-			drm_mode_probed_add(output, newmode);
++			if (newmode) {
++				/* First detailed mode is preferred */
++				if (i == 0 && edid->preferred_timing)
++					newmode->type |= DRM_MODE_TYPE_PREFERRED;
++				drm_mode_probed_add(output, newmode);
+ 				     
+-			modes++;
++				modes++;
++			}
+ 			continue;
+ 		}
+ 
+@@ -312,8 +316,10 @@ static int add_detailed_info(struct drm_output *output, struct edid *edid)
+ 
+ 				std = &data->data.timings[j];
+ 				newmode = drm_mode_std(dev, std);
+-				drm_mode_probed_add(output, newmode);
+-				modes++;
++				if (newmode) {
++					drm_mode_probed_add(output, newmode);
++					modes++;
++				}
+ 			}
+ 			break;
+ 		default:
+diff --git a/drivers/char/drm/i915_drv.h b/drivers/char/drm/i915_drv.h
+index 9e4631a..98a0056 100644
+--- a/drivers/char/drm/i915_drv.h
++++ b/drivers/char/drm/i915_drv.h
+@@ -770,6 +770,8 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
+ #define XY_MONO_SRC_COPY_IMM_BLT	((2<<29)|(0x71<<22)|5)
+ #define XY_SRC_COPY_BLT_WRITE_ALPHA	(1<<21)
+ #define XY_SRC_COPY_BLT_WRITE_RGB	(1<<20)
++#define XY_SRC_COPY_BLT_SRC_TILED      (1<<15)
++#define XY_SRC_COPY_BLT_DST_TILED      (1<<11)
+ #define   BLT_DEPTH_8			(0<<24)
+ #define   BLT_DEPTH_16_565		(1<<24)
+ #define   BLT_DEPTH_16_1555		(2<<24)
+diff --git a/drivers/char/drm/i915_irq.c b/drivers/char/drm/i915_irq.c
+index a0c747a..7c7e233 100644
+--- a/drivers/char/drm/i915_irq.c
++++ b/drivers/char/drm/i915_irq.c
+@@ -122,7 +122,7 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 				XY_SRC_COPY_BLT_WRITE_ALPHA |
+ 				XY_SRC_COPY_BLT_WRITE_RGB)
+ 			     : XY_SRC_COPY_BLT_CMD;
+-	u32 pitchropcpp;
++	u32 ropcpp, src_pitch, dst_pitch;
+ 	RING_LOCALS;
+ 
+ 	DRM_DEBUG("\n");
+@@ -147,12 +147,6 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 		if ((counter[pipe] - vbl_swap->sequence) > (1<<23))
+ 			continue;
+ 
+-		master_priv = vbl_swap->minor->master->driver_priv;
+-		sarea_priv = master_priv->sarea_priv;
+-		
+-		pitchropcpp = (sarea_priv->pitch * cpp) | (0xcc << 16) |
+-			(cpp << 23) | (1 << 24);
+-
+ 		list_del(list);
+ 		dev_priv->swaps_pending--;
+ 
+@@ -198,16 +192,6 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 
+ 	i915_kernel_lost_context(dev);
+ 
+-	upper[0] = upper[1] = 0;
+-	slice[0] = max(sarea_priv->planeA_h / nhits, 1);
+-	slice[1] = max(sarea_priv->planeB_h / nhits, 1);
+-	lower[0] = sarea_priv->planeA_y + slice[0];
+-	lower[1] = sarea_priv->planeB_y + slice[0];
+-
+-	offsets[0] = sarea_priv->front_offset;
+-	offsets[1] = sarea_priv->back_offset;
+-	offsets[2] = sarea_priv->third_offset;
+-	num_pages = sarea_priv->third_handle ? 3 : 2;
+ 
+ 	spin_lock(&dev->drw_lock);
+ 
+@@ -221,8 +205,6 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 	     upper[1] = lower[1], lower[1] += slice[1]) {
+ 		int init_drawrect = 1;
+ 
+-		if (i == nhits)
+-			lower[0] = lower[1] = sarea_priv->height;
+ 
+ 		list_for_each(hit, &hits) {
+ 			drm_i915_vbl_swap_t *swap_hit =
+@@ -236,24 +218,65 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 			if (!drw)
+ 				continue;
+ 
+-			plane = swap_hit->plane;
+-
+ 			if (swap_hit->flip) {
+ 				i915_dispatch_vsync_flip(dev, drw, plane);
+ 				continue;
+ 			}
+ 
+-			if (init_drawrect) {
+-				BEGIN_LP_RING(6);
++			master_priv = swap_hit->minor->master->driver_priv;
++			sarea_priv = master_priv->sarea_priv;
+ 
+-				OUT_RING(GFX_OP_DRAWRECT_INFO);
+-				OUT_RING(0);
+-				OUT_RING(0);
+-				OUT_RING(sarea_priv->width | sarea_priv->height << 16);
+-				OUT_RING(sarea_priv->width | sarea_priv->height << 16);
+-				OUT_RING(0);
++			src_pitch = sarea_priv->pitch * cpp;
++			dst_pitch = sarea_priv->pitch * cpp;
+ 
+-				ADVANCE_LP_RING();
++			if (sarea_priv->front_tiled) {
++				cmd |= XY_SRC_COPY_BLT_DST_TILED;
++				dst_pitch >>=2;
++			}
++
++			if (sarea_priv->back_tiled) {
++				cmd |= XY_SRC_COPY_BLT_SRC_TILED;
++				src_pitch >>=2;
++			}
++
++			upper[0] = upper[1] = 0;
++			slice[0] = max(sarea_priv->planeA_h / nhits, 1);
++			slice[1] = max(sarea_priv->planeB_h / nhits, 1);
++			lower[0] = sarea_priv->planeA_y + slice[0];
++			lower[1] = sarea_priv->planeB_y + slice[0];
++
++			offsets[0] = sarea_priv->front_offset;
++			offsets[1] = sarea_priv->back_offset;
++			offsets[2] = sarea_priv->third_offset;
++			num_pages = sarea_priv->third_handle ? 3 : 2;
++			if (i == nhits)
++				lower[0] = lower[1] = sarea_priv->height;
++
++			ropcpp = (0xcc << 16) | ((cpp - 1) << 24);
++
++			plane = swap_hit->plane;
++
++			if (init_drawrect) {
++				if (IS_I965G(dev)) {
++					BEGIN_LP_RING(4);
++
++					OUT_RING(GFX_OP_DRAWRECT_INFO_I965);
++					OUT_RING(0);
++					OUT_RING(((sarea_priv->width - 1) & 0xffff) | ((sarea_priv->height - 1) << 16));
++					OUT_RING(0);
++					ADVANCE_LP_RING();
++				} else {
++					BEGIN_LP_RING(6);
++
++					OUT_RING(GFX_OP_DRAWRECT_INFO);
++					OUT_RING(0);
++					OUT_RING(0);
++					OUT_RING(sarea_priv->width | sarea_priv->height << 16);
++					OUT_RING(sarea_priv->width | sarea_priv->height << 16);
++					OUT_RING(0);
++
++					ADVANCE_LP_RING();
++				}
+ 
+ 				sarea_priv->ctxOwner = DRM_KERNEL_CONTEXT;
+ 
+@@ -268,6 +291,8 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 				 (2 * plane)) & 0x3;
+ 			back = (front + 1) % num_pages;
+ 
++		
++
+ 			for (num_rects = drw->num_rects; num_rects--; rect++) {
+ 				int y1 = max(rect->y1, top);
+ 				int y2 = min(rect->y2, bottom);
+@@ -278,12 +303,12 @@ static void i915_vblank_tasklet(struct drm_device *dev)
+ 				BEGIN_LP_RING(8);
+ 
+ 				OUT_RING(cmd);
+-				OUT_RING(pitchropcpp);
++				OUT_RING(ropcpp | dst_pitch);
+ 				OUT_RING((y1 << 16) | rect->x1);
+ 				OUT_RING((y2 << 16) | rect->x2);
+ 				OUT_RING(offsets[front]);
+ 				OUT_RING((y1 << 16) | rect->x1);
+-				OUT_RING(pitchropcpp & 0xffff);
++				OUT_RING(src_pitch);
+ 				OUT_RING(offsets[back]);
+ 
+ 				ADVANCE_LP_RING();
+@@ -709,6 +734,7 @@ int i915_vblank_swap(struct drm_device *dev, void *data,
+ 	vbl_swap->plane = plane;
+ 	vbl_swap->sequence = swap->sequence;
+ 	vbl_swap->flip = (swap->seqtype & _DRM_VBLANK_FLIP);
++	vbl_swap->minor = file_priv->minor;
+ 
+ 	if (vbl_swap->flip)
+ 		swap->sequence++;
+diff --git a/drivers/char/drm/radeon_cp.c b/drivers/char/drm/radeon_cp.c
+index dd9bb45..33c6b72 100644
+--- a/drivers/char/drm/radeon_cp.c
++++ b/drivers/char/drm/radeon_cp.c
+@@ -1278,15 +1278,17 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
+ 	tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RADEON_BUS_MASTER_DIS;
+ 	RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+ 
+-	dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
+-	RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
++	if (dev_priv->sarea_priv) {
++		dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
++		RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
+ 
+-	dev_priv->sarea_priv->last_dispatch = dev_priv->scratch[1] = 0;
+-	RADEON_WRITE(RADEON_LAST_DISPATCH_REG,
+-		     dev_priv->sarea_priv->last_dispatch);
++		dev_priv->sarea_priv->last_dispatch = dev_priv->scratch[1] = 0;
++		RADEON_WRITE(RADEON_LAST_DISPATCH_REG,
++			     dev_priv->sarea_priv->last_dispatch);
+ 
+-	dev_priv->sarea_priv->last_clear = dev_priv->scratch[2] = 0;
+-	RADEON_WRITE(RADEON_LAST_CLEAR_REG, dev_priv->sarea_priv->last_clear);
++		dev_priv->sarea_priv->last_clear = dev_priv->scratch[2] = 0;
++		RADEON_WRITE(RADEON_LAST_CLEAR_REG, dev_priv->sarea_priv->last_clear);
++	}
+ 
+ 	radeon_do_wait_for_idle(dev_priv);
+ 

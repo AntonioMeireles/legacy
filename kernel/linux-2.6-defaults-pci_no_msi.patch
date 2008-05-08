@@ -1,0 +1,64 @@
+Disable PCI MSI by default, add kernel parameter to enable it.
+
+Signed-off-by: Chuck Ebbert <cebbert@redhat.com>
+
+--- linux-2.6.20.noarch.orig/drivers/pci/msi.c
++++ linux-2.6.20.noarch/drivers/pci/msi.c
+@@ -23,7 +23,7 @@ static DEFINE_SPINLOCK(msi_lock);
+ #include "pci.h"
+ #include "msi.h"
+ 
+-static int pci_msi_enable = 1;
++static int pci_msi_enable = 0;
+ 
+ /* Arch hooks */
+ 
+@@ -722,6 +722,11 @@ void pci_no_msi(void)
+ {
+ 	pci_msi_enable = 0;
+ }
++
++void pci_yes_msi(void)
++{
++	pci_msi_enable = 1;
++}
+ 
+ void pci_msi_init_pci_dev(struct pci_dev *dev)
+ {
+--- linux-2.6.20.noarch.orig/Documentation/kernel-parameters.txt
++++ linux-2.6.20.noarch/Documentation/kernel-parameters.txt
+@@ -1429,6 +1429,9 @@ and is between 256 and 4096 characters. 
+ 				root domains (aka PCI segments, in ACPI-speak).
+ 		nommconf	[X86-32,X86_64] Disable use of MMCONFIG for PCI
+ 				Configuration
++		msi		[MSI] If the PCI_MSI kernel config parameter is
++				enabled, this kernel boot option can be used to
++				enable the use of MSI interrupts system-wide.
+ 		nomsi		[MSI] If the PCI_MSI kernel config parameter is
+ 				enabled, this kernel boot option can be used to
+ 				disable the use of MSI interrupts system-wide.
+--- linux-2.6.20.noarch.orig/drivers/pci/pci.c
++++ linux-2.6.20.noarch/drivers/pci/pci.c
+@@ -1642,6 +1642,8 @@ static int __devinit pci_setup(char *str
+ 		if (*str && (str = pcibios_setup(str)) && *str) {
+ 			if (!strcmp(str, "nomsi")) {
+ 				pci_no_msi();
++			} else if (!strcmp(str, "msi")) {
++				pci_yes_msi();
+ 			} else if (!strcmp(str, "noaer")) {
+ 				pci_no_aer();
+ 			} else if (!strcmp(str, "nodomains")) {
+--- linux-2.6.20.noarch.orig/drivers/pci/pci.h
++++ linux-2.6.20.noarch/drivers/pci/pci.h
+@@ -41,9 +41,11 @@ extern unsigned int pci_pm_d3_delay;
+ 
+ #ifdef CONFIG_PCI_MSI
+ void pci_no_msi(void);
++void pci_yes_msi(void);
+ extern void pci_msi_init_pci_dev(struct pci_dev *dev);
+ #else
+ static inline void pci_no_msi(void) { }
++static inline void pci_yes_msi(void) { }
+ static inline void pci_msi_init_pci_dev(struct pci_dev *dev) { }
+ #endif
+ 
