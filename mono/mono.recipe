@@ -7,54 +7,47 @@
 loadSuperClass('rpmpackage')
 class Mono(RPMPackageRecipe,AutoPackageRecipe):
     name = 'mono'
-    version = '1.2.6'
-    rpmRelease = '6.1.fc9'
-    rpmPatches = [ 'mono-big-integer-CVE-2007-5197.patch', ]
-
+    version = '1.9.1'
+    rpmRelease = '2.fc9'
+    rpmPatches = [ 'mono-libdir-126.patch',
+                   'mono-1.2.3-use-monodir.patch',
+                   'mono-1.2.4-metadata.patch',
+                   'mono-1251-metadata.patch',
+                   'mono-big-integer-CVE-2007-5197.patch',
+                   'mono-mcs-config.patch'
+                   ]
+    rpmSources = ['monodir.c']
     buildRequires = [ 'zlib:devel', 'glib:devel', 'bison:runtime',
                       'pkgconfig:devel', 'openssl:devel', 'autoconf:runtime',
                       'automake:runtime', 'expat:devel', 'libtool:devel',
-                      'libtool:runtime', 'm4:runtime', 'pkgconfig:devel']
+                      'libtool:runtime', 'm4:runtime', 'pkgconfig:devel',
+                      'attr:devel', 'ncurses:devel']
 
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
-
-        # https://bugzilla.novell.com/show_bug.cgi?id=349952
-        # r91687 and r91817 from branches/mono-1-2-6/
-        r.addPatch('mono-threads-no-internal-1.patch')
-        r.addPatch('mono-threads-no-internal-2.patch')
-
-        # FIXME: get this nicer
-        # Fix the install path, install into %(libdir)s
-        # breaks bootstrapping on x86_64
-        # in policy as local mono, at cooktime is not in ../lib64/
-        #        r.Run(""" 
-#sed -i -e 's:$(prefix)/lib:$(libdir):'  -i -e 's:$(exec_prefix)/lib:$(libdir):' -i -e "s:'mono_libdir=\${exec_prefix}/lib':\"mono_libdir=\$libdir\":" {scripts,mono/metadata}/Makefile.am configure.in       
-#sed -i -e 's:^libdir.*:libdir=@libdir@:' -i -e 's:${prefix}/lib/:${libdir}/:g' ./{scripts,}/*.pc.in 
-#""")
+        r.addAction(""" sed -i -e 's!@@LIBDIR@@!%(libdir)s!' configure.in  """)
+        r.Run(' autoreconf -f -i -s ')
+        # Add undeclared Arg
+        r.Run(""" sed -i "61a #define ARG_MAX_POSIX_ARG_MAX" mono/io-layer/wapi_glob.h """)
+        # Remove prebuilt binaries
+        r.Remove('mcs/class/lib/monolite/*', recursive = True)
 
     def configure(r):
-        r.disableParallelMake()
+        r.Run('gcc -o monodir  monodir.c -DMONODIR=\\"%(libdir)s/mono\\"')
+        r.Install('monodir', '%(bindir)s/')
 
-        extraConfig = ' --with-ikvm=yes --with-jit=yes '
-        # we need this, otherwise won't cook
-        extraConfig += ' --with-tls=pthread '
-        # FIXME: it's supposed to be faster, at cost of size.
-        # do we want it ?
-        # extraConfig += ' --with-static_mono=yes'
+        extraConfig = ' --with-ikvm=yes --with-jit=yes --with-xen_opt=no '
 
-        extraConfig += ' --with-glib=system'
         # Enable the 2.0 FX and 2.1 moonlight
         extraConfig += ' --with-preview=yes '
         extraConfig += ' --with-moonlight=yes '
+        # we need this, otherwise won't cook
+        extraConfig += ' --with-tls=pthread '
 
-        # Remove dummy ltconfig and let libtool handle it
-        r.Remove('libgc/ltconfig')
 
-        r.Run('autoreconf -f -i -s')
         r.Configure(extraConfig)
-                    
+
         # do not add spurious builddir RPATH entry
         r.Replace(('^runpath_var=.*', 'runpath_var=""'),
                   ('^hardcode_libdir_flag_spec=.*',
@@ -71,13 +64,16 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
         r.Install('mono/monograph/.libs/monograph', '%(bindir)s/')
 
         # This was removed upstream... 
-        r.Remove('%(bindir)s/jay')
-        r.Remove('%(datadir)s/jay', recursive = True)
-        r.Remove('%(datadir)s/libgc-mono', recursive = True)
-        r.Remove('%(mandir)s/man1/{jay,monostyle,oldmono,mint}.1')
-        r.Remove('%(libdir)s/mono/1.0/{CorCompare.exe,browsercaps-updater.exe*,mono-api-diff.exe}')
-        r.Remove('%(libdir)s/mono/*/mono-api-info.exe', recursive = True)
-        
+        r.Remove('%(libdir)s/gac/Mono.Security.Win32/[12]*', allowNoMatch=True)
+        r.Remove('%(libdir)s/1.0/Mono.Security.Win32.dll', allowNoMatch=True)
+        r.Remove('%(libdir)s//2.0/Mono.Security.Win32.dll', allowNoMatch=True)
+        r.Remove('%(bindir)s/jay', allowNoMatch=True)
+        r.Remove('%(datadir)s/jay', recursive = True, allowNoMatch=True)
+        r.Remove('%(datadir)s/libgc-mono', recursive = True, allowNoMatch=True)
+        r.Remove('%(mandir)s/man1/{jay,monostyle,oldmono,mint}.1', allowNoMatch=True)
+        r.Remove('%(libdir)s/mono/1.0/{CorCompare.exe,browsercaps-updater.exe*,mono-api-diff.exe}', allowNoMatch=True)
+        r.Remove('%(libdir)s/mono/*/mono-api-info.exe', recursive = True, allowNoMatch=True)
+
 
     def policy(r):
         # The mono libraries that provide CIL: dependencies have an
