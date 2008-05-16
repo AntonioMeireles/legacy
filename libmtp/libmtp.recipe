@@ -1,6 +1,6 @@
 # Original by Gil Hamlin
 # Modified by Cesar Cardoso
-# Copyright (c) 2007 by Foresight Linux
+# Copyright (c) 2007-2008 by Foresight Linux
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -14,21 +14,16 @@ class libmtp(CPackageRecipe):
     buildRequires = ['doxygen:runtime', 'libusb:devel']
 
     def setup(r):
-        #r.addSource('10-usb-music-players-libmtp.fdi')
-        #r.addSource('20-usb-player-libmtp-policy.fdi')
         r.addArchive('mirror://sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
-        r.Configure()
+        r.Configure('--disable-static --program-prefix=mtp-')
         r.Make()
+        # Remove permissions from symlink in udev script, we use
+        # PAM to fix the permissions instead.
+        r.Run(""" examples/hotplug -a"SYMLINK+=\"libmtp-%%k\" " > libmtp.rules  """)
         r.MakeInstall()
-        # Needed to let user control the music player
-        # Copied from SUSE's libmtp package
-        #r.Install('10-usb-music-players-libmtp.fdi',
-        #          '%(datadir)s/hal/fdi/information/10freedesktop/')
-        # Inspired by gphoto's tutorial in http://www.gphoto.org/doc/manual/permissions-usb.html
-        #r.Install('20-usb-player-libmtp-policy.fdi', 
-        #          '%(datadir)s/hal/fdi/policy/20thirdparty/')
-        r.Run('./examples/hotplug -u > 65-libmtp.rules')
-        r.Install('65-libmtp.rules', '%(sysconfdir)s/udev/rules.d/')
-        r.Install('libmtp.fdi', '%(datadir)s/hal/fdi/information/20thirdparty/10-usb-music-players-libmtp.fdi')
-        # Depending on setprocperm so HAL can make its magic and let the user fill their player
-        r.Requires('setprocperm:runtime', '%(datadir)s/hal/fdi/policy/20thirdparty/20-usb-player-libmtp-policy.fdi')
+        r.Install('libmtp.rules', '%(sysconfdir)s/udev/rules.d/60-libmtp.rules', mode = 0644)
+        r.Install('libmtp.fdi', '%(datadir)s/hal/fdi/information/10freedesktop/10-usb-music-players-libmtp.fdi', mode = 0644)
+        r.Create('%(sysconfdir)s/security/console.perms.d/60-libmtp.perms', mode = 0644, contents = """
+<libmtp>=/dev/libmtp*
+<console> 0600 <libmtp> 0600 root
+""")
