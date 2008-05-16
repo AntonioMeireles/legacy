@@ -5,9 +5,12 @@
 #
 
 loadSuperClass('gnomepackage')
-class Banshee(GnomePackageRecipe):
+loadSuperClass('rpmpackage')
+class Banshee(RPMPackageRecipe,GnomePackageRecipe):
     name = 'banshee'
     version = '0.13.2'
+    rpmRelease = '71'
+    isOPENsuse = True
     buildRequires = [ 'GConf:devel', 'GConf:runtime', 'ORBit2:devel',
                       'atk:devel', 'avahi-sharp:devellib', 'avahi-sharp:cil',
                       'cairo:devel', 'dbus-glib:devel', 'dbus:devel',
@@ -16,8 +19,8 @@ class Banshee(GnomePackageRecipe):
                       'gnome-sharp:cil', 'gnome-sharp:devellib', 'gnome-sharp:lib',
                       'gnome-vfs:devel', 'gst-plugins-base:devel', 'gst-plugins-base:lib',
                       'gst-plugins-good:lib', 'gstreamer:devel', 'gstreamer:runtime',
-                      'gtk-sharp:devellib', 'gtk-sharp:lib', 'gtk:devel', 'hal-sharp:devellib',
-                      'hal-sharp:lib', 'hal:devel', 'intltool:runtime',
+                      'gtk-sharp:devellib', 'gtk-sharp:lib', 'gtk:devel', 
+                      'hal:devel', 'intltool:runtime',
                       'libX11:devel', 'libXrender:devel', 'libgphoto2-sharp:devellib',
                       'libmusicbrainz:devel', 'libpng:devel', 'libusb:devel',
                       'libusb:lib', 'libxml2:devel', 'mono:devel',
@@ -27,14 +30,27 @@ class Banshee(GnomePackageRecipe):
                       'gnome-common:runtime', 'gnome-common:devel',
                       'mono-zeroconf:devellib', 'podsleuth:devellib', 'podsleuth:lib', 
                       'podsleuth:runtime', 'ipod-sharp:devellib', 'libmtp:devel',
+                      'automake:runtime', 'autoconf:runtime', 'libtool:runtime',
+                      'ndesk-dbus-glib:devellib', 'ndesk-dbus:devellib', 'taglib-sharp:cil', 'taglib-sharp:devellib',
                       ]
     GnomePackageRecipe.extraConfig += '--disable-static --disable-helix --disable-vlc '
-    GnomePackageRecipe.extraConfig += '--disable-xing --disable-docs --with-gstreamer-0-10 --enable-avahi --disable-mtp --enable-ipod'
+    GnomePackageRecipe.extraConfig += '--disable-xing --disable-docs --enable-external-ndesk-dbus  --enable-external-taglib-sharp --enable-avahi --enable-mtp --enable-ipod'
 
     def unpack(r):
-        r.addArchive('http://www.banshee-project.org/files/%(name)s/')
+        RPMPackageRecipe.unpack(r)
         r.Environment('MONO_SHARED_DIR', '/tmp')
-        r.disableParallelMake()
+        for p in [ 'banshee-plugin-include-mask.patch',
+                   'banshee-alt-f4-fix-257350.patch',
+                   'banshee-last-fm-refresh-fix.patch',
+                   'banshee-mtp.patch',
+                   'banshee-podcast-translation-265687.patch',
+                   'banshee-write-cd-fix-293774.patch',
+                   'banshee-mono-fixes.patch',]:
+                   r.addPatch(p, rpm=r.srpm)
+        r.Environment('CFLAGS','%(optflags)s')
+        r.Run('intltoolize --force')
+        r.Environment('ACLOCAL', "aclocal -I build/m4/banshee -I build/m4/shamrock")
+        r.Run('autoreconf -fi')
 
     def policy(r):
         r.Requires('libmtp:lib', '%(libdir)s/banshee/Banshee.Dap/libmtp-sharp.dll.config')
