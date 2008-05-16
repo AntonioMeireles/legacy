@@ -6,17 +6,18 @@
 class Qt4(AutoPackageRecipe):
 
     name = 'qt4'
-    version = '4.3.4+r780381'
+    version = '4.4.0+r806764'
 
     buildRequires = [
         'cups:devel', 'dbus:devel', 'fontconfig:devel', 'freetype:devel',
-        'glib:devel', 'libICE:devel', 'libjpeg:devel', 'libmng:devel',
-        'libpng:devel', 'libSM:devel', 'libstdc++:devel', 'libtiff:devel',
-        'libX11:devel', 'libXcursor:devel', 'libXext:devel', 'libXfixes:devel',
-        'libXi:devel', 'libXinerama:devel', 'libXrandr:devel',
+        'glib:devel', 'gst-plugins-base:devel', 'gstreamer:devel',
+        'libICE:devel', 'libjpeg:devel', 'libmng:devel', 'libpng:devel',
+        'libSM:devel', 'libstdc++:devel', 'libtiff:devel', 'libX11:devel',
+        'libXcursor:devel', 'libXext:devel', 'libXfixes:devel', 'libXi:devel',
+        'libXinerama:devel', 'libxml2:devel', 'libXrandr:devel',
         'libXrender:devel', 'libXt:devel', 'Mesa:devel', 'mysql:devel',
-        'openssl:devel', 'pkgconfig:devel', 'postgresql:devel', 'sqlite:devel',
-        'unixODBC:devel', 'zlib:devel'
+        'openssl:devel', 'pkgconfig:devel', 'postgresql:devel',
+        'readline:devel', 'sqlite:devel', 'unixODBC:devel', 'zlib:devel'
     ]
 
     def unpack(r):
@@ -30,10 +31,12 @@ class Qt4(AutoPackageRecipe):
 
         rev = r.version.split('+')[1][1:]
         r.addSvnSnapshot(
-            'svn://anonsvn.kde.org/home/kde/branches/qt/%(major_version)s/', revision=rev
+            'svn://anonsvn.kde.org/home/kde/trunk/qt-copy', revision=rev
         )
-        r.addPatch('assistant-qt4.patch')
-        r.addPatch('qdbuscpp2xml-moc-qt4.patch')
+        #r.addPatch('assistant-qt4.patch')
+        #r.addPatch('qdbuscpp2xml-moc-qt4.patch')
+
+        r.Replace('"/moc"', '"/moc-qt4"', 'tools/qdbus/qdbuscpp2xml/qdbuscpp2xml.cpp')
 
         r.addSource('environment.conf', dir='mkspecs/common/')
         r.addSource('rpath.conf', dir='mkspecs/common/', macros=True)
@@ -45,6 +48,9 @@ class Qt4(AutoPackageRecipe):
 
         r.Replace('link_prl', '',
                   'mkspecs/linux-g++{,-32,-64}/qmake.conf')
+
+        # broken patch
+        #r.Run('echo "0212" >> patches/DISABLED')
 
         r.Replace('test -d .svn &&', '', 'apply_patches')
         r.Run('./apply_patches')
@@ -65,12 +71,14 @@ class Qt4(AutoPackageRecipe):
                  ' -reduce-relocations'
                  ' -nomake demos'
                  ' -nomake examples'
+                 ' -reduce-relocations'
                  ' -platform %(platform)s'
                  ' -no-separate-debug-info')
 
         conf += (' -system-zlib'
                  ' -system-libpng'
                  ' -system-libjpeg'
+                 ' -no-phonon'
                  ' -no-nas-sound'
                  ' -qdbus'
                  ' -qvfb'
@@ -85,7 +93,7 @@ class Qt4(AutoPackageRecipe):
 #                 ' -qt-sql-sqlite'
                  ' -system-sqlite')
 
-        conf +=  ' -v -confirm-license -L %(libdir)s/xorg.mesa.3d/'
+        conf +=  ' -v -confirm-license -L %(libdir)s/xorg.mesa.3d/ -debug'
 
         r.ManualConfigure(conf)
 
@@ -124,7 +132,7 @@ class Qt4(AutoPackageRecipe):
 
         # Rename files
         files = (
-            'assistant', 'designer', 'linguist',
+            #'assistant', 'designer', 'linguist',
             'lrelease', 'lupdate', 'moc', 'qmake', 'qtconfig', 'uic' )
         for file in files:
             r.Move('%%(bindir)s/%s' % file, '%%(bindir)s/%s-qt4' % file)
@@ -133,13 +141,15 @@ class Qt4(AutoPackageRecipe):
 
         r.Doc('demos')
         r.Doc('examples')
-        r.Doc('README', 'OPENSOURCE-NOTICE.TXT',
-              'LICENSE.GPL', 'LICENSE.QPL', 'changes-'+r.version.split('+')[0])
+        r.Doc('README', 'OPENSOURCE-NOTICE.TXT', 'LICENSE.*')
 
         r.AutoDoc(exceptions='/')
         r.RemoveNonPackageFiles(exceptions='.*\.la')
 
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/%(qt)s')
+
+        r.Requires('dbus:lib',
+                   '%(bindir)s/qdbusxml2cpp', '%(bindir)s/qdbuscpp2xml')
 
         r.PackageSpec('%(qt)s-core',
                       '%(bindir)s/qdbus',
@@ -167,12 +177,12 @@ class Qt4(AutoPackageRecipe):
                 '%%(libdir)s/%%(qt)s/plugins/sqldrivers/libqsql%s.so' % plugin)
 
         r.PackageSpec('%(qt)s-designer',
-                      '%(bindir)s/designer-qt4',
+                      '%(bindir)s/designer',
                       '%(libdir)s/%(qt)s/plugins/designer/.+.so')
 
         r.PackageSpec('%(qt)s-tools',
                       '%(datadir)s/%(qt)s/phrasebooks/',
-                      '%(bindir)s/(assistant|linguist)-qt4')
+                      '%(bindir)s/(assistant|linguist)')
 
         r.ComponentSpec('locale',
                         '%(datadir)s/%(qt)s/translations/.+.qm')
