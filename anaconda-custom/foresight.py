@@ -24,5 +24,7 @@ class InstallClass(rPathBaseInstallClass):
         if anaconda.isKickstart:
             anaconda.dispatch.skipStep("initialuser")
 
+        if anaconda.isKickstart:
+           anaconda.dispatch.skipStep("users")
         #anaconda.dispatch.skipStep("postselection")
         #anaconda.dispatch.skipStep("confirminstall")
