@@ -12,14 +12,23 @@ class WxPython(CPackageRecipe):
     buildRequires = [ 'python-setuptools:python', 'gcc-c++:runtime',
         'glibc:devel', 'gtk:devel', 'libgcc:devellib', 'libstdc++:devel', 
         'libxml2:python', 'mx:python', 'pkgconfig:devel', 'python-ctypes:python', 
-        'python:devel', 'python-numeric:python', 'wxWidgets:devel' ]
+        'python:devel', 'python-numeric:python', 'Mesa:devel', 'wxGTK:devel' ]
 
     def setup(r):
+        r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d/ '
         r.addArchive('mirror://sourceforge/wxpython/%(name)s-src-%(version)s.tar.bz2')
+        # included distutils is not multilib aware; use system's one
+        r.Remove('distutils', recursive = True)
+
         # We need to disable GLCANVAS because breaks build:
         r.Replace('BUILD_GLCANVAS = 1','BUILD_GLCANVAS = 0',
                   'wxPython/config.py')
         # Remove eggs because they break install:
         r.Remove('wxPython/wx/tools/Editra/plugins/*.egg')
         # Setup with some fixes:
-        r.PythonSetup(rootDir='%(destdir)s', dir='wxPython',purePython=False)
+        # r.PythonSetup(' --single-version-externally-managed', rootDir='%(destdir)s', dir='wxPython', purePython=False)
+        r.Run('python setup.py WXPORT=gtk2 UNICODE=1  build',  dir='wxPython')
+        r.Run('python setup.py WXPORT=gtk2 UNICODE=1  install --root=%(destdir)s ',  dir='wxPython')
+        
+        if Arch.x86_64:
+            r.Move('/usr/lib/python2.4/site-packages/*', '%(libdir)s/python2.4/site-packages/')
