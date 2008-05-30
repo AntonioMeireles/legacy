@@ -1,53 +1,82 @@
 #
 # Copyright (c) 2008 Lance Haig.
+#               2008 the Foresight Linux Project 
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class LibVirt(CPackageRecipe):
+class LibVirt(AutoPackageRecipe):
     buildRequires = [ 'iptables:runtime', 
-			'libxml2:devel', 
-			'libxml2:runtime', 
-			'libxslt:runtime', 
-			'ncurses:devel', 
-			'readline:devel', 
-			'sysfsutils:devel', 
-			'zlib:devel',
-			#'xen:devel', # enable this on rpl2 for xen support
-			'kqemu:lib',
-			'gnutls:devel',
-                        'gnutls:runtime',
-                        'cyrus-sasl:devel',
-                        'cyrus-sasl:runtime',
-			'parted:devel',
-			'parted:devellib',
-			'parted:runtime',
-			'pkgconfig:devel',
-			'PolicyKit:devel',
-                        'avahi:devel',
-                        'bridge-utils:runtime',
-                        'cyrus-sasl:devel',
-                        'dbus:devel',
-                        'python:devel',
-                        'readline:devel',
-			'PolicyKit:runtime', 
-			'gcc-c++:runtime', 
-			'kvm:runtime', 
-			'open-iscsi:runtime',
-			'gettext:runtime', 
-			'intltool:runtime'
-			]
+                      'libxml2:devel', 
+                      'libxml2:runtime', 
+                      'libxslt:runtime', 
+                      'ncurses:devel', 
+                      'readline:devel', 
+                      'sysfsutils:devel', 
+                      'zlib:devel',
+                      #'xen:devel', # enable this on rpl2 for xen support
+                      'kqemu:lib',
+                      'gnutls:devel',
+                      'gnutls:runtime',
+                      'cyrus-sasl:devel',
+                      'cyrus-sasl:runtime',
+                      'parted:devel',
+                      'parted:devellib',
+                      'parted:runtime',
+                      'pkgconfig:devel',
+                      'PolicyKit:devel',
+                      'avahi:devel',
+                      'bridge-utils:runtime',
+                      'cyrus-sasl:devel',
+                      'dbus:devel',
+                      'python:devel',
+                      'readline:devel',
+                      'PolicyKit:runtime', 
+                      'gcc-c++:runtime', 
+                      'kvm:runtime', 
+                      'open-iscsi:runtime',
+                      'gettext:runtime', 
+                      'intltool:runtime', 
+                      'chkconfig:runtime',
+                      ]
 
     name = 'libvirt'
     version = '0.4.2'
 
-    def setup(r):
+    def unpack(r):
         r.addArchive('http://libvirt.org/sources/%(name)s-%(version)s.tar.gz')
-       # r.addArchive('http://libvirt.org/sources/libvirt-cvs-snapshot.tar.gz') # Use this line to build the nightly snapshot.
-	#cmd = './configure --with-libvirtd --with-init-scripts=auto --with-sasl --with-polkit --with-avahi --with-gnu-ld --with-lxc --with-xen=no'
-        cmd = './configure --with-libvirtd --with-init-scripts=redhat --with-sasl --with-polkit --with-avahi --with-gnu-ld --with-lxc --with-xen=no --prefix=%(prefix)s --localstatedir=%(localstatedir)s --libdir=%(libdir)s'
-        r.Run(cmd)
-        r.Make()
-        r.MakeInstall()
-	#r.Install('init/bongo.init.rpl.in', '%(initdir)s/bongo', mode=0755)
-	r.TagSpec('initscript', '%(initdir)s/')
+
+    def configure(r):
+
+        config =  ' --with-libvirtd --with-init-scripts=redhat --with-sasl --with-polkit --with-avahi --with-gnu-ld --with-lxc '
+        config += ' --with-xen=no '
+        config += ' --with-remote-file=%(localstatedir)s/run/libvirtd.pid '
+        config += ' --prefix=%(prefix)s --localstatedir=%(localstatedir)s --libdir=%(libdir)s'
+
+        r.ManualConfigure(config)
+
+    def policy(r):
+        # We don't want to install /etc/libvirt/qemu/networks in the main %files list
+        # because if the admin wants to delete the default network completely, we don't
+        # want to end up re-incarnating it on every RPM upgrade.
+        r.MakeDirs('%(datadir)s/libvirt/networks')
+        r.Copy('%(sysconfdir)s/libvirt/qemu/networks/default.xml', '%(datadir)s/libvirt/networks/default.xml')
+        r.Remove('%(sysconfdir)s/libvirt/qemu/networks/default.xml')
+        r.Remove('%(sysconfdir)s/libvirt/qemu/networks/autostart/default.xml')
+        # Strip auto-generated UUID - we need it generated per-install
+        r.Run('sed -i -e "/<uuid>/d" %(destdir)s%(datadir)s/libvirt/networks/default.xml')
+
+        # We want to install the default network for initial RPM installs
+        # or on the first upgrade from a non-network aware libvirt only.
+        # We check this by looking to see if the daemon is already installed
+        # thru a taghandler
+
+        r.addSource('%(name)s_uuidgen.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/%(name)s_uuidgen')
+        r.addSource('%(name)s_uuidgen.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/%(name)s_uuidgen', mode=0755)
+
+        r.Requires('file: %(bindir)s/virsh', '%(taghandlerdir)s/%(name)s_uuidgen')
+
+        r.TagSpec('%(name)s_uuidgen', '%(bindir)s/virsh')
+
