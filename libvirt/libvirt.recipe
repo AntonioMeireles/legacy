@@ -56,9 +56,19 @@ class LibVirt(AutoPackageRecipe):
         r.ManualConfigure(config)
 
     def policy(r):
-        # We don't want to install /etc/libvirt/qemu/networks in the main %files list
+        
+        for d in [ '%(localstatedir)s/run/%(name)s', 
+                   '%(sysconfdir)s/libvirt/qemu/networks/autostart',
+                   '%(localstatedir)s/log/libvirt/qemu',
+                   # FC9 default locations are sane; let's use them. 
+                   '%(localstatedir)s/lib/libvirt/images', '%(localstatedir)s/lib/libvirt/boot', 
+                   ]:
+            r.MakeDirs(d)
+            r.ExcludeDirectories(exceptions = d)
+
+        # We don't want to install /etc/libvirt/qemu/networks in the package directly
         # because if the admin wants to delete the default network completely, we don't
-        # want to end up re-incarnating it on every RPM upgrade.
+        # want to end up re-incarnating it on every conary upgrade.
         r.MakeDirs('%(datadir)s/libvirt/networks')
         r.Copy('%(sysconfdir)s/libvirt/qemu/networks/default.xml', '%(datadir)s/libvirt/networks/default.xml')
         r.Remove('%(sysconfdir)s/libvirt/qemu/networks/default.xml')
@@ -66,7 +76,7 @@ class LibVirt(AutoPackageRecipe):
         # Strip auto-generated UUID - we need it generated per-install
         r.Run('sed -i -e "/<uuid>/d" %(destdir)s%(datadir)s/libvirt/networks/default.xml')
 
-        # We want to install the default network for initial RPM installs
+        # We want to install the default network for initial conary installs
         # or on the first upgrade from a non-network aware libvirt only.
         # We check this by looking to see if the daemon is already installed
         # thru a taghandler
