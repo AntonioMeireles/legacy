@@ -12,14 +12,35 @@ class SblimSfcb(AutoPackageRecipe):
         'chkconfig:runtime',
         'curl:devel',
         'flex:runtime',
+        'pam:devel',
         'perl:devel',
         'perl:runtime',
         'zlib:devel',
     ]
 
+    cimSchema = "cimv217Final-MOFs.zip"
+    cimSchemaUrl = "http://www.dmtf.org/standards/cim/cim_schema_v217/%(cimSchema)s"
+
     def unpack(r):
+        r.macros.cimSchema = r.cimSchema
         r.addArchive('mirror://sourceforge/sblim/')
+        r.addSource(r.cimSchemaUrl)
+
+    def configure(r):
+        r.Configure("--enable-ssl --enable-pam")
 
     def makeinstall(r):
         r.MakeInstall()
         r.Install('sfcb.init-redhat', "%(initdir)s/sfcb", mode=0755)
+        r.Environment("CIMSCHEMA_SOURCE", r.cimSchema)
+        r.Environment("CIMSCHEMA_SUBDIRS", "yes")
+        r.Run("sh getSchema.sh -f %(destdir)s%(datadir)s/sfcb")
+#        r.MakeInstall(installtarget="install-cimschema",
+#            preMake="CIMSCHEMA_SOURCE=%(cimSchema)s CIMSCHEMA_SUBDIRS=yes")
+        r.Install('%(localstatedir)s/lib/sfcb/stage/default.reg',
+                  '%(localstatedir)s/lib/sfcb/registration/providerRegister')
+        r.Environment('DESTDIR', "%(destdir)s")
+        r.Run("sh sfcbrepos -f")
+
+    def policy(r):
+        r.ExcludeDirectories(exceptions="%(localstatedir)s/lib/sfcb/registration/repository/root/cimv2")
