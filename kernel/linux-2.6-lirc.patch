@@ -1,8 +1,39 @@
+ drivers/input/Kconfig                 |    2 +
+ drivers/input/Makefile                |    2 +
+ drivers/input/lirc/Kconfig            |  127 +++
+ drivers/input/lirc/Makefile           |   24 +
+ drivers/input/lirc/commandir.c        | 1009 +++++++++++++++++++++++
+ drivers/input/lirc/commandir.h        |   41 +
+ drivers/input/lirc/kcompat.h          |  152 ++++
+ drivers/input/lirc/lirc.h             |  102 +++
+ drivers/input/lirc/lirc_atiusb.c      | 1326 ++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_bt829.c       |  393 +++++++++
+ drivers/input/lirc/lirc_cmdir.c       |  605 ++++++++++++++
+ drivers/input/lirc/lirc_cmdir.h       |   27 +
+ drivers/input/lirc/lirc_dev.c         |  827 +++++++++++++++++++
+ drivers/input/lirc/lirc_dev.h         |  264 ++++++
+ drivers/input/lirc/lirc_i2c.c         |  668 +++++++++++++++
+ drivers/input/lirc/lirc_igorplugusb.c |  624 ++++++++++++++
+ drivers/input/lirc/lirc_imon.c        | 1165 +++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_it87.c        | 1012 +++++++++++++++++++++++
+ drivers/input/lirc/lirc_it87.h        |  116 +++
+ drivers/input/lirc/lirc_mceusb.c      |  890 ++++++++++++++++++++
+ drivers/input/lirc/lirc_mceusb2.c     | 1058 ++++++++++++++++++++++++
+ drivers/input/lirc/lirc_parallel.c    |  745 +++++++++++++++++
+ drivers/input/lirc/lirc_parallel.h    |   26 +
+ drivers/input/lirc/lirc_pvr150.c      | 1431 +++++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_sasem.c       |  971 ++++++++++++++++++++++
+ drivers/input/lirc/lirc_serial.c      | 1348 +++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_sir.c         | 1323 ++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_streamzap.c   |  810 +++++++++++++++++++
+ drivers/input/lirc/lirc_ttusbir.c     |  393 +++++++++
+ 29 files changed, 17481 insertions(+), 0 deletions(-)
+
 diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
-index 9dea14d..d84ac4a 100644
+index 5f9d860..747633c 100644
 --- a/drivers/input/Kconfig
 +++ b/drivers/input/Kconfig
-@@ -173,5 +173,7 @@ source "drivers/input/gameport/Kconfig"
+@@ -182,5 +182,7 @@ source "drivers/input/gameport/Kconfig"
  
  endmenu
  
@@ -11,16 +42,15 @@ index 9dea14d..d84ac4a 100644
  endmenu
  
 diff --git a/drivers/input/Makefile b/drivers/input/Makefile
-index 2ae87b1..24bdec1 100644
+index 98c4f9a..6a1049b 100644
 --- a/drivers/input/Makefile
 +++ b/drivers/input/Makefile
-@@ -21,5 +21,6 @@ obj-$(CONFIG_INPUT_JOYSTICK)	+= joystick/
- obj-$(CONFIG_INPUT_TABLET)	+= tablet/
- obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= touchscreen/
+@@ -23,3 +23,5 @@ obj-$(CONFIG_INPUT_MISC)	+= misc/
  obj-$(CONFIG_INPUT_MISC)	+= misc/
-+obj-$(CONFIG_INPUT_LIRC)	+= lirc/
  
  obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
++
++obj-$(CONFIG_INPUT_LIRC)       += lirc/
 diff --git a/drivers/input/lirc/Kconfig b/drivers/input/lirc/Kconfig
 new file mode 100644
 index 0000000..138e58a
@@ -1248,10 +1278,10 @@ index 0000000..90a297f
 +
 diff --git a/drivers/input/lirc/kcompat.h b/drivers/input/lirc/kcompat.h
 new file mode 100644
-index 0000000..7792a88
+index 0000000..da2e7eb
 --- /dev/null
 +++ b/drivers/input/lirc/kcompat.h
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,153 @@
 +/*      $Id: kcompat.h,v 5.32 2007/12/15 17:28:00 lirc Exp $      */
 +
 +#ifndef _KCOMPAT_H
@@ -1269,11 +1299,14 @@ index 0000000..7792a88
 +
 +
 +
-+#define lirc_class_device_create class_device_create
++#define lirc_device_create(cs, parent, dev, fmt, args...) \
++	class_device_create(cs, NULL, dev, parent, fmt, ## args)
 +#define LIRC_DEVFS_PREFIX
 +
 +
 +typedef struct class lirc_class_t;
++
++#define lirc_device_destroy class_device_destroy
 +
 +
 +
@@ -1404,10 +1437,10 @@ index 0000000..7792a88
 +#endif /* _KCOMPAT_H */
 diff --git a/drivers/input/lirc/lirc.h b/drivers/input/lirc/lirc.h
 new file mode 100644
-index 0000000..ee76bc9
+index 0000000..accd2cd
 --- /dev/null
 +++ b/drivers/input/lirc/lirc.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,102 @@
 +/*      $Id: lirc.h,v 5.13 2007/09/27 19:47:18 lirc Exp $      */
 +
 +#ifndef _LINUX_LIRC_H
@@ -1466,6 +1499,7 @@ index 0000000..ee76bc9
 +
 +#define LIRC_CAN_SET_REC_DUTY_CYCLE_RANGE 0x40000000
 +#define LIRC_CAN_SET_REC_CARRIER_RANGE    0x80000000
++#define LIRC_CAN_GET_REC_RESOLUTION       0x20000000
 +
 +#define LIRC_CAN_SEND(x) ((x)&LIRC_CAN_SEND_MASK)
 +#define LIRC_CAN_REC(x) ((x)&LIRC_CAN_REC_MASK)
@@ -3886,7 +3920,7 @@ index 0000000..2de23da
 +#endif
 diff --git a/drivers/input/lirc/lirc_dev.c b/drivers/input/lirc/lirc_dev.c
 new file mode 100644
-index 0000000..cbbc436
+index 0000000..1d5706f
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.c
 @@ -0,0 +1,827 @@
@@ -4000,7 +4034,7 @@ index 0000000..cbbc436
 +#ifdef LIRC_HAVE_DEVFS_26
 +	devfs_remove(DEV_LIRC "/%u", ir->p.minor);
 +#endif
-+	class_device_destroy(lirc_class, MKDEV(IRCTL_DEV_MAJOR, ir->p.minor));
++	lirc_device_destroy(lirc_class, MKDEV(IRCTL_DEV_MAJOR, ir->p.minor));
 +
 +	if (ir->buf != ir->p.rbuf) {
 +		lirc_buffer_free(ir->buf);
@@ -4221,9 +4255,9 @@ index 0000000..cbbc436
 +			S_IFCHR|S_IRUSR|S_IWUSR,
 +			DEV_LIRC "/%u", ir->p.minor);
 +#endif
-+	(void) lirc_class_device_create(lirc_class, NULL,
-+					MKDEV(IRCTL_DEV_MAJOR, ir->p.minor),
-+					ir->p.dev, "lirc%u", ir->p.minor);
++	(void) lirc_device_create(lirc_class, ir->p.dev,
++				  MKDEV(IRCTL_DEV_MAJOR, ir->p.minor),
++				  "lirc%u", ir->p.minor);
 +
 +	if (p->sample_rate || p->get_queue) {
 +		/* try to fire up polling thread */
@@ -4249,7 +4283,7 @@ index 0000000..cbbc436
 +	return minor;
 +
 +out_sysfs:
-+	class_device_destroy(lirc_class, MKDEV(IRCTL_DEV_MAJOR, ir->p.minor));
++	lirc_device_destroy(lirc_class, MKDEV(IRCTL_DEV_MAJOR, ir->p.minor));
 +#ifdef LIRC_HAVE_DEVFS_26
 +	devfs_remove(DEV_LIRC "/%i", ir->p.minor);
 +#endif
@@ -4989,10 +5023,10 @@ index 0000000..c3a0c0f
 +#endif
 diff --git a/drivers/input/lirc/lirc_i2c.c b/drivers/input/lirc/lirc_i2c.c
 new file mode 100644
-index 0000000..ed1092b
+index 0000000..6e47d53
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_i2c.c
-@@ -0,0 +1,671 @@
+@@ -0,0 +1,668 @@
 +/*      $Id: lirc_i2c.c,v 1.44 2007/11/08 21:07:18 lirc Exp $      */
 +
 +/*
@@ -5324,12 +5358,9 @@ index 0000000..ed1092b
 +static int set_use_inc(void *data)
 +{
 +	struct IR *ir = data;
-+	int ret;
 +
 +	/* lock bttv in memory while /dev/lirc is in use  */
-+	ret = i2c_use_client(&ir->c);
-+	if (ret != 0)
-+		return ret;
++	i2c_use_client(&ir->c);
 +
 +	MOD_INC_USE_COUNT;
 +	return 0;
@@ -9503,12 +9534,12 @@ index 0000000..aed3f6f
 +EXPORT_NO_SYMBOLS;
 diff --git a/drivers/input/lirc/lirc_mceusb2.c b/drivers/input/lirc/lirc_mceusb2.c
 new file mode 100644
-index 0000000..85dc1ce
+index 0000000..9e927a4
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_mceusb2.c
-@@ -0,0 +1,1042 @@
+@@ -0,0 +1,1058 @@
 +/*
-+ * LIRC driver for Philips eHome USB Infrared Transciever
++ * LIRC driver for Philips eHome USB Infrared Transceiver
 + * and the Microsoft MCE 2005 Remote Control
 + *
 + * (C) by Martin A. Blatter <martin_a_blatter@yahoo.com>
@@ -9567,7 +9598,7 @@ index 0000000..85dc1ce
 +#define DRIVER_VERSION	"$Revision: 1.39 $"
 +#define DRIVER_AUTHOR	"Daniel Melander <lirc@rajidae.se>, " \
 +			"Martin Blatter <martin_a_blatter@yahoo.com>"
-+#define DRIVER_DESC	"Philips eHome USB IR Transciever and Microsoft " \
++#define DRIVER_DESC	"Philips eHome USB IR Transceiver and Microsoft " \
 +			"MCE 2005 Remote Control driver for LIRC"
 +#define DRIVER_NAME	"lirc_mceusb2"
 +
@@ -9587,6 +9618,7 @@ index 0000000..85dc1ce
 +#define MCE_PULSE_BIT	0x80 /* Pulse bit, MSB set == PULSE else SPACE */
 +#define MCE_PULSE_MASK	0x7F /* Pulse mask */
 +#define MCE_MAX_PULSE_LENGTH 0x7F /* Longest transmittable pulse symbol */
++#define MCE_PACKET_LENGTH_MASK  0x7F /* Pulse mask */
 +
 +
 +/* module parameters */
@@ -9621,6 +9653,7 @@ index 0000000..85dc1ce
 +#define VENDOR_TATUNG		0x1460
 +#define VENDOR_GATEWAY		0x107b
 +#define VENDOR_SHUTTLE		0x1308
++#define VENDOR_SHUTTLE2		0x051c
 +#define VENDOR_MITSUMI		0x03ee
 +#define VENDOR_TOPSEED		0x1784
 +#define VENDOR_RICAVISION	0x179d
@@ -9630,12 +9663,15 @@ index 0000000..85dc1ce
 +#define VENDOR_MICROSOFT	0x045e
 +#define VENDOR_FORMOSA		0x147a
 +#define VENDOR_FINTEK		0x1934
++#define VENDOR_PINNACLE		0x2304
 +
 +static struct usb_device_id usb_remote_table [] = {
-+	/* Philips eHome Infrared Transciever */
++	/* Philips eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_PHILIPS, 0x0815) },
-+	/* Philips Infrared Transciever - HP branded */
++	/* Philips Infrared Transceiver - HP branded */
 +	{ USB_DEVICE(VENDOR_PHILIPS, 0x060c) },
++	/* Philips SRM5100 */
++	{ USB_DEVICE(VENDOR_PHILIPS, 0x060d) },
 +	/* SMK/Toshiba G83C0004D410 */
 +	{ USB_DEVICE(VENDOR_SMK, 0x031d) },
 +	/* SMK eHome Infrared Transceiver (Sony VAIO) */
@@ -9646,6 +9682,8 @@ index 0000000..85dc1ce
 +	{ USB_DEVICE(VENDOR_TATUNG, 0x9150) },
 +	/* Shuttle eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_SHUTTLE, 0xc001) },
++	/* Shuttle eHome Infrared Transceiver */
++	{ USB_DEVICE(VENDOR_SHUTTLE2, 0xc001) },
 +	/* Gateway eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_GATEWAY, 0x3009) },
 +	/* Mitsumi */
@@ -9672,8 +9710,12 @@ index 0000000..85dc1ce
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe015) },
 +	/* Formosa aim / Trust MCE Infrared Receiver */
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe017) },
++	/* Formosa Industrial Computing / Beanbag Emulation Device */
++	{ USB_DEVICE(VENDOR_FORMOSA, 0xe018) },
 +	/* Fintek eHome Infrared Transceiver */
 +	{ USB_DEVICE(VENDOR_FINTEK, 0x0602) },
++	/* Pinnacle Remote Kit */
++	{ USB_DEVICE(VENDOR_PINNACLE, 0x0225) },
 +	/* Terminating entry */
 +	{ }
 +};
@@ -9943,9 +9985,11 @@ index 0000000..85dc1ce
 +	/* success */
 +	case SUCCESS:
 +		for (i = 0; i < buf_len; i++) {
-+			/* decode mce packets on the form (84),AA,BB,CC,DD */
++			/* decode mce packets of the form (84),AA,BB,CC,DD */
 +			switch (ir->buf_in[i]) {
++
 +			/* data headers */
++			case 0x90: /* used Pinnacle Remote Kit */
 +			case 0x8F:
 +			case 0x8E:
 +			case 0x8D:
@@ -9963,7 +10007,8 @@ index 0000000..85dc1ce
 +			case 0x81:
 +			case 0x80:
 +				/* decode packet data */
-+				packet_len = ir->buf_in[i] & MCE_PULSE_MASK;
++				packet_len = ir->buf_in[i] &
++					MCE_PACKET_LENGTH_MASK;
 +				for (j = 1;
 +				     j <= packet_len && (i+j < buf_len);
 +				     j++) {
@@ -10132,7 +10177,9 @@ index 0000000..85dc1ce
 +	    (ir->usbdev->descriptor.idVendor == VENDOR_TOPSEED &&
 +	     (ir->usbdev->descriptor.idProduct == 0x0001 ||
 +	      ir->usbdev->descriptor.idProduct == 0x0007 ||
-+	      ir->usbdev->descriptor.idProduct == 0x0008)))
++	      ir->usbdev->descriptor.idProduct == 0x0008)) ||
++	    (ir->usbdev->descriptor.idVendor == VENDOR_PINNACLE &&
++	     (ir->usbdev->descriptor.idProduct == 0x0225)))
 +		ir->transmitter_mask = mask;
 +	else
 +		/* The mask begins at 0x02 and has an inverted
