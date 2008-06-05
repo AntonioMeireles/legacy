@@ -1,5 +1,5 @@
 
-class AtiFglrx(BuildPackageRecipe):
+class AtiFglrx(AutoPackageRecipe):
 
     buildRequires = [ 'glibc:devel', 'gtk:runtime', 'libX11:devel', 
                       'libXext:devel', 'libXrandr:devel', 'libXrender:devel', 'libgcc:devellib', 
@@ -7,13 +7,10 @@ class AtiFglrx(BuildPackageRecipe):
                       'fontconfig:devel', 'freetype:devel', 'libICE:devel', 'libSM:devel', 'libXcursor:devel', 'libXi:devel']
 
     name = 'ati-fglrx'
-    version = '8.3'
+    version = '8.5'
 
 
-    # https://a248.e.akamai.net/f/674/9206/0/www2.ati.com/drivers/linux/64bit/ati-driver-installer-8-3-x86.x86_64.run
-
-
-    def setup(r):
+    def unpack(r):
         r.macros.version = r.version.replace('.', '-')
 
         if Arch.x86_64:
@@ -21,7 +18,10 @@ class AtiFglrx(BuildPackageRecipe):
             r.FixupMultilibPaths(exceptions='.*')
 
         r.addSource('https://a248.e.akamai.net/f/674/9206/0/www2.ati.com/drivers/linux/ati-driver-installer-%(version)s-x86.x86_64.run')
-        r.Run('sh ./ati-driver-installer-%(version)s-x86.x86_64.run --extract archive_files')
+        r.addAction('sh ./ati-driver-installer-%(version)s-x86.x86_64.run --extract archive_files')
+
+    def configure(r):
+        r.Copy('archive_files/common/*', 'src/')
 
         if Arch.x86_64:
             r.Copy('archive_files/arch/x86_64/*', 'src/')
@@ -30,45 +30,102 @@ class AtiFglrx(BuildPackageRecipe):
             r.Copy('archive_files/arch/x86/*', 'src/')
             r.Copy('archive_files/x710/*', 'src/')
 
-        r.Copy('archive_files/common/*', 'src/')
-        r.Move('src/usr/X11R6/bin/*','src/usr/bin/')
-        r.Move('src/usr/X11R6/%(lib)s/modules/dri/','src/usr/%(lib)s/dri/updates/')
-        r.Move('src/usr/X11R6/%(lib)s/modules/*','src/usr/%(lib)s/xorg/modules/updates/')
-        r.Move('src/usr/X11R6/%(lib)s/*','src/usr/%(lib)s/')
-        r.Move('src/usr/X11R6/include/X11','src/usr/include/')
 
-        #        del r.AutoDoc
+    def make(r):
+        pass
 
-        r.Install('src/usr', '%(destdir)s')
-        r.Install('src/etc', '%(destdir)s')
+    def makeinstall(r):
+         r.Install('src/usr/sbin/*','%(sbindir)s/', mode = 0755)
+         r.Remove('src/usr/sbin/*')
+         r.Install('src/usr/X11R6/bin/*','%(bindir)s/', mode = 0755)
+         r.Remove('src/usr/X11R6/bin/*')
+         r.Install('src/usr/X11R6/%(lib)s/modules/dri/*','%(libdir)s/dri/updates/', mode = 0644)
+         r.Remove('src/usr/X11R6/%(lib)s/modules/dri/*')
+         r.Install('src/usr/X11R6/%(lib)s/modules/drivers/*','%(libdir)s/xorg/modules/updates/drivers/', mode = 0644)
+         r.Remove('src/usr/X11R6/%(lib)s/modules/drivers/*')
+         r.Install('src/usr/X11R6/%(lib)s/modules/linux/*','%(libdir)s/xorg/modules/updates/linux/', mode = 0644)
+         r.Remove('src/usr/X11R6/%(lib)s/modules/linux/*')
+         r.Install('src/usr/X11R6/%(lib)s/modules/*','%(libdir)s/xorg/modules/updates/', mode = 0644)
+         r.Remove('src/usr/X11R6/%(lib)s/modules/*')
+         r.Install('src/usr/X11R6/include/X11/*','%(includedir)s/X11/', mode = 0644)
+         r.Remove('src/usr/X11R6/include/X11/*')
+         r.Install('src/usr/X11R6/%(lib)s/*', '%(libdir)s/xorg.fglrx.3d/', mode = 0644)
+         r.Remove('src/usr/X11R6/%(lib)s/*')
+         r.Install('src/usr/X11R6/include/X11/extensions/*', '%(includedir)s/X11/extensions/', mode = 0644)
+         r.Remove('src/usr/X11R6/include/X11/extensions/*')
 
-        r.Move('%(libdir)s/lib*', '%(libdir)s/xorg.fglrx.3d/')
+         r.Install('src/etc/ati/*','%(sysconfdir)s/ati/', mode = 0644)
+         r.Remove('src/etc/ati/*')
 
-        if Arch.x86_64:
-            r.Move('archive_files/arch/x86/usr/X11R6/lib/modules/dri/*','/usr/lib/dri/updates/')
-            r.Copy('archive_files/arch/x86/usr/X11R6/lib/*', '%(lib32)s/xorg.fglrx.3d/')
-
-        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/')
-        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/extensions/')
-        r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/drivers/')
-
-        r.SharedLibrary(subtrees='%(libdir)s/xorg.fglrx.3d')
-
-        if Arch.x86_64:
-            r.SharedLibrary(subtrees='%(lib32)s/xorg.fglrx.3d')
-
-        r.addSource('atieventsd.init')
-        r.Install('atieventsd.init', '%(initdir)s/atieventsd')
-
-        r.InitialContents('%(sysconfdir)s/ati/.*')
+         if Arch.x86_64:
+             r.Install('archive_files/arch/x86/usr/X11R6/lib/modules/dri/*','%(lib32)s/dri/updates/', mode = 0644)
+             r.Install('archive_files/arch/x86/usr/X11R6/lib/lib*', '%(lib32)s/xorg.fglrx.3d/', mode = 0644)
 
 
-        # The kernel side is in nvidia-kernel, and we need the kernel
-        # modules that match this version exactly
-        r.Requires('ati-fglrx-kernel:runtime(%(version)s)', 
-                   '%(libdir)s/dri/updates/fglrx_dri.so')
+         r.Install('usr/share/icons/ccc_*.xpm','%(datadir)s/icons/', mode = 0644)
 
-        # We want to make sure that the kernel module can require the
-        # matching userspace code
-        r.ComponentProvides('%(version)s')
+         r.Config(exceptions='%(sysconfdir)s/ati/control')
+
+         # Set the correct path for gdm's Xauth file
+         r.Replace('GDM_AUTH_FILE=/var/lib/gdm/$1.Xauth',
+                   'GDM_AUTH_FILE=/var/gdm/$1.Xauth',
+                   '%(sysconfdir)s/ati/authatieventsd.sh')
+
+
+         r.addSource('atieventsd.init')
+         r.addSource('ati-powermode.sh')
+         r.addSource('amdcccle.desktop')
+         r.Desktopfile('amdcccle.desktop')
+
+         r.Install('atieventsd.init', '%(initdir)s/atieventsd', mode = 0755)
+         r.Install('ati-powermode.sh', '%(sysconfdir)s/acpi/actions/ati-powermode.sh', mode = 0755)
+
+         r.Create('%(sysconfdir)s/acpi/events/a-ac-aticonfig.conf', mode = 0644, contents = """
+# /etc/acpi/actions/ati-powermode.sh
+# Called when the user connects ac power to us
+event=ac_adapter
+action=/etc/acpi/actions/ati-powermode.sh
+""")
+         r.Create('%(sysconfdir)s/acpi/events/a-lid-aticonfig.conf', mode = 0644, contents = """
+# /etc/acpi/actions/ati-powermode.sh
+# Called when the user opens/closes the laptop lid
+event=button[ /]lid
+action=/etc/acpi/actions/ati-powermode.sh
+""")
+
+
+
+#         r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/')
+#         r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/extensions/')
+#         r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/drivers/')
+
+
+
+
+
+
+
+
+#         #        del r.AutoDoc
+
+
+
+#         r.SharedLibrary(subtrees='%(libdir)s/xorg.fglrx.3d')
+
+#         if Arch.x86_64:
+#             r.SharedLibrary(subtrees='%(lib32)s/xorg.fglrx.3d')
+
+
+
+#         r.InitialContents('%(sysconfdir)s/ati/.*')
+
+
+         # The kernel side is in %(name)s-kernel, and we need the kernel
+         # modules that match this version exactly
+         r.Requires('ati-fglrx-kernel:runtime(%(version)s)', 
+                    '%(libdir)s/dri/updates/fglrx_dri.so')
+
+         # We want to make sure that the kernel module can require the
+         # matching userspace code
+         r.ComponentProvides('%(version)s')
 
