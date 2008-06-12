@@ -1,0 +1,72 @@
+From: https://bugzilla.redhat.com/show_bug.cgi?id=448056#c5
+[cebbert: removed 'const' from parameter]
+
+Original patch: http://mactel-linux.svn.sourceforge.net/viewvc/mactel-linux/trunk/kernel/mactel-patches-2.6.25/applesmc-remove-debugging-messages.patch?revision=156&view=markup
+
+diff -uNrp a/drivers/hwmon/applesmc.c b/drivers/hwmon/applesmc.c
+--- a/drivers/hwmon/applesmc.c	2008-04-17 09:49:44.000000000 +0700
++++ b/drivers/hwmon/applesmc.c	2008-05-22 22:49:43.000000000 +0700
+@@ -130,7 +130,8 @@ struct dmi_match_data {
+ 	int temperature_set;
+ };
+ 
+-static const int debug;
++static int debug = 0;
++module_param(debug, int, S_IRUGO|S_IWUSR);
+ static struct platform_device *pdev;
+ static s16 rest_x;
+ static s16 rest_y;
+@@ -169,7 +170,7 @@ static int __wait_status(u8 val)
+ 
+ 	for (i = 0; i < 200; i++) {
+ 		if ((inb(APPLESMC_CMD_PORT) & APPLESMC_STATUS_MASK) == val) {
+-			if (debug)
++			if (debug >= 9)
+ 				printk(KERN_DEBUG
+ 						"Waited %d us for status %x\n",
+ 						i*10, val);
+@@ -178,7 +179,8 @@ static int __wait_status(u8 val)
+ 		udelay(10);
+ 	}
+ 
+-	printk(KERN_WARNING "applesmc: wait status failed: %x != %x\n",
++	if (debug >= 1)
++		printk(KERN_WARNING "applesmc: wait status failed: %x != %x\n",
+ 						val, inb(APPLESMC_CMD_PORT));
+ 
+ 	return -EIO;
+@@ -208,21 +210,21 @@ static int applesmc_read_key(const char*
+ 		if (__wait_status(0x04))
+ 			return -EIO;
+ 	}
+-	if (debug)
++	if (debug >= 9)
+ 		printk(KERN_DEBUG "<%s", key);
+ 
+ 	outb(len, APPLESMC_DATA_PORT);
+-	if (debug)
++	if (debug >= 9)
+ 		printk(KERN_DEBUG ">%x", len);
+ 
+ 	for (i = 0; i < len; i++) {
+ 		if (__wait_status(0x05))
+ 			return -EIO;
+ 		buffer[i] = inb(APPLESMC_DATA_PORT);
+-		if (debug)
++		if (debug >= 9)
+ 			printk(KERN_DEBUG "<%x", buffer[i]);
+ 	}
+-	if (debug)
++	if (debug >= 9)
+ 		printk(KERN_DEBUG "\n");
+ 
+ 	return 0;
+@@ -374,7 +376,7 @@ static int applesmc_device_init(void)
+ 	mutex_lock(&applesmc_lock);
+ 
+ 	for (total = INIT_TIMEOUT_MSECS; total > 0; total -= INIT_WAIT_MSECS) {
+-		if (debug)
++		if (debug >= 9)
+ 			printk(KERN_DEBUG "applesmc try %d\n", total);
+ 		if (!applesmc_read_key(MOTION_SENSOR_KEY, buffer, 2) &&
+ 				(buffer[0] != 0x00 || buffer[1] != 0x00)) {
