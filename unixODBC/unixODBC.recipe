@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class UnixODBC(AutoPackageRecipe):
+    name = 'unixODBC'
+    version = '2.2.12'
+
+    buildRequires = [ 'bison:runtime', 'flex:runtime', 'gettext:runtime',
+                      'intltool:runtime', 'readline:devel', 'file:runtime',
+                      'autoconf:runtime', 'automake:runtime',
+                      'libtool:runtime' ]
+
+    def unpack(r):
+        r.addArchive('http://www.unixodbc.org/')
+        # RPL-645. pulled from Fedora CVS (rev. 1.1)
+        r.addPatch('unixODBC-2.2.11-symbols.patch')
+
+    def configure(r):
+        # the libtool version included with 2.2.11 is
+        # ancient & causes problems building the Qt parts
+        # (though those have since been removed)
+        r.Run('libtoolize -c -f --ltdl')
+        r.Automake(autoMakeArgs='--add-missing --copy --force-missing')
+        r.Automake(dir='libltdl')
+        r.Run('cp -v libltdl/install-sh .')
+        r.Configure('--disable-gui')
+
+    def make(r):
+        r.Make('all')
+
+    def policy(r):
+
+        r.AutoDoc(exceptions='/.+/')
+
+        for dir in (
+            'AdministratorManual', 'UserManual', 'lst',
+            'ProgrammerManual', 'ProgrammerManual/Tutorial'
+        ):
+            r.Doc('doc/'+dir+'/*.{html,gif,vsd,sql,css}', dir=dir)
+
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/ODBCDataSources')
