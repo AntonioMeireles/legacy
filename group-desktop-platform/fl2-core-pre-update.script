@@ -77,5 +77,24 @@ if [ -d $oodir -a ! -d $allbitmap ] ; then
     done
 fi
 
+# remove unmanaged conary config file that contains pinning
+for i in /etc/conary/config.d/{foresight,shuttle}-* ; do
+  rm -f $i
+done
+# handle pinned kerneloops due to bad pinning (FL-1492)
+if conary q kerneloops --info | grep 'Pinned.*: True' >/dev/null 2>&1 ; then
+    echo 'unpinning kerneloops, retry update soon'
+    (i=0;
+     while [ $i -lt 30 ] ; do
+         sleep 1;
+         conary unpin kerneloops
+         if  conary q kerneloops --info | grep 'Pinned.*: True' ; then : else
+            exit 0
+         fi
+         i=$(($i+1));
+     done >/dev/null 2>&1)&
+     exit 1
+fi
+
 # it is very important to return success; failure stops the operation
 exit 0
