@@ -1,4 +1,3 @@
-
 # Copyright (c) 2006-2008 Foresight Linux Project
 # Copyright (c) 2004-2008 rPath, Inc.
 #
@@ -16,7 +15,7 @@ class GroupDesktopPlatform(GroupRecipe):
     depCheck = True
     # we handle this on the group-{gnome,xfce,dist}-dist stage
     checkPathConflicts = False
-
+    checkOnlyByDefaultDeps = True
     requireLatest = False
 
     x86_64rplGroupsFlavorString = 'is: x86 x86_64'
@@ -86,8 +85,9 @@ class GroupDesktopPlatform(GroupRecipe):
     else:
         rplGroupUmbrella = rplGroupUmbrella % x86rplGroupsFlavorString
 
-    def flCreateGroup(r, name, parentGroup=None, depCheck=False, byDefault=True, \
-                   autoResolve = False, dynamicGroup = False, checkPathConflicts=None):
+    def flCreateGroup(r, name, parentGroup=None, depCheck=False,
+                      byDefault=True, checkOnlyByDefaultDeps=True,
+                      autoResolve = False, dynamicGroup = False, checkPathConflicts=None):
         # creates group named 'name', adds it to the toplevel group,
         # and sets the current group to that name.  calls to r.add()
         # will use the current group by default.
@@ -101,6 +101,7 @@ class GroupDesktopPlatform(GroupRecipe):
         if parentGroup:
             r.setDefaultGroup(parentGroup)
         r.createGroup(name, autoResolve=autoResolve, depCheck=depCheck,
+                      checkOnlyByDefaultDeps=checkOnlyByDefaultDeps, 
                       byDefault=byDefault,  checkPathConflicts=checkPathConflicts)
         if parentGroup:
             r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
@@ -116,7 +117,7 @@ class GroupDesktopPlatform(GroupRecipe):
             elif name in r.kdegroups:
                 r.copyComponents(r.develComponents,  name, 'group-kde-devel')
             elif name == 'group-gnome':
-                r.copyComponents(r.develComponents,  name, 'group-gnome-devel')
+               r.copyComponents(r.develComponents,  name, 'group-gnome-devel')
 
             elif name not in r.bucketDevelGroups and name not in r.bucketExtraDocGroups and name not in ['group-gnome' 'group-xfce'] and name not in r.kdegroups:
                 r.copyComponents(r.develComponents,  name, 'group-desktop-common-devel')
@@ -138,6 +139,11 @@ class GroupDesktopPlatform(GroupRecipe):
     def flAdd(r, name, components = None, source=None, versionStr=None, \
               groupName=None, flavor=None, byDefault=True, singleArch=False):
 
+        searchPath = (r.foresightLinuxLabel)
+
+        if not versionStr:
+            versionStr = r.foresightLinuxLabel
+
         if isinstance(name, tuple):
             # This allows us to put troves created with PackageSpec into
             # lists where each trove is added iteratively, and still specify
@@ -157,7 +163,9 @@ class GroupDesktopPlatform(GroupRecipe):
               source=source,
               groupName=groupName,
               flavor=flavor,
-              byDefault=byDefault)
+              byDefault=byDefault,
+              searchPath=searchPath,
+              )
 
         # second, we check if that trove is already in any of the upstream, pre-built,
         # groups, we use, and - there - we replace it.
@@ -167,7 +175,8 @@ class GroupDesktopPlatform(GroupRecipe):
                       groupName='group-compat32',
                       allowNoMatch=True,
                       newVersionStr = versionStr,
-                      newFlavor = r.x86FlavorString
+                      newFlavor = r.x86FlavorString,
+                      searchPath=searchPath,
                       )
 
         if not singleArch:
@@ -176,6 +185,7 @@ class GroupDesktopPlatform(GroupRecipe):
                           newVersionStr = versionStr,
                           groupName = g,
                           newFlavor=flavor,
+                          searchPath=searchPath,
                           allowNoMatch=True)
 
 
@@ -204,8 +214,16 @@ class GroupDesktopPlatform(GroupRecipe):
             else:
                 flavor = r.x86FlavorString
 
-        searchPath = (r.rplGroupUmbrella, r.rplLabel, r.rplLabelCompat)
-        # searchPath = (r.rplGroupUmbrella, r.rplLabelCompat)
+        if not versionStr:
+            versionStr = r.rplLabel
+
+        searchPath = (r.rplGroupUmbrella)
+
+        if isinstance(name, tuple):
+            # This allows us to put troves created with PackageSpec into
+            # lists where each trove is added iteratively, and still specify
+            # an explicit source.
+            name, source = name
 
         if Arch.x86_64:
             flavor32 = r.x86FlavorString
@@ -262,9 +280,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.addPostUpdateScript('fl2-core-post-update.script',
                              groupName = 'group-core')
         #
-
-        r.setSearchPath(r.foresightLinuxLabel,
-                        r.rplGroupUmbrella, r.rplLabelCompat)
+        r.setSearchPath(r.foresightLinuxLabel, r.rplGroupUmbrella, r.foresightLinuxKernelLabel, r.rplLabelCompat)
 
         # Create a out shell group for all the belong to (no parent)
         r.flCreateGroup('group-world')
@@ -288,18 +304,19 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # devel groups
         r.flCreateGroup('group-gnome-devel', parentGroup='group-desktop-platform',
-                        depCheck=True, autoResolve = True, # checkPathConflicts=True
+                        dynamicGroup = True,
+                        depCheck=False, autoResolve = False, # checkPathConflicts=True
         )
         r.flCreateGroup('group-desktop-common-devel', parentGroup='group-gnome-devel',
                         dynamicGroup = True)
         r.addNewGroup('group-devel', groupName='group-gnome-devel')
         r.flCreateGroup('group-kde-devel', parentGroup='group-desktop-platform',
-                        depCheck=True,  autoResolve = True, # checkPathConflicts=True,
+                        depCheck=False,  autoResolve = False, # checkPathConflicts=True,
                         dynamicGroup = True)
         r.addNewGroup('group-devel', groupName='group-kde-devel')
         r.addNewGroup('group-desktop-common-devel', groupName='group-kde-devel')
         r.flCreateGroup('group-xfce-devel', parentGroup='group-desktop-platform',
-                        depCheck=True,  autoResolve = True, # checkPathConflicts=True,
+                        depCheck=False,  autoResolve = False, # checkPathConflicts=True,
                         dynamicGroup = True)
         r.addNewGroup('group-devel', groupName='group-xfce-devel')
         r.addNewGroup('group-desktop-common-devel', groupName='group-xfce-devel')
@@ -325,7 +342,8 @@ class GroupDesktopPlatform(GroupRecipe):
 #                            depCheck=False, byDefault=False, dynamicGroup = True)
 
         # the real show beguins here
-        r.flCreateGroup('group-desktop-common-extras', parentGroup='group-desktop-platform')
+        r.flCreateGroup('group-desktop-common-extras', parentGroup='group-desktop-platform', dynamicGroup = True)
+        # above dynamicGroup = True because we don't want the :devel 's there to go to 'group-desktop-common-devel'
 
         # kernel
         if Arch.x86:
@@ -347,6 +365,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flCreateGroup('group-foresight-basics', parentGroup='group-desktop-common')
 
         # libs we want in all editions
+        #
         r.flAdd('qt', groupName='group-foresight-basics')
         r.flAdd('gtk', groupName='group-foresight-basics')
         r.flAdd('pango', groupName='group-foresight-basics')
@@ -366,7 +385,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('xdg-utils', groupName='group-foresight-basics')
         r.flAdd('pyxdg', groupName='group-foresight-basics')
         # end of freedesktop.org xdg stuff
-        
+
         # need for abiword/OOO/koffice
         r.flAdd('libwpd', groupName='group-foresight-basics')
 
@@ -557,7 +576,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # wanted/expected for gdm Xsession plumbing
         r.rplAdd('xterm', groupName='group-foresight-basics')
 
-        r.flAdd('info-wheel', groupName='group-foresight-basics')
+        r.rplAdd('info-wheel', groupName='group-foresight-basics')
         r.flReplace('sudo')
         r.flReplace('setup')
 
@@ -595,9 +614,9 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('openobex', groupName='group-foresight-basics')
         # end of bluetooth pack
 
-        r.flAdd('info-bin', groupName='group-foresight-basics')
+        r.rplAdd('info-bin', groupName='group-foresight-basics')
 
-        r.flAdd('info-nobody', groupName='group-foresight-basics')
+        r.rplAdd('info-nobody', groupName='group-foresight-basics')
         r.rplAdd('mailx', groupName='group-foresight-basics')
 
         r.flAdd('nss', groupName='group-foresight-basics')
@@ -919,7 +938,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # avahi, hal  and dbus are PkgSpeced
         # r.flAdd('hal-gnome', groupName='group-gnome')
         r.flAdd('dbus-x11', groupName='group-gnome', source='dbus')
-        r.flAdd('info-avahi', groupName='group-gnome')
+        r.rplAdd('info-avahi', groupName='group-gnome')
         r.flAdd('avahi-tools', groupName='group-gnome', source='avahi', byDefault=False)
         r.flAdd('avahi-glib', groupName='group-gnome', source='avahi')
         r.flAdd('avahi-sharp', groupName='group-gnome', source='avahi')
@@ -1229,7 +1248,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # needed at least by yelp and nautilus
         r.flAdd('beagle', groupName='group-gnome')
-        r.flAdd('info-beagleindex', groupName='group-gnome')
+        r.rplAdd('info-beagleindex', groupName='group-gnome')
 
         r.flAdd('gtksourceview-sharp', groupName='group-gnome-devel') #dep for monodevelop
         r.flAdd('libgdiplus', groupName='group-gnome-devel') #dep for monodevelop
@@ -1850,7 +1869,6 @@ class GroupDesktopPlatform(GroupRecipe):
         # r.replace('python', r.foresightLinuxLabel)
         # r.replace('idle', r.foresightLinuxLabel)
 
-
         #FIXME.
         r.flAdd('guile', groupName = 'group-devel')
 
@@ -1858,11 +1876,14 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('docbook-dtds', groupName = 'group-devel')
         r.flAdd('docbook-xsl', groupName = 'group-devel')
 
-        # FIXME: should _not_ be needed (but otherwise nss breaks groups)
+        # FIXME: should _not_ be needed (but otherwise breaks groups)
         # to be fixed properly later
         if Arch.x86_64:
-            r.add('sqlite:lib', groupName='group-compat32', flavor = r.x86FlavorString,
-                  searchPath = r.rplGroupUmbrellaCompat32)
+            for p in [ 'idle', 'sqlite', 'audit', 'openslp',
+                       'parted', 'postgresql', 'perl']:
+                r.add( p + ':lib', groupName='group-compat32',
+                       flavor = r.x86FlavorString,
+                       searchPath = r.rplGroupUmbrellaCompat32)
 
         # rMake and friends
         r.flAdd('conary-repository', versionStr=r.conaryVersion, groupName='group-desktop-common-devel')
@@ -1879,6 +1900,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('kid', groupName='group-desktop-common-devel')
 
         # more group-devel stuff
+        r.remove('python:test', groupName='group-world')
         r.flAdd('bzr', groupName='group-desktop-common-devel')
         r.rplAdd('ConfigObj', groupName='group-desktop-common-devel')
         r.flAdd('eclipse-sdk', groupName='group-desktop-common-devel', byDefault=False)
@@ -1954,8 +1976,8 @@ class GroupDesktopPlatform(GroupRecipe):
         ## end of list of packages built by xorg-proto
 
         r.flAdd('xcursor-themes', groupName='group-xorg', source='xorg-apps')
-        r.flAdd('xkeyboard-config', groupName='group-xorg')
-        r.flAdd('xorg-sgml-doctools', groupName='group-desktop-common-devel')
+        r.rplAdd('xkeyboard-config', groupName='group-xorg')
+        r.rplAdd('xorg-sgml-doctools', groupName='group-desktop-common-devel')
 
         ## packages built by xorg-libs
 
@@ -2187,7 +2209,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('urw-fonts', groupName='group-xorg-fonts')
         r.flAdd('liberation-fonts-ttf', groupName='group-xorg-fonts')
         r.flAdd('msttcorefonts', groupName='group-xorg-fonts')
-        r.flAdd('bitstream-vera-fonts', groupName='group-xorg-fonts')
+        r.rplAdd('bitstream-vera-fonts', groupName='group-xorg-fonts')
 
         r.flAdd('charis-fonts', groupName='group-xorg-fonts')
         r.flAdd('gentium-fonts', groupName='group-xorg-fonts')
@@ -2580,7 +2602,6 @@ class GroupDesktopPlatform(GroupRecipe):
         groupList = r.getChildGroups('group-desktop-platform')
         for g in groupList:
             if g[0].name not in r.bucketDevelGroups:
-
                 r.removeComponents(r.develComponents, g[0].name)
 
         # FIXME: this is freak. r.add(..., component=['lib'], flavor = is: x86) installs
@@ -2590,19 +2611,19 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             legacyArchGroups = ['group-compat32',] #  'group-desktop-platform-compat32']
             for g in legacyArchGroups:
-                r.removeComponents( [ 'devel', 'python', 'doc', 'data', 'runtime',
+                r.removeComponents( [ 'devel', 'python', 'doc', 'data', 'runtime', 'test', 'perl',
                                       'supdoc', 'locale', 'config', 'devellib'],
                                     groupName=g)
 
-        #
-        #
         #
         # Everything below here define 'official' foresight editions (gnome,kde,xfce,etc)
 
         # Define GNOME Edition
         r.flCreateGroup('group-gnome-dist', parentGroup='group-desktop-platform',
-                        depCheck=True, autoResolve=True, # checkPathConflicts=True,
+                        checkOnlyByDefaultDeps=False,
+                        depCheck=True, autoResolve=True, checkPathConflicts=True,
                         dynamicGroup = True)
+
         r.addNewGroup('group-desktop-common', groupName='group-gnome-dist')
         r.addNewGroup('group-gnome', groupName='group-gnome-dist')
         r.addNewGroup('group-mozilla', groupName='group-gnome-dist')
@@ -2611,7 +2632,8 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # Define KDE Edition
         r.flCreateGroup('group-kde-dist', parentGroup='group-desktop-platform',
-                        depCheck=True, autoResolve=True, # checkPathConflicts=True,
+                        checkOnlyByDefaultDeps=False,
+                        depCheck=True, autoResolve=True, checkPathConflicts=True,
                         dynamicGroup = True)
         r.addNewGroup('group-desktop-common', groupName='group-kde-dist')
         r.addNewGroup('group-kde', groupName='group-kde-dist')
@@ -2621,19 +2643,18 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # Define XFCE Edition
         r.flCreateGroup('group-xfce-dist', parentGroup='group-desktop-platform',
-                        depCheck=True, autoResolve=True, # checkPathConflicts=True,
+                        checkOnlyByDefaultDeps=False,
+                        depCheck=True, autoResolve=True, checkPathConflicts=True,
                         dynamicGroup = True)
         r.addNewGroup('group-desktop-common', groupName='group-xfce-dist')
         r.addNewGroup('group-xfce', groupName='group-xfce-dist')
         r.addNewGroup('group-mozilla', groupName='group-xfce-dist')
         r.addNewGroup('group-pidgin', groupName='group-xfce-dist')
         r.addNewGroup('group-desktop-common-extras', groupName='group-xfce-dist')
-
         # gdm stuff
         r.flAdd('xfce-default-session', groupName='group-xfce-dist')
         r.flAdd('gdm', groupName='group-xfce-dist')
         r.flAdd('gdm-simple-green', groupName='group-xfce-dist')
-
 
         # dist-devel groups
         # simplifies life to devs, as it makes  sync/update group-`edition`-{devel,dist} unnecessary
@@ -2643,7 +2664,8 @@ class GroupDesktopPlatform(GroupRecipe):
                         dynamicGroup = True)
             r.addNewGroup('group-'+ edition + '-dist', groupName='group-' + edition + '-dist-devel')
             r.addNewGroup('group-'+ edition + '-devel', groupName='group-' + edition + '-dist-devel')
-
+            # this one avoids having to close each 'group-'+ edition + '-devel'
+            r.Requires('group-'+ edition + '-devel', groupName='group-' + edition + '-dist-devel')
 
 # vi: set ts=4 sts=4 sw=4 expandtab:
 
