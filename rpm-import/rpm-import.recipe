@@ -1,0 +1,292 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# version 2 as published by the Free Software Foundation and
+# available from http://www.rpath.com/licenses/copyright/GPL-2
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+
+from conary import rpmhelper
+from conary.lib import log
+
+class RPMImportRecipe(PackageRecipe):
+    name = 'rpm-import'
+    version = '0.1'
+    extraArch = {}
+    abstractBaseClass = True
+    rpmUrl = ''
+
+    def __init__(r, *args, **kw):
+        r.headers = []
+        PackageRecipe.__init__(r, *args, **kw)
+
+    @staticmethod
+    def extractSources(sources, openSourceFileFn):
+        return [x for x in sources if x.endswith('.rpm')]
+
+    def unpack(r):
+        for filename in r.sourceFiles:
+            r.addArchive(filename, dir='/', preserveOwnership = True)
+
+    def disableBuildRequirementsPolicy(r):
+        r.EnforceSonameBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
+        r.EnforceJavaBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
+        r.EnforceCILBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
+        r.EnforceConfigLogBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
+        # Note that perl and python runtime requirement CANNOT
+        # be discovered without listing them as runtime requirements,
+        # so it is important not to disable
+        # r.Enforce{Perl,Python}BuildRequirements
+
+    def disablePolicy(r):
+        r.BadInterpreterPaths(exceptions = '.*', allowUnusedFilters = True)
+        r.CheckDesktopFiles(exceptions = '.*', allowUnusedFilters = True)
+        r.CheckDestDir(exceptions = '.*', allowUnusedFilters = True)
+        r.CheckSonames(exceptions = '.*', allowUnusedFilters = True)
+        r.DanglingSymlinks(exceptions = '.*', allowUnusedFilters = True)
+        r.ExecutableLibraries(exceptions = '.*', allowUnusedFilters = True)
+        r.FilesForDirectories(exceptions = '.*', allowUnusedFilters = True)
+        r.FilesInMandir(exceptions = '.*', allowUnusedFilters = True)
+        r.FixDirModes(exceptions = '.*', allowUnusedFilters = True)
+        r.FixupMultilibPaths(exceptions = '.*', allowUnusedFilters = True)
+        r.LinkCount(exceptions = '.*', allowUnusedFilters = True)
+        r.IgnoredSetuid(exceptions = '.*', allowUnusedFilters = True)
+        r.ImproperlyShared(exceptions = '.*', allowUnusedFilters = True)
+        r.NonBinariesInBindirs(exceptions = '.*', allowUnusedFilters = True)
+        r.NonMultilibComponent(exceptions = '.*', allowUnusedFilters = True)
+        r.NonMultilibDirectories(exceptions = '.*', allowUnusedFilters = True)
+        r.NormalizeCompression(exceptions = '.*', allowUnusedFilters = True)
+        r.NormalizeInterpreterPaths(exceptions = '.*', allowUnusedFilters = True)
+        r.RemoveNonPackageFiles(exceptions = '.*', allowUnusedFilters = True)
+        r.WarnWriteable(exceptions = '.*', allowUnusedFilters = True)
+        r.WorldWriteableExecutables(exceptions = '.*', allowUnusedFilters = True)
+        # ObsoletePaths does not honor exceptions
+        del r.ObsoletePaths
+
+    def disableStrip(r):
+        """
+        Default to not stripping; allow override in subclasses with:
+
+        def disableStrip(r): pass
+        """
+        r.Strip(exceptions = '.*', allowUnusedFilters = True)
+
+    def policy(r):
+        """
+        hook for adding additional policy in subclasses.
+        """
+        pass
+
+    def preprocess(r):
+        "hook for adding sources/policy calls before anything else"
+        pass
+
+    def postprocess(r):
+        "hook for adding sources/policy calls after anything else"
+        pass
+
+    def readHeaders(r):
+        sourceList = r.fetchAllSources()
+        for rpmname in r.sourceFiles:
+            rpmfiles = [ x for x in sourceList if os.path.basename(x) == rpmname ]
+            if len(rpmfiles) != 1:
+                raise RPMImportError('more than one source object matches '
+                                      'the "%s" rpm filename' %rpmname)
+            rpmfile = rpmfiles[0]
+            r.headers.append(rpmhelper.readHeader(file(rpmfile)))
+
+    def processScripts(r):
+        for header in r.headers:
+            r._addTroveScripts(header)
+
+    def processFiles(r):
+        # given the set of RPM headers used, set permissions, config
+        # flags, etc appropriately
+        for header in r.headers:
+            for path, mode, rdev, flags, username, groupname in zip(
+                header.paths(),
+                header[rpmhelper.FILEMODES],
+                header[rpmhelper.FILERDEVS],
+                header[rpmhelper.FILEFLAGS],
+                header[rpmhelper.FILEUSERNAME],
+                header[rpmhelper.FILEGROUPNAME]):
+                path = util.normpath(path)
+                escaped_path = util.literalRegex(path)
+                escaped_path = escaped_path.replace('\\/', '/')
+                if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+                    if stat.S_ISCHR(mode):
+                        type='c'
+                    else:
+                        type='b'
+                    # this is correct for 32-bit device number
+                    # RPM does not provide 64-bit device number
+                    minor = rdev & 0xff | (rdev >> 12) & 0xffffff00
+                    major = (rdev >> 8) & 0xfff
+                    r.MakeDevices(escaped_path, type, major, minor,
+                                  username, groupname, mode&0777)
+                    continue
+
+                if flags & (1 << 0):
+                    # CONFIG
+                    r.Config(escaped_path)
+                if (flags & (1 << 1) or
+                      flags & (1 << 7) or
+                      flags & (1 << 8)):
+                    # DOC, LICENSE, README
+                    r.ComponentSpec('doc', escaped_path)
+                if flags & (1 << 4):
+                    # NOREPLACE
+                    r.InitialContents(escaped_path)
+                if flags & (1 << 6):
+                    # GHOST.  We only handle ghost files, not ghost dirs
+                    if stat.S_ISREG(mode):
+                        r.Create(path)
+                        r.InitialContents(escaped_path)
+                    elif stat.S_ISDIR(mode):
+                        r.ExcludeDirectories(exceptions=escaped_path)
+
+                # handle "special" permissions (although un-cpio'ing
+                # the payload should have set them all correctly, payload
+                # doesn't include things like %ghost)
+                if not stat.S_ISLNK(mode):
+                    r.SetModes(path, mode & 07777)
+
+    def processRequires(r):
+        # FIXME: implement
+        pass
+
+    def processProvides(r):
+        # FIXME: implement
+        pass
+
+    def recipeClassSetup(r):
+        if r.__class__.__name__ == 'RPMImportRecipe':
+            return
+        r.preprocess()
+        r.unpack()
+        r.policy()
+        r.readHeaders()
+        r.processScripts()
+        r.processFiles()
+        r.disableBuildRequirementsPolicy()
+        r.disableStrip()
+        r.disablePolicy()
+        r.postprocess()
+
+    _tagNameMap = {
+        rpmhelper.PREIN:    "preinstall",
+        rpmhelper.POSTIN:   "postinstall",
+        rpmhelper.PREUN:    "preuninstall",
+        rpmhelper.POSTUN:   "postuninstall",
+    }
+
+    def _getScript(self, header, scriptTag, scriptInterpTag):
+        if scriptTag not in header:
+            return None
+        tagName = self._tagNameMap[scriptTag]
+        interp = header.get(scriptInterpTag, "/bin/sh")
+        if interp == "/sbin/ldconfig":
+            log.info("  Ignoring %s script with interpreter %s" % (
+                     tagName, interp))
+            return None
+        if interp != "/bin/sh":
+            log.info("  Ignoring %s script with unsupported interpreter %s" % (
+                     tagName, interp))
+            return None
+        return header[scriptTag]
+
+    def _getRandomString(self):
+        import sha
+
+        x = sha.new()
+
+        if not os.path.exists("/dev/urandom"):
+            import time
+            x.update("%.9f" % time.time())
+        else:
+            x.update(file("/dev/urandom").read(16))
+
+        return x.hexdigest()
+
+    def _getTroveScripts(self, header):
+        _map = {
+            'prein':    (rpmhelper.PREIN, rpmhelper.PREINPROG),
+            'postin':   (rpmhelper.POSTIN, rpmhelper.POSTINPROG),
+            'preun':    (rpmhelper.PREUN, rpmhelper.PREUNPROG),
+            'postun':   (rpmhelper.POSTUN, rpmhelper.POSTUNPROG),
+        }
+        scripts = ( (x, self._getScript(header, t, ti))
+                              for (x, (t, ti)) in _map.items() )
+        scripts = dict((x, y) for (x, y) in scripts if y)
+        return scripts
+
+    _scriptTemplate = """\
+#!/bin/sh
+cat << %(separator)s | %(interpreter)s
+%(contents)s
+%(separator)s
+"""
+
+    @staticmethod
+    def _filenameFromHeader(header):
+        return "%s-%s-%s.%s.rpm" % (
+            header[rpmhelper.NAME],
+            header[rpmhelper.VERSION],
+            header[rpmhelper.RELEASE],
+            header[rpmhelper.ARCH],
+        )
+
+    def _addTroveScripts(self, header):
+        # For now, we are adding the scripts we find in the rpm in the package
+        # with the same name as the rpm (no components)
+
+        log.info("Importing scripts for %s" % self._filenameFromHeader(header))
+
+        rpmScripts = self._getTroveScripts(header)
+        if not rpmScripts:
+            return
+        randString = self._getRandomString()
+
+        # Map rpm tags into conary tags. The second value in the map is the
+        # argument count ($1) that gets passed into the rpm scriptlet.
+        scriptsMap = [
+            ('prein',  [('preupdate', 2), ('preinstall', 1)]),
+            ('postin', [('postupdate', 2), ('postinstall', 1)]),
+            ('preun',  [('preupdate', 1), ('preerase', 0)]),
+            ('postun', [('postupdate', 1), ('posterase', 0)]),
+        ]
+
+        conaryScripts = {}
+        for (rpmTag, actList) in scriptsMap:
+            if rpmTag not in rpmScripts:
+                continue
+            d = dict(separator = randString, contents = rpmScripts[rpmTag])
+            for (conaryTag, argCount) in actList:
+                d['interpreter'] = "/bin/sh -s %s" % argCount
+                ns = self._scriptTemplate % d
+                if conaryTag in conaryScripts:
+                    ns = "%s\n%s" % (conaryScripts[conaryTag], ns)
+                conaryScripts[conaryTag] = ns
+
+        methodMap = [
+            ('preinstall',  self.ScriptPreInstall),
+            ('postinstall', self.ScriptPostInstall),
+            ('preupdate',   self.ScriptPreUpdate),
+            ('postupdate',  self.ScriptPostUpdate),
+            ('preerase',    self.ScriptPreErase),
+            ('posterase',   self.ScriptPostErase),
+        ]
+        rpmName = header[rpmhelper.NAME]
+        for conaryTag, method in methodMap:
+            if conaryTag in conaryScripts:
+                log.info("    Adding %s script" % conaryTag)
+                method(rpmName, contents = conaryScripts[conaryTag])
+
+class RPMImportError(Exception):
+    pass
