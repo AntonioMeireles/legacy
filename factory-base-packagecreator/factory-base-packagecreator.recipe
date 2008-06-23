@@ -1,0 +1,128 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# version 2 as published by the Free Software Foundation and
+# available from http://www.rpath.com/licenses/copyright/GPL-2
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+
+class BasePackageCreatorFactory(Factory):
+
+    version = '1.0'
+    name = 'factory-base-packagecreator'
+
+    descriptionFile = 'description.xml'
+    # To be overridden in factory subclasses
+    RecipeClass = None
+
+    _factoryDefinitionFile = 'data-definition.xml'
+
+    @classmethod
+    def getAdditionalSourceFiles(kls):
+        if kls.RecipeClass is None:
+            return []
+        return [(kls._factoryDefinitionFile,
+                   "%(datadir)s/factory/data-definitions/%(name)s/")]
+
+    def readBuildDescription(self):
+        """Read the build description checked in by the UI"""
+        if self.descriptionFile not in self.sources:
+            return None
+
+        from xml.dom import minidom
+
+        def xmlToDict(stream):
+            dom = minidom.parse(stream)
+            ret = {}
+
+            children = dom.getElementsByTagName('factoryData')
+            if not children:
+                return ret
+
+            children = children[0].getElementsByTagName('field')
+            for child in children:
+                nodeName = getFirstNodeValue(child.getElementsByTagName('name'))
+                nodeType = getFirstNodeValue(child.getElementsByTagName('type'), 'str')
+
+                nodeValues = child.getElementsByTagName('values')
+                if nodeValues:
+                    values = getChildValuesByName(nodeValues[0], 'value')
+                else:
+                    values = getChildValuesByName(child, 'value')
+                    if not values:
+                        continue
+                values = [ castValue(x, nodeType) for x in values ]
+                if not nodeValues:
+                    values = values[0]
+                ret[nodeName] = values
+            return ret
+
+        def getChildValuesByName(node, childName):
+            values = [ getFirstNodeValue([c])
+                       for c in node.getElementsByTagName(childName) ]
+            return [ x for x in values if x is not None ]
+
+        def getFirstNodeValue(nodes, default = None):
+            if not nodes:
+                return default
+            node = nodes[0]
+            for child in [x for x in node.childNodes if x.nodeType == x.TEXT_NODE]:
+                return child.data
+            return None
+
+        def castValue(value, valueType):
+            if valueType == "int":
+                return int(value)
+            if valueType == "bool":
+                return value.upper() in ['TRUE', '1']
+            if valueType == "str":
+                return value.encode('utf-8')
+            return value
+
+        f = self.openSourceFile(self.descriptionFile)
+        return xmlToDict(f)
+
+
+    def getRecipeName(self, buildDescription):
+        """Extract the name out of the build description"""
+        return buildDescription['name']
+
+    def getRecipeVersion(self, buildDescription):
+        """Extract the version out of the build description"""
+        return buildDescription.get('version', '1.0')
+
+    def getRecipeClass(self):
+        """Main function that gets called by Conary's build process.
+        Ideally, you should not have to re-define this.
+        Instead, define a RecipeClass in the factory you are deriving from
+        this class.
+        It should define a static method:
+            extractSources(sources, openSourceFileFn)
+        that will populate the recipe's sourceFiles field.
+        """
+        bdesc = self.readBuildDescription()
+        class BuildRecipeClass(self.RecipeClass):
+            buildDescription = bdesc
+            name = self.getRecipeName(bdesc)
+            version = self.getRecipeVersion(bdesc)
+
+            sourceFiles = self.RecipeClass.extractSources(self.sources,
+                                                          self.openSourceFile)
+            def setup(r):
+                r.preProcess()
+                r.recipeClassSetup()
+                r.postProcess()
+
+            def preProcess(r):
+                """This is a stub method for packagers to override"""
+
+            def postProcess(r):
+                """This is a stub method for packagers to override"""
+
+        return BuildRecipeClass
