@@ -19,15 +19,21 @@ class FactoryArchive(BasePackageCreatorFactory):
     name = 'factory-archive'
 
     class RecipeClass(PackageRecipe):
-        @staticmethod
+        buildRequires = []
 
-        def extractSources(sources, openSourceFileFn):
-            types = ['tar','gz','zip','bz2','tgz']
+        @classmethod
+        def extractSources(klass, sources, openSourceFileFn):
+            types = {'tar' : [],
+                     'gz': [],
+                     'zip': ['unzip:runtime'],
+                     'bz2': [],
+                     'tgz': []}
             files = []
 
             for source in sources:
                 for type in types:
                     if source.endswith(type):
+                        klass.buildRequires.extend(types[type])
                         files.append(source)
             return files
 
@@ -37,6 +43,8 @@ class FactoryArchive(BasePackageCreatorFactory):
             lic = r.buildDescription.get('license')
             location = r.buildDescription.get('location')
             for f in r.sourceFiles:
-                r.addArchive(f, dir = location, preserveOwnership = True)
+                # zip files cannot preserve ownership, so we can't ask for it
+                preserve = not f.endswith('zip')
+                r.addArchive(f, dir = location, preserveOwnership = preserve)
             if lic:
                 r.Licenses(lic)
