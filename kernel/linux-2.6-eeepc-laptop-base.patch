@@ -1,55 +1,86 @@
-Signed-off-by: Eric Cooper <ecc@cmu.edu>
+From: Eric Cooper <ecc@cmu.edu>
+Date: Thu, 13 Mar 2008 11:55:46 +0000 (+0100)
+Subject: eeepc-laptop: add base driver
+X-Git-Tag: v2.6.26-rc1~101^2~1^6~2
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=e59f87966adef2cb03d419530e3ade5159487d6d
 
+eeepc-laptop: add base driver
+
+This patch is based on Eric Cooper's work to clean the original asus_acpi
+given by Asus.  It's a platform driver (/sys/devices/platform/eeepc/)
+wich support:
+     - hotkeys - wlan on/off - camera on/off - cardr on/off
+
+Signed-off-by: Corentin Chary <corentincj@iksaif.net>
+Signed-off-by: Len Brown <len.brown@intel.com>
 ---
- drivers/misc/Kconfig  |   10 +
- drivers/misc/Makefile |    1 +
- drivers/misc/eeepc.c  |  447 +++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 458 insertions(+), 0 deletions(-)
- create mode 100644 drivers/misc/eeepc.c
 
+diff --git a/MAINTAINERS b/MAINTAINERS
+index c1dd1ae..37debda 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -1531,6 +1531,13 @@ L:	bluesmoke-devel@lists.sourceforge.net
+ W:	bluesmoke.sourceforge.net
+ S:	Maintained
+ 
++EEEPC LAPTOP EXTRAS DRIVER
++P:	Corentin Chary
++M:	corentincj@iksaif.net
++L:	acpi4asus-user@lists.sourceforge.net
++W:	http://sourceforge.net/projects/acpi4asus
++S:	Maintained
++
+ EEPRO100 NETWORK DRIVER
+ P:	Andrey V. Savochkin
+ M:	saw@saw.sw.com.sg
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
-index b1f9a40..8fd1ccb 100644
+index 297a48f..2264127 100644
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
-@@ -251,4 +251,14 @@ config ATMEL_SSC
- 	  driver (SCSI/ATA) which supports enclosures
- 	  or a SCSI enclosure device (SES) to use these services.
+@@ -351,6 +351,17 @@ config INTEL_MENLOW
  
-+config EEEPC
-+        tristate "Eee PC Hotkey Driver (EXPERIMENTAL)"
-+        depends on X86
-+        depends on ACPI
-+	depends on EXPERIMENTAL && !ACPI_ASUS
-+        ---help---
+ 	  If unsure, say N.
+ 
++config EEEPC_LAPTOP
++	tristate "Eee PC Hotkey Driver (EXPERIMENTAL)"
++	depends on X86
++	depends on ACPI
++	depends on EXPERIMENTAL
++	---help---
 +	  This driver supports the Fn-Fx keys on Eee PC laptops.
++	  It also adds the ability to switch camera/wlan on/off.
 +
 +	  If you have an Eee PC laptop, say Y or M here.
 +
- endif # MISC_DEVICES
+ config ENCLOSURE_SERVICES
+ 	tristate "Enclosure Services"
+ 	default n
 diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
-index 87f2685..699b35c 100644
+index 5914da4..1952875 100644
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile
-@@ -17,3 +17,4 @@ obj-$(CONFIG_SONY_LAPTOP)	+= sony-laptop.o
- obj-$(CONFIG_EEPROM_93CX6)	+= eeprom_93cx6.o
- obj-$(CONFIG_INTEL_MENLOW)	+= intel_menlow.o
- obj-$(CONFIG_ENCLOSURE_SERVICES) += enclosure.o
-+obj-$(CONFIG_EEEPC)		+= eeepc.o
-diff --git a/drivers/misc/eeepc.c b/drivers/misc/eeepc.c
+@@ -7,7 +7,8 @@ obj-$(CONFIG_IBM_ASM)		+= ibmasm/
+ obj-$(CONFIG_HDPU_FEATURES)	+= hdpuftrs/
+ obj-$(CONFIG_MSI_LAPTOP)     += msi-laptop.o
+ obj-$(CONFIG_ACER_WMI)     += acer-wmi.o
+-obj-$(CONFIG_ASUS_LAPTOP)     += asus-laptop.o
++obj-$(CONFIG_ASUS_LAPTOP)	+= asus-laptop.o
++obj-$(CONFIG_EEEPC_LAPTOP)	+= eeepc-laptop.o
+ obj-$(CONFIG_ATMEL_PWM)		+= atmel_pwm.o
+ obj-$(CONFIG_ATMEL_SSC)		+= atmel-ssc.o
+ obj-$(CONFIG_ATMEL_TCLIB)	+= atmel_tclib.o
+diff --git a/drivers/misc/eeepc-laptop.c b/drivers/misc/eeepc-laptop.c
 new file mode 100644
-index 0000000..2e33117
+index 0000000..e34ff97
 --- /dev/null
-+++ b/drivers/misc/eeepc.c
-@@ -0,0 +1,447 @@
++++ b/drivers/misc/eeepc-laptop.c
+@@ -0,0 +1,442 @@
 +/*
-+ *  eepc_acpi.c - Asus Eee PC hotkey driver
-+ *
-+ *  Copyright (C) 2008 Eric Cooper <ecc@cmu.edu>
++ *  eepc-laptop.c - Asus Eee PC extras
 + *
 + *  Based on asus_acpi.c as patched for the Eee PC by Asus:
 + *  ftp://ftp.asus.com/pub/ASUS/EeePC/701/ASUS_ACPI_071126.rar
-+ *
-+ *  Copyright (C) 2002-2005 Julien Lerouge, 2003-2006 Karol Kozimor
++ *  Based on eee.c from eeepc-linux
 + *
 + *  This program is free software; you can redistribute it and/or modify
 + *  it under the terms of the GNU General Public License as published by
@@ -69,24 +100,25 @@ index 0000000..2e33117
 +#include <linux/platform_device.h>
 +#include <acpi/acpi_drivers.h>
 +#include <acpi/acpi_bus.h>
-+#include <asm/uaccess.h>
++#include <linux/uaccess.h>
 +
-+#define EEEPC_HOTK_NAME          "Eee PC Hotkey Driver"
-+#define EEEPC_HOTK_FILE          "eeepc"
-+#define EEEPC_HOTK_CLASS         "hotkey"
-+#define EEEPC_HOTK_DEVICE_NAME   "Hotkey"
-+#define EEEPC_HOTK_HID           "ASUS010"
++#define EEEPC_LAPTOP_VERSION	"0.1"
++
++#define EEEPC_HOTK_NAME		"Eee PC Hotkey Driver"
++#define EEEPC_HOTK_FILE		"eeepc"
++#define EEEPC_HOTK_CLASS	"hotkey"
++#define EEEPC_HOTK_DEVICE_NAME	"Hotkey"
++#define EEEPC_HOTK_HID		"ASUS010"
 +
 +#define EEEPC_LOG	EEEPC_HOTK_FILE ": "
-+#define EEEPC_ERR	KERN_ERR EEEPC_LOG
-+#define EEEPC_WARNING	KERN_WARNING EEEPC_LOG
-+#define EEEPC_NOTICE	KERN_NOTICE EEEPC_LOG
-+#define EEEPC_INFO	KERN_INFO EEEPC_LOG
++#define EEEPC_ERR	KERN_ERR	EEEPC_LOG
++#define EEEPC_WARNING	KERN_WARNING	EEEPC_LOG
++#define EEEPC_NOTICE	KERN_NOTICE	EEEPC_LOG
++#define EEEPC_INFO	KERN_INFO	EEEPC_LOG
 +
 +/*
 + * Definitions for Asus EeePC
 + */
-+
 +#define	NOTIFY_WLAN_ON	0x10
 +
 +enum {
@@ -144,8 +176,6 @@ index 0000000..2e33117
 +	"CRDS", NULL
 +};
 +
-+static unsigned int init_flag;
-+
 +/*
 + * This is the main structure, we can use it to store useful information
 + * about the hotk device
@@ -155,11 +185,22 @@ index 0000000..2e33117
 +	acpi_handle handle;		/* the handle of the hotk device */
 +	u32 cm_supported;		/* the control methods supported
 +					   by this BIOS */
++	uint init_flag;			/* Init flags */
 +	u16 event_count[128];		/* count for each event */
 +};
 +
 +/* The actual device the driver binds to */
 +static struct eeepc_hotk *ehotk;
++
++/* Platform device/driver */
++static struct platform_driver platform_driver = {
++	.driver = {
++		.name = EEEPC_HOTK_FILE,
++		.owner = THIS_MODULE,
++	}
++};
++
++static struct platform_device *platform_device;
 +
 +/*
 + * The hotkey driver declaration
@@ -167,27 +208,28 @@ index 0000000..2e33117
 +static int eeepc_hotk_add(struct acpi_device *device);
 +static int eeepc_hotk_remove(struct acpi_device *device, int type);
 +
-+static const struct acpi_device_id eee_device_ids[] = {
++static const struct acpi_device_id eeepc_device_ids[] = {
 +	{EEEPC_HOTK_HID, 0},
 +	{"", 0},
 +};
++MODULE_DEVICE_TABLE(acpi, eeepc_device_ids);
 +
 +static struct acpi_driver eeepc_hotk_driver = {
 +	.name = EEEPC_HOTK_NAME,
 +	.class = EEEPC_HOTK_CLASS,
-+	.ids = eee_device_ids,
++	.ids = eeepc_device_ids,
 +	.ops = {
 +		.add = eeepc_hotk_add,
 +		.remove = eeepc_hotk_remove,
 +	},
 +};
 +
-+MODULE_AUTHOR("Julien Lerouge, Karol Kozimor, Eric Cooper");
++MODULE_AUTHOR("Corentin Chary, Eric Cooper");
 +MODULE_DESCRIPTION(EEEPC_HOTK_NAME);
 +MODULE_LICENSE("GPL");
 +
 +/*
-+ * returns 1 if write is successful, otherwise 0.
++ * ACPI Helpers
 + */
 +static int write_acpi_int(acpi_handle handle, const char *method, int val,
 +			  struct acpi_buffer *output)
@@ -202,74 +244,74 @@ index 0000000..2e33117
 +	in_obj.integer.value = val;
 +
 +	status = acpi_evaluate_object(handle, (char *)method, &params, output);
-+	return (status == AE_OK);
++	return (status == AE_OK ? 0 : -1);
 +}
 +
 +static int read_acpi_int(acpi_handle handle, const char *method, int *val)
 +{
-+	struct acpi_buffer output;
-+	union acpi_object out_obj;
 +	acpi_status status;
++	ulong result;
 +
-+	output.length = sizeof(out_obj);
-+	output.pointer = &out_obj;
-+	status = acpi_evaluate_object(handle, (char *) method, NULL, &output);
-+	*val = out_obj.integer.value;
-+	return (status == AE_OK) && (out_obj.type == ACPI_TYPE_INTEGER);
++	status = acpi_evaluate_integer(handle, (char *)method, NULL, &result);
++	if (ACPI_FAILURE(status)) {
++		*val = -1;
++		return -1;
++	} else {
++		*val = result;
++		return 0;
++	}
 +}
 +
++static int set_acpi(int cm, int value)
++{
++	if (ehotk->cm_supported & (0x1 << cm)) {
++		const char *method = cm_setv[cm];
++		if (method == NULL)
++			return -ENODEV;
++		if (write_acpi_int(ehotk->handle, method, value, NULL))
++			printk(EEEPC_WARNING "Error writing %s\n", method);
++	}
++	return 0;
++}
++
++static int get_acpi(int cm)
++{
++	int value = -1;
++	if ((ehotk->cm_supported & (0x1 << cm))) {
++		const char *method = cm_getv[cm];
++		if (method == NULL)
++			return -ENODEV;
++		if (read_acpi_int(ehotk->handle, method, &value))
++			printk(EEEPC_WARNING "Error reading %s\n", method);
++	}
++	return value;
++}
++
++/*
++ * Sys helpers
++ */
 +static int parse_arg(const char *buf, unsigned long count, int *val)
 +{
 +	if (!count)
 +		return 0;
-+	if (count > 31)
-+		return -EINVAL;
 +	if (sscanf(buf, "%i", val) != 1)
 +		return -EINVAL;
 +	return count;
 +}
 +
-+static ssize_t store_proc(int cm, const char *buf, size_t count)
++static ssize_t store_sys_acpi(int cm, const char *buf, size_t count)
 +{
 +	int rv, value;
 +
 +	rv = parse_arg(buf, count, &value);
-+	if (rv > 0 && (ehotk->cm_supported & (0x1 << cm))) {
-+		const char *method = cm_setv[cm];
-+		if (method == NULL)
-+			return 0;
-+		if (!write_acpi_int(ehotk->handle, method, value, NULL))
-+			printk(EEEPC_WARNING "Error writing %s\n", method);
-+	}
++	if (rv > 0)
++		set_acpi(cm, value);
 +	return rv;
 +}
 +
-+static ssize_t show_proc(int cm, char *buf)
++static ssize_t show_sys_acpi(int cm, char *buf)
 +{
-+	int value = -1;
-+
-+	if ((ehotk->cm_supported & (0x1 << cm))) {
-+		const char *method = cm_getv[cm];
-+		if (method == NULL)
-+			return 0;
-+		if (!read_acpi_int(ehotk->handle, method, &value))
-+			printk(EEEPC_WARNING "Error reading %s\n", method);
-+	}
-+	return sprintf(buf, "%d\n", value);
-+}
-+
-+static ssize_t real_store_init(struct device *dev,
-+			       struct device_attribute *attr,
-+			       const char *buf, size_t count)
-+{
-+	int rv, value;
-+
-+	rv = parse_arg(buf, count, &value);
-+	if (!write_acpi_int(ehotk->handle, "INIT", value, NULL))
-+		printk(EEEPC_ERR "Hotkey initialization failed\n");
-+	else
-+		printk(EEEPC_INFO "Reset init flag 0x%x\n", value);
-+	return rv;
++	return sprintf(buf, "%d\n", get_acpi(cm));
 +}
 +
 +#define EEEPC_CREATE_DEVICE_ATTR(_name, _cm)				\
@@ -277,13 +319,13 @@ index 0000000..2e33117
 +				    struct device_attribute *attr,	\
 +				    char *buf)				\
 +	{								\
-+		return show_proc(_cm, buf);				\
++		return show_sys_acpi(_cm, buf);				\
 +	}								\
 +	static ssize_t store_##_name(struct device *dev,		\
 +				     struct device_attribute *attr,	\
 +				     const char *buf, size_t count)	\
 +	{								\
-+		return store_proc(_cm, buf, count);			\
++		return store_sys_acpi(_cm, buf, count);			\
 +	}								\
 +	static struct device_attribute dev_attr_##_name = {		\
 +		.attr = {						\
@@ -293,25 +335,15 @@ index 0000000..2e33117
 +		.store  = store_##_name,				\
 +	}
 +
-+EEEPC_CREATE_DEVICE_ATTR(brn, CM_ASL_PANELBRIGHT);
 +EEEPC_CREATE_DEVICE_ATTR(camera, CM_ASL_CAMERA);
 +EEEPC_CREATE_DEVICE_ATTR(cardr, CM_ASL_CARDREADER);
-+EEEPC_CREATE_DEVICE_ATTR(cpufv, CM_ASL_CPUFV);
 +EEEPC_CREATE_DEVICE_ATTR(disp, CM_ASL_DISPLAYSWITCH);
-+EEEPC_CREATE_DEVICE_ATTR(hdps, CM_ASL_BIOSFLASH);
-+EEEPC_CREATE_DEVICE_ATTR(init, -1);	/* fixed up in eeepc_hotk_add() */
-+EEEPC_CREATE_DEVICE_ATTR(lid, CM_ASL_LID);
 +EEEPC_CREATE_DEVICE_ATTR(wlan, CM_ASL_WLAN);
 +
 +static struct attribute *platform_attributes[] = {
-+	&dev_attr_brn.attr,
 +	&dev_attr_camera.attr,
 +	&dev_attr_cardr.attr,
-+	&dev_attr_cpufv.attr,
 +	&dev_attr_disp.attr,
-+	&dev_attr_hdps.attr,
-+	&dev_attr_init.attr,
-+	&dev_attr_lid.attr,
 +	&dev_attr_wlan.attr,
 +	NULL
 +};
@@ -320,6 +352,9 @@ index 0000000..2e33117
 +	.attrs = platform_attributes
 +};
 +
++/*
++ * Hotkey functions
++ */
 +static int eeepc_hotk_check(void)
 +{
 +	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
@@ -329,16 +364,16 @@ index 0000000..2e33117
 +	if (result)
 +		return result;
 +	if (ehotk->device->status.present) {
-+		if (!write_acpi_int(ehotk->handle, "INIT", init_flag,
++		if (write_acpi_int(ehotk->handle, "INIT", ehotk->init_flag,
 +				    &buffer)) {
 +			printk(EEEPC_ERR "Hotkey initialization failed\n");
 +			return -ENODEV;
 +		} else {
 +			printk(EEEPC_NOTICE "Hotkey init flags 0x%x\n",
-+			       init_flag);
++			       ehotk->init_flag);
 +		}
 +		/* get control methods supported */
-+		if (!read_acpi_int(ehotk->handle, "CMSG"
++		if (read_acpi_int(ehotk->handle, "CMSG"
 +				   , &ehotk->cm_supported)) {
 +			printk(EEEPC_ERR
 +			       "Get control methods supported failed\n");
@@ -348,7 +383,6 @@ index 0000000..2e33117
 +			       "Get control methods supported: 0x%x\n",
 +			       ehotk->cm_supported);
 +		}
-+		ehotk->cm_supported |= (0x1 << CM_ASL_LID);
 +	} else {
 +		printk(EEEPC_ERR "Hotkey device not present, aborting\n");
 +		return -EINVAL;
@@ -356,28 +390,30 @@ index 0000000..2e33117
 +	return 0;
 +}
 +
++static void notify_wlan(u32 *event)
++{
++	/* if DISABLE_ASL_WLAN is set, the notify code for fn+f2
++	   will always be 0x10 */
++	if (ehotk->cm_supported & (0x1 << CM_ASL_WLAN)) {
++		const char *method = cm_getv[CM_ASL_WLAN];
++		int value;
++		if (read_acpi_int(ehotk->handle, method, &value))
++			printk(EEEPC_WARNING "Error reading %s\n",
++			       method);
++		else if (value == 1)
++			*event = 0x11;
++	}
++}
++
 +static void eeepc_hotk_notify(acpi_handle handle, u32 event, void *data)
 +{
 +	if (!ehotk)
 +		return;
-+	/* if DISABLE_ASL_WLAN is set, the notify code for fn+f2
-+	   will always be 0x10 */
-+	if (event == NOTIFY_WLAN_ON && (DISABLE_ASL_WLAN & init_flag)) {
-+		int value;
-+		if (ehotk->cm_supported & (0x1 << CM_ASL_WLAN)) {
-+			const char *method = cm_getv[CM_ASL_WLAN];
-+			if (!read_acpi_int(ehotk->handle, method, &value))
-+				printk(EEEPC_WARNING "Error reading %s\n",
-+				       method);
-+			else if (value == 1)
-+				event = 0x11;
-+		}
-+	}
++	if (event == NOTIFY_WLAN_ON && (DISABLE_ASL_WLAN & ehotk->init_flag))
++		notify_wlan(&event);
 +	acpi_bus_generate_proc_event(ehotk->device, event,
 +				     ehotk->event_count[event % 128]++);
 +}
-+
-+static int ehotk_found;
 +
 +static int eeepc_hotk_add(struct acpi_device *device)
 +{
@@ -390,6 +426,7 @@ index 0000000..2e33117
 +	ehotk = kzalloc(sizeof(struct eeepc_hotk), GFP_KERNEL);
 +	if (!ehotk)
 +		return -ENOMEM;
++	ehotk->init_flag = DISABLE_ASL_WLAN | DISABLE_ASL_DISPLAYSWITCH;
 +	ehotk->handle = device->handle;
 +	strcpy(acpi_device_name(device), EEEPC_HOTK_DEVICE_NAME);
 +	strcpy(acpi_device_class(device), EEEPC_HOTK_CLASS);
@@ -398,16 +435,15 @@ index 0000000..2e33117
 +	result = eeepc_hotk_check();
 +	if (result)
 +		goto end;
-+	dev_attr_init.show = NULL;
-+	dev_attr_init.store = real_store_init;
 +	status = acpi_install_notify_handler(ehotk->handle, ACPI_SYSTEM_NOTIFY,
 +					     eeepc_hotk_notify, ehotk);
 +	if (ACPI_FAILURE(status))
 +		printk(EEEPC_ERR "Error installing notify handler\n");
-+	ehotk_found = 1;
 + end:
-+	if (result)
++	if (result) {
 +		kfree(ehotk);
++		ehotk = NULL;
++	}
 +	return result;
 +}
 +
@@ -425,16 +461,10 @@ index 0000000..2e33117
 +	return 0;
 +}
 +
-+static struct platform_driver platform_driver = {
-+	.driver = {
-+		.name = EEEPC_HOTK_FILE,
-+		.owner = THIS_MODULE,
-+	}
-+};
-+
-+static struct platform_device *platform_device;
-+
-+static void __exit eeepc_hotk_exit(void)
++/*
++ * exit/init
++ */
++static void __exit eeepc_laptop_exit(void)
 +{
 +	acpi_bus_unregister_driver(&eeepc_hotk_driver);
 +	sysfs_remove_group(&platform_device->dev.kobj,
@@ -443,18 +473,17 @@ index 0000000..2e33117
 +	platform_driver_unregister(&platform_driver);
 +}
 +
-+static int __init eeepc_hotk_init(void)
++static int __init eeepc_laptop_init(void)
 +{
 +	struct device *dev;
 +	int result;
 +
 +	if (acpi_disabled)
 +		return -ENODEV;
-+	init_flag = DISABLE_ASL_WLAN | DISABLE_ASL_DISPLAYSWITCH;
 +	result = acpi_bus_register_driver(&eeepc_hotk_driver);
 +	if (result < 0)
 +		return result;
-+	if (!ehotk_found) {
++	if (!ehotk) {
 +		acpi_bus_unregister_driver(&eeepc_hotk_driver);
 +		return -ENODEV;
 +	}
@@ -476,15 +505,15 @@ index 0000000..2e33117
 +	if (result)
 +		goto fail_sysfs;
 +	return 0;
-+ fail_sysfs:
++fail_sysfs:
 +	platform_device_del(platform_device);
-+ fail_platform_device2:
++fail_platform_device2:
 +	platform_device_put(platform_device);
-+ fail_platform_device1:
++fail_platform_device1:
 +	platform_driver_unregister(&platform_driver);
-+ fail_platform_driver:
++fail_platform_driver:
 +	return result;
 +}
 +
-+module_init(eeepc_hotk_init);
-+module_exit(eeepc_hotk_exit);
++module_init(eeepc_laptop_init);
++module_exit(eeepc_laptop_exit);
