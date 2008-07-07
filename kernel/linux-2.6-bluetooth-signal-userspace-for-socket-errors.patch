@@ -1,0 +1,59 @@
+From: Marcel Holtmann <marcel@holtmann.org>
+Date: Thu, 26 Jun 2008 20:15:15 +0000 (+0200)
+Subject: [Bluetooth] Signal user-space for HIDP and BNEP socket errors
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Fholtmann%2Fbluetooth-2.6.git;a=commitdiff_plain;h=c14bf10817f09ffc15e7f16e97d8119cd04c3ca8
+
+[Bluetooth] Signal user-space for HIDP and BNEP socket errors
+
+When using the HIDP or BNEP kernel support, the user-space needs to
+know if the connection has been terminated for some reasons. Wake up
+the application if that happens. Otherwise kernel and user-space are
+no longer on the same page and weird behaviors can happen.
+
+Signed-off-by: Marcel Holtmann <marcel@holtmann.org>
+---
+
+diff --git a/net/bluetooth/bnep/core.c b/net/bluetooth/bnep/core.c
+index f85d946..24e91eb 100644
+--- a/net/bluetooth/bnep/core.c
++++ b/net/bluetooth/bnep/core.c
+@@ -507,6 +507,11 @@ static int bnep_session(void *arg)
+ 	/* Delete network device */
+ 	unregister_netdev(dev);
+ 
++	/* Wakeup user-space polling for socket errors */
++	s->sock->sk->sk_err = EUNATCH;
++
++	wake_up_interruptible(s->sock->sk->sk_sleep);
++
+ 	/* Release the socket */
+ 	fput(s->sock->file);
+ 
+diff --git a/net/bluetooth/hidp/core.c b/net/bluetooth/hidp/core.c
+index 519cdb9..96434d7 100644
+--- a/net/bluetooth/hidp/core.c
++++ b/net/bluetooth/hidp/core.c
+@@ -581,6 +581,12 @@ static int hidp_session(void *arg)
+ 		hid_free_device(session->hid);
+ 	}
+ 
++	/* Wakeup user-space polling for socket errors */
++	session->intr_sock->sk->sk_err = EUNATCH;
++	session->ctrl_sock->sk->sk_err = EUNATCH;
++
++	hidp_schedule(session);
++
+ 	fput(session->intr_sock->file);
+ 
+ 	wait_event_timeout(*(ctrl_sk->sk_sleep),
+@@ -879,6 +885,10 @@ int hidp_del_connection(struct hidp_conndel_req *req)
+ 			skb_queue_purge(&session->ctrl_transmit);
+ 			skb_queue_purge(&session->intr_transmit);
+ 
++			/* Wakeup user-space polling for socket errors */
++			session->intr_sock->sk->sk_err = EUNATCH;
++			session->ctrl_sock->sk->sk_err = EUNATCH;
++
+ 			/* Kill session thread */
+ 			atomic_inc(&session->terminate);
+ 			hidp_schedule(session);
