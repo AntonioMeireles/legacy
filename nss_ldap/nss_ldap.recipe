@@ -1,0 +1,76 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('db')
+class Nss_ldap(CPackageRecipe):
+    name = 'nss_ldap'
+    version = '260'
+
+    if Use.ldap:
+        buildRequires = [
+            'autoconf:runtime', 'automake:runtime',
+            'libtool:runtime', 'krb5:devel', 'openssl:devel',
+            'cyrus-sasl:devel', 'openldap:devel',
+            'db:devel', 'zlib:devel' ]
+
+    def setup(r):
+        if not Use.ldap:
+            return
+
+        r.macros.libsasllibs = '-lsasl2'
+        r.macros.cflags += ' -fPIC'
+        r.macros.db_soversion = '4'
+
+        r.addArchive('http://www.padl.com/download/nss_ldap-%(version)s.tar.gz')
+
+        r.addSource('nss_ldap.versions')
+        r.addSource('README.TLS')
+        r.addSource('version.c')
+
+        r.addAction('cp %(datadir)s/libtool/config.{sub,guess} .')
+        r.Replace(r'-o \$\(INST_UID\) -g \$\(INST_GID\)', '', 'Makefile.am')
+        r.Run('autoreconf')
+
+        # Finally nss_ldap
+        r.macros.ldaplibs = ('-lldap -llber %(libsasllibs)s -lssl -lcrypto'
+                             ' -lkrb5 -lk5crypto -lz')
+        r.macros.staticlibs = '%(ldaplibs)s'
+        r.macros.sharedlibs = ' -ldl -lresolv -lc -ldb-%(db_soversion)s'
+
+        r.macros.alllibs= (' -L/usr/kerberos/%(lib)s'
+                           ' %(ldaplibs)s -lcom_err '
+                           ' -Wl,-Bdynamic %(sharedlibs)s ')
+
+        r.Environment('LIBS', '%(alllibs)s')
+        r.Environment('LDFLAGS', '-L/usr/kerberos/%(lib)s')
+        r.Configure(' --with-ldap=openldap --libdir=%(essentiallibdir)s'
+                    ' --enable-schema-mapping --enable-rfc2307bis ')
+        r.Make()
+
+        # Remove old .so and remake
+        r.Run('rm nss_ldap.so')
+        ldflags = ('-shared -Wl,--version-script=%(builddir)s/nss_ldap.versions'
+                   ' -Wl-Wl,-soname=libnss_ldap.so.2')
+        r.Make('nss_ldap_so_LDFLAGS="%s"' % ldflags)
+
+        r.MakeDirs('%(essentiallibdir)s/security',
+                   '%(libdir)s',
+                   '%(sysconfdir)s')
+        r.MakeInstall()
+
+        # Remove referenece to padl.com to avoid overloading server
+        r.Run("sed -i -e 's|dc=padl|dc=example|g' ldap.conf")
+        r.Install('ldap.conf', '%(sysconfdir)s/ldap.conf', mode=0644)
+        r.InitialContents('%(sysconfdir)s/ldap.conf')
+
+        r.Symlink('%(essentiallibdir)s/libnss_ldap.so.2',
+                  '%(libdir)s/libnss_ldap.so')
+        r.Remove('%(libdir)s/libnss_ldap.so.2')
+
+        # handle the docs
+        r.Doc('nsswitch.ldap', 'README.TLS')
+
+        r.Remove('%(sysconfdir)s/nsswitch.ldap')
