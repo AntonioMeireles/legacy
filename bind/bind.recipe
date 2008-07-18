@@ -9,7 +9,7 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
     name = 'bind'
     # we should keep this strange-looking version even when seemingly not
     # needed since bind versions often have -P1 or similar
-    archive_version = '9.4.2'
+    archive_version = '9.4.2-P1'
     version = archive_version.replace('-', '_')
     rpmRelease = '6.fc7'
     rpmUpVer = '9.4.0'
@@ -19,6 +19,8 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         'tetex-latex:runtime', 'tetex:runtime', ]
 
     def setup(r):
+        srpm2 = 'http://download.fedora.redhat.com/pub/fedora/linux/core/4/SRPMS/caching-nameserver-7.3-3.src.rpm'
+
         r.disableParallelMake()
         r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = r.version.split('.')[0]
@@ -28,6 +30,11 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         r.addSource('named.logrotate', rpm=r.srpm, dest='%(sysconfdir)s/logrotate.d/named')
         r.addSource('keygen.c', rpm=r.srpm)
         r.addPatch('globals.h.pid_path.patch')
+        r.addSource('ftp://ftp.internic.net/domain/named.root')
+        r.addSource('named.local', rpm=srpm2)
+        r.addSource('localhost.zone', rpm=srpm2)
+        r.addSource('named.conf', rpm=srpm2)
+        r.addSource('Copyright.caching-nameserver', rpm=srpm2)
 
         # CVE-2008-0122
         r.addPatch('http://security.freebsd.org/patches/SA-08:02/libc.patch', dir='lib/bind')
@@ -47,6 +54,19 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         r.Make()
         r.MakeInstall()
         r.Run('gcc %(cflags)s -o %(destdir)s/%(sbindir)s/dns-keygen keygen.c')
+
+        # need to do this after the install so that we overwrite the default
+        # with a more recent version
+        r.Install('named.root', '%(servicedir)s/named/named.ca')
+        r.Install('named.local', '%(servicedir)s/named/named.local')
+        r.Install('localhost.zone', '%(servicedir)s/named/localhost.zone')
+        r.Install('named.conf', '%(sysconfdir)s/named.conf')
+
+        r.Doc('Copyright.caching-nameserver')
+
+        r.Replace('%(localstatedir)s', '%(servicedir)s',
+                  '%(sysconfdir)s/named.conf')
+        r.Config('%(servicedir)s/named/')
 
         # glibc provides the following files
         r.Remove('%(includedir)s/arpa/inet.h',
@@ -71,7 +91,6 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         r.Doc('doc/*')
 
         r.MakeDirs('%(localstatedir)s/named/slaves')
-        r.MakeDirs('%(servicedir)s/named')
         r.MakeDirs('%(localstatedir)s/run/named')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/named')
         r.Ownership('root', 'named', '%(sysconfdir)s/rndc.key')
