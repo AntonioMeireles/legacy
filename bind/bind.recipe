@@ -31,8 +31,12 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         r.addSource('keygen.c', rpm=r.srpm)
         r.addPatch('globals.h.pid_path.patch')
         r.addSource('ftp://ftp.internic.net/domain/named.root')
+        r.addSource('named.broadcast', rpm=srpm2)
+        r.addSource('named.zero', rpm=srpm2)
         r.addSource('named.local', rpm=srpm2)
+        r.addSource('named.ip6.local', rpm=srpm2)
         r.addSource('localhost.zone', rpm=srpm2)
+        r.addSource('localdomain.zone', rpm=srpm2)
         r.addSource('named.conf', rpm=srpm2)
         r.addSource('Copyright.caching-nameserver', rpm=srpm2)
 
@@ -47,10 +51,12 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         r.macros.cflags += ' $(pkg-config --cflags openssl)'
         r.macros.cppflags += ' $(pkg-config --cflags-only-I openssl)'
         r.macros.ldflags += ' $(pkg-config --libs-only-L openssl)'
-        r.Configure('--with-libtool --localstatedir=%(localstatedir)s '
+        r.Configure('--with-libtool '
                     '--enable-threads --disable-openssl-version-check '
                     '--enable-libbind --enable-largefile --enable-ipv6 '
-                    '--with-openssl=%(prefix)s')
+                    '--with-openssl=%(prefix)s '
+                    # For named.pid file:
+                    '--localstatedir=%(localstatedir)s ')
         r.Make()
         r.MakeInstall()
         r.Run('gcc %(cflags)s -o %(destdir)s/%(sbindir)s/dns-keygen keygen.c')
@@ -58,8 +64,12 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
         # need to do this after the install so that we overwrite the default
         # with a more recent version
         r.Install('named.root', '%(servicedir)s/named/named.ca')
+        r.Install('named.broadcast', '%(servicedir)s/named/named.broadcast')
+        r.Install('named.zero', '%(servicedir)s/named/named.zero')
         r.Install('named.local', '%(servicedir)s/named/named.local')
+        r.Install('named.ip6.local', '%(servicedir)s/named/named.ip6.local')
         r.Install('localhost.zone', '%(servicedir)s/named/localhost.zone')
+        r.Install('localdomain.zone', '%(servicedir)s/named/localdomain.zone')
         r.Install('named.conf', '%(sysconfdir)s/named.conf')
 
         r.Doc('Copyright.caching-nameserver')
@@ -90,13 +100,15 @@ class Bind(RPMPackageRecipe,CPackageRecipe):
 
         r.Doc('doc/*')
 
-        r.MakeDirs('%(localstatedir)s/named/slaves')
+        r.MakeDirs('%(servicedir)s/named/slaves')
+        r.MakeDirs('%(servicedir)s/named/data')
         r.MakeDirs('%(localstatedir)s/run/named')
-        r.ExcludeDirectories(exceptions='%(localstatedir)s/named')
+        r.ExcludeDirectories(exceptions='%(servicedir)s/named')
         r.Ownership('root', 'named', '%(sysconfdir)s/rndc.key')
-        r.Ownership('root', 'named', '%(localstatedir)s/named')
         r.Ownership('root', 'named', '%(servicedir)s/named')
-        r.Ownership('named', 'named', '%(localstatedir)s/named/slaves')
+        r.Ownership('root', 'named', '%(servicedir)s/named')
+        r.Ownership('named', 'named', '%(servicedir)s/named/slaves')
+        r.Ownership('named', 'named', '%(servicedir)s/named/data')
         r.Ownership('named', 'named', '%(localstatedir)s/run/named')
 
         r.PackageSpec('bind-utils', '%(bindir)s/(host|nslookup|nsupdate|dig)',
