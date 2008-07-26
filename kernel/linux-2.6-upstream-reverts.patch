@@ -38,3 +38,229 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
  	return res;
  }
  
+From stable-bounces@linux.kernel.org Wed Jul  2 16:42:53 2008
+From: Michael Buesch <mb@bu3sch.de>
+Date: Thu, 3 Jul 2008 01:04:29 +0200
+Subject: b43: Do not return TX_BUSY from op_tx
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, John Linville <linville@tuxdriver.com>, bcm43xx-dev@lists.berlios.de
+Message-ID: <200807030104.30100.mb@bu3sch.de>
+Content-Disposition: inline
+
+From: Michael Buesch <mb@bu3sch.de>
+
+Never return TX_BUSY from op_tx. It doesn't make sense to return
+TX_BUSY, if we can not transmit the packet.
+Drop the packet and return TX_OK.
+This will fix the resume hang.
+
+Upstream commit is
+66193a7cef2239bfd1b9b96e304770facf7a49c7
+
+Signed-off-by: Michael Buesch <mb@bu3sch.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+
+---
+ drivers/net/wireless/b43/main.c |    9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/b43/main.c
++++ b/drivers/net/wireless/b43/main.c
+@@ -2607,7 +2607,7 @@ static int b43_op_tx(struct ieee80211_hw
+ 	int err;
+ 
+ 	if (unlikely(!dev))
+-		return NETDEV_TX_BUSY;
++		goto drop_packet;
+ 
+ 	/* Transmissions on seperate queues can run concurrently. */
+ 	read_lock_irqsave(&wl->tx_lock, flags);
+@@ -2619,7 +2619,12 @@ static int b43_op_tx(struct ieee80211_hw
+ 	read_unlock_irqrestore(&wl->tx_lock, flags);
+ 
+ 	if (unlikely(err))
+-		return NETDEV_TX_BUSY;
++		goto drop_packet;
++	return NETDEV_TX_OK;
++
++drop_packet:
++	/* We can not transmit this packet. Drop it. */
++	dev_kfree_skb_any(skb);
+ 	return NETDEV_TX_OK;
+ }
+ 
+From stable-bounces@linux.kernel.org Wed Jul  2 18:24:51 2008
+From: Michael Buesch <mb@bu3sch.de>
+Date: Thu, 3 Jul 2008 02:04:33 +0200
+Subject: b43: Fix possible MMIO access while device is down
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, John Linville <linville@tuxdriver.com>, bcm43xx-dev@lists.berlios.de
+Message-ID: <200807030204.33987.mb@bu3sch.de>
+Content-Disposition: inline
+
+From: Michael Buesch <mb@bu3sch.de>
+
+This fixes a possible MMIO access while the device is still down
+from a suspend cycle. MMIO accesses with the device powered down
+may cause crashes on certain devices.
+
+Upstream commit is
+33598cf261e393f2b3349cb55509e358014bfd1f
+
+Signed-off-by: Michael Buesch <mb@bu3sch.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/b43/leds.c |    3 +++
+ 1 file changed, 3 insertions(+)
+
+--- a/drivers/net/wireless/b43/leds.c
++++ b/drivers/net/wireless/b43/leds.c
+@@ -72,6 +72,9 @@ static void b43_led_brightness_set(struc
+ 	struct b43_wldev *dev = led->dev;
+ 	bool radio_enabled;
+ 
++	if (unlikely(b43_status(dev) < B43_STAT_INITIALIZED))
++		return;
++
+ 	/* Checking the radio-enabled status here is slightly racy,
+ 	 * but we want to avoid the locking overhead and we don't care
+ 	 * whether the LED has the wrong state for a second. */
+From stable-bounces@linux.kernel.org Wed Jul  2 16:42:46 2008
+From: Michael Buesch <mb@bu3sch.de>
+Date: Thu, 3 Jul 2008 01:06:32 +0200
+Subject: b43legacy: Do not return TX_BUSY from op_tx
+To: stable@kernel.org
+Cc: linux-wireless@vger.kernel.org, John Linville <linville@tuxdriver.com>, Stefano Brivio <stefano.brivio@polimi.it>, bcm43xx-dev@lists.berlios.de
+Message-ID: <200807030106.32960.mb@bu3sch.de>
+Content-Disposition: inline
+
+From: Michael Buesch <mb@bu3sch.de>
+
+Never return TX_BUSY from op_tx. It doesn't make sense to return
+TX_BUSY, if we can not transmit the packet.
+Drop the packet and return TX_OK.
+
+Upstream commit is
+eb803e419ca6be06ece2e42027bb4ebd8ec09f91
+
+Signed-off-by: Michael Buesch <mb@bu3sch.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+
+---
+ drivers/net/wireless/b43legacy/main.c |    6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/b43legacy/main.c
++++ b/drivers/net/wireless/b43legacy/main.c
+@@ -2350,8 +2350,10 @@ static int b43legacy_op_tx(struct ieee80
+ 	} else
+ 		err = b43legacy_dma_tx(dev, skb, ctl);
+ out:
+-	if (unlikely(err))
+-		return NETDEV_TX_BUSY;
++	if (unlikely(err)) {
++		/* Drop the packet. */
++		dev_kfree_skb_any(skb);
++	}
+ 	return NETDEV_TX_OK;
+ }
+ 
+From stable-bounces@linux.kernel.org Wed Jul  2 19:45:56 2008
+From: Michael Buesch <mb@bu3sch.de>
+Date: Thu, 3 Jul 2008 02:45:47 GMT
+Subject: b43legacy: Fix possible NULL pointer dereference in DMA code
+To: jejb@kernel.org, stable@kernel.org
+Message-ID: <200807030245.m632jlDH007664@hera.kernel.org>
+
+From: Michael Buesch <mb@bu3sch.de>
+
+commit 2f9ec47d0954f9d2e5a00209c2689cbc477a8c89 upstream
+
+This fixes a possible NULL pointer dereference in an error path of the
+DMA allocation error checking code. This is also necessary for a future
+DMA API change that is on its way into the mainline kernel that adds
+an additional dev parameter to dma_mapping_error().
+
+Signed-off-by: Michael Buesch <mb@bu3sch.de>
+Signed-off-by: John W. Linville <linville@tuxdriver.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/net/wireless/b43legacy/dma.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/drivers/net/wireless/b43legacy/dma.c
++++ b/drivers/net/wireless/b43legacy/dma.c
+@@ -876,6 +876,7 @@ struct b43legacy_dmaring *b43legacy_setu
+ 	if (!ring)
+ 		goto out;
+ 	ring->type = type;
++	ring->dev = dev;
+ 
+ 	nr_slots = B43legacy_RXRING_SLOTS;
+ 	if (for_tx)
+@@ -922,7 +923,6 @@ struct b43legacy_dmaring *b43legacy_setu
+ 				 DMA_TO_DEVICE);
+ 	}
+ 
+-	ring->dev = dev;
+ 	ring->nr_slots = nr_slots;
+ 	ring->mmio_base = b43legacy_dmacontroller_base(type, controller_index);
+ 	ring->index = controller_index;
+From stable-bounces@linux.kernel.org Wed Jul  2 19:06:00 2008
+From: Larry Finger <Larry.Finger@lwfinger.net>
+Date: Wed, 02 Jul 2008 20:36:31 -0500
+Subject: mac80211: detect driver tx bugs
+To: stable@kernel.org, Johannes Berg <johannes@sipsolutions.net>
+Cc: linux-wireless@vger.kernel.org
+Message-ID: <486c2d1f.ntPY4RgDHDbYfPvX%Larry.Finger@lwfinger.net>
+
+From: Johannes Berg <johannes@sipsolutions.net>
+
+When a driver rejects a frame in it's ->tx() callback, it must also
+stop queues, otherwise mac80211 can go into a loop here. Detect this
+situation and abort the loop after five retries, warning about the
+driver bug.
+
+This patch was added to mainline as
+commit ef3a62d272f033989e83eb1f26505f93f93e3e69.
+
+Thanks to Larry Finger <Larry.Finger@lwfinger.net> for doing the -stable
+port.
+
+Cc: Larry Finger <Larry.Finger@lwfinger.net>
+Signed-off-by: Johannes Berg <johannes@sipsolutions.net>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+---
+ net/mac80211/tx.c |    9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -1090,7 +1090,7 @@ static int ieee80211_tx(struct net_devic
+ 	ieee80211_tx_handler *handler;
+ 	struct ieee80211_txrx_data tx;
+ 	ieee80211_txrx_result res = TXRX_DROP, res_prepare;
+-	int ret, i;
++	int ret, i, retries = 0;
+ 
+ 	WARN_ON(__ieee80211_queue_pending(local, control->queue));
+ 
+@@ -1181,6 +1181,13 @@ retry:
+ 		if (!__ieee80211_queue_stopped(local, control->queue)) {
+ 			clear_bit(IEEE80211_LINK_STATE_PENDING,
+ 				  &local->state[control->queue]);
++			retries++;
++			/*
++			 * Driver bug, it's rejecting packets but
++			 * not stopping queues.
++			 */
++			if (WARN_ON_ONCE(retries > 5))
++				goto drop;
+ 			goto retry;
+ 		}
+ 		memcpy(&store->control, control,
