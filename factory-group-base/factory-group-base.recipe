@@ -1,0 +1,116 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# version 2 as published by the Free Software Foundation and
+# available from http://www.rpath.com/licenses/copyright/GPL-2
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+
+loadSuperClass('factory-base-packagecreator')
+class BaseGroupFactory(BasePackageCreatorFactory):
+
+    version = '1.0'
+    name = 'factory-group-base'
+
+    descriptionFile = 'appliance-manifest.xml'
+    # To be overridden in factory subclasses
+    SuperClassRecipe = "group-appliance"
+
+    _factoryDefinitionFile = 'appliance-manifest.xml'
+
+    def readBuildDescription(self):
+        """Read the build description checked in by the UI"""
+        if self.descriptionFile not in self.sources:
+            return None
+
+        from xml.dom import minidom
+        from conary import conaryclient
+
+        def getFirstNodeValue(nodes, default = None):
+            if not nodes:
+                return default
+            node = nodes[0]
+            for child in [x for x in node.childNodes if x.nodeType == x.TEXT_NODE]:
+                return child.data
+            return None
+
+        def getTroveList(dom, tagName):
+            troves = dom.getElementsByTagName(tagName)
+            troves = troves[0].getElementsByTagName('trove')
+            trovelist = []
+            for trove in troves:
+                n, v, f = conaryclient.cmdline.parseTroveSpec(getFirstNodeValue([trove]).encode('ascii'))
+                if f is not None:
+                    f = str(f)
+                trovelist.append((n, v, f))
+            return trovelist
+
+        def getSearchPathList(dom):
+            pathnodes = dom.getElementsByTagName('searchPaths')[0].getElementsByTagName('searchPath')
+            ret = []
+            for x in pathnodes:
+                ret.append(getFirstNodeValue([x]).encode('ascii'))
+            return ret
+
+        def xmlToDict(stream):
+            dom = minidom.parse(stream)
+            ret = {}
+            #The trovelists
+            ret['explicitTroves'] = getTroveList(dom, 'explicitTroves')
+            ret['implicitTroves'] = getTroveList(dom, 'implicitTroves')
+
+            ret['troveName'] = getFirstNodeValue(dom.getElementsByTagName('troveName')).encode('ascii')
+            ret['troveVersion'] = getFirstNodeValue(dom.getElementsByTagName('troveVersion')).encode('ascii')
+
+            ret['searchPath'] = getSearchPathList(dom)
+            return ret
+
+        f = self.openSourceFile(self.descriptionFile)
+        return xmlToDict(f)
+
+    def getRecipeName(self, buildDescription):
+        """Extract the name out of the build description"""
+        return buildDescription['troveName']
+
+    def getPackageList(self, buildDescription):
+        return buildDescription['implicitTroves'] + buildDescription['explicitTroves']
+
+    def getSearchPath(self, buildDescription):
+        return buildDescription['searchPath']
+
+    def getRecipeClass(self):
+        """Main function that gets called by Conary's build process.
+        """
+        bdesc = self.readBuildDescription()
+        klass = loadSuperClass(self.SuperClassRecipe)
+        if klass is None:
+            klass = self.__moduleObj__.__dict__.get('ApplianceGroupRecipe')
+        if klass is None:
+            raise RuntimeError('Superclass was not found. A newer version of conary is requried.')
+        class BuildRecipeClass(klass):
+            buildDescription = bdesc
+            name = self.getRecipeName(bdesc)
+            version = self.getRecipeVersion(bdesc)
+
+            additionalSearchPath = self.getSearchPath(bdesc)
+            autoResolve = True
+            depCheck = True
+            checkPathConflicts = True
+            imageGroup = True
+
+            def addRecipePackages(r):
+                """ Override this method in your recipe if you want to specify additional troves """
+
+            def addPackages(r):
+                r.addRecipePackages()
+                for x in self.getPackageList(bdesc):
+                    r.add(*x) #This is a hack since there's no r.AddOrReplace()
+                    r.replace(*x)
+
+        return BuildRecipeClass
