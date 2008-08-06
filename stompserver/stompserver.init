@@ -10,31 +10,45 @@
 # Source function library
 . /etc/init.d/functions
 
-[ -f /etc/sysconfig/stompserver ] && . /etc/sysconfig/stompserver
-
 LONGNAME="StompServer Message Queue"
-CONFIG=/etc/stompserver.conf
-DAEMON=stompserver
-PIDFILE=/tmp/stompserver/log/stompserver.pid
-OPTIONS=
+PIDFILE='/var/run/stompserver.pid'
+DAEMON='/usr/bin/stompserver'
 
-running() {
-    [ -f "$PIDFILE" ] && kill -0 `cat "$PIDFILE"` 2>/dev/null
-}
+JOURNAL=/var/lib/stompserver/
+BIND_ADDR=0.0.0.0
+PORT=61613
 
 start() {
     echo -n "Starting $LONGNAME:"
-    daemon $DAEMON -C "$CONFIG" "$OPTIONS" ">/dev/null"
+    daemon $DAEMON -f -b $BIND_ADDR -p $PORT -j $JOURNAL
     echo ""
+
+    i=5
+    echo -n "Waiting for $LONGNAME: "
+    while [[ $i > 0 ]] && ! netstat -ltn |grep -q :$PORT
+    do
+        i=$((i - 1))
+        echo -n "."
+        sleep 1
+    done
+    if ! netstat -ltn |grep -q :$PORT
+    then
+        echo " $LONGNAME did not start"
+        killproc $DAEMON
+        exit 2
+    fi
+
+    echo " done"
 }
 
 stop() {
     echo -n "Stopping $LONGNAME:"
     killproc $DAEMON
     echo ""
-    if [ "$1" = "--wait" ] && running; then
+    if [ "$1" = "--wait" ]; then
         echo -n "Waiting for $LONGNAME server to terminate..."
-        while running; do sleep 1; done
+        while [ -f "$PIDFILE" ]; do sleep 1; done
+        echo "done."
     fi
 }
 

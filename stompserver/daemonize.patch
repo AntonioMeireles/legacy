@@ -1,0 +1,65 @@
+diff -ur stompserver-0.9.7/bin/stompserver stompserver-0.9.7.new/bin/stompserver
+--- stompserver-0.9.7/bin/stompserver	2006-11-02 14:33:28.000000000 -0500
++++ stompserver-0.9.7.new/bin/stompserver	2007-10-02 22:56:09.000000000 -0400
+@@ -1,28 +1,52 @@
++#!/usr/bin/ruby
++
+ require 'rubygems'
+ require 'stomp_server'
+ require 'frame_journal'
+ require 'optparse'
++require 'fileutils'
+ 
+ opts = OptionParser.new
+ 
+ port = 61613
+-bind = "127.0.0.1"
+-bind = "localhost"
++bind = "0.0.0.0"
+ journal = ".stompserver"
++daemon = false
+ 
+ opts.on("-p", "--port=PORT", Integer, "Change the port (default: 61613)") {|p| port = p}
+ opts.on("-b", "--bind=ADDR", String, "Change the binding adapter (default: localhost)") {|a| bind = a}
+ opts.on("-j", "--journal=DIR", String, "Change the journal directory (default: ./.stompserver)") {|j| journal = j}
+ opts.on("-d", "--debug", "Enable debug output") {$DEBUG=1}
++opts.on("-f", "--fork", "Enable forked daemon mode") {|f| daemon = f}
+ opts.on("-h", "--help", "Show this message") do
+-  puts opts
+-  exit
++    puts opts
++    exit
+ end
+ 
+ puts opts.parse(ARGV)
+- 
+-StompServer.setup(FrameJournal.new(journal))
+-EventMachine::run do
+-  puts "Stomp Server starting on port #{port}"
+-  EventMachine.start_server bind, port, StompServer
++
++def run(port, bind, journal)
++    StompServer.setup(FrameJournal.new(journal))
++    EventMachine::run do
++        puts "Stomp Server starting on port #{port}"
++        EventMachine.start_server bind, port, StompServer
++    end
++end
++
++if daemon
++    fork do
++        Process.setsid
++        pid = fork
++        if pid
++            File.open('/var/run/stompserver.pid', 'w').write("#{pid}\n")
++            exit
++        end
++
++        STDIN.reopen "/dev/null"
++        STDOUT.reopen "/dev/null", "a"
++        STDERR.reopen STDOUT
++        run(port, bind, journal)
++    end
++else
++    run(port, bind, journal)
+ end
