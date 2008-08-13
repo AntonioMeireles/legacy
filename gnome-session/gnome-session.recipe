@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('gnomepackage')
+loadSuperClass('rpmpackage')
+class GnomeSession(RPMPackageRecipe,GnomePackageRecipe):
+
+    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'atk:devel', 'audiofile:devel', 'cairo:devel', 'libXrandr:devel', 'xrdb:runtime', 'gnome-control-center:devel', 'fontconfig:devel', 'freetype:devel', 'gnome-keyring:devel', 'libart_lgpl:devel', 'libgnomecanvas:devel', 'libpng:devel', 'libxml2:devel', 'pango:devel', 'popt:devel', 'tcp_wrappers:devel', 'esound:devel', 'glib:devel', 'gnome-vfs:devel', 'libbonobo:devel', 'libbonoboui:devel', 'libgnome:devel', 'libgnomeui:devel', 'GConf:runtime', 'desktop-file-utils:runtime', 'gettext:runtime', 'glib:runtime', 'gnome-desktop:devel', 'gnome-keyring:runtime', 'krb5-workstation:runtime', 'perl:runtime', 'startup-notification:devel', 'dbus-glib:devellib', 'dbus:devel','expat:devel', 'pulseaudio:runtime', 'rsh:runtime', 'gnome-common:runtime', 'gnome-common:devel', 'gnome-settings-daemon:devel' ]
+
+    name = 'gnome-session'
+    version = '2.22.3'
+    rpmRelease = '1.fc9'
+
+    extraConfig = GnomePackageRecipe.extraConfig
+    extraConfig +=   ' --with-halt-command=%(bindir)s/poweroff '
+    extraConfig +=   ' --with-reboot-command=%(bindir)s/reboot'
+
+    rpmPatches = [  'gnome-session-2.2.2-icons.patch',
+                    # too much crashing
+                   'gnome-session-2.13.4-no-crashes.patch',
+                   # http://bugzilla.gnome.org/show_bug.cgi?id=350848
+                   # The gconf bits weren't accepted upstream, so we'll
+                   # need to figure something out here
+                   'gnome-session-2.17.5-window-manager.patch',
+                   ]
+    rpmSources = [ 'redhat-default-session', 
+                   'gnome.desktop' ]
+
+    def setup(r):
+        RPMPackageRecipe.unpack(r)
+        r.Run("""sed -i -e 's/GNOME_COMPILE_WARNINGS.*//' configure.in""")
+        r.Run('aclocal ; automake ; intltoolize --force ;  autoheader ; autoconf')
+
+        GnomePackageRecipe.build(r)
+        GnomePackageRecipe.install(r)
+
+        r.Install('gnome.desktop', '%(datadir)s/xsessions/', mode=0644)
+        r.Remove('%(datadir)s/gnome/default.session')
+        r.Install('redhat-default-session', '%(datadir)s/gnome/default.session', mode=0644)
+
+        r.Remove('%(datadir)s/pixmaps/splash')
+
+        r.Requires('file: %(bindir)s/pam-panel-icon', '%(name)s:runtime',)
+
+
