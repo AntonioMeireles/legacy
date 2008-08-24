@@ -7,8 +7,8 @@
 loadSuperClass('rpmpackage')
 class X11InputSynaptics(RPMPackageRecipe, AutoPackageRecipe):
     name = 'x11-input-synaptics'
-    version = '0.14.6'
-    rpmRelease = '164'
+    version = '0.15.0'
+    rpmRelease = '24'
     isOPENsuse = True
 
     buildRequires = [ 'pkgconfig:devel', 'ghostscript:runtime', 'linuxdoc-tools:runtime',
@@ -19,15 +19,16 @@ class X11InputSynaptics(RPMPackageRecipe, AutoPackageRecipe):
                       'pkgconfig:devel' , 'm4:runtime', 'expat:devel',
                       'util-macros:devel', 'libX11:devel', 'libXi:devel',
                       'imake:runtime', 'xorg-cf-files:data', 'gccmakedep:runtime',
-                      'texinfo:runtime', 'which:runtime']
+                      'texinfo:runtime', 'which:runtime', 'libpciaccess:devel']
 
-    tarballName = 'synaptics-%(version)s.tar.bz2'
+    tarballName = 'xf86-input-synaptics-%(version)s.tar.bz2'
 
     rpmArchives = [ 'xorg_gunze.tgz' , 'gunze-tools.tgz' ]
 
-    rpmPatches = [ 'synaptics-%(version)s.diff',
-                   'wait.diff', ]
-
+    rpmPatches = [ 'wait.diff',
+                   'tap2click.diff',
+                   'random-data.diff',
+                   'xf86-input-synaptics.diff',]
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
@@ -38,25 +39,18 @@ class X11InputSynaptics(RPMPackageRecipe, AutoPackageRecipe):
         r.addPatch('xorg_gunze.diff', dir = 'programs/Xserver/hw/xfree86/input/gunze/', rpm=r.srpm)
         r.addPatch('gunze-tools.diff', dir = 'gunze-tools', rpm=r.srpm)
 
-        r.Create('VERSION', contents='%(version)s')
-        r.Create('VERSION_ID', contents='1406')
-
     def configure(r):
         r.macros.optflags += ' -fno-strict-aliasing  '
-        r.Run('xmkmf -a')
+        r.Configure()
         r.Run('xmkmf -a', dir = 'programs/Xserver/hw/xfree86/input/gunze')
 
         # fixes "undefined symbol: __stack_chk_fail_local" (Bug #242319)
-        r.Replace(['-nostdlib',''],['-lgcc',''],'Makefile')
         r.Replace(['-nostdlib',''],['-lgcc',''], 'programs/Xserver/hw/xfree86/input/gunze/Makefile')
 
         r.macros.ldflags += '-lm -L%(libdir)s/ -lX11'
 
     def make(r):
         r.Make('CDEBUGFLAGS="%(optflags)s -fno-strict-aliasing -I/usr/include/pixman-1"')
-        r.Make('synclient')
-        r.Make('syndaemon')
-
         r.Make('CDEBUGFLAGS="%(optflags)s -fno-strict-aliasing -I/usr/include/pixman-1"', dir = 'programs/Xserver/hw/xfree86/input/gunze/')
         r.Make(dir = 'gunze-tools')
 
@@ -65,5 +59,3 @@ class X11InputSynaptics(RPMPackageRecipe, AutoPackageRecipe):
         r.MakeInstall('MODULEDIR=%(libdir)s/xorg/modules', dir = 'programs/Xserver/hw/xfree86/input/gunze/')
         r.MakeInstall('BINDIR=%(destdir)s/%(bindir)s', dir = 'gunze-tools')
 
-        r.Install('synclient', '%(bindir)s/')
-        r.Install('syndaemon', '%(bindir)s/')
