@@ -6,7 +6,7 @@
 
 class SblimSfcb(AutoPackageRecipe):
     name = 'sblim-sfcb'
-    version = '1.3.0'
+    version = '1.3.2preview'
 
     buildRequires = [
         'chkconfig:runtime',
@@ -39,11 +39,16 @@ class SblimSfcb(AutoPackageRecipe):
         r.Install('%(localstatedir)s/lib/sfcb/stage/default.reg',
                   '%(localstatedir)s/lib/sfcb/registration/providerRegister')
 
-        # Get rid of DESTDIR in sfcbrepos, it's confusing the file wrapper
-        r.Copy("sfcbrepos", "sfcbrepos.local")
-        r.Replace("\$\{DESTDIR\}", "", "sfcbrepos.local")
-        # Use filewrap to make the script run in place
-        r.Run("sh sfcbrepos.local -f", filewrap = True)
+        r.Replace('sfcbmof', '$DESTDIR/usr/bin/sfcbmof', "sfcbrepos")
+        r.Environment('DESTDIR', '%(destdir)s')
+        r.Environment('LD_LIBRARY_PATH', '%(destdir)s/usr/bin')
+
+        # Copy header files, they are not installed automatically
+        for f in ['cmpidt.h', 'cmpift.h', 'cmpimacs.h', 'cmpios.h', 'cmpipl.h']:
+            r.Install(f, "%(includedir)s/cmpi/")
+
+        # Create the interop dir
+        r.MakeDirs("%(localstatedir)s/lib/sfcb/registration/repository/root/interop")
 
     def policy(r):
-        r.ExcludeDirectories(exceptions="%(localstatedir)s/lib/sfcb/registration/repository/root/cimv2")
+        r.ExcludeDirectories(exceptions="%(localstatedir)s/lib/sfcb/registration/repository/root/.*")
