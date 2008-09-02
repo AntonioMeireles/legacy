@@ -88,6 +88,27 @@ class BasePackageCreatorFactory(Factory):
         f = self.openSourceFile(self.descriptionFile)
         return xmlToDict(f)
 
+    def getFileArches(self):
+        import simplejson
+        from conary.build import errors
+        res = {}
+        if 'MANIFEST' in self.sources:
+            f = self.openSourceFile('MANIFEST')
+            for line in [x.strip() for x in f.readlines()]:
+                if line.startswith('#'):
+                    continue
+                data = line.split(None, 1)
+                if len(data) != 2:
+                    continue
+                fileType, fileData = data
+                if fileData[0] == '[':
+                    fileName, arches = simplejson.loads(fileData)
+                else:
+                    fileName = fileData
+                    arches = []
+                res[fileName] = arches
+            f.close()
+        return res
 
     def getRecipeName(self, buildDescription):
         """Extract the name out of the build description"""
@@ -114,6 +135,18 @@ class BasePackageCreatorFactory(Factory):
 
             sourceFiles = self.RecipeClass.extractSources(self.sources,
                                                           self.openSourceFile)
+
+            fileArches = self.getFileArches()
+
+            def fileMatchesArch(r, fileName):
+                arches = r.fileArches.get(fileName, [])
+                if not arches:
+                    return True
+                for arch in arches:
+                    if Arch.get(arch):
+                        return True
+                return False
+
             def setup(r):
                 r.preProcess()
                 r.recipeClassSetup()
