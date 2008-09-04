@@ -1,0 +1,55 @@
+#
+# Copyright (c) 2006-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+import datetime
+
+class AnacondaTemplates(PackageRecipe):
+    name = 'anaconda-templates'
+    version = datetime.date.today().strftime("%Y%m%d")
+    buildRequires = [ 'anaconda:runtime', 'coreutils:runtime',
+                      'diffutils:runtime', 'findutils:runtime',
+                      'fontconfig:runtime', 'gawk:runtime',
+                      'glibc:runtime', 'gnupg:runtime', 'grep:runtime',
+                      'mktemp:runtime', 'module-init-tools:runtime',
+                      'netpbm:runtime', 'openssh:runtime',
+                      'syslinux:runtime', 'mkfontdir:runtime',
+                      'hwdata:config', 'gettext:runtime',
+                      'binutils:runtime', 'elfutils:runtime']
+
+    def setup(r):
+        r.addSource('template.conf')
+        r.addSource('gentemplates', macros=True, mode=0755)
+        r.addSource('keymaps.gz')
+
+        pkgBlackList = [ 'nss', 'nspr', 'raidtools', 'reiserfs-utils',
+            'xorg-x11', 'xorg-x11-ISO8859-9-75dpi-fonts', 'xorg-x11-xfs',
+            'xorg-x11-ISO8859-2-75dpi-fonts', 'xorg-x11-libs-data',
+            'xorg-x11-100dpi-fonts', 'xorg-x11-fonts', 'xorg-x11-xauth',
+            'xorg-x11-ISO8859-15-75dpi-fonts', 'prelink',
+            'xorg-x11-base-fonts', 'xorg-x11-font-utils', 'modutils',
+            'zenity', ]
+
+        r.Environment('ANACONDA_CONARY_PACKAGE_BLACKLIST',
+                      ' '.join(pkgBlackList))
+
+        r.Replace('DESTDIR', '%(destdir)s', 'template.conf')
+        r.Replace('VERSION', '%(version)s', 'template.conf')
+        if Arch.x86:
+            r.Replace('ARCH', 'i386', 'template.conf')
+        if Arch.x86_64:
+            r.Replace('ARCH', 'x86_64', 'template.conf')
+        r.Run('./gentemplates')
+        r.Install('keymaps.gz', '/makebootdisk.dir/etc/', mode=0644)
+
+        # Policy exceptions, conary-policy really doesnt like these trees
+        # but we dont want to mess with them.
+
+        r.DanglingSymlinks(exceptions='.*')
+        r.LinkCount(exceptions='.*')
+        r.ExcludeDirectories(exceptions='.*')
+        r.Requires(exceptDeps='.*')
+        r.Strip(exceptions='.*')
+        r.RemoveNonPackageFiles(exceptions='.*')
