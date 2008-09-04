@@ -1,0 +1,115 @@
+From ivdoorn@gmail.com Sun Aug  3 17:12:25 2008
+Return-Path: <ivdoorn@gmail.com>
+Received: from nf-out-0910.google.com (nf-out-0910.google.com
+  [64.233.182.184]) by ra.tuxdriver.com (8.14.0/8.14.0) with ESMTP id
+  m73LCJqn009460 for <linville@tuxdriver.com>; Sun, 3 Aug 2008 17:12:25
+  -0400
+Received: by nf-out-0910.google.com with SMTP id b2so643681nfb.27 for
+  <linville@tuxdriver.com>; Sun, 03 Aug 2008 14:12:19 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com;
+  s=gamma;
+  h=domainkey-signature:received:received:to:subject:date:user-agent:cc
+  :references:in-reply-to:mime-version:content-type
+  :content-transfer-encoding:content-disposition:message-id:from;
+  bh=s7h1ixGm//YGAI/Ng805q8kc8RPIIOoKaN+L70atiSE=;
+  b=g3Lftvf2uq5bZJkrO9y42kDsZHSiWd1hKxJTbjNtwtlnpUytxswmdXKZk13uJ3mESd
+  6W1TUwXGtQGv+jCpfH5aZdXMSBVkITICDA+Rw14yodmC5LpbqL5XtfoFyicO1MzE+Do5
+  wv+JF7iBrJWSnMAbh5JJSFrTXuuPmx6NaGV80=
+DomainKey-Signature: a=rsa-sha1; c=nofws; d=gmail.com; s=gamma;
+  h=to:subject:date:user-agent:cc:references:in-reply-to:mime-version
+  :content-type:content-transfer-encoding:content-disposition
+  :message-id:from;
+  b=nl1crWYFIqlGOt3B8eyfvvIGTHrBT1eEPo+FYasCTZcvveDiaPUZpa+XCr0sAfHNeO
+  b+IIvfZeehDGoiirqAfiBSHOJdMNhAzp9epkIhGcGKpju7gOm2e5n+THMmwV4RaJHLu4
+  sxGY8+D0zJdn5vn/urxYM5N81Uysk/bh40tLg=
+Received: by 10.210.50.5 with SMTP id x5mr16018439ebx.117.1217797939208;
+  Sun, 03 Aug 2008 14:12:19 -0700 (PDT)
+Received: from ?192.168.8.39? ( [212.129.165.99]) by mx.google.com with
+  ESMTPS id b30sm12659027ika.3.2008.08.03.14.12.16 (version=SSLv3
+  cipher=RC4-MD5); Sun, 03 Aug 2008 14:12:17 -0700 (PDT)
+To: "John W. Linville" <linville@tuxdriver.com>
+Subject: [PATCH v2] rt2x00: Disable link tuning in rt2500usb
+Date: Sun, 3 Aug 2008 23:36:01 +0200
+User-Agent: KMail/1.9.9
+Cc: linux-wireless@vger.kernel.org, rt2400-devel@lists.sourceforge.net,
+  "Stefanik =?utf-8?q?G=C3=A1bor?=" <netrolller.3d@gmail.com>
+References: <200808031657.27710.IvDoorn@gmail.com>
+In-Reply-To: <200808031657.27710.IvDoorn@gmail.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+Message-Id: <200808032336.01359.IvDoorn@gmail.com>
+From: Ivo van Doorn <ivdoorn@gmail.com>
+X-Spam-Status: No, score=-1.7 required=3.0 tests=AWL,BAYES_00,
+  DNS_FROM_RFC_POST,SPF_PASS autolearn=no version=3.1.8-gr1
+X-Spam-Checker-Version: SpamAssassin 3.1.8-gr1 (2007-02-13) on
+  ra.tuxdriver.com
+Content-Length: 2396
+
+From 921724b82bebfbfe4b4f70940bba748923738cb4 Mon Sep 17 00:00:00 2001
+From: Ivo van Doorn <IvDoorn@gmail.com>
+Date: Sun, 3 Aug 2008 15:34:53 +0200
+Subject: [PATCH] rt2x00: Disable link tuning in rt2500usb
+
+In the legacy rt2570 driver the link tuner was never
+really called. And now the reason has finally become
+apparent: It breaks TX capabilities
+
+As soon as the device has been associated all following
+TX frames will be queued in the hardware and never transmitted
+to the air. Disabling sections of the link tuner did not
+have the expected result, but completely disabling the
+link tuner did have the right result (Both of my rt2570 devices
+came back to life).
+
+This should fix Fedora bug: 411481
+
+v2: Fix typos
+
+Signed-off-by: Ivo van Doorn <IvDoorn@gmail.com>
+---
+ drivers/net/wireless/rt2x00/rt2500usb.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/wireless/rt2x00/rt2500usb.c
+b/drivers/net/wireless/rt2x00/rt2500usb.c
+index c6f6eb6..5e6383d 100644
+--- a/drivers/net/wireless/rt2x00/rt2500usb.c
++++ b/drivers/net/wireless/rt2x00/rt2500usb.c
+@@ -633,6 +633,16 @@ static void rt2500usb_reset_tuner(struct rt2x00_dev *rt2x00dev)
+ 	rt2x00dev->link.vgc_level = value;
+ }
+
++/*
++ * NOTE: This function is directly ported from legacy driver, but
++ * despite it being declared it was never called. Although link tuning
++ * sounds like a good idea, and usually works well for the other drivers,
++ * it does _not_ work with rt2500usb. Enabling this function will result
++ * in TX capabilities only until association kicks in. Immediately
++ * after the successful association all TX frames will be kept in the
++ * hardware queue and never transmitted.
++ */
++#if 0
+ static void rt2500usb_link_tuner(struct rt2x00_dev *rt2x00dev)
+ {
+ 	int rssi = rt2x00_get_link_rssi(&rt2x00dev->link);
+@@ -752,6 +762,9 @@ dynamic_cca_tune:
+ 		rt2x00dev->link.vgc_level = r17;
+ 	}
+ }
++#else
++#define rt2500usb_link_tuner	NULL
++#endif
+
+ /*
+  * Initialization functions.
+@@ -1737,6 +1750,7 @@ static int rt2500usb_probe_hw(struct rt2x00_dev *rt2x00dev)
+ 	__set_bit(DRIVER_REQUIRE_ATIM_QUEUE, &rt2x00dev->flags);
+ 	__set_bit(DRIVER_REQUIRE_BEACON_GUARD, &rt2x00dev->flags);
+ 	__set_bit(DRIVER_REQUIRE_SCHEDULED, &rt2x00dev->flags);
++	__set_bit(CONFIG_DISABLE_LINK_TUNING, &rt2x00dev->flags);
+
+ 	/*
+ 	 * Set the rssi offset.
+--
+1.5.6.1

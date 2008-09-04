@@ -1,0 +1,79 @@
+From: venkatesh.pallipadi@intel.com <venkatesh.pallipadi@intel.com>
+Date: Thu, 31 Jul 2008 02:21:43 +0000 (-0700)
+Subject: cpuidle: Menu governor fix wrong usage of measured_us
+X-Git-Tag: v2.6.27-rc4~59^2^2~1
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=320eee776357db52d6fcfb11cff985b1976a4595
+
+cpuidle: Menu governor fix wrong usage of measured_us
+
+There is a bug in menu governor where we have
+		if (data->elapsed_us < data->elapsed_us + measured_us)
+
+with measured_us already having elapsed_us added in tickless case here
+	unsigned int measured_us =
+		cpuidle_get_last_residency(dev) + data->elapsed_us;
+
+Also, it should be last_residency, not measured_us, that need to be used to
+do comparing and distinguish between expected & non-expected events.
+
+Refactor menu_reflect() to fix these two problems.
+
+Signed-off-by: Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
+Signed-off-by: Wei Gang <gang.wei@intel.com>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+---
+
+diff --git a/drivers/cpuidle/governors/menu.c b/drivers/cpuidle/governors/menu.c
+index b8f3e21..8d7cf3f 100644
+--- a/drivers/cpuidle/governors/menu.c
++++ b/drivers/cpuidle/governors/menu.c
+@@ -74,9 +74,9 @@ static void menu_reflect(struct cpuidle_device *dev)
+ {
+ 	struct menu_device *data = &__get_cpu_var(menu_devices);
+ 	int last_idx = data->last_state_idx;
+-	unsigned int measured_us =
+-		cpuidle_get_last_residency(dev) + data->elapsed_us;
++	unsigned int last_idle_us = cpuidle_get_last_residency(dev);
+ 	struct cpuidle_state *target = &dev->states[last_idx];
++	unsigned int measured_us;
+ 
+ 	/*
+ 	 * Ugh, this idle state doesn't support residency measurements, so we
+@@ -84,20 +84,27 @@ static void menu_reflect(struct cpuidle_device *dev)
+ 	 * for one full standard timer tick.  However, be aware that this
+ 	 * could potentially result in a suboptimal state transition.
+ 	 */
+-	if (!(target->flags & CPUIDLE_FLAG_TIME_VALID))
+-		measured_us = USEC_PER_SEC / HZ;
++	if (unlikely(!(target->flags & CPUIDLE_FLAG_TIME_VALID)))
++		last_idle_us = USEC_PER_SEC / HZ;
+ 
+-	/* Predict time remaining until next break event */
+-	if (measured_us + BREAK_FUZZ < data->expected_us - target->exit_latency) {
+-		data->predicted_us = max(measured_us, data->last_measured_us);
++	/*
++	 * measured_us and elapsed_us are the cumulative idle time, since the
++	 * last time we were woken out of idle by an interrupt.
++	 */
++	if (data->elapsed_us <= data->elapsed_us + last_idle_us)
++		measured_us = data->elapsed_us + last_idle_us;
++	else
++		measured_us = -1;
++
++	/* Predict time until next break event */
++	data->predicted_us = max(measured_us, data->last_measured_us);
++
++	if (last_idle_us + BREAK_FUZZ <
++	    data->expected_us - target->exit_latency) {
+ 		data->last_measured_us = measured_us;
+ 		data->elapsed_us = 0;
+ 	} else {
+-		if (data->elapsed_us < data->elapsed_us + measured_us)
+-			data->elapsed_us = measured_us;
+-		else
+-			data->elapsed_us = -1;
+-		data->predicted_us = max(measured_us, data->last_measured_us);
++		data->elapsed_us = measured_us;
+ 	}
+ }
+ 

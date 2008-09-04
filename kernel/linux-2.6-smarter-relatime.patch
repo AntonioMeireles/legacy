@@ -58,9 +58,9 @@ Index: linux/Documentation/kernel-parameters.txt
 +			[FS] relative atime update frequency, in seconds.
 +			(default: 1 day: 86400 seconds)
 +
- 	reserve=	[KNL,BUGS] Force the kernel to ignore some iomem area
- 
- 	reservetop=	[X86-32]
+ 	relax_domain_level=
+ 			[KNL, SMP] Set scheduler's default relax_domain_level.
+ 			See Documentation/cpusets.txt.
 --- linux-2.6.23.noarch/fs/Kconfig~	2007-10-17 17:09:10.000000000 -0400
 +++ linux-2.6.23.noarch/fs/Kconfig	2007-10-17 17:10:05.000000000 -0400
 @@ -2173,6 +2173,29 @@ config 9P_FS
@@ -139,46 +139,32 @@ Index: linux/fs/inode.c
  /**
   *	touch_atime	-	update the access time
   *	@mnt: mount the inode is accessed on
-@@ -1191,22 +1226,14 @@ void touch_atime(struct vfsmount *mnt, s
- 			return;
- 		if ((mnt->mnt_flags & MNT_NODIRATIME) && S_ISDIR(inode->i_mode))
- 			return;
--
--		if (mnt->mnt_flags & MNT_RELATIME) {
--			/*
--			 * With relative atime, only update atime if the
--			 * previous atime is earlier than either the ctime or
--			 * mtime.
--			 */
--			if (timespec_compare(&inode->i_mtime,
--						&inode->i_atime) < 0 &&
--			    timespec_compare(&inode->i_ctime,
--						&inode->i_atime) < 0)
-+	}
+@@ -1191,16 +1226,12 @@ void touch_atime(struct vfsmount *mnt, s
+ 		goto out;
+ 	if ((mnt->mnt_flags & MNT_NODIRATIME) && S_ISDIR(inode->i_mode))
+ 		goto out;
+-	if (mnt->mnt_flags & MNT_RELATIME) {
+-		/*
+-		 * With relative atime, only update atime if the previous
+-		 * atime is earlier than either the ctime or mtime.
+-		 */
+-		if (timespec_compare(&inode->i_mtime, &inode->i_atime) < 0 &&
+-		    timespec_compare(&inode->i_ctime, &inode->i_atime) < 0)
++
 +	now = current_fs_time(inode->i_sb);
-+	if (mnt) {
-+		if (mnt->mnt_flags & MNT_RELATIME)
-+			if (!relatime_need_update(inode, now))
- 				return;
--		}
++	if (mnt->mnt_flags & MNT_RELATIME) {
++		if (!relatime_need_update(inode, now))
+ 			goto out;
  	}
  
 -	now = current_fs_time(inode->i_sb);
  	if (timespec_equal(&inode->i_atime, &now))
- 		return;
+ 		goto out;
  
 Index: linux/fs/namespace.c
 ===================================================================
 --- linux.orig/fs/namespace.c
 +++ linux/fs/namespace.c
-@@ -1107,6 +1107,7 @@ int do_add_mount(struct vfsmount *newmnt
- 		goto unlock;
- 
- 	newmnt->mnt_flags = mnt_flags;
-+
- 	if ((err = graft_tree(newmnt, nd)))
- 		goto unlock;
- 
 @@ -1362,6 +1363,24 @@ int copy_mount_options(const void __user
  }
  
@@ -213,21 +199,20 @@ Index: linux/fs/namespace.c
 +		mnt_flags |= MNT_RELATIME;
 +		flags |= MS_RELATIME;
 +	}
+ 	if (flags & MS_RDONLY)
+ 		mnt_flags |= MNT_READONLY;
  
- 	flags &= ~(MS_NOSUID | MS_NOEXEC | MS_NODEV | MS_ACTIVE |
- 		   MS_NOATIME | MS_NODIRATIME | MS_RELATIME);
 Index: linux/include/linux/mount.h
 ===================================================================
 --- linux.orig/include/linux/mount.h
 +++ linux/include/linux/mount.h
-@@ -103,5 +103,8 @@ extern void shrink_submounts(struct vfsm
+@@ -103,4 +103,7 @@ extern void shrink_submounts(struct vfsm
  extern spinlock_t vfsmount_lock;
  extern dev_t name_to_dev_t(char *name);
  
 +extern int default_relatime;
 +extern int relatime_interval;
 +
- #endif
  #endif /* _LINUX_MOUNT_H */
 Index: linux/kernel/sysctl.c
 ===================================================================
@@ -264,4 +249,3 @@ Index: linux/kernel/sysctl.c
  #if defined(CONFIG_BINFMT_MISC) || defined(CONFIG_BINFMT_MISC_MODULE)
  	{
  		.ctl_name	= CTL_UNNUMBERED,
-

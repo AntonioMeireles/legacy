@@ -76,57 +76,83 @@ Signed-off-by: Dave Jones <davej@redhat.com>
  	}
  	pci_restore_pcix_state(dev);
  	pci_restore_msi_state(dev);
-
-
-diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
-index d887d5c..80be564 100644
---- a/drivers/base/power/main.c
-+++ b/drivers/base/power/main.c
-@@ -64,9 +64,6 @@ int (*platform_enable_wakeup)(struct device *dev, int is_on);
-  */
- void device_pm_add(struct device *dev)
+--- linux-2.6.25.noarch/drivers/base/power/main.c~	2008-05-16 10:26:38.000000000 -0400
++++ linux-2.6.25.noarch/drivers/base/power/main.c	2008-05-16 10:26:59.000000000 -0400
+@@ -64,9 +64,6 @@ int device_pm_add(struct device *dev)
  {
+ 	int error;
+ 
 -	pr_debug("PM: Adding info for %s:%s\n",
 -		 dev->bus ? dev->bus->name : "No Bus",
 -		 kobject_name(&dev->kobj));
  	mutex_lock(&dpm_list_mtx);
- 	list_add_tail(&dev->power.entry, &dpm_active);
- 	mutex_unlock(&dpm_list_mtx);
-@@ -80,9 +77,6 @@ void device_pm_add(struct device *dev)
-  */
- void device_pm_remove(struct device *dev)
- {
--	pr_debug("PM: Removing info for %s:%s\n",
--		 dev->bus ? dev->bus->name : "No Bus",
--		 kobject_name(&dev->kobj));
- 	mutex_lock(&dpm_list_mtx);
- 	dpm_sysfs_remove(dev);
- 	list_del_init(&dev->power.entry);
---- linux-2.6.24.noarch/arch/x86/pci/mmconfig-shared.c~	2008-04-12 20:04:01.000000000 -0400
-+++ linux-2.6.24.noarch/arch/x86/pci/mmconfig-shared.c	2008-04-12 20:05:35.000000000 -0400
-@@ -191,7 +191,7 @@ static void __init pci_mmcfg_reject_brok
- 	if (pci_mmcfg_config_num == 1 &&
- 	    cfg->pci_segment == 0 &&
- 	    (cfg->start_bus_number | cfg->end_bus_number) == 0) {
--		printk(KERN_ERR "PCI: start and end of bus number is 0. "
-+		printk(KERN_DEBUG "PCI: start and end of bus number is 0. "
- 		       "Rejected as broken MCFG.\n");
- 		goto reject;
+ 	if ((dev->parent && dev->parent->power.sleeping) || all_sleeping) {
+ 		if (dev->parent->power.sleeping)
+From fc4c74c4d0ccc7b57fcc841e88b63fd729f45115 Mon Sep 17 00:00:00 2001
+From: Jeremy Katz <katzj@redhat.com>
+Date: Tue, 1 Jul 2008 17:32:41 -0400
+Subject: [PATCH] Make loading padlock modules quieter when hardware isn't available
+
+When loading aes or sha256 via the module aliases, the padlock modules
+also try to get loaded.  Make the error message for them not being
+present only be a NOTICE rather than an ERROR so that use of 'quiet'
+will suppress the messages
+
+Signed-off-by: Jeremy Katz <katzj@redhat.com>
+---
+ drivers/crypto/padlock-aes.c |    4 ++--
+ drivers/crypto/padlock-sha.c |    4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/crypto/padlock-aes.c b/drivers/crypto/padlock-aes.c
+index bb30eb9..54a2a16 100644
+--- a/drivers/crypto/padlock-aes.c
++++ b/drivers/crypto/padlock-aes.c
+@@ -385,12 +385,12 @@ static int __init padlock_init(void)
+ 	int ret;
+ 
+ 	if (!cpu_has_xcrypt) {
+-		printk(KERN_ERR PFX "VIA PadLock not detected.\n");
++		printk(KERN_NOTICE PFX "VIA PadLock not detected.\n");
+ 		return -ENODEV;
  	}
-@@ -203,14 +203,14 @@ static void __init pci_mmcfg_reject_brok
- 	if (type == 1 && !e820_all_mapped(cfg->address,
- 					  cfg->address + MMCONFIG_APER_MIN,
- 					  E820_RESERVED)) {
--		printk(KERN_ERR "PCI: BIOS Bug: MCFG area at %Lx is not"
-+		printk(KERN_DEBUG "PCI: BIOS Bug: MCFG area at %Lx is not"
- 		       " E820-reserved\n", cfg->address);
- 		goto reject;
+ 
+ 	if (!cpu_has_xcrypt_enabled) {
+-		printk(KERN_ERR PFX "VIA PadLock detected, but not enabled. Hmm, strange...\n");
++		printk(KERN_NOTICE PFX "VIA PadLock detected, but not enabled. Hmm, strange...\n");
+ 		return -ENODEV;
  	}
+ 
+diff --git a/drivers/crypto/padlock-sha.c b/drivers/crypto/padlock-sha.c
+index c666b4e..40d5680 100644
+--- a/drivers/crypto/padlock-sha.c
++++ b/drivers/crypto/padlock-sha.c
+@@ -254,12 +254,12 @@ static int __init padlock_init(void)
+ 	int rc = -ENODEV;
+ 
+ 	if (!cpu_has_phe) {
+-		printk(KERN_ERR PFX "VIA PadLock Hash Engine not detected.\n");
++		printk(KERN_NOTICE PFX "VIA PadLock Hash Engine not detected.\n");
+ 		return -ENODEV;
+ 	}
+ 
+ 	if (!cpu_has_phe_enabled) {
+-		printk(KERN_ERR PFX "VIA PadLock detected, but not enabled. Hmm, strange...\n");
++		printk(KERN_NOTICE PFX "VIA PadLock detected, but not enabled. Hmm, strange...\n");
+ 		return -ENODEV;
+ 	}
+ 
+-- 
+1.5.6
+
+--- linux-2.6.26.noarch/arch/x86/pci/mmconfig-shared.c~	2008-08-14 15:04:05.000000000 -0400
++++ linux-2.6.26.noarch/arch/x86/pci/mmconfig-shared.c	2008-08-14 15:04:14.000000000 -0400
+@@ -365,7 +365,7 @@ static void __init pci_mmcfg_reject_brok
  	return;
  
  reject:
 -	printk(KERN_ERR "PCI: Not using MMCONFIG.\n");
-+	printk(KERN_DEBUG "PCI: Not using MMCONFIG.\n");
++	printk(KERN_INFO "PCI: Not using MMCONFIG.\n");
+ 	pci_mmcfg_arch_free();
  	kfree(pci_mmcfg_config);
  	pci_mmcfg_config = NULL;
- 	pci_mmcfg_config_num = 0;

@@ -1,0 +1,42 @@
+From: Jens Axboe <jens.axboe@oracle.com>
+Date: Fri, 22 Aug 2008 08:00:36 +0000 (+0200)
+Subject: block: submit_bh() inadvertently discards barrier flag on a sync write
+X-Git-Tag: v2.6.27-rc5~19^2~4
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=48fd4f93a00eac844678629f2f00518e146ed30d
+
+block: submit_bh() inadvertently discards barrier flag on a sync write
+
+Reported by Milan Broz <mbroz@redhat.com>, commit 18ce3751 inadvertently
+made submit_bh() discard the barrier bit for a WRITE_SYNC request. Fix
+that up.
+
+Signed-off-by: Jens Axboe <jens.axboe@oracle.com>
+---
+
+diff --git a/fs/buffer.c b/fs/buffer.c
+index 38653e3..ac78d4c 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -2926,14 +2926,17 @@ int submit_bh(int rw, struct buffer_head * bh)
+ 	BUG_ON(!buffer_mapped(bh));
+ 	BUG_ON(!bh->b_end_io);
+ 
+-	if (buffer_ordered(bh) && (rw == WRITE))
+-		rw = WRITE_BARRIER;
++	/*
++	 * Mask in barrier bit for a write (could be either a WRITE or a
++	 * WRITE_SYNC
++	 */
++	if (buffer_ordered(bh) && (rw & WRITE))
++		rw |= WRITE_BARRIER;
+ 
+ 	/*
+-	 * Only clear out a write error when rewriting, should this
+-	 * include WRITE_SYNC as well?
++	 * Only clear out a write error when rewriting
+ 	 */
+-	if (test_set_buffer_req(bh) && (rw == WRITE || rw == WRITE_BARRIER))
++	if (test_set_buffer_req(bh) && (rw & WRITE))
+ 		clear_buffer_write_io_error(bh);
+ 
+ 	/*

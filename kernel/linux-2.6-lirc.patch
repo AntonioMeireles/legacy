@@ -14,11 +14,11 @@
  drivers/input/lirc/lirc_dev.h         |  264 ++++++
  drivers/input/lirc/lirc_i2c.c         |  668 +++++++++++++++
  drivers/input/lirc/lirc_igorplugusb.c |  624 ++++++++++++++
- drivers/input/lirc/lirc_imon.c        | 1165 +++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_imon.c        | 1248 ++++++++++++++++++++++++++++
  drivers/input/lirc/lirc_it87.c        | 1012 +++++++++++++++++++++++
  drivers/input/lirc/lirc_it87.h        |  116 +++
  drivers/input/lirc/lirc_mceusb.c      |  890 ++++++++++++++++++++
- drivers/input/lirc/lirc_mceusb2.c     | 1058 ++++++++++++++++++++++++
+ drivers/input/lirc/lirc_mceusb2.c     | 1060 ++++++++++++++++++++++++
  drivers/input/lirc/lirc_parallel.c    |  745 +++++++++++++++++
  drivers/input/lirc/lirc_parallel.h    |   26 +
  drivers/input/lirc/lirc_pvr150.c      | 1431 +++++++++++++++++++++++++++++++++
@@ -27,7 +27,7 @@
  drivers/input/lirc/lirc_sir.c         | 1323 ++++++++++++++++++++++++++++++
  drivers/input/lirc/lirc_streamzap.c   |  810 +++++++++++++++++++
  drivers/input/lirc/lirc_ttusbir.c     |  393 +++++++++
- 29 files changed, 17481 insertions(+), 0 deletions(-)
+ 29 files changed, 17566 insertions(+), 0 deletions(-)
 
 diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
 index 5f9d860..747633c 100644
@@ -45,10 +45,10 @@ diff --git a/drivers/input/Makefile b/drivers/input/Makefile
 index 98c4f9a..6a1049b 100644
 --- a/drivers/input/Makefile
 +++ b/drivers/input/Makefile
-@@ -23,3 +23,5 @@ obj-$(CONFIG_INPUT_MISC)	+= misc/
- obj-$(CONFIG_INPUT_MISC)	+= misc/
- 
+@@ -25,3 +25,5 @@ obj-$(CONFIG_INPUT_MISC)	+= misc/
  obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
+ 
+ obj-$(CONFIG_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 +
 +obj-$(CONFIG_INPUT_LIRC)       += lirc/
 diff --git a/drivers/input/lirc/Kconfig b/drivers/input/lirc/Kconfig
@@ -1281,7 +1281,7 @@ new file mode 100644
 index 0000000..da2e7eb
 --- /dev/null
 +++ b/drivers/input/lirc/kcompat.h
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,152 @@
 +/*      $Id: kcompat.h,v 5.32 2007/12/15 17:28:00 lirc Exp $      */
 +
 +#ifndef _KCOMPAT_H
@@ -1299,14 +1299,13 @@ index 0000000..da2e7eb
 +
 +
 +
-+#define lirc_device_create(cs, parent, dev, fmt, args...) \
-+	class_device_create(cs, NULL, dev, parent, fmt, ## args)
++#define lirc_device_create device_create
 +#define LIRC_DEVFS_PREFIX
 +
 +
 +typedef struct class lirc_class_t;
 +
-+#define lirc_device_destroy class_device_destroy
++#define lirc_device_destroy device_destroy
 +
 +
 +
@@ -3920,7 +3919,7 @@ index 0000000..2de23da
 +#endif
 diff --git a/drivers/input/lirc/lirc_dev.c b/drivers/input/lirc/lirc_dev.c
 new file mode 100644
-index 0000000..1d5706f
+index 0000000..93ac8de
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.c
 @@ -0,0 +1,827 @@
@@ -3965,7 +3964,7 @@ index 0000000..1d5706f
 +#include <linux/completion.h>
 +#include <linux/uaccess.h>
 +#include <linux/errno.h>
-+#include <asm/semaphore.h>
++#include <linux/semaphore.h>
 +#define __KERNEL_SYSCALLS__
 +#include <linux/unistd.h>
 +#include <linux/kthread.h>
@@ -5023,7 +5022,7 @@ index 0000000..c3a0c0f
 +#endif
 diff --git a/drivers/input/lirc/lirc_i2c.c b/drivers/input/lirc/lirc_i2c.c
 new file mode 100644
-index 0000000..6e47d53
+index 0000000..3d107f6
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_i2c.c
 @@ -0,0 +1,668 @@
@@ -5083,7 +5082,7 @@ index 0000000..6e47d53
 +#include <linux/i2c.h>
 +#include <linux/i2c-algo-bit.h>
 +
-+#include <asm/semaphore.h>
++#include <linux/semaphore.h>
 +
 +#include "kcompat.h"
 +#include "lirc_dev.h"
@@ -6327,10 +6326,10 @@ index 0000000..0c2ca5a
 + */
 diff --git a/drivers/input/lirc/lirc_imon.c b/drivers/input/lirc/lirc_imon.c
 new file mode 100644
-index 0000000..9bf63b4
+index 0000000..776c742
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_imon.c
-@@ -0,0 +1,1165 @@
+@@ -0,0 +1,1248 @@
 +/*
 + *   lirc_imon.c:  LIRC plugin/VFD driver for Ahanix/Soundgraph IMON IR/VFD
 + *
@@ -6377,7 +6376,9 @@ index 0000000..9bf63b4
 + *
 + */
 +#include <linux/version.h>
-+
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
 +
 +#include <linux/autoconf.h>
 +
@@ -6430,7 +6431,11 @@ index 0000000..9bf63b4
 +static int vfd_open(struct inode *inode, struct file *file);
 +static int vfd_close(struct inode *inode, struct file *file);
 +static ssize_t vfd_write(struct file *file, const char *buf,
-+				size_t n_bytes, loff_t *pos);
++			 size_t n_bytes, loff_t *pos);
++
++/* LCD file_operations override function prototypes */
++static ssize_t lcd_write(struct file *file, const char *buf,
++			 size_t n_bytes, loff_t *pos);
 +
 +/* LIRC plugin function prototypes */
 +static int ir_open(void *data);
@@ -6493,11 +6498,16 @@ index 0000000..9bf63b4
 +
 +/* USB Device ID for IMON USB Control Board */
 +static struct usb_device_id imon_usb_id_table[] = {
-+	{ USB_DEVICE(0x0aa8, 0xffda) },		/* IR & VFD    */
-+	{ USB_DEVICE(0x0aa8, 0x8001) },		/* IR only     */
-+	{ USB_DEVICE(0x15c2, 0xffda) },		/* IR & VFD    */
-+	{ USB_DEVICE(0x15c2, 0xffdc) },		/* IR & VFD    */
-+	{ USB_DEVICE(0x04e8, 0xff30) },		/* ext IR only */
++	/* IMON USB Control Board (IR & VFD) */
++	{ USB_DEVICE(0x0aa8, 0xffda) },
++	/* IMON USB Control Board (IR only) */
++	{ USB_DEVICE(0x0aa8, 0x8001) },
++	/* IMON USB Control Board (IR & VFD) */
++	{ USB_DEVICE(0x15c2, 0xffda) },
++	/* IMON USB Control Board (IR & VFD) */
++	{ USB_DEVICE(0x15c2, 0xffdc) },
++	/* IMON USB Control Board (ext IR only) */
++	{ USB_DEVICE(0x04e8, 0xff30) },
 +	{}
 +};
 +
@@ -6535,6 +6545,9 @@ index 0000000..9bf63b4
 +
 +static int debug;
 +
++/* lcd or vfd? */
++static int is_lcd;
++
 +
 +/* ------------------------------------------------------------
 + *		     M O D U L E   C O D E
@@ -6547,6 +6560,9 @@ index 0000000..9bf63b4
 +MODULE_DEVICE_TABLE(usb, imon_usb_id_table);
 +module_param(debug, int, 0);
 +MODULE_PARM_DESC(debug, "Debug messages: 0=no, 1=yes(default: no)");
++module_param(is_lcd, int, 0);
++MODULE_PARM_DESC(is_lcd, "The device is an LCD: 0=no (it's a VFD), "
++		 "1=yes (default: no)");
 +
 +static inline void delete_context(struct imon_context *context)
 +{
@@ -6854,7 +6870,10 @@ index 0000000..9bf63b4
 +		goto exit;
 +	}
 +
-+	copy_from_user(context->tx.data_buf, buf, n_bytes);
++	if (copy_from_user(context->tx.data_buf, buf, n_bytes)) {
++		retval = -EFAULT;
++		goto exit;
++	}
 +
 +	/* Pad with spaces */
 +	for (i = n_bytes; i < 32; ++i)
@@ -6896,6 +6915,63 @@ index 0000000..9bf63b4
 +	UNLOCK_CONTEXT;
 +
 +	return(retval == SUCCESS) ? n_bytes : retval;
++}
++
++/**
++ * Writes data to the LCD.  The iMON OEM LCD screen excepts 8-byte
++ * packets. We accept data as 16 hexadecimal digits, followed by a
++ * newline (to make it easy to drive the device from a command-line
++ * -- even though the actual binary data is a bit complicated).
++ *
++ * The device itself is not a "traditional" text-mode display. It's
++ * actually a 16x96 pixel bitmap display. That means if you want to
++ * display text, you've got to have your own "font" and translate the
++ * text into bitmaps for display. This is really flexible (you can
++ * display whatever diacritics you need, and so on), but it's also
++ * a lot more complicated than most LCDs...
++ */
++static ssize_t lcd_write(struct file *file, const char *buf,
++			 size_t n_bytes, loff_t *pos)
++{
++	int retval = SUCCESS;
++	struct imon_context *context;
++
++	context = (struct imon_context *) file->private_data;
++	if (!context) {
++		err("%s: no context for device", __FUNCTION__);
++		return -ENODEV;
++	}
++
++	LOCK_CONTEXT;
++
++	if (!context->dev_present) {
++		err("%s: no iMON device present", __FUNCTION__);
++		retval = -ENODEV;
++		goto exit;
++	}
++
++	if (n_bytes != 8) {
++		err("%s: invalid payload size: %d (expecting 8)",
++		  __FUNCTION__, (int) n_bytes);
++		retval = -EINVAL;
++		goto exit;
++	}
++
++	if (copy_from_user(context->usb_tx_buf, buf, 8)) {
++		retval = -EFAULT;
++		goto exit;
++	}
++
++	retval = send_packet(context);
++	if (retval != SUCCESS) {
++		err("%s: send packet failed!", __FUNCTION__);
++		goto exit;
++	} else if (debug) {
++		info("%s: write %d bytes to LCD", __FUNCTION__, (int) n_bytes);
++	}
++exit:
++	UNLOCK_CONTEXT;
++	return (retval == SUCCESS) ? n_bytes : retval;
 +}
 +
 +/**
@@ -7199,6 +7275,12 @@ index 0000000..9bf63b4
 +
 +	info("%s: found IMON device", __FUNCTION__);
 +
++	/*
++	 * If it's the LCD, as opposed to the VFD, we just need to replace
++	 * the "write" file op.
++	 */
++	if (is_lcd)
++		vfd_fops.write = &lcd_write;
 +
 +	dev = usb_get_dev(interface_to_usbdev(interface));
 +	iface_desc = interface->cur_altsetting;
@@ -7359,27 +7441,6 @@ index 0000000..9bf63b4
 +		info("%s: Registered iMON plugin(minor:%d)",
 +		     __FUNCTION__, lirc_minor);
 +
-+alloc_status_switch:
-+
-+	switch (alloc_status) {
-+	case 7:
-+		if (vfd_ep_found)
-+			usb_free_urb(tx_urb);
-+	case 6:
-+		usb_free_urb(rx_urb);
-+	case 5:
-+		lirc_buffer_free(rbuf);
-+	case 4:
-+		kfree(rbuf);
-+	case 3:
-+		kfree(plugin);
-+	case 2:
-+		kfree(context);
-+		context = NULL;
-+	case 1:
-+		retval = -ENOMEM;
-+	}
-+
 +	/* Needed while unregistering! */
 +	plugin->minor = lirc_minor;
 +
@@ -7421,7 +7482,28 @@ index 0000000..9bf63b4
 +
 +	UNLOCK_CONTEXT;
 +
-+ exit:
++alloc_status_switch:
++
++	switch (alloc_status) {
++	case 7:
++		if (vfd_ep_found)
++			usb_free_urb(tx_urb);
++	case 6:
++		usb_free_urb(rx_urb);
++	case 5:
++		lirc_buffer_free(rbuf);
++	case 4:
++		kfree(rbuf);
++	case 3:
++		kfree(plugin);
++	case 2:
++		kfree(context);
++		context = NULL;
++	case 1:
++		retval = -ENOMEM;
++	}
++
++exit:
 +	return retval;
 +}
 +
@@ -9534,10 +9616,10 @@ index 0000000..aed3f6f
 +EXPORT_NO_SYMBOLS;
 diff --git a/drivers/input/lirc/lirc_mceusb2.c b/drivers/input/lirc/lirc_mceusb2.c
 new file mode 100644
-index 0000000..9e927a4
+index 0000000..2f78da8
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_mceusb2.c
-@@ -0,0 +1,1058 @@
+@@ -0,0 +1,1060 @@
 +/*
 + * LIRC driver for Philips eHome USB Infrared Transceiver
 + * and the Microsoft MCE 2005 Remote Control
@@ -9672,6 +9754,8 @@ index 0000000..9e927a4
 +	{ USB_DEVICE(VENDOR_PHILIPS, 0x060c) },
 +	/* Philips SRM5100 */
 +	{ USB_DEVICE(VENDOR_PHILIPS, 0x060d) },
++	/* Philips Infrared Transceiver - Omaura */
++	{ USB_DEVICE(VENDOR_PHILIPS, 0x060f) },
 +	/* SMK/Toshiba G83C0004D410 */
 +	{ USB_DEVICE(VENDOR_SMK, 0x031d) },
 +	/* SMK eHome Infrared Transceiver (Sony VAIO) */
@@ -11381,7 +11465,7 @@ index 0000000..59679c6
 +#endif
 diff --git a/drivers/input/lirc/lirc_pvr150.c b/drivers/input/lirc/lirc_pvr150.c
 new file mode 100644
-index 0000000..bef6eb4
+index 0000000..fed5720
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_pvr150.c
 @@ -0,0 +1,1431 @@
@@ -11446,7 +11530,7 @@ index 0000000..bef6eb4
 +#include <linux/firmware.h>
 +#include <linux/vmalloc.h>
 +
-+#include <asm/semaphore.h>
++#include <linux/semaphore.h>
 +#include <linux/kthread.h>
 +
 +#include "kcompat.h"

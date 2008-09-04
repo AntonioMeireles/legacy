@@ -1,0 +1,47 @@
+From: venkatesh.pallipadi@intel.com <venkatesh.pallipadi@intel.com>
+Date: Wed, 20 Aug 2008 23:45:51 +0000 (-0700)
+Subject: x86: PAT proper tracking of set_memory_uc and friends
+X-Git-Tag: v2.6.27-rc5~5^2~23
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=c15238df3b65e34fadb1021b0fb0d5aebc7c42c6
+
+x86: PAT proper tracking of set_memory_uc and friends
+
+Big thinko in pat memtype tracking code. reserve_memtype should be called
+with physical address and not virtual address.
+
+Signed-off-by: Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
+Signed-off-by: Suresh Siddha <suresh.b.siddha@intel.com>
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+---
+
+diff --git a/arch/x86/mm/pageattr.c b/arch/x86/mm/pageattr.c
+index f5f5154..43e2f84 100644
+--- a/arch/x86/mm/pageattr.c
++++ b/arch/x86/mm/pageattr.c
+@@ -849,7 +849,7 @@ int set_memory_uc(unsigned long addr, int numpages)
+ 	/*
+ 	 * for now UC MINUS. see comments in ioremap_nocache()
+ 	 */
+-	if (reserve_memtype(addr, addr + numpages * PAGE_SIZE,
++	if (reserve_memtype(__pa(addr), __pa(addr) + numpages * PAGE_SIZE,
+ 			    _PAGE_CACHE_UC_MINUS, NULL))
+ 		return -EINVAL;
+ 
+@@ -868,7 +868,7 @@ int set_memory_wc(unsigned long addr, int numpages)
+ 	if (!pat_enabled)
+ 		return set_memory_uc(addr, numpages);
+ 
+-	if (reserve_memtype(addr, addr + numpages * PAGE_SIZE,
++	if (reserve_memtype(__pa(addr), __pa(addr) + numpages * PAGE_SIZE,
+ 		_PAGE_CACHE_WC, NULL))
+ 		return -EINVAL;
+ 
+@@ -884,7 +884,7 @@ int _set_memory_wb(unsigned long addr, int numpages)
+ 
+ int set_memory_wb(unsigned long addr, int numpages)
+ {
+-	free_memtype(addr, addr + numpages * PAGE_SIZE);
++	free_memtype(__pa(addr), __pa(addr) + numpages * PAGE_SIZE);
+ 
+ 	return _set_memory_wb(addr, numpages);
+ }

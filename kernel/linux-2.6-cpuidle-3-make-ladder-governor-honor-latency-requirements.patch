@@ -1,0 +1,39 @@
+From: venkatesh.pallipadi@intel.com <venkatesh.pallipadi@intel.com>
+Date: Thu, 31 Jul 2008 02:21:44 +0000 (-0700)
+Subject: cpuidle: Make ladder governor honor latency requirements fully
+X-Git-Tag: v2.6.27-rc4~59^2^2
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=06d9e908b2248f983b186aaf569c58e1430db85d
+
+cpuidle: Make ladder governor honor latency requirements fully
+
+ladder governor only honored latency requirement when promoting C-states.
+Instead. it should check for latency requirement on each idle call,
+and demote to appropriate C-state when there is a latency requirement change.
+
+Signed-off-by: Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+---
+
+diff --git a/drivers/cpuidle/governors/ladder.c b/drivers/cpuidle/governors/ladder.c
+index 27ab3bf..a4bec3f 100644
+--- a/drivers/cpuidle/governors/ladder.c
++++ b/drivers/cpuidle/governors/ladder.c
+@@ -99,6 +99,18 @@ static int ladder_select_state(struct cpuidle_device *dev)
+ 
+ 	/* consider demotion */
+ 	if (last_idx > CPUIDLE_DRIVER_STATE_START &&
++	    dev->states[last_idx].exit_latency > latency_req) {
++		int i;
++
++		for (i = last_idx - 1; i > CPUIDLE_DRIVER_STATE_START; i--) {
++			if (dev->states[i].exit_latency <= latency_req)
++				break;
++		}
++		ladder_do_selection(ldev, last_idx, i);
++		return i;
++	}
++
++	if (last_idx > CPUIDLE_DRIVER_STATE_START &&
+ 	    last_residency < last_state->threshold.demotion_time) {
+ 		last_state->stats.demotion_count++;
+ 		last_state->stats.promotion_count = 0;
