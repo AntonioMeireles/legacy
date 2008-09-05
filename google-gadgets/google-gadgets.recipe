@@ -19,13 +19,30 @@ class GoogleGadgets(AutoPackageRecipe):
                       'pango:devel', 'pixman:devel', 'pkgconfig:devel',
                       'xcb-util:devel', 'xulrunner:devel', 'zip:runtime',
                       'zlib:devel', 'automake:runtime', 'autoconf:runtime', 
-                       'libtool:runtime',]
+                       'libtool:runtime', 'desktop-file-utils:runtime', 'flex:runtime', 'shared-mime-info:runtime']
 
     def unpack(r):
         r.addArchive('http://%(name)s-for-linux.googlecode.com/files/%(name)s-for-linux-%(version)s.tar.gz')
-        # http://code.google.com/p/google-gadgets-for-linux/issues/detail?id=100&colspec=ID Type Status Priority Milestone Owner Component Summary
-        r.Run('autoreconf -fi')
         r.Replace('-Werror', '', 'configure')
+        # we don't want to obliterate all RPATHs, since it is used during build
+        # Add library search path
+        r.Run(""" sed -i.libdir_syssearch -e  '/sys_lib_dlsearch_path_spec/s|/usr/lib |/usr/lib /usr/lib64 /lib /lib64 |'  configure """)
+        # Remove the redundant RPATH for %%{_libdir}, already searched by Fedora libtool
+        r.Run(""" sed -i.extra_R -e  's|-R\$(libdir)||' hosts/*/Makefile.in """)
 
     def configure(r):
-        r.Configure('--disable-qt-host --disable-qt-xml-http-request --disable-qtwebkit-browser-element --disable-qt-system-framework --disable-libggadget-qt')
+        r.Configure('--disable-static --disable-qt-host --disable-qt-xml-http-request --disable-qtwebkit-browser-element --disable-qt-system-framework --disable-libggadget-qt')
+
+    def make(r):
+        r.Make()
+        # Remove quotes from .pc files
+        r.Run(""" find . -name '*.pc' -exec sed -i 's|\"||g' '{}' \; """)
+
+    def policy(r):
+        # wipe prematurely-generated MIME info
+        r.Remove('%(datadir)s/mime', recursive = True)
+        r.Remove('%(datadir)s/applications/mimeinfo.cache')
+        if Arch.x86_64:
+            r.Requires(exceptDeps=r'soname\:\ ELF64\/usr\/lib64\/xulrunner\-sdk\-1\.9\/sdk\/lib\/libmozjs\.so\(SysV\ x86\_64\)')
+        else:
+            r.Requires(exceptDeps=r'soname\:\ ELF32\/usr\/lib\/xulrunner\-sdk\-1\.9\/sdk\/lib\/libmozjs\.so\(SysV\ x86\)')
