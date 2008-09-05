@@ -4,11 +4,35 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Bitlbee(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class Bitlbee(RPMPackageRecipe,AutoPackageRecipe):
     name = 'bitlbee'
-    version = '1.2'
+    version = '1.2.2'
+    rpmRelease = '1.fc10'
+    rpmPatches = ['bitlbee-1.2.2-libresolv.patch', 'bitlbee-1.2.2-gaccess.patch']
+    rpmSources = ['bitlbee.xinetd']
  
     buildRequires = ['glib:devel', 'gnutls:devel', 'libgcrypt:devel', 'libgpg-error:devel']
  
-    def unpack(r):
-        r.addArchive('http://get.bitlbee.org/src/')
+    def configure(r):
+#        r.Run(""" perl -pi.make -e '
+#                s|\$\(BINDIR\)|\$(sbindir)|g;
+#                s|\$\(DATADIR\)|\$(datadir)/%(name)s|g;
+#                s|\$\(ETCDIR\)|\$(sysconfdir)/%(name)s|g;
+#                s|\$\(MANDIR\)|\$(mandir)|g;
+#        ' Makefile */Makefile */*/Makefile  """)
+
+        r.Environment('CFLAGS', '%(optflags)s')
+        r.Configure(' --prefix=%(prefix)s  --bindir=%(sbindir)s  --etcdir=%(sysconfdir)s/%(name)s '
+                    ' --mandir=%(mandir)s  --datadir=%(datadir)s/%(name)s '
+                    ' --config=%(localstatedir)s/lib/%(name)s '
+                    ' --strip=0  --plugins=1 '
+                    )
+
+    def policy(r):
+        r.MakeDirs('%(localstatedir)s/lib/%(name)s')
+        r.Install('bitlbee.xinetd', '%(sysconfdir)s/xinetd.d/%(name)s', mode = 0644)
+        r.Install('bitlbee.conf', '%(sysconfdir)s/%(name)s/%(name)s.conf', mode = 0644)
+        r.Install('doc/*.8', '%(mandir)s/man8/', mode = 0644)
+        r.Ownership('%(name)s', '%(name)s', '%(localstatedir)s/lib/%(name)s')
+        r.SetModes('%(localstatedir)s/lib/%(name)s', 0700)
