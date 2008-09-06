@@ -7,30 +7,31 @@
 loadSuperClass('rpmpackage')
 class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
     name = 'PolicyKit'
-    version = '0.8'
-    rpmRelease = '2.fc9'
+    version = '0.9'
+    rpmRelease = '2.fc10'
+    rpmPatches = ['pk-ck-api-change.patch']
     buildRequires = [ 'libtool:runtime', 'automake:runtime',
                       'autoconf:runtime', 'dbus:devel', 'pkgconfig:devel',
                       'glib:devel', 'dbus-glib:devel', 'dbus-glib:runtime',
                       'pam:devel', 'xmlto:runtime', 'expat:devel',
                       'gnome-doc-utils:devel', 'gnome-doc-utils:runtime',
-                      'perl-XML-Parser:perl', 'gettext:runtime'
+                      'perl-XML-Parser:perl', 'gettext:runtime', 'intltool:runtime'
                       ]
 
     def configure(r):
-        r.addPatch('wheel.patch')
+#        r.addPatch('wheel.patch')
         r.Configure('--with-os-type=redhat --disable-docbook-docs --disable-selinux --disable-gtk-doc')
 
     def policy(r):
         r.ExcludeDirectories(exceptions='%(datadir)s/PolicyKit/policy')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/PolicyKit-public')
 
         # see upstream design specification for why these permissions are necessary
         for d in [ 'polkit-set-default-helper',]:
                     r.Ownership('polkituser', 'root', '%(libexecdir)s/' + d)
                     r.SetModes('%(libexecdir)s/' + d, 04755)
 
-        for d in [ 'polkit-set-default-helper',
-                   'polkit-read-auth-helper',
+        for d in [ 'polkit-read-auth-helper',
                    'polkit-revoke-helper',
                    'polkit-explicit-grant-helper',
                    'polkit-grant-helper']:
@@ -44,15 +45,16 @@ class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
         r.SetModes('%(libexecdir)s/polkit-resolve-exe-helper', 04755)
 
         r.Ownership('polkituser','polkituser','%(localstatedir)s/run/PolicyKit')
-        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit')
-
-        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit-public')
-        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/misc/PolicyKit.reload')
-
         r.SetModes('%(localstatedir)s/run/PolicyKit', 0770)
+
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/PolicyKit')
         r.SetModes('%(localstatedir)s/lib/PolicyKit', 0770)
-        r.SetModes('%(localstatedir)s/lib/PolicyKit-public', 0775)
-        r.SetModes('%(localstatedir)s/lib/misc/PolicyKit.reload', 0775)
+
+        r.Ownership('polkituser','root','%(localstatedir)s/lib/PolicyKit-public')
+        r.SetModes('%(localstatedir)s/lib/PolicyKit', 0755)
+
+        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/misc/PolicyKit.reload')
+        r.SetModes('%(localstatedir)s/lib/misc/PolicyKit.reload', 0664)
 
         # allows x86 and x86_64 :lib co-existence
         r.ComponentSpec(':runtime', '%(localstatedir)s/lib/PolicyKit/reload')
