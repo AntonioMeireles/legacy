@@ -9,22 +9,21 @@ loadRecipe('gnomepackage')
 class Gdm(RPMPackageRecipe,GnomePackageRecipe):
 
     name = 'gdm'
-    version = '2.23.91'
-    rpmRelease = '0.20080828.2.fc10'
-    tarballName = '%(name)s-2.23.91.tar.bz2'
+    version = '2.23.92'
+    rpmRelease = '1.fc10'
 
     buildRequires = [ 'libglade:devel', 'pango:devel', 'gtk:devel', 'libgnomeui:devel', 'libgnomecanvas:devel', 'librsvg:devel', 'libxml2:devel', 'fontconfig:devel', 'libgsf:devel', 'libcroco:devel', 'attr:devel', 'rarian:runtime', 'desktop-file-utils:runtime', 'GConf:devel', 'ORBit2:devel', 'atk:devel', 'cairo:devel', 'freetype:devel', 'glib:devel', 'gnome-keyring:devel', 'gnome-vfs:devel', 'libart_lgpl:devel', 'libbonobo:devel', 'libbonoboui:devel', 'libgnome:devel', 'libpng:devel', 'popt:devel', 'tcp_wrappers:devel', 'gettext:runtime', 'gtk:runtime', 'perl:runtime', 'usermode:runtime', 'zenity:runtime', 'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXi:devellib', 'libXinerama:devel', 'libXrender:devel','libdmx:devellib', 'gnome-doc-utils:devel', 'gnome-doc-utils:runtime', 'audit:devel', 'shadow:runtime', 'automake:runtime', 'autoconf:runtime', 'libtool:devel',  'pkgconfig:devel' , 'm4:runtime', 'expat:devel', 'pam:devel', 'dbus-glib:runtime', 'GConf:runtime', 'xorg-server:runtime', 'PolicyKit-gnome:devel', 'PolicyKit:devel', 'gnome-panel:devel', 'iso-codes:devellib', 'libxklavier:devel' ]
 
     extraConfig = ' --with-pam-prefix=%(sysconfdir)s'
     extraConfig += ' --enable-console-helper  --without-selinux --with-console-kit'
-    extraConfig += ' --disable-scrollkeeper '
+    extraConfig += ' --disable-scrollkeeper --enable-profiling '
 
     rpmPatches = [  'xkb-groups.patch',
                  ]
 
     def setup(r):
         RPMPackageRecipe.unpack(r)
-        r.addSource('gdm.conf-custom')
+#        r.addSource('gdm.conf-custom')
         r.addPatch('logo.patch')
 
         # evaluate extraConfig's sysconfdir before setting new value
@@ -32,9 +31,25 @@ class Gdm(RPMPackageRecipe,GnomePackageRecipe):
         #r.macros.sysconfdir= '%(sysconfdir)s/X11'
 
         GnomePackageRecipe.build(r)
+
+        r.MakeDirs('%(sysconfdir)s/gdm/{Init,PreSession,PostSession}')
+
         GnomePackageRecipe.install(r)
+
+        # create log dir
+        r.MakeDirs('%(localstatedir)s/log/gdm')
+        r.ExcludeDirectories(exceptions=[
+            '%(localstatedir)s/log/gdm',
+            '%(sysconfdir)s/gdm/{Init,PreSession,PostSession}',
+            '%(datadir)s/gdm/autostart/LoginWindow',
+            ])
+
+        # remove the gdm Xsession as we're using the xdm one
+        r.Remove('%(sysconfdir)s/gdm/Xsession')
+        # FIXME: came back here to check once i clean xdm side
+        r.Symlink('%(sysconfdir)s/X11/xdm/Xsession', '%(sysconfdir)s/gdm/Xsession')
+
         # add trailling newline, in order for conary-policy to  be happy...
-        r.Run(""" echo '' >> %(destdir)s%(sysconfdir)s/gdm/Xsession """)
         r.Move('%(localstatedir)s/lib/gdm/.*', '%(localstatedir)s/gdm')
 
         r.SetModes('%(localstatedir)s/gdm/.gconf.mandatory', 01750)
@@ -51,13 +66,6 @@ class Gdm(RPMPackageRecipe,GnomePackageRecipe):
         r.Ownership('root', 'gdm', '%(localstatedir)s/lib/gdm')
         r.Ownership('root', 'gdm', '%(localstatedir)s/run/gdm')
 
-        # remove the gdm Xsession as we're using the xdm one
-        r.Remove('%(sysconfdir)s/gdm/Xsession')
-        # FIXME: came back here to check once i clean xdm side
-        r.Symlink('%(sysconfdir)s/X11/xdm/Xsession', '%(sysconfdir)s/gdm/Xsession')
-
-        r.MakeDirs('%(sysconfdir)s/gdm/{Init,PreSession,PostSession}')
-        r.MakeDirs('%(localstatedir)s/log/gdm')
         r.MakeDirs('%(datadir)s/gdm/autostart/LoginWindow')
 
         r.PackageSpec('gdm-user-switch-applet',
@@ -67,10 +75,6 @@ class Gdm(RPMPackageRecipe,GnomePackageRecipe):
         r.PackageSpec('gdm-user-switch-applet', 
             '%(datadir)s/gnome-2.0/ui/GNOME_FastUserSwitchApplet.xml')
 
-        r.ExcludeDirectories(exceptions=[
-            '%(localstatedir)s/log/gdm',
-            '%(sysconfdir)s/gdm/{Init,PreSession,PostSession}'
-            ])
         r.DanglingSymlinks(exceptions=['%(sysconfdir)s/gdm/Xsession'])
 
 
