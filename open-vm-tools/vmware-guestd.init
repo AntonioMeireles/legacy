@@ -6,10 +6,50 @@
 # description: vmware-guestd is responsible for automatically starting vmware-user
 #
 # servicename: vmware-guestd
+### BEGIN INIT INFO
+# Provides: vmware-guestd
+# Required-Start: $local_fs
+# Should-Start: 
+# Required-Stop: 
+# Default-Start: 3 4 5
+# Default-Stop: 0 1 2 6
+# Short-Description: Starts the VMware Guest Daemon
+# Description: VMware Guest Daemon
+### END INIT INFO
 #
 
-# Source function library.
-. /etc/rc.d/init.d/functions
+# Use RPL as default
+DISTRO=rpl
+STARTPROC=daemon
+
+if [ -f "/etc/init.d/functions" ]; then
+    DISTRO=rpl
+    STARTPROC=daemon
+    source /etc/init.d/functions
+elif [ -f /etc/rc.status ]; then
+    DISTRO=sles
+    STARTPROC=startproc
+    source /etc/rc.status
+fi
+if [ "$DISTRO" = "rpl" ]; then
+showstatus() {
+    [ $1 = 0 ] && success || failure
+    echo
+}
+checkstatus() {
+    status $1
+}
+elif [ "$DISTRO" = "sles" ]; then
+showstatus() {
+    [ $1 = 0 ] && true || false
+    rc_status -v
+}
+checkstatus() {
+    echo -n "Checking for $1: "
+    checkproc $1
+    rc_status -v
+}
+fi
 
 servicename=vmware-guestd
 OPTIONS='--background /var/run/vmware-guestd.pid'
@@ -19,10 +59,12 @@ RETVAL=0
 start() {
     echo -n $"Starting VMware guestd: "
     modprobe -q vmmemctl
-    daemon $servicename $OPTIONS
+    $STARTPROC /usr/sbin/vmware-guestd $OPTIONS
     RETVAL=$?
+    showstatus $RETVAL
     echo
     [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$servicename
+    return $RETVAL
 }
 
 stop() {
@@ -30,10 +72,12 @@ stop() {
 
     killproc $servicename -TERM
     RETVAL=$?
+    showstatus $RETVAL
     echo
     if [ $RETVAL -eq 0 ]; then
         rm -f /var/lock/subsys/$servicename
     fi
+    return $RETVAL
 }
 
 # See how we were called.
@@ -45,7 +89,7 @@ case "$1" in
         stop
         ;;
     status)
-        status $servicename
+        checkstatus $servicename
         RETVAL=$?
         ;;
     restart)
