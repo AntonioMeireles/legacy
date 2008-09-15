@@ -1,0 +1,211 @@
+diff -uNr e2fsimage-0.2.2.orig/man/e2fsimage.man e2fsimage-0.2.2/man/e2fsimage.man
+--- e2fsimage-0.2.2.orig/man/e2fsimage.man	2006-02-06 18:42:53.274317500 -0500
++++ e2fsimage-0.2.2/man/e2fsimage.man	2006-02-06 18:43:27.088430750 -0500
+@@ -158,6 +158,8 @@
+ .LP
+ .I <name> <type> <major> <minor> 
+ .RI [ \ <mode>\  [ \ <uid>\  [ \ <gid>\  ]]]
++.LP
++If <name> contains whitespace, it must be escaped using a backslash, i.e. ' ' would be escaped to '\\ ', and '<tab>' would be escaped to '\\t'.
+ .TP
+ .B name
+ the name of the file like 
+@@ -205,6 +207,8 @@
+ .I <name> <username> 
+ .RI [ \ <groupname> \ ]
+ .LP
++If <name> contains whitespace, it must be escaped using a backslash, i.e. ' ' would be escaped to '\\ ', and '<tab>' would be escaped to '\\t'.
++.LP
+ If <name> is ".", then the owner and group information
+ will be kept recursively for all files and directorys below.
+ For a "chown 500 /home/user" one would write "user 500" to "home/.UIDGID and have
+diff -uNr e2fsimage-0.2.2.orig/src/copy.c e2fsimage-0.2.2/src/copy.c
+--- e2fsimage-0.2.2.orig/src/copy.c	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/copy.c	2006-02-06 18:59:38.197121250 -0500
+@@ -114,7 +114,11 @@
+ 
+ 	/* if this sizes differ its an inconsistency in the base filesystem */
+ 	if (s.st_size != size) {
++#if( _FILE_OFFSET_BITS == 64 )
++		fprintf(stderr, "Error 'size matters' Inode:%lld, File:%lld\n", s.st_size, size);
++#else
+ 		fprintf(stderr, "Error 'size matters' Inode:%ld, File:%ld\n", s.st_size, size);
++#endif
+ 		return -1;
+ 	}
+ 	
+diff -uNr e2fsimage-0.2.2.orig/src/e2fsimage.h e2fsimage-0.2.2/src/e2fsimage.h
+--- e2fsimage-0.2.2.orig/src/e2fsimage.h	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/e2fsimage.h	2006-02-06 18:52:56.540019250 -0500
+@@ -64,6 +64,7 @@
+ 
+ #define S_ISSF(x) (S_ISCHR(x) || S_ISBLK(x) || S_ISFIFO(x) || S_ISSOCK(x))
+ 
++int filename(char *str, char *estr, char ** ptrptr);
+ 
+ #define MALLOC_DEBUG_
+ 
+diff -uNr e2fsimage-0.2.2.orig/src/sfile.c e2fsimage-0.2.2/src/sfile.c
+--- e2fsimage-0.2.2.orig/src/sfile.c	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/sfile.c	2006-02-06 18:53:39.750719750 -0500
+@@ -124,6 +124,7 @@
+ {
+ 	FILE *fp;
+ 	char fname[80], line_buf[256], type;
++	char *ptr;
+ 	int n, major, minor, mode, ln=0, uid, gid, pug_tmp;
+ 	dev_t rdev;
+ 	struct stat s;
+@@ -150,23 +151,23 @@
+ 			while (c != '\n' && c >0) c = fgetc(fp);
+ 			continue;
+ 		}
++		/* check for comment lines */
++		if (line_buf[0] == '\n' || line_buf[0] == '#' ) continue;
+ 		
+ 		s.st_uid = e2c->default_uid;
+ 		s.st_gid = e2c->default_gid;
+ 		s.st_mode = 0600;
+ 		
+-		n = sscanf(line_buf, "%79s %c %d %d %o %d %d",
+-			fname, &type, &major, &minor, &mode, &uid, &gid);
++		filename(line_buf, fname, &ptr);
++		n = sscanf(ptr, "%c %d %d %o %d %d",
++			&type, &major, &minor, &mode, &uid, &gid);
+ 		
+-		/* check for comment lines */
+-		if (line_buf[0] == '\n' || fname[0] == '#' ) continue;
+-
+ 		/* how much parameters were given ? */
+ 		switch (n) {
+-			case 7 : s.st_gid = gid; /* uid gid and mode were given */
+-			case 6 : s.st_uid = uid;
+-			case 5 : s.st_mode = mode; /* mode was given */
+-			case 4 : break;
++			case 6 : s.st_gid = gid; /* uid gid and mode were given */
++			case 5 : s.st_uid = uid;
++			case 4 : s.st_mode = mode; /* mode was given */
++			case 3 : break;
+ 			default:
+ 				fprintf(stderr, "Bad entry in %s, line %d (%s)\n",
+ 					e2c->curr_path, ln, fname);
+diff -uNr e2fsimage-0.2.2.orig/src/symlink.c e2fsimage-0.2.2/src/symlink.c
+--- e2fsimage-0.2.2.orig/src/symlink.c	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/symlink.c	2006-02-06 19:01:05.950605500 -0500
+@@ -107,7 +107,11 @@
+ 	
+ 	/* if this sizes differ its an inconsistency in the base filesystem */
+ 	if (size != written) {
++#if( _FILE_OFFSET_BITS == 64 )
++		fprintf(stderr, "Error 'size matters' Size:%lld, Written:%d\n", size, written);
++#else
+ 		fprintf(stderr, "Error 'size matters' Size:%ld, Written:%d\n", size, written);
++#endif
+ 		return -1;
+ 	}
+ 	
+diff -uNr e2fsimage-0.2.2.orig/src/uids.c e2fsimage-0.2.2/src/uids.c
+--- e2fsimage-0.2.2.orig/src/uids.c	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/uids.c	2006-02-06 18:51:57.580334500 -0500
+@@ -52,6 +52,7 @@
+ {
+ 	FILE *fp;
+  	char fname[256], line_buf[256], ename[80], uname[80], gname[80];
++	char *ptr;
+ 	int n, ln=0, uid, gid, dummy, len;
+ 
+ 	/* prepare the filename PATH/.UIDGID */
+@@ -68,9 +69,10 @@
+ 		return 0;
+ 	}
+ 	
+-	/* iterate over the lines in the device file */
++	/* iterate over the lines in the UID file */
+ 	while (fgets(line_buf, 256, fp) != 0) {
+ 		ln++;  /* count the line numbers */
++		/* check for comment lines */
+ 		/* check for too long lines */
+ 		if (strlen(line_buf)>254) {
+ 			char c = line_buf[254];
+@@ -79,17 +81,18 @@
+ 			while (c != '\n' && c >0) c = fgetc(fp);
+ 			continue;
+ 		}
++		if (line_buf[0] == '\n' || line_buf[0] == '#' ) continue;
+ 		
+ 		uid = gid = 0;
+-		n = sscanf(line_buf, " %79s %d %d", ename, &uid, &gid);
+-		
+-		/* check for comment lines */
+-		if (ename[0] == '\n' || line_buf[0] == '#' ) continue;
++		/* Get the filename */
++		filename(line_buf, ename, &ptr);
++
++		n = sscanf(ptr, " %d %d", &uid, &gid);
+ 
+ 		/* how many parameters were given ? */
+-		if (n < 2 || n > 3) {
+-			n = sscanf(line_buf, " %79s %79s %79s", ename, uname, gname);
+-			if (n < 2 || n > 3) {
++		if (n < 1 || n > 2) {
++			n = sscanf(ptr, " %79s %79s", uname, gname);
++			if (n < 1 || n > 2) {
+ 				fprintf(stderr, "Bad entry in %s, line %d (%s)\n",
+ 					e2c->curr_path, ln, fname);
+                 fclose(fp);
+@@ -103,7 +106,7 @@
+                 fclose(fp);
+ 				return -1;
+ 			}
+-			if (n == 3){
++			if (n == 2){
+ 				if (!uiddb_search(e2c->group, gname, &dummy, &gid)) {
+ 					fprintf(stderr, 
+ 						"Group name %s from %s line %d not found in '%s'\n",
+diff -uNr e2fsimage-0.2.2.orig/src/util.c e2fsimage-0.2.2/src/util.c
+--- e2fsimage-0.2.2.orig/src/util.c	2006-02-06 18:42:53.278317750 -0500
++++ e2fsimage-0.2.2/src/util.c	2006-02-06 18:52:20.617774250 -0500
+@@ -59,6 +59,43 @@
+ }
+ #endif
+ 
++int filename(char *str, char *estr, char ** ptrptr)
++{
++    char * ptr, *eptr;
++    ptr = str;
++    eptr = estr;
++    while (ptr)
++    {
++        if(*ptr == '\\') {
++            ptr++;
++            switch(*ptr) {
++                case 't':
++                    *eptr = '\t';
++                    break;
++                case 'n':
++                    *eptr = '\n';
++                    break;
++                /* This handles simple cases like \", \', \* and \$ */
++                default:
++                    *eptr = *ptr;
++            }
++        }
++        /* break on space or tab */
++        else if(*ptr == ' ' || *ptr == '\t') {
++            *eptr = 0;
++            ptr++;
++            break;
++        }
++        else {
++            *eptr = *ptr;
++        }
++        ptr++;
++        eptr++;
++    }
++    *ptrptr = ptr;
++    return 0;
++}
++
+ void init_inode(e2i_ctx_t *e2c, struct ext2_inode *i, struct stat *s)
+ {
+ 	/* do the root squash */
