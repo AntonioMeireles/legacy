@@ -7,8 +7,8 @@
 class OpenOffice(CPackageRecipe):
 
     name = 'openoffice.org'
-    version = '2.4.1'
-    ooo_build_version = '12865'
+    version = '3.0.0+m7'
+    ooo_build_version = '13978'
 
     buildRequires = [
         'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
@@ -42,9 +42,7 @@ class OpenOffice(CPackageRecipe):
 
     def setup(r):
 
-        #r.macros.snapshot = 'ooh680-'+r.version.split('+')[1]
-        #r.macros.snapshotdir = r.macros.snapshot.split('-')[0].upper()
-        r.macros.ooobuild = r.version # .split('+')[0]
+        r.macros.snapshot = r.version.split('+')[1]
         r.macros.fullName = 'OpenOffice.org-%(major_version)s'
 
         # used in loadManifest
@@ -65,17 +63,20 @@ class OpenOffice(CPackageRecipe):
         r.poor_help = poor_help.split()
 
         r.build_langs = [ 'en-US', ]
-        r.build_langs.extend(r.langs)
+        #r.build_langs.extend(r.langs)
         # Can be used to speed up test builds
-        #r.build_langs.extend([
-        #    'de', 'pt', 'pt-BR', 'ru', 'fr',
-        #])
+        r.build_langs.extend([
+            'de', 'pt', 'pt-BR', 'ru', 'fr',
+        ])
         r.macros.langs = ' '.join(r.build_langs)
         r.macros.poor_help = ' '.join(r.poor_help)
+
+        r.default_lang = r.build_langs[0]
 
         # Saving only looks in /usr/lib/OpenOffice.org for some BASIC files
         # and does not respect --with-installed-ooo-dirname -- RPL-247
         r.macros.basedir = '%(libdir)s/%(fullName)s'
+        r.macros.basisdir = '%(basedir)s/basis%(major_version)s'
 
         r.macros.cflags += ' -fno-strict-aliasing'
 
@@ -88,34 +89,45 @@ class OpenOffice(CPackageRecipe):
         r.macros.site = 'http://download.go-oo.org'
 
         r.addSvnSnapshot(
-            #  'http://svn.gnome.org/svn/ooo-build/trunk', revision=r.ooo_build_version
-            'http://svn.gnome.org/svn/ooo-build/branches/ooo-build-2-4-1', revision=r.ooo_build_version
+            'http://svn.gnome.org/svn/ooo-build/branches/ooo-build-3-0/', revision=r.ooo_build_version
         )
 
-        for x in ('core', 'l10n', 'sdk', 'system', 'binfilter'):
-            #r.addSource('%(site)s/%(snapshotdir)s/%(snapshot)s-'+x+'.tar.bz2', dir='src/')
-            #r.addSource('http://mirrors.ibiblio.org/pub/mirrors/openoffice/stable/%(version)s/OOo_%(version)s_src_'+x+'.tar.bz2', dir='src/')
-            r.addSource('http://neacm.fe.up.pt/pub/openoffice/stable/%(version)s/OOo_%(version)s_src_'+x+'.tar.bz2', dir='src/')
+        oooModules = [
+            'artwork',
+            'base',
+            'bootstrap',
+            'calc',
+            'components',
+            'extensions',
+            'filters',
+            'impress',
+            'l10n',
+            'libs_core',
+            'libs_extern_sys',
+            'libs_extern',
+            'libs_gui',
+            'postprocess',
+            'sdk',
+            'testing',
+            'ure',
+            'writer',
+        ]
+        for x in oooModules:
+            r.addSource('%(site)s/OOO300/ooo300-%(snapshot)s-'+x+'.tar.bz2', dir='src/')
 
         oooSupport = [
             'biblio.tar.bz2',
-            'cli_types.dll',
-            'cli_types_bridgetest.dll',
-            'extras-2.tar.bz2',
-            'libsvg-0.1.4.tar.gz',
-            'libwpg-0.1.2.tar.gz',
+            'extras-3.tar.bz2',
+            'libwpg-0.1.3.tar.gz',
             'libwps-0.1.2.tar.gz',
-            'lp_solve_5.5.0.10_source.tar.gz',
             'mdbtools-0.6pre1.tar.gz',
-            'oox.2008-02-29.tar.bz2',
-            'writerfilter.2008-02-29.tar.bz2',
         ]
         for file in oooSupport:
             r.addSource('%%(site)s/SRC680/%s' % file, dir='src/')
 
-        #r.addSource('http://cairographics.org/releases/cairo-1.4.10.tar.gz', dir='src/')
+        for file in ('ooo-cli-prebuilt-3.0.tar.bz2', 'scsolver.2008-09-08.tar.bz2'):
+            r.addSource('%%(site)s/DEV300/%s' % file, dir='src/')
 
-        r.addSource('%(site)s/xt/xt-20051206-src-only.zip', dir='src/')
         r.addSource('http://tools.openoffice.org/unowinreg_prebuild/680/unowinreg.dll', dir='src/')
 
         # Will use after patch.apply
@@ -136,9 +148,11 @@ class OpenOffice(CPackageRecipe):
         r.Replace(
             '^rpl2:.*$',
             'Foresight: LinuxCommon, NotDebian, CalcSolver, Lockdown, BerkeleyDB43, CairoFonts, Shrink',
-            'patches/src680/apply'
+            'patches/dev300/apply'
         )
         r.Copy('distro-configs/rpl2.conf.in', 'distro-configs/Foresight.conf')
+
+        r.Replace(' setup ', ' ./setup ', 'bin/applyflags')
 
         r.Run('NOCONFIGURE=1 ./autogen.sh')
 
@@ -155,8 +169,8 @@ class OpenOffice(CPackageRecipe):
 
         # Packaging stuff
 
-        extraConf = (  ' --with-tag="OOH680_m17"'
-                       #' --with-tag=%(snapshot)s'
+        extraConf = (
+                       ' --with-tag=ooo300-%(snapshot)s'
                        ' --with-lang="%(langs)s" --with-dict=ALL'
                        ' --with-poor-help-localizations="%(poor_help)s"'
                        ' --with-binsuffix=%(major_version)s'
@@ -210,6 +224,8 @@ class OpenOffice(CPackageRecipe):
                        ' --without-system-libwpg'
                        ' --without-system-libsvg'
                        ' --without-system-icu'
+                       ' --without-system-hunspell'
+                       ' --without-system-lpsolve'
                        # I'm not sure if we need these in distro, but we should
                        # consider it
                        ' --without-system-xt'
@@ -225,6 +241,9 @@ class OpenOffice(CPackageRecipe):
                        ' --without-system-xmlsec'
                        ' --enable-binfilter'
                        ' --enable-mono'
+                       # lucene analayzer not found
+                       ' --without-system-lucene'
+                       ' --without-system-saxon'
                     )
 
         extraConf += ' --with-distro=Foresight'
@@ -257,10 +276,10 @@ class OpenOffice(CPackageRecipe):
         # apply upstream sources
         r.Make('patch.apply')
 
-        #r.Run('cat solenv-enable-soname.patch | patch -d build/%(snapshot)s -p0')
-	r.Run('cat solenv-enable-soname.patch | patch -d build/OOH680_m17 -p0')
+        r.Run('cat solenv-enable-soname.patch | patch -d build/ooo300-%(snapshot)s -p0')
         # compile the program
-        r.Make(preMake='PATH=$PATH:/%(sbindir)s')
+        #r.Make(preMake='PATH=$PATH:/%(sbindir)s')
+        r.Make()
 
         # -------------------------------
         #
@@ -270,45 +289,63 @@ class OpenOffice(CPackageRecipe):
 
         r.MakeInstall()
 
+        # deps fixes
+        r.ComponentSpec(r.name+':runtime', '%(basisdir)s/program/libsclx.so')
+        r.ComponentSpec(r.name+'-base:runtime', '%(basisdir)s/program/libdbaxmllx.so')
+
         # XXX
         r.Install('hsqldb.jar', '%(basedir)s/program/classes/')
 
         r.Replace(
-            '/bin/python', '%(bindir)s/python', '%(basedir)s/program/mailmerge.py'
+            '/bin/python', '%(bindir)s/python', '%(basedir)s/basis%(major_version)s/program/mailmerge.py'
         )
 
-        r.Run('bash compact_templates.sh "%(destdir)s/%(basedir)s"')
+        r.Run('bash compact_templates.sh "%(destdir)s/%(basedir)s/basis%(major_version)s"')
 
         # This is not a help document
-        r.ComponentSpec('runtime', '%(basedir)s/help/main_transform.xsl')
+        r.ComponentSpec('runtime', '%(basedir)s/basis%(major_version)s/help/main_transform.xsl')
 
-        for lang in r.build_langs:
-            if lang not in r.poor_help:
-                r.ComponentSpec(r.name+'-doc-%s:doc' % lang, '%%(basedir)s/help/%s/' % lang)
-
-        for lang in r.build_langs[1:]:
-            r.loadManifest('lang_%s_list.txt' % lang, r.name+'-locale-'+lang+':locale')
-
-        for p in ('kde', 'gnome', 'mono'):
-            r.loadManifest('%s_list.txt' % p, r.name+'-'+p)
+        r.loadManifest('mono_list.txt', r.name+'-mono')
+        if r.use_kde:
+            r.loadManifest('kde_list.txt', r.name+'-kde')
+        if r.use_gnome:
+            r.loadManifest('gnome_list.txt', r.name+'-gnome')
+            r.loadManifest('gid_Module_Optional_Gnome', r.name+'-gnome')
 
         apps = [
+            ('base', 'Base'),
             ('calc', 'Calc'),
             ('draw', 'Draw'),
             ('impress', 'Impress'),
             ('math', 'Math'),
             ('writer', 'Wrt'),
         ]
+
         for (app, d) in apps:
             pkg = '%s-%s:runtime' % (r.name, app)
+            binFile = '%(bindir)s/oo'+app+'%(major_version)s'
             desktopFile = '%(datadir)s/applications/'+app+'%(major_version)s.desktop'
-            r.loadManifest('gid_Module_Prg_'+d, pkg)
+            r.loadManifest('gid_Module_Brand_Prg_'+d, pkg)
+            r.loadManifest('gid_Module_Prg_'+d+'_Bin', pkg)
             r.ComponentSpec(pkg, desktopFile)
-            r.ComponentSpec(pkg, '%(bindir)s/oo'+app+'%(major_version)s')
+            r.ComponentSpec(pkg, binFile)
+            # depend on openoffice.org:runtime
+            r.Requires(r.name+':runtime', binFile)
 
         desktopFile = '%(datadir)s/applications/web%(major_version)s.desktop'
         r.ComponentSpec(pkg, desktopFile)
         r.ComponentSpec(pkg, '%(bindir)s/ooweb%(major_version)s')
+
+        # Always install :java
+        r.Requires(r.name+':java', '%(bindir)s/soffice')
+
+        for lang in r.build_langs:
+
+            pkg = r.name+':runtime'
+            if lang != r.default_lang:
+                pkg = r.name+'-locale-'+lang+':locale'
+
+            r.loadManifest('lang_%s_list.txt' % lang.replace('-', '_'), pkg)
 
         # make sure basedir exists... we ran into this problem before. can't
         # use an assert since that would be run before everything else
