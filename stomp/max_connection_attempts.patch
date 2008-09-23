@@ -1,0 +1,85 @@
+# HG changeset patch
+# User Scott Parkerson <http://issues.rpath.com/>
+# Date 1222118072 14400
+# Node ID 38a9e0b93a2a630ee4b3119f7abb391415693418
+# Parent  00b030c2dcf6d93be8bb87fdfabed6702281034c
+Add max_connection_attempts parameter, start send thread first
+
+diff -r 00b030c2dcf6 -r 38a9e0b93a2a stomp.py
+--- a/stomp.py	Thu Sep 11 00:18:20 2008 +0100
++++ b/stomp.py	Mon Sep 22 17:14:32 2008 -0400
+@@ -138,6 +138,13 @@
+     """
+     pass
+ 
++class MaxConnectionAttemptsExceededException(Exception):
++    """
++    Raised by Connection.__attempt_connection if the connection
++    had max_connection_attempts set to a positive integer, thus
++    limiting the number of connection attempts before giving up.
++    """
++    pass
+ 
+ class ConnectionListener(object):
+     """
+@@ -230,6 +237,7 @@
+                  passcode = None,
+                  prefer_localhost = True,
+                  try_loopback_connect = True,
++                 max_connection_attempts = 0,
+                  reconnect_sleep_initial = 0.1,
+                  reconnect_sleep_increase = 0.5,
+                  reconnect_sleep_jitter = 0.1,
+@@ -248,6 +256,10 @@
+                  if True and the local host is found in the host
+                  tuples, try connecting to it using loopback interface
+                  (127.0.0.1)
++
++        \param max_connection_attempts
++
++                 maximum number of times to try connecting (0 = try forever)
+ 
+         \param reconnect_sleep_initial 
+ 
+@@ -312,6 +324,7 @@
+ 
+         self.__listeners = [ ]
+ 
++        self.__max_connection_attempts = max_connection_attempts
+         self.__reconnect_sleep_initial = reconnect_sleep_initial
+         self.__reconnect_sleep_increase = reconnect_sleep_increase
+         self.__reconnect_sleep_jitter = reconnect_sleep_jitter
+@@ -339,8 +352,8 @@
+         no frames will be received by the connection.
+         """
+         self.__running = True
++        self.__attempt_connection()
+         thread.start_new_thread(self.__receiver_loop, ())
+-        self.__attempt_connection()
+ 
+     def stop(self):
+         """
+@@ -656,7 +669,9 @@
+         lock.acquire(1)
+         try:
+             sleep_exp = 1
++            attempts = 0
+             while self.__running and self.__socket is None:
++                attempts += 1
+                 for host_and_port in self.__host_and_ports:
+                     try:
+                         log.debug("Attempting connection to host %s, port %s" % host_and_port)
+@@ -674,6 +689,13 @@
+                         log.warning("Could not connect to host %s, port %s: %s" % (host_and_port[0], host_and_port[1], exc))
+     
+                 if self.__socket is None:
++                    if self.__max_connection_attempts:
++                        if attempts < self.__max_connection_attempts:
++                            log.debug("Connection failed; will try %d more time(s)" % (self.__max_connection_attempts - attempts))
++                        else:
++                            log.debug("Maximum number of connection attempts exceeded")
++                            raise MaxConnectionAttemptsExceededException
++
+                     sleep_duration = (min(self.__reconnect_sleep_max, 
+                                           ((self.__reconnect_sleep_initial / (1.0 + self.__reconnect_sleep_increase)) 
+                                            * math.pow(1.0 + self.__reconnect_sleep_increase, sleep_exp)))
