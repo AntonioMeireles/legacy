@@ -1,0 +1,80 @@
+From: Arjan van de Ven <arjan@linux.intel.com>
+Date: Mon, 21 Jul 2008 20:31:48 +0000 (-0700)
+Subject: net: Print the module name as part of the watchdog message
+X-Git-Tag: v2.6.27-rc1~860^2~20
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=6579e57b31d79d31d9b806e41ba48774e73257dc
+
+net: Print the module name as part of the watchdog message
+
+As suggested by Dave:
+
+This patch adds a function to get the driver name from a struct net_device,
+and consequently uses this in the watchdog timeout handler to print as
+part of the message.
+
+Signed-off-by: Arjan van de Ven <arjan@linux.intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Backport: Chuck Ebbert <cebbert@redhat.com>
+---
+
+Index: linux-2.6.26.noarch/include/linux/netdevice.h
+===================================================================
+--- linux-2.6.26.noarch.orig/include/linux/netdevice.h
++++ linux-2.6.26.noarch/include/linux/netdevice.h
+@@ -1509,6 +1509,8 @@ extern void *dev_seq_next(struct seq_fil
+ extern void dev_seq_stop(struct seq_file *seq, void *v);
+ #endif
+ 
++extern char *netdev_drivername(struct net_device *dev, char *buffer, int len);
++
+ extern void linkwatch_run_queue(void);
+ 
+ extern int netdev_compute_features(unsigned long all, unsigned long one);
+Index: linux-2.6.26.noarch/net/core/dev.c
+===================================================================
+--- linux-2.6.26.noarch.orig/net/core/dev.c
++++ linux-2.6.26.noarch/net/core/dev.c
+@@ -4489,6 +4489,26 @@ err_name:
+ 	return -ENOMEM;
+ }
+ 
++char *netdev_drivername(struct net_device *dev, char *buffer, int len)
++{
++	struct device_driver *driver;
++	struct device *parent;
++
++	if (len <= 0 || !buffer)
++		return buffer;
++	buffer[0] = 0;
++
++	parent = dev->dev.parent;
++
++	if (!parent)
++		return buffer;
++
++	driver = parent->driver;
++	if (driver && driver->name)
++		strlcpy(buffer, driver->name, len);
++	return buffer;
++}
++
+ static void __net_exit netdev_exit(struct net *net)
+ {
+ 	kfree(net->dev_name_head);
+Index: linux-2.6.26.noarch/net/sched/sch_generic.c
+===================================================================
+--- linux-2.6.26.noarch.orig/net/sched/sch_generic.c
++++ linux-2.6.26.noarch/net/sched/sch_generic.c
+@@ -215,9 +215,9 @@ static void dev_watchdog(unsigned long a
+ 		    netif_carrier_ok(dev)) {
+ 			if (netif_queue_stopped(dev) &&
+ 			    time_after(jiffies, dev->trans_start + dev->watchdog_timeo)) {
+-
+-				printk(KERN_INFO "NETDEV WATCHDOG: %s: transmit timed out\n",
+-				       dev->name);
++				char drivername[64];
++				printk(KERN_INFO "NETDEV WATCHDOG: %s (%s): transmit timed out\n",
++				       dev->name, netdev_drivername(dev, drivername, 64));
+ 				dev->tx_timeout(dev);
+ 				WARN_ON_ONCE(1);
+ 			}

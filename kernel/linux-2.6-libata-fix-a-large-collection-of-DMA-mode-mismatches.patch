@@ -1,0 +1,159 @@
+From: Alan Cox <alan@redhat.com>
+Date: Fri, 1 Aug 2008 08:18:34 +0000 (+0100)
+Subject: libata: Fix a large collection of DMA mode mismatches
+X-Git-Tag: v2.6.27-rc5~51^2~1
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=b15b3ebae102f89c25ccbcae0b2099af312f2e82
+
+libata: Fix a large collection of DMA mode mismatches
+
+Dave MÃ¼ller sent a diff for the pata_oldpiix that highlighted a problem
+where a lot of the ATA drivers assume dma_mode == 0 means "no DMA" while
+the core code uses 0xFF.
+
+This turns out to have other consequences such as code doing >= XFER_UDMA_0
+also catching 0xFF as UDMAlots. Fortunately it doesn't generally affect
+set_dma_mode, although some drivers call back into their own set mode code
+from other points.
+
+Having been through the drivers I've added helpers for using_udma/using_mwdma
+dma_enabled so that people don't open code ranges that may change (eg if UDMA8
+appears somewhere)
+
+Thanks to David for the initial bits
+[and added fix for pata_oldpiix from and signed-off-by Dave Mueller
+ <dave.mueller@gmx.ch>  -jg]
+
+Signed-off-by: Alan Cox <alan@redhat.com>
+Signed-off-by: Jeff Garzik <jgarzik@redhat.com>
+---
+
+diff --git a/drivers/ata/libata-core.c b/drivers/ata/libata-core.c
+index 5f8f57a..79e3a8e 100644
+--- a/drivers/ata/libata-core.c
++++ b/drivers/ata/libata-core.c
+@@ -3288,7 +3288,7 @@ int ata_do_set_mode(struct ata_link *link, struct ata_device **r_failed_dev)
+ 		dev->dma_mode = ata_xfer_mask2mode(dma_mask);
+ 
+ 		found = 1;
+-		if (dev->dma_mode != 0xff)
++		if (ata_dma_enabled(dev))
+ 			used_dma = 1;
+ 	}
+ 	if (!found)
+@@ -3313,7 +3313,7 @@ int ata_do_set_mode(struct ata_link *link, struct ata_device **r_failed_dev)
+ 
+ 	/* step 3: set host DMA timings */
+ 	ata_link_for_each_dev(dev, link) {
+-		if (!ata_dev_enabled(dev) || dev->dma_mode == 0xff)
++		if (!ata_dev_enabled(dev) || !ata_dma_enabled(dev))
+ 			continue;
+ 
+ 		dev->xfer_mode = dev->dma_mode;
+diff --git a/drivers/ata/pata_acpi.c b/drivers/ata/pata_acpi.c
+index fbe6057..eb919c1 100644
+--- a/drivers/ata/pata_acpi.c
++++ b/drivers/ata/pata_acpi.c
+@@ -181,7 +181,7 @@ static unsigned int pacpi_qc_issue(struct ata_queued_cmd *qc)
+ 
+ 	if (adev != acpi->last) {
+ 		pacpi_set_piomode(ap, adev);
+-		if (adev->dma_mode)
++		if (ata_dma_enabled(adev))
+ 			pacpi_set_dmamode(ap, adev);
+ 		acpi->last = adev;
+ 	}
+diff --git a/drivers/ata/pata_atiixp.c b/drivers/ata/pata_atiixp.c
+index d7de7ba..e8a0d99 100644
+--- a/drivers/ata/pata_atiixp.c
++++ b/drivers/ata/pata_atiixp.c
+@@ -183,7 +183,7 @@ static void atiixp_bmdma_start(struct ata_queued_cmd *qc)
+ 	u16 tmp16;
+ 
+ 	pci_read_config_word(pdev, ATIIXP_IDE_UDMA_CONTROL, &tmp16);
+-	if (adev->dma_mode >= XFER_UDMA_0)
++	if (ata_using_udma(adev))
+ 		tmp16 |= (1 << dn);
+ 	else
+ 		tmp16 &= ~(1 << dn);
+diff --git a/drivers/ata/pata_cs5530.c b/drivers/ata/pata_cs5530.c
+index 744beeb..0c4b271 100644
+--- a/drivers/ata/pata_cs5530.c
++++ b/drivers/ata/pata_cs5530.c
+@@ -149,10 +149,10 @@ static unsigned int cs5530_qc_issue(struct ata_queued_cmd *qc)
+ 	struct ata_device *prev = ap->private_data;
+ 
+ 	/* See if the DMA settings could be wrong */
+-	if (adev->dma_mode != 0 && adev != prev && prev != NULL) {
++	if (ata_dma_enabled(adev) && adev != prev && prev != NULL) {
+ 		/* Maybe, but do the channels match MWDMA/UDMA ? */
+-		if ((adev->dma_mode >= XFER_UDMA_0 && prev->dma_mode < XFER_UDMA_0) ||
+-		    (adev->dma_mode < XFER_UDMA_0 && prev->dma_mode >= XFER_UDMA_0))
++		if ((ata_using_udma(adev) && !ata_using_udma(prev)) ||
++		    (ata_using_udma(prev) && !ata_using_udma(adev)))
+ 		    	/* Switch the mode bits */
+ 		    	cs5530_set_dmamode(ap, adev);
+ 	}
+diff --git a/drivers/ata/pata_oldpiix.c b/drivers/ata/pata_oldpiix.c
+index e678af3..df64f24 100644
+--- a/drivers/ata/pata_oldpiix.c
++++ b/drivers/ata/pata_oldpiix.c
+@@ -198,7 +198,7 @@ static unsigned int oldpiix_qc_issue(struct ata_queued_cmd *qc)
+ 
+ 	if (adev != ap->private_data) {
+ 		oldpiix_set_piomode(ap, adev);
+-		if (adev->dma_mode)
++		if (ata_dma_enabled(adev))
+ 			oldpiix_set_dmamode(ap, adev);
+ 	}
+ 	return ata_sff_qc_issue(qc);
+diff --git a/drivers/ata/pata_sc1200.c b/drivers/ata/pata_sc1200.c
+index cbab397..0278fd2 100644
+--- a/drivers/ata/pata_sc1200.c
++++ b/drivers/ata/pata_sc1200.c
+@@ -167,10 +167,10 @@ static unsigned int sc1200_qc_issue(struct ata_queued_cmd *qc)
+ 	struct ata_device *prev = ap->private_data;
+ 
+ 	/* See if the DMA settings could be wrong */
+-	if (adev->dma_mode != 0 && adev != prev && prev != NULL) {
++	if (ata_dma_enabled(adev) && adev != prev && prev != NULL) {
+ 		/* Maybe, but do the channels match MWDMA/UDMA ? */
+-		if ((adev->dma_mode >= XFER_UDMA_0 && prev->dma_mode < XFER_UDMA_0) ||
+-		    (adev->dma_mode < XFER_UDMA_0 && prev->dma_mode >= XFER_UDMA_0))
++		if ((ata_using_udma(adev) && !ata_using_udma(prev)) ||
++		    (ata_using_udma(prev) && !ata_using_udma(adev)))
+ 		    	/* Switch the mode bits */
+ 		    	sc1200_set_dmamode(ap, adev);
+ 	}
+diff --git a/include/linux/libata.h b/include/linux/libata.h
+index 80233fd..225bfc5 100644
+--- a/include/linux/libata.h
++++ b/include/linux/libata.h
+@@ -1429,6 +1429,28 @@ static inline unsigned long ata_deadline(unsigned long from_jiffies,
+ 	return from_jiffies + msecs_to_jiffies(timeout_msecs);
+ }
+ 
++/* Don't open code these in drivers as there are traps. Firstly the range may
++   change in future hardware and specs, secondly 0xFF means 'no DMA' but is
++   > UDMA_0. Dyma ddreigiau */
++
++static inline int ata_using_mwdma(struct ata_device *adev)
++{
++	if (adev->dma_mode >= XFER_MW_DMA_0 && adev->dma_mode <= XFER_MW_DMA_4)
++		return 1;
++	return 0;
++}
++
++static inline int ata_using_udma(struct ata_device *adev)
++{
++	if (adev->dma_mode >= XFER_UDMA_0 && adev->dma_mode <= XFER_UDMA_7)
++		return 1;
++	return 0;
++}
++
++static inline int ata_dma_enabled(struct ata_device *adev)
++{
++	return (adev->dma_mode == 0xFF ? 0 : 1);
++}
+ 
+ /**************************************************************************
+  * PMP - drivers/ata/libata-pmp.c

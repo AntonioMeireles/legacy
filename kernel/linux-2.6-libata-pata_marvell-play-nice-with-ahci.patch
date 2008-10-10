@@ -1,0 +1,76 @@
+pata_marvell: Undo the regressions Jeff caused
+
+From: Alan Cox <alan@redhat.com>
+
+I've been chasing Jeff about this for months so am now giving up and sending
+it directly. Jeff added the Marvell device identifiers to the ahci driver
+without making the AHCI driver handle the PATA port. This means a lot of users
+can't use current kernels and in most distro cases can't even install. This has
+been going on since March 2008 for the 6121 Marvell, and late 2007 for the 6145.
+
+This was all pointed out at the time and repeatedly ignored. Bugs assigned
+to Jeff about this are ignored also.
+
+To quote Jeff in email
+
+"Just switch the order of 'ahci' and 'pata_marvell' in
+/etc/modprobe.conf, then use Fedora's tools regenerate the initrd.
+
+See?  It's not rocket science, and the current configuration can be
+easily made to work for Fedora users."
+
+(Which isn't trivial, isn't end user, shouldn't be needed, and as it usually
+breaks at install time is in fact impossible)
+
+To quote Jeff in August 2007
+
+"   mv-ahci-pata
+Marvell 6121/6141 PATA support.  Needs fixing in the 'PATA controller
+command' area before it is usable, and can go upstream."
+
+Only he applied it all anyway later and broke everything.
+
+The actual fix for the moment is very simple. If the user has included
+the pata_marvell driver let it drive the ports. If they've only selected
+for SATA support give them the AHCI driver which will run the port a fraction
+faster.
+
+
+Signed-off-by: Alan Cox <alan@redhat.com>
+
+Index: linux-2.6.26.noarch/drivers/ata/Kconfig
+===================================================================
+--- linux-2.6.26.noarch.orig/drivers/ata/Kconfig
++++ linux-2.6.26.noarch/drivers/ata/Kconfig
+@@ -448,8 +448,10 @@ config PATA_MARVELL
+ 	tristate "Marvell PATA support via legacy mode"
+ 	depends on PCI
+ 	help
+-	  This option enables limited support for the Marvell 88SE6145 ATA
+-	  controller.
++	  This option enables limited support for the Marvell 88SE61xx ATA
++	  controllers. If you wish to use only the SATA ports then select
++	  the AHCI driver alone. If you wish to the use the PATA port or
++	  both SATA and PATA include this driver.
+ 
+ 	  If unsure, say N.
+ 
+Index: linux-2.6.26.noarch/drivers/ata/ahci.c
+===================================================================
+--- linux-2.6.26.noarch.orig/drivers/ata/ahci.c
++++ linux-2.6.26.noarch/drivers/ata/ahci.c
+@@ -538,9 +538,14 @@ static const struct pci_device_id ahci_p
+ 	{ PCI_VDEVICE(SI, 0x1185), board_ahci_nopmp },		/* SiS 968 */
+ 	{ PCI_VDEVICE(SI, 0x0186), board_ahci_nopmp },		/* SiS 968 */
+ 
++#if  !defined(CONFIG_PATA_MARVELL) && !defined(CONFIG_PATA_MARVELL_MODULE)
+ 	/* Marvell */
++	/* The AHCI driver can only drive the SATA ports, the PATA driver
++	   can drive them all so if both drivers are selected make sure
++	   AHCI stays out of the way */
+ 	{ PCI_VDEVICE(MARVELL, 0x6145), board_ahci_mv },	/* 6145 */
+ 	{ PCI_VDEVICE(MARVELL, 0x6121), board_ahci_mv },	/* 6121 */
++#endif
+ 
+ 	/* Generic, PCI class code for AHCI */
+ 	{ PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,

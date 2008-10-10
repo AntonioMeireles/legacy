@@ -1,0 +1,65 @@
+From: Thomas Gleixner <tglx@linutronix.de>
+Date: Thu, 14 Aug 2008 10:17:06 +0000 (+0200)
+Subject: x86: hpet: workaround SB700 BIOS
+X-Git-Tag: v2.6.27-rc4~52^2~17
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=a6825f1c1fa83b1e92b6715ee5771a4d6524d3b9
+
+x86: hpet: workaround SB700 BIOS
+
+AMD SB700 based systems with spread spectrum enabled use a SMM based
+HPET emulation to provide proper frequency setting. The SMM code is
+initialized with the first HPET register access and takes some time to
+complete. During this time the config register reads 0xffffffff. We
+check for max. 1000 loops whether the config register reads a non
+0xffffffff value to make sure that HPET is up and running before we go
+further. A counting loop is safe, as the HPET access takes thousands
+of CPU cycles. On non SB700 based machines this check is only done
+once and has no side effects.
+
+Based on a quirk patch from: crane cai <crane.cai@amd.com>
+
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+---
+
+diff --git a/arch/x86/kernel/hpet.c b/arch/x86/kernel/hpet.c
+index ad2b15a..59fd3b6 100644
+--- a/arch/x86/kernel/hpet.c
++++ b/arch/x86/kernel/hpet.c
+@@ -359,6 +359,7 @@ static int hpet_clocksource_register(void)
+ int __init hpet_enable(void)
+ {
+ 	unsigned long id;
++	int i;
+ 
+ 	if (!is_hpet_capable())
+ 		return 0;
+@@ -369,6 +370,29 @@ int __init hpet_enable(void)
+ 	 * Read the period and check for a sane value:
+ 	 */
+ 	hpet_period = hpet_readl(HPET_PERIOD);
++
++	/*
++	 * AMD SB700 based systems with spread spectrum enabled use a
++	 * SMM based HPET emulation to provide proper frequency
++	 * setting. The SMM code is initialized with the first HPET
++	 * register access and takes some time to complete. During
++	 * this time the config register reads 0xffffffff. We check
++	 * for max. 1000 loops whether the config register reads a non
++	 * 0xffffffff value to make sure that HPET is up and running
++	 * before we go further. A counting loop is safe, as the HPET
++	 * access takes thousands of CPU cycles. On non SB700 based
++	 * machines this check is only done once and has no side
++	 * effects.
++	 */
++	for (i = 0; hpet_readl(HPET_CFG) == 0xFFFFFFFF; i++) {
++		if (i == 1000) {
++			printk(KERN_WARNING
++			       "HPET config register value = 0xFFFFFFFF. "
++			       "Disabling HPET\n");
++			goto out_nohpet;
++		}
++	}
++
+ 	if (hpet_period < HPET_MIN_PERIOD || hpet_period > HPET_MAX_PERIOD)
+ 		goto out_nohpet;
+ 

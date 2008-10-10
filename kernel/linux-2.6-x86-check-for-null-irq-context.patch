@@ -1,0 +1,26 @@
+From: Chuck Ebbert <cebbert@redhat.com>
+
+x86: check for null IRQ context before switching stacks
+
+Sometimes during hibernate an unexpected interrupt fires on a disabled CPU.
+The CPU's irq context is NULL and this causes a null pointer dereference.
+Paper over this problem by checking for NULL and making the handler execute
+on the current stack when that happens.
+
+Signed-off-by: Chuck Ebbert <cebbert@redhat.com>
+
+Index: linux-2.6.26.noarch/arch/x86/kernel/irq_32.c
+===================================================================
+--- linux-2.6.26.noarch.orig/arch/x86/kernel/irq_32.c
++++ linux-2.6.26.noarch/arch/x86/kernel/irq_32.c
+@@ -115,6 +115,10 @@ execute_on_irq_stack(int overflow, struc
+ 	curctx = (union irq_ctx *) current_thread_info();
+ 	irqctx = hardirq_ctx[smp_processor_id()];
+ 
++	if (WARN_ONCE(!irqctx, KERN_ERR "No stack for IRQ %d on CPU %d\n",
++			irq, smp_processor_id()))
++		return 0;
++
+ 	/*
+ 	 * this is where we switch to the IRQ stack. However, if we are
+ 	 * already using the IRQ stack (because we interrupted a hardirq
