@@ -1,0 +1,95 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Hal(RPMPackageRecipe,AutoPackageRecipe):
+    buildRequires = [
+        'expat:devel', 'glib:devel', 'dbus:devel',
+        'hwdata:data', 'libcap:devel', 'popt:devel',
+        'dbus-glib:devellib', 'glibc:devel', 'libusb:devel',
+        'perl-XML-Parser:perl', 'gnome-python:python',
+        'pygtk:python', 'binutils:runtime', 'docbook-utils:runtime',
+        'doxygen:runtime', 'gawk:runtime', 'gettext:runtime',
+        'glibc:runtime', 'perl:runtime', 'pkgconfig:devel',
+        'dbus-glib:devel', 'pygobject:python', 'udev:devel', 'xmlto:runtime',
+        'smbios:runtime', 'smbios:devel', 'pciutils:devel',
+        'pciutils:devellib', 'gcc-c++:runtime', 'chkconfig:runtime',
+        'zlib:lib', 'zlib:devellib', 'zlib:devel', 'ConsoleKit:devel',
+        'PolicyKit:devellib', 'PolicyKit:runtime', 'e2fsprogs:devel',
+        'gperf:runtime', 'parted:devel',
+
+        ]
+
+    name = 'hal'
+    version = '0.5.11'
+    rpmRelease = '4.fc10'
+    rpmPatches = [ 'hal-0.5.10-set-property-direct.patch',
+                   'hal-change-priority.patch',
+                   'hal-cloexec.patch',
+                   'hal-ck-api-change.patch',
+                   ]
+
+    def unpack(r):
+        RPMPackageRecipe.unpack(r)
+
+    def configure(r):
+        r.Configure( ' --with-initscripts=redhat'
+                     ' --disable-docbook-docs --with-dell-backlight=yes '
+                     ' --with-pid-file=%(localstatedir)s/run/haldaemon.pid '
+                     ' --enable-sonypic --enable-acpi-acpid '
+                     ' --with-cpufreq '
+                     ' --enable-parted --with-macbookpro --with-macbook --with-usb-csr'
+                     ' --with-os-type=redhat --enable-console-kit --enable-policy-kit' 
+                     ' --enable-acl-management --enable-umount-helper --enable-acpi-ibm'
+                     ' --enable-acpi-toshiba --disable-gtk-doc')
+
+        r.Run(""" sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
+sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool """)
+
+    def policy(r):
+        r.PackageSpec('hal-gnome', '%(datadir)s/%(name)s/device-manager/',
+                      '%(bindir)s/hal-device-manager')
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Requires('hal-info:data', '%(sbindir)s/hald')
+        r.Requires('ConsoleKit:runtime', '%(sbindir)s/hald')
+        r.Requires('PolicyKit:runtime', '%(sbindir)s/hald')
+
+        r.ExcludeDirectories(exceptions='%(datadir)s/hal/fdi/information/20thirdparty')
+        r.ExcludeDirectories(exceptions='%(datadir)s/hal/fdi/information/10freedesktop')
+        r.ExcludeDirectories(exceptions='%(datadir)s/hal/fdi/preprobe/20thirdparty')
+        r.ExcludeDirectories(exceptions='%(datadir)s/hal/fdi/preprobe/10osvendor')
+        r.ExcludeDirectories(exceptions='%(datadir)s/hal/fdi/policy/20thirdparty')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/hald/hald-local')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/hald/hald-runner')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/cache/hald')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/hal')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/hal/fdi/information')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/hal/fdi/preprobe')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/hal/fdi/policy')
+
+        r.UtilizeUser('haldaemon', r'%(sysconfdir)s/.*/hal\.conf')
+
+        r.SetModes('%(localstatedir)s/cache/hald', 0700)
+        r.SetModes('%(localstatedir)s/run/hald', 0700)
+        r.Ownership('haldaemon','haldaemon', '%(localstatedir)s/cache/hald')
+        r.Ownership('haldaemon','haldaemon', '%(localstatedir)s/run/hald')
+
+        r.Create('%(localstatedir)s/run/hald/acl-list')
+        r.InitialContents('%(localstatedir)s/run/hald/acl-list')
+
+        # deprecated keys
+        r.Copy('fdi/information/10freedesktop/01-deprecated-keys.fdi', '%(datadir)s/hal/fdi/information/10freedesktop/')
+
+
+        # FIXME: find a better way, if any
+        r.addSource('hal.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/hal')
+        r.addSource('hal.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/hal', mode=0755)
+
+        r.Requires('file: /usr/bin/polkit-auth', '%(taghandlerdir)s/hal')
+
+        r.TagSpec('hal', '%(sbindir)s/hald')
