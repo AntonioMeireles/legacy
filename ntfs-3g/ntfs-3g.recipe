@@ -4,14 +4,27 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Ntfs3g(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class Ntfs3g(RPMPackageRecipe,AutoPackageRecipe):
     name = 'ntfs-3g'
-    version = '1.1120'
+    version = '1.5012'
+    rpmRelease = '2.fc10'
+    rpmPatches = ['ntfs-3g-1.2216-nomtab.patch']
+    rpmSources = ['20-ntfs-config-write-policy.fdi']
     buildRequires = [ 'fuse:devel', 'pkgconfig:devel' ]
 
     def unpack(r):
-        r.addArchive('http://www.ntfs-3g.org/')
-        r.Replace('\$\(LDCONFIG\)', '#$(LDCONFIG)', 'src/Makefile.in', lines=590)
+        RPMPackageRecipe.unpack(r)
+        r.macros.cflags += ' -D_FILE_OFFSET_BITS=64'
+
+    def configure(r):
+        r.Configure(' --disable-static '
+                    ' --disable-ldconfig '
+                    ' --with-fuse=external '
+                    ' --exec-prefix=/ '
+                    ' --bindir=%(essentialbindir)s '
+                    ' --sbindir=%(essentialsbindir)s '
+                    ' --libdir=/%(lib)s' )
 
     def policy(r):
         r.Requires('fuse:runtime', '/usr/bin/ntfs-3g')
@@ -24,3 +37,17 @@ class Ntfs3g(AutoPackageRecipe):
 modprobe fuse >/dev/null 2>&1
 
 """)
+        r.Remove('%(essentialsbindir)s/mount.ntfs-3g')
+        r.Copy('%(essentialbindir)s/ntfs-3g', '%(essentialsbindir)s/mount.ntfs-3g')
+        r.SetModes('%(essentialsbindir)s/mount.ntfs-3g', 0754)
+
+        r.Symlink('%(essentialbindir)s/ntfs-3g', '%(essentialbindir)s/ntfsmount')
+        r.Symlink('%(essentialsbindir)s/mount.ntfs-3g', '%(essentialbindir)s/mount.ntfs-fuse')
+        r.Symlink('%(essentialsbindir)s/mount.ntfs-3g', '%(essentialbindir)s/mount.ntfs')
+
+        r.Symlink('%(essentialbindir)s/ntfs-3g', '%(bindir)s/ntfs-3g')
+        r.Symlink('%(essentialbindir)s/ntfsmount', '%(bindir)s/ntfsmount')
+
+        r.Move('/%(lib)s/pkgconfig/libntfs-3g.pc', '%(libdir)s/pkgconfig/libntfs-3g.pc')
+        r.Install('20-ntfs-config-write-policy.fdi', '%(datadir)s/hal/fdi/policy/10osvendor/')
+
