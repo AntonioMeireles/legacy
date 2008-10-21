@@ -1,0 +1,39 @@
+#
+# Copyright (c) 2006-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Recipe(RPMPackageRecipe,AutoPackageRecipe):
+    name = 'fuse'
+    version = '2.7.4'
+    rpmRelease = '1.fc10'
+    rpmPatches = [ 'fuse-udev_rules.patch',
+                   'fuse-openfix.patch',
+                   'fuse-chkconfig_support.diff', ]
+    rpmSources = [ 'fuse-udev.nodes',
+                   'fuse-makedev.d-fuse']
+
+    buildRequires = [ 'chkconfig:runtime' ]
+
+    def configure(r):
+        #disable device creation during build/install
+        r.Run(""" sed -i 's|mknod|echo Disabled: mknod |g' util/Makefile.in """)
+
+        r.Configure(' --disable-kernel-module '
+                    ' --without-kernel '
+                    ' --without-kernel-build'
+                    ' --libdir=/%(lib)s'
+                    ' --bindir=%(essentialbindir)s'
+                    ' --exec-prefix=/')
+
+    def policy(r):
+        r.Install('fuse-udev.nodes', '%(sysconfdir)s/udev/makedev.d/99-fuse.nodes', mode = 0644)
+        r.Install('fuse-makedev.d-fuse', '%(sysconfdir)s/makedev.d/z-fuse', mode = 0644)
+        r.SetModes('%(essentialbindir)s/fusermount', 04755)
+        r.MakeDirs('%(libdir)s')
+        r.Move('%(destdir)s/%(lib)s/pkgconfig', '%(destdir)s/%(libdir)s/')
+        # Compatibility symlinks
+        r.Symlink('%(essentialbindir)s/fusermount', '%(bindir)s/fusermount')
+        r.Symlink('%(essentialbindir)s/ulockmgr_server', '%(bindir)s/ulockmgr_server')
