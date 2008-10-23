@@ -33,8 +33,6 @@ class Initscripts(CPackageRecipe):
         r.addMercurialSnapshot('http://hg.rpath.com/initscripts-upstart',
                                tag='rpl-'+r.version)
 
-        r.addPatch('prefdm-splashy.patch')
-
         r.addPatch('RPL-2442-persistent-dhclient.patch')
         r.addSource('README.persistent-dhclient')
         r.addPatch('prefdm_after_dbus.patch')
@@ -49,14 +47,18 @@ class Initscripts(CPackageRecipe):
         r.Remove('%(essentialsbindir)s/mkkerneldoth')
 
         # we are not using upstart yet... so
-        # r.Move('%(sysconfdir)s/inittab.upstart', '%(sysconfdir)s/inittab')
-        r.Move('/etc/inittab.sysv', '/etc/inittab')
-        r.Remove('/etc/event.d', recursive = True)
-        #
 
-        r.Remove('%(sysconfdir)s/rc.d/rc1.d/S99single',
-                 '%(sysconfdir)s/rc.d/init.d/single',
-                 '%(sysconfdir)s/inittab.*')
+        r.Move('%(sysconfdir)s/inittab.sysv', '%(sysconfdir)s/inittab')
+        r.Remove('%(sysconfdir)s/event.d', recursive = True)
+
+        # r.Move('%(sysconfdir)s/inittab.upstart', '%(sysconfdir)s/inittab')
+        # r.Remove('%(sysconfdir)s/rc.d/rc1.d/S99single',
+        #         '%(sysconfdir)s/rc.d/init.d/single',)
+
+        r.Replace('id:3:initdefault:', 'id:5:initdefault:', '%(sysconfdir)s/inittab')
+
+        r.Remove('/etc/inittab.*')
+
 
         r.Doc('sysconfig.txt', 'sysvinitfiles', 'static-routes-ipv6',
             'ipv6-tunnel.howto', 'ipv6-6to4.howto', 'changes.ipv6',
@@ -90,8 +92,9 @@ class Initscripts(CPackageRecipe):
                 r.Remove('%(sysconfdir)s/'+file)
                 r.Move('%(sysconfdir)s/rc.d/'+file, '%(sysconfdir)s/')
                 r.Symlink('%(sysconfdir)s/'+file, '%(sysconfdir)s/rc.d/'+file)
-            r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
-                  " %(destdir)s/%(sysconfdir)s/event.d/rcS")
+
+            #r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
+            #      " %(destdir)s/%(sysconfdir)s/event.d/rcS")
 
         r.SetModes('%(localstatedir)s/{log/wtmp,run/utmp}', 0644)
         r.SetModes('%(localstatedir)s/log/btmp', 0600)
@@ -129,7 +132,7 @@ class Initscripts(CPackageRecipe):
         r.Requires('%(essentialbindir)s/ls', '%(initdir)s/functions')
         r.Requires('%(essentialbindir)s/egrep', '%(initdir)s/functions')
         r.Requires('%(essentialbindir)s/sed', '%(initdir)s/functions')
-        r.Requires('%(essentialbindir)s/find', '%(initdir)s/functions')
+        r.Requires('%(bindir)s/find', '%(initdir)s/functions')
         #   filesystem:runtime required for directories like
         #     /var/lock/subsys
         r.Requires('filesystem:runtime', '%(initdir)s/functions')
@@ -160,7 +163,7 @@ class Initscripts(CPackageRecipe):
             '%(sysconfdir)s/init.d/(halt|netfs|functions)')
         r.Requires('%(essentialsbindir)s/dhclient',
                    '%(sysconfdir)s/sysconfig/network-scripts/(ifup|ifdown)-eth')
-        r.Requires('%(essentialsbindir)s/initctl', '%(sysconfdir)s/inittab')
+        # r.Requires('%(essentialsbindir)s/initctl', '%(sysconfdir)s/inittab')
 
         # default networking information
         r.Create('%(sysconfdir)s/resolv.conf',
@@ -171,7 +174,20 @@ class Initscripts(CPackageRecipe):
             contents='NETWORKING=yes\nHOSTNAME=localhost.localdomain')
         r.InitialContents('%(sysconfdir)s/(hosts|resolv.conf|sysconfig/network)')
         ## r.InitialContents('%(sysconfdir)s/event\.d/.*')
-        r.ExcludeDirectories(exceptions='%(sysconfdir)s/rc1.d')
+        for d in [ '%(sysconfdir)s/rc1.d',
+                   '%(sysconfdir)s/statetab.d',
+                   '%(sysconfdir)s/rwtab.d',
+                   '%(sysconfdir)s/sysconfig/console',
+                   '%(sysconfdir)s/sysconfig/modules',
+                   '%(sysconfdir)s/sysconfig/networking/devices',
+                   '%(sysconfdir)s/sysconfig/networking/profiles/default',
+                   '%(sysconfdir)s/ppp/peers',
+                   '%(localstatedir)s/lib/stateless/writable',
+                   '%(localstatedir)s/lib/stateless/state',
+                   ]:
+            r.ExcludeDirectories(exceptions= d)
+
+
         r.SetModes('%(sysconfdir)s/profile.d/*', 0755)
 
         if not Use.bootstrap:
