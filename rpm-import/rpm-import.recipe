@@ -18,22 +18,140 @@ from conary.lib import log
 class RPMImportRecipe(PackageRecipe):
     name = 'rpm-import'
     version = '0.1'
-    extraArch = {}
+    rpms = None
+    rpmNames = None
+    rpmFiles = None
+    archs = set()
+    extraArch =  { 'i686': []}
     abstractBaseClass = True
     rpmUrl = ''
 
     def __init__(r, *args, **kw):
+        r.usedrpms = set()
         r.headers = []
         PackageRecipe.__init__(r, *args, **kw)
+
+    @staticmethod
+    def parseNVRA(filename):
+        assert(filename.endswith('.rpm'))
+        filename = os.path.basename(filename)
+        # Strip trailing .rpm and extract arch
+        dotPos = filename[:-4].rindex('.')
+        nvr, a = filename[:dotPos], filename[dotPos + 1:-4]
+        arr = nvr.split('-')
+        v, r = arr[-2], arr[-1]
+        n = '-'.join(arr[:-2])
+        return n, v, r, a
+
+    @staticmethod
+    def parseManifest(stream):
+        ret = []
+        # Grab all non-commented lines
+        for line in stream:
+            line = line.strip()
+            if line[0] == '#':
+                continue
+            ret.append(line)
+        return ret
 
     @staticmethod
     def extractSources(sources, openSourceFileFn):
         return [x for x in sources if x.endswith('.rpm')]
 
+    @staticmethod
+    def computeVersion(rpms):
+        ver = None
+        for rpm in rpms:
+            n_, v_, r_, a_ = RPMImportRecipe.parseNVRA(rpm)
+            vr = '_'.join([v_, r_])
+            if ver is None:
+                ver = vr
+            elif vr != ver:
+                raise ValueError("inconsistent RPM version/release pair "
+                    "'%s' and '%s'" % (vr, ver))
+
+        return ver
+
     def unpack(r):
-        for filename in r.sourceFiles:
-            r.addArchive(filename, dir='/', preserveOwnership = True,
-                    use = r.fileMatchesArch(filename))
+        r.rpmNames = set()
+        rpmFileMap = {}
+        for rpm in r.sourceFiles:
+            n_, v_, r_, a_ = RPMImportRecipe.parseNVRA(rpm)
+            if a_ in ('src', 'nosrc'):
+                r.addSource(r.rpmUrl + rpm)
+                continue
+            nvr_ = '-'.join((n_, v_, r_))
+            nv_ = '-'.join((n_, v_))
+            r.rpmNames.add((n_, v_))
+            if (nv_, a_) in rpmFileMap:
+                raise RPMImportError('multiple rpms of the same name, '
+                                     'version, and arch found')
+            rpmFileMap[(nv_, a_)] = rpm
+            if a_ == 'i686':
+                r.extraArch['i686'].append(n_)
+            r.archs.add(a_)
+
+        for rpm in r.rpmNames:
+            # if we have a tuple, it's name, version
+            rpmpath = None
+            if isinstance(rpm, tuple):
+                rpmname, ver = rpm
+                rpm = rpmname + '-%s' % ver
+            else:
+                rpmname = rpm
+                rpm += '-%(version)s'
+
+            for rpmarch in r.archs:
+                pkgarch = rpmarch
+                if rpmarch == 'noarch':
+                    arch = True
+                elif rpmarch.startswith('i') and rpmarch.endswith('86'):
+                    # this is i586, i686 - most likely
+                    arch = Arch.x86
+                    if (rpmarch in r.extraArch
+                        and rpmname not in r.extraArch[rpmarch]
+                        and rpmarch == 'i686'):
+                        # handle cases like glibc, glibc-devel=i686,
+                        # but the rest are i586
+                        pkgarch = 'i386'
+                elif rpmarch == 'x86_64':
+                    arch = Arch[rpmarch]
+                else:
+                    raise RPMImportError('unsupported arch: %s' %rpmarch)
+
+                if (rpm, pkgarch) in rpmFileMap:
+                    rpmfile = rpmFileMap[(rpm, pkgarch)]
+                else:
+                    raise RPMImportError('Could not find a %s version of %s'
+                                         % (pkgarch, rpm))
+                rpmfilename = os.path.basename(rpmfile % r.macros)
+
+                if arch:
+                    r.usedrpms.add(rpmfilename)
+
+                # follow the packaging splitting from the RPMs we're importing
+                packagename = rpmname
+                # collapse libfoo -> foo when the main package name is foo
+                # but don't collapse libbar -> bar when it's produced by the
+                # foo src rpm.
+                if (not r.name.startswith('lib')
+                    and packagename.startswith('lib')
+                    and packagename[3:].startswith(r.name)):
+                    packagename = packagename[3:]
+                # collapse suffixes
+                for suffix in ('-devel', '-docs', '-doc', '-info',
+                               '-lib', '-libs', '-locale', '-man',
+                               '-i18ndata', '-html'):
+                # collapse foo-devel -> foo
+                    if rpmname.endswith(suffix):
+                        packagename = packagename[:-len(suffix)]
+                        break
+                fullUrl = os.path.join(r.rpmUrl % { 'arch' : rpmarch },
+                                       rpmfile % r.macros)
+                r.addArchive(fullUrl, dir = '/',
+                             package = packagename, preserveOwnership = True,
+                             use = r.fileMatchesArch(rpmfilename))
+
 
     def disableBuildRequirementsPolicy(r):
         r.EnforceSonameBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
@@ -150,6 +268,7 @@ class RPMImportRecipe(PackageRecipe):
                         r.Create(path)
                         r.InitialContents(escaped_path)
                     elif stat.S_ISDIR(mode):
+                        r.MakeDirs(escaped_path)
                         r.ExcludeDirectories(exceptions=escaped_path)
 
                 # handle "special" permissions (although un-cpio'ing
@@ -172,6 +291,8 @@ class RPMImportRecipe(PackageRecipe):
         r.preprocess()
         r.unpack()
         r.policy()
+        if r._lightInstance:
+            return
         r.readHeaders()
         r.processScripts()
         r.processFiles()
@@ -203,6 +324,7 @@ class RPMImportRecipe(PackageRecipe):
         return header[scriptTag]
 
     def _getRandomString(self):
+        import os
         import sha
 
         x = sha.new()
