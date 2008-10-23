@@ -4,18 +4,17 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class Initscripts(RPMPackageRecipe,CPackageRecipe):
+class Initscripts(CPackageRecipe):
     name = 'initscripts'
-    version = '8.76.2'
-    rpmRelease = '1'
+    version = '8.81.2'
 
     if Use.bootstrap:
-        clearBuildReqs()
+        clearBuildRequires()
         buildRequires = [ 'setup:runtime' ]
     else:
         buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
-                      'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel' ]
+                          'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel', ]
+        buildRequires.extend(['mercurial:runtime'])
 
     # Add sysvinit:runtime to work around rMake bug RMK-580
     buildRequires.append('sysvinit:runtime')
@@ -31,36 +30,44 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
             r.RequireChkconfig(exceptions='%(initdir)s/functions')
             return
 
-        RPMPackageRecipe.unpack(r)
-        r.addPatch('foresight.patch')
+        r.addMercurialSnapshot('http://hg.rpath.com/initscripts-upstart',
+                               tag='rpl-'+r.version)
+
         r.addPatch('prefdm-splashy.patch')
-        r.addPatch('initscripts-8.76.2-raid.patch')
+
+        r.addPatch('RPL-2442-persistent-dhclient.patch')
+        r.addSource('README.persistent-dhclient')
         r.addPatch('prefdm_after_dbus.patch')
 
         r.Make()
         r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
                       ' mandir=%(mandir)s', rootVar='ROOT')
 
-        # we are not using upstart yet... so
-        r.Move('/etc/inittab.sysv', '/etc/inittab')
-        r.Remove('/etc/event.d', recursive = True)
-        #
-
         r.Remove('%(sysconfdir)s/sysconfig/init.s390')
         r.Remove('%(sysconfdir)s/rc.d/rc.sysinit.s390init')
         # we use separate build trees rather than trying to unify them
         r.Remove('%(essentialsbindir)s/mkkerneldoth')
 
+        # we are not using upstart yet... so
+        # r.Move('%(sysconfdir)s/inittab.upstart', '%(sysconfdir)s/inittab')
+        r.Move('/etc/inittab.sysv', '/etc/inittab')
+        r.Remove('/etc/event.d', recursive = True)
+        #
+
+        r.Remove('%(sysconfdir)s/rc.d/rc1.d/S99single',
+                 '%(sysconfdir)s/rc.d/init.d/single',
+                 '%(sysconfdir)s/inittab.*')
+
         r.Doc('sysconfig.txt', 'sysvinitfiles', 'static-routes-ipv6',
-            'ipv6-tunnel.howto', 'ipv6-6to4.howto', 'changes.ipv6')
+            'ipv6-tunnel.howto', 'ipv6-6to4.howto', 'changes.ipv6',
+            'README-event.d')
         r.SetModes('%(sbindir)s/usernetctl', 04755)
         r.SetModes('%(essentialsbindir)s/netreport', 02755)
         r.SetModes('%(localstatedir)s/run/netreport', 0775)
 
         # avoid prefdm from checkings stuff every 4 seconds:
         # https://issues.rpath.com/browse/RPL-334
-        #r.Remove('%(sysconfdir)s/X11/prefdm')
-        # r.Replace('.*prefdm.*', '', '%(sysconfdir)s/inittab')
+        # r.Remove('%(sysconfdir)s/X11/prefdm', '%(sysconfdir)s/event.d/prefdm')
 
         if r.macros.initdir != r.macros.sysconfdir+'/init.d':
             # Using something other than FHS standard, add compat symlinks
@@ -84,27 +91,12 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
                 r.Move('%(sysconfdir)s/rc.d/'+file, '%(sysconfdir)s/')
                 r.Symlink('%(sysconfdir)s/'+file, '%(sysconfdir)s/rc.d/'+file)
             r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
-                  " %(destdir)s/%(sysconfdir)s/inittab")
+                  " %(destdir)s/%(sysconfdir)s/event.d/rcS")
 
         r.SetModes('%(localstatedir)s/{log/wtmp,run/utmp}', 0644)
         r.SetModes('%(localstatedir)s/log/btmp', 0600)
         r.Ownership('root', 'utmp', '%(localstatedir)s/log/wtmp',
                                     '%(localstatedir)s/run/utmp')
-
-        for i in ['/etc/rwtab.d',
-                  '/etc/statetab.d',
-                  '/etc/sysconfig/modules',
-                  '/etc/sysconfig/console',
-                  '/etc/sysconfig/networking/devices',
-                  '/etc/sysconfig/networking/profiles/default',
-                  '/etc/ppp/peers',
-                  '/var/lib/stateless/writable',
-                  '/var/lib/stateless/state',]:
-                  r.ExcludeDirectories(exceptions = i)
-
-        r.NonBinariesInBindirs(exceptions = '%(sysconfdir)s/profile.d/lang.sh')
-        r.NonBinariesInBindirs(exceptions = '%(sysconfdir)s/profile.d/lang.csh')
-
 
         # oddly enough, it's the initscripts package itself that has violations
         # of its own "must use chkconfig" policy!
@@ -115,11 +107,11 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
         r.TagSpec('initscript', '%(initdir)s/')
         r.TagSpec('initscript', exceptions='%(initdir)s/killall')
         r.TagSpec('initscript', exceptions='%(initdir)s/halt')
-        r.TagSpec('initscript', exceptions='%(initdir)s/single')
+        #r.TagSpec('initscript', exceptions='%(initdir)s/single')
         r.TagSpec('initscript', exceptions='%(initdir)s/functions')
         r.RequireChkconfig(exceptions='%(initdir)s/killall')
         r.RequireChkconfig(exceptions='%(initdir)s/halt')
-        r.RequireChkconfig(exceptions='%(initdir)s/single')
+        #r.RequireChkconfig(exceptions='%(initdir)s/single')
         r.RequireChkconfig(exceptions='%(initdir)s/functions')
 
         # add runtime requirements
@@ -137,6 +129,7 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
         r.Requires('%(essentialbindir)s/ls', '%(initdir)s/functions')
         r.Requires('%(essentialbindir)s/egrep', '%(initdir)s/functions')
         r.Requires('%(essentialbindir)s/sed', '%(initdir)s/functions')
+        r.Requires('%(essentialbindir)s/find', '%(initdir)s/functions')
         #   filesystem:runtime required for directories like
         #     /var/lock/subsys
         r.Requires('filesystem:runtime', '%(initdir)s/functions')
@@ -167,6 +160,7 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
             '%(sysconfdir)s/init.d/(halt|netfs|functions)')
         r.Requires('%(essentialsbindir)s/dhclient',
                    '%(sysconfdir)s/sysconfig/network-scripts/(ifup|ifdown)-eth')
+        r.Requires('%(essentialsbindir)s/initctl', '%(sysconfdir)s/inittab')
 
         # default networking information
         r.Create('%(sysconfdir)s/resolv.conf',
@@ -176,3 +170,10 @@ class Initscripts(RPMPackageRecipe,CPackageRecipe):
         r.Create('%(sysconfdir)s/sysconfig/network',
             contents='NETWORKING=yes\nHOSTNAME=localhost.localdomain')
         r.InitialContents('%(sysconfdir)s/(hosts|resolv.conf|sysconfig/network)')
+        ## r.InitialContents('%(sysconfdir)s/event\.d/.*')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/rc1.d')
+        r.SetModes('%(sysconfdir)s/profile.d/*', 0755)
+
+        if not Use.bootstrap:
+            r.Requires('%(sbindir)s/NetworkManager',
+                       '%(sysconfdir)s/init.d/netfs')
