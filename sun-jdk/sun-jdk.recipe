@@ -7,75 +7,76 @@
 loadSuperClass('javapackage')
 class SunJava(JavaPackageRecipe, CPackageRecipe):
     name = 'sun-jdk'
-    version = '6u6'
+    version = '6u10'
 
-    JavaPackageRecipe.buildRequires = []
-    buildRequires = [ 'desktop-file-utils:runtime', ]
+    clearBuildRequires()
 
-    jdkhome = '%%(jvmdir)s/sun-java-%s' % version
+    javaname = 'sun-java-%s' % version
+    jdkhome = '%%(jvmdir)s/%s' % javaname
     javahome = '%s/jre' % jdkhome
 
     def upstreamUnpack(r):
+
         r.macros.jrename = 'sun-jre'
         r.macros.jdkhome = r.jdkhome
-        r.macros.desktopfile = 'jre/plugin/desktop/sun_java.desktop'
+        r.macros.javaname = r.javaname
+
         upver = r.version.replace('.', '_')
         site = 'http://download.java.net/dlj/binaries/'+'jdk-'+upver+'-dlj-linux-'
         arch32 = 'i586.bin'
         arch64 = 'amd64.bin'
+
         r.addSource(site+arch32, use=(Arch.x86 and not Use.gcj))
         r.addSource(site+arch64, use=(Arch.x86_64 and not Use.gcj))
+
+        r.addSource('%(name)s.sh', macros=True)
+
         r.Run('sh *.bin --accept-license --unpack')
-        r.Run('mv jdk*/* .')
 
     def upstreamSetup(r):
+
+        r.Install('jdk*/*', '%(jdkhome)s/')
+
         if Arch.x86:
-            r.Replace( ('X-Sun-Supported;', ''),
-                       ('X-Red-Hat-Base;', ''),
-                       ('X-Ximian-Settings;', ''),
-                       ('Application;', ''),
-                       '%(desktopfile)s')
+            desktop = '%(jdkhome)s/jre/plugin/desktop/sun_java'
+            desktopFile = '%s.desktop' % desktop
+            desktopIcon = '%s.png' % desktop
+            r.Replace(
+                ('X-Sun-Supported;', ''),
+                ('X-Red-Hat-Base;', ''),
+                ('X-Ximian-Settings;', ''),
+                ('Application;', ''),
+                desktopFile
+            )
 
-            r.Desktopfile('%(desktopfile)s')
-
-            r.Install('jre/plugin', '%(javahome)s')
+            r.Install(desktopFile, '%(datadir)s/applications/')
+            r.Install(desktopIcon, '%(datadir)s/pixmaps/sun-jcontrol.png')
 
             # Create symlink for firefox plugin
             r.Symlink('%(javahome)s/plugin/i386/ns7/libjavaplugin_oji.so',
                       '%(libdir)s/mozilla/plugins/')
 
             r.PackageSpec('%(jrename)s', '%(libdir)s/mozilla/plugins/')
-            r.ComponentSpec('lib', '%(libdir)s/mozilla/plugins/')
 
-        r.Install('bin', '%(jdkhome)s')
-        r.Install('lib', '%(jdkhome)s')
-        r.Install('include', '%(jdkhome)s/')
-        r.Install('man/man1/', '%(datadir)s/man/man1/')
-        r.Install('jre/bin', '%(javahome)s')
-        r.Install('jre/lib', '%(javahome)s')
+        r.macros.jsuffix = ('-64','')[Arch.x86==True]
+        r.Install(
+            '%(name)s.sh',
+            '%(sysconfdir)s/profile.d/%(name)s%(jsuffix)s.sh',
+            package='%(jrename)s', mode=0755
+        )
 
-        # Setup environment variables
-        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.sh', mode=0755,
-                 contents='export PATH="%(javahome)s/bin:$PATH"\n'
-                          'export JAVA_HOME="%(javahome)s"')
-        r.Create('%(sysconfdir)s/profile.d/%(jrename)s.csh', mode=0755,
-                 contents='setenv PATH "%(javahome)s/bin:$PATH"\n'
-                          'setenv JAVA_HOME "%(javahome)s"')
-
-        r.Create('%(sysconfdir)s/profile.d/%(name)s.sh', mode=0755,
-                 contents='export PATH="%(jdkhome)s/bin:$PATH"')
-        r.Create('%(sysconfdir)s/profile.d/%(name)s.csh', mode=0755,
-                 contents='setenv PATH "%(jdkhome)s/bin:$PATH"')
-
-        r.PackageSpec('%(jrename)s', '%(javahome)s/',
-                                     '%(sysconfdir)s/profile.d/%(jrename)s.*')
+        r.ComponentSpec('locale', '%(javahome)s/lib/locale/')
+        r.ComponentSpec('runtime', '/')
+        r.PackageSpec('%(jrename)s', '%(javahome)s/')
 
         # RPL-1534
         r.Requires(exceptDeps='java.*')
 
         # RPL-1558
-        r.Requires('sun-jre:java', '%(jdkhome)s/.*')
+        r.Requires('%(jrename)s:runtime', '%(jdkhome)s/.*')
 
-        r.Requires('%(jrename)s:runtime', '%(sysconfdir)s/profile.d/%(name)s.*')
-        r.Requires('%(jrename)s:lib', '%(jdkhome)s/bin/.*')
+        r.TagSpec('desktop-file', '%(datadir)s/applications/')
+
+        del(r.AutoDoc)
+        del(r.RemoveNonPackageFiles)
 
