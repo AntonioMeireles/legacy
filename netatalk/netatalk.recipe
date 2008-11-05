@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2007 rPath, Inc.
+# Copyright (c) 2007-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -7,19 +7,45 @@
 class Netatalk(CPackageRecipe):
     name = 'netatalk'
     version = '2.0.3'
+    dbVersion = '4.2.52'
 
-    buildRequires = ['db:devel=:1-compat', 'openssl:devel', 'pam:devel',
-        'perl:devel', 'perl:runtime', 'procps:runtime', 'chkconfig:runtime']
+    buildRequires = [
+        'chkconfig:runtime', 'cracklib:devel', 'cups:devel',
+        'openslp:devel', 'openssl:devel', 'pam:devel',
+        'perl:devel', 'perl:runtime', 'procps:runtime',
+        'tcp_wrappers:devel',
+    ]
 
     def setup(r):
+        r.macros.dbver = r.dbVersion
         r.addArchive('mirror://sourceforge/%(name)s/')
+
+        # build internal version of db that netatalk knows how to deal with
+        # unfortunately, this is a bit ugly
+        r.addArchive('http://download.oracle.com/berkeley-db/db-%(dbver)s.tar.gz',
+                     dir='%(maindir)s')
+        r.Configure('--enable-shared=no',
+                    configureName='../dist/configure',
+                    dir='db-%(dbver)s/build_unix')
+        r.Make(dir='db-%(dbver)s/build_unix')
+        r.Make('install DESTDIR=%(builddir)s/db-%(dbver)s/install',
+               dir='db-%(dbver)s/build_unix')
         
-        r.Configure()
+        r.Configure('--without-xfs --enable-redhat --enable-timelord'
+                    ' --enable-a2boot --enable-cups --with-cracklib'
+                    ' --with-ssl-dir=/usr/bin'
+                    ' --with-bdb=%(builddir)s/db-%(dbver)s/install/usr/',
+                    preConfigure='LIBS="-lpthread" '
+                                 'CFLAGS="$CFLAGS -I%(builddir)s/db-%(dbver)s/install/usr/include/"'
+                                 ' LDFLAGS="-L%(builddir)s/db-%(dbver)s/install/usr/%(lib)s $LDFLAGS -lpthread"')
+
+        # properly not depending on XFS hasn't been finished upstream
+        # This Replace can be removed if the package builds fine without it
+        r.Replace('#define (HAVE_.*XFS.*_H) 1',
+                  r'/* #undef \1 */',
+                  'config.h')
         r.Make()
         r.MakeInstall()
-
-        r.Make('rc.atalk.redhat', dir = 'distrib/initscripts/')
-        r.Install('distrib/initscripts/rc.atalk.redhat', '%(initdir)s/atalk', mode = 0755)
 
         # plan9 shell not supported, removing this script
         r.Remove('%(bindir)s/acleandir.rc')
