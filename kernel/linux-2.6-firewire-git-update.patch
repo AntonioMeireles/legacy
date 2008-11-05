@@ -1,71 +1,35 @@
- drivers/firewire/Kconfig          |    9 ++-
- drivers/firewire/fw-card.c        |   92 ++++++++++--------------
- drivers/firewire/fw-cdev.c        |   29 +++++---
- drivers/firewire/fw-device.c      |   42 ++---------
- drivers/firewire/fw-device.h      |    1 -
- drivers/firewire/fw-ohci.c        |  111 +++++++++++++++--------------
- drivers/firewire/fw-sbp2.c        |   71 +++++++++----------
- drivers/firewire/fw-topology.c    |   24 ++++++-
- drivers/firewire/fw-transaction.c |  141 +++++++++++++++++++++++--------------
- drivers/firewire/fw-transaction.h |   52 +++++++++++---
- drivers/ieee1394/csr1212.c        |   34 ++++++---
- drivers/ieee1394/dma.c            |    2 +-
- drivers/ieee1394/eth1394.c        |    2 +-
- drivers/ieee1394/highlevel.c      |    4 +-
- drivers/ieee1394/highlevel.h      |   13 +++-
- drivers/ieee1394/raw1394.c        |   20 ++++--
- drivers/ieee1394/sbp2.c           |   22 +++++-
- drivers/ieee1394/sbp2.h           |    1 +
- drivers/ieee1394/video1394.c      |    2 +
- drivers/scsi/sd.c                 |    5 ++
- include/linux/pci_ids.h           |    1 +
- include/scsi/scsi_device.h        |    1 +
- 22 files changed, 401 insertions(+), 278 deletions(-)
+Git diff in linux1394-2.6-git at commit 3346610742cdef8b1670d090008aca0911e95880
+vs. tag v2.6.27, on 2008-10-29.
 
-diff --git a/drivers/firewire/Kconfig b/drivers/firewire/Kconfig
-index 76f2671..fa6d6ab 100644
---- a/drivers/firewire/Kconfig
-+++ b/drivers/firewire/Kconfig
-@@ -16,8 +16,13 @@ config FIREWIRE
- 	  enable the new stack.
- 
- 	  To compile this driver as a module, say M here: the module will be
--	  called firewire-core.  It functionally replaces ieee1394, raw1394,
--	  and video1394.
-+	  called firewire-core.
-+
-+	  This module functionally replaces ieee1394, raw1394, and video1394.
-+	  To access it from application programs, you generally need at least
-+	  libraw1394 version 2.  IIDC/DCAM applications also need libdc1394
-+	  version 2.  No libraries are required to access storage devices
-+	  through the firewire-sbp2 driver.
- 
- config FIREWIRE_OHCI
- 	tristate "OHCI-1394 controllers"
+---
+
+ drivers/firewire/fw-card.c         |   58 ++------
+ drivers/firewire/fw-cdev.c         |   42 +++---
+ drivers/firewire/fw-device.c       |   40 ++----
+ drivers/firewire/fw-device.h       |    4 +
+ drivers/firewire/fw-ohci.c         |  123 ++++++++++------
+ drivers/firewire/fw-sbp2.c         |  154 +++++++++-----------
+ drivers/firewire/fw-topology.c     |   18 ++-
+ drivers/firewire/fw-transaction.c  |   48 ++++++-
+ drivers/firewire/fw-transaction.h  |   20 ++-
+ drivers/ieee1394/csr1212.c         |    2 +-
+ drivers/ieee1394/dv1394.c          |    2 +-
+ drivers/ieee1394/eth1394.c         |    2 +-
+ drivers/ieee1394/nodemgr.c         |  279 ++++++++++++++----------------------
+ drivers/ieee1394/nodemgr.h         |    2 +-
+ drivers/ieee1394/raw1394-private.h |    1 +
+ drivers/ieee1394/raw1394.c         |  230 ++++++++++++++++-------------
+ drivers/ieee1394/sbp2.c            |  218 ++++++++++++----------------
+ drivers/ieee1394/sbp2.h            |   33 ++---
+ drivers/ieee1394/video1394.c       |    8 +-
+ include/linux/firewire-cdev.h      |    9 +-
+ 20 files changed, 622 insertions(+), 671 deletions(-)
+
 diff --git a/drivers/firewire/fw-card.c b/drivers/firewire/fw-card.c
-index 5b4c0d9..94cf070 100644
+index bbd73a4..94cf070 100644
 --- a/drivers/firewire/fw-card.c
 +++ b/drivers/firewire/fw-card.c
-@@ -16,12 +16,15 @@
-  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-  */
- 
--#include <linux/module.h>
--#include <linux/errno.h>
-+#include <linux/completion.h>
-+#include <linux/crc-itu-t.h>
- #include <linux/delay.h>
- #include <linux/device.h>
-+#include <linux/errno.h>
-+#include <linux/kref.h>
-+#include <linux/module.h>
- #include <linux/mutex.h>
--#include <linux/crc-itu-t.h>
-+
- #include "fw-transaction.h"
- #include "fw-topology.h"
- #include "fw-device.h"
-@@ -186,39 +189,16 @@ static const char gap_count_table[] = {
+@@ -189,39 +189,16 @@ static const char gap_count_table[] = {
  	63, 5, 7, 8, 10, 13, 16, 18, 21, 24, 26, 29, 32, 35, 37, 40
  };
  
@@ -107,7 +71,7 @@ index 5b4c0d9..94cf070 100644
  
  	spin_lock_irqsave(&card->lock, flags);
  	local_node = card->local_node;
-@@ -238,7 +218,7 @@ fw_card_bm_work(struct work_struct *work)
+@@ -241,7 +218,7 @@ fw_card_bm_work(struct work_struct *work)
  	root_id = root_node->node_id;
  	grace = time_after(jiffies, card->reset_jiffies + DIV_ROUND_UP(HZ, 10));
  
@@ -116,7 +80,7 @@ index 5b4c0d9..94cf070 100644
  	    (card->bm_generation != generation && grace)) {
  		/*
  		 * This first step is to figure out who is IRM and
-@@ -260,33 +240,28 @@ fw_card_bm_work(struct work_struct *work)
+@@ -263,33 +240,28 @@ fw_card_bm_work(struct work_struct *work)
  			goto pick_me;
  		}
  
@@ -162,129 +126,182 @@ index 5b4c0d9..94cf070 100644
  			/*
  			 * The lock request failed, maybe the IRM
  			 * isn't really IRM capable after all. Let's
-@@ -396,14 +371,16 @@ fw_card_initialize(struct fw_card *card, const struct fw_card_driver *driver,
- {
- 	static atomic_t index = ATOMIC_INIT(-1);
- 
--	atomic_set(&card->device_count, 0);
- 	card->index = atomic_inc_return(&index);
- 	card->driver = driver;
- 	card->device = device;
- 	card->current_tlabel = 0;
- 	card->tlabel_mask = 0;
- 	card->color = 0;
-+	card->broadcast_channel = BROADCAST_CHANNEL_INITIAL;
- 
-+	kref_init(&card->kref);
-+	init_completion(&card->done);
- 	INIT_LIST_HEAD(&card->transaction_list);
- 	spin_lock_init(&card->lock);
- 	setup_timer(&card->flush_timer,
-@@ -496,7 +473,6 @@ dummy_enable_phys_dma(struct fw_card *card,
- }
- 
- static struct fw_card_driver dummy_driver = {
--	.name            = "dummy",
- 	.enable          = dummy_enable,
- 	.update_phy_reg  = dummy_update_phy_reg,
- 	.set_config_rom  = dummy_set_config_rom,
-@@ -507,6 +483,14 @@ static struct fw_card_driver dummy_driver = {
- };
- 
- void
-+fw_card_release(struct kref *kref)
-+{
-+	struct fw_card *card = container_of(kref, struct fw_card, kref);
-+
-+	complete(&card->done);
-+}
-+
-+void
- fw_core_remove_card(struct fw_card *card)
- {
- 	card->driver->update_phy_reg(card, 4,
-@@ -521,15 +505,13 @@ fw_core_remove_card(struct fw_card *card)
- 	card->driver = &dummy_driver;
- 
- 	fw_destroy_nodes(card);
--	/*
--	 * Wait for all device workqueue jobs to finish.  Otherwise the
--	 * firewire-core module could be unloaded before the jobs ran.
--	 */
--	while (atomic_read(&card->device_count) > 0)
--		msleep(100);
-+
-+	/* Wait for all users, especially device workqueue jobs, to finish. */
-+	fw_card_put(card);
-+	wait_for_completion(&card->done);
- 
- 	cancel_delayed_work_sync(&card->work);
--	fw_flush_transactions(card);
-+	WARN_ON(!list_empty(&card->transaction_list));
- 	del_timer_sync(&card->flush_timer);
- }
- EXPORT_SYMBOL(fw_core_remove_card);
 diff --git a/drivers/firewire/fw-cdev.c b/drivers/firewire/fw-cdev.c
-index c639915..2e6d584 100644
+index 2e6d584..75bbd66 100644
 --- a/drivers/firewire/fw-cdev.c
 +++ b/drivers/firewire/fw-cdev.c
-@@ -369,22 +369,33 @@ complete_transaction(struct fw_card *card, int rcode,
- 	struct response *response = data;
- 	struct client *client = response->client;
- 	unsigned long flags;
-+	struct fw_cdev_event_response *r = &response->response;
+@@ -24,9 +24,11 @@
+ #include <linux/errno.h>
+ #include <linux/device.h>
+ #include <linux/vmalloc.h>
++#include <linux/mutex.h>
+ #include <linux/poll.h>
+ #include <linux/preempt.h>
+ #include <linux/time.h>
++#include <linux/spinlock.h>
+ #include <linux/delay.h>
+ #include <linux/mm.h>
+ #include <linux/idr.h>
+@@ -107,7 +109,6 @@ static int fw_device_op_open(struct inode *inode, struct file *file)
+ {
+ 	struct fw_device *device;
+ 	struct client *client;
+-	unsigned long flags;
  
--	if (length < response->response.length)
--		response->response.length = length;
-+	if (length < r->length)
-+		r->length = length;
- 	if (rcode == RCODE_COMPLETE)
--		memcpy(response->response.data, payload,
--		       response->response.length);
-+		memcpy(r->data, payload, r->length);
+ 	device = fw_device_get_by_devt(inode->i_rdev);
+ 	if (device == NULL)
+@@ -132,9 +133,9 @@ static int fw_device_op_open(struct inode *inode, struct file *file)
  
- 	spin_lock_irqsave(&client->lock, flags);
- 	list_del(&response->resource.link);
- 	spin_unlock_irqrestore(&client->lock, flags);
+ 	file->private_data = client;
  
--	response->response.type   = FW_CDEV_EVENT_RESPONSE;
--	response->response.rcode  = rcode;
--	queue_event(client, &response->event,
--		    &response->response, sizeof(response->response),
--		    response->response.data, response->response.length);
-+	r->type   = FW_CDEV_EVENT_RESPONSE;
-+	r->rcode  = rcode;
-+
-+	/*
-+	 * In the case that sizeof(*r) doesn't align with the position of the
-+	 * data, and the read is short, preserve an extra copy of the data
-+	 * to stay compatible with a pre-2.6.27 bug.  Since the bug is harmless
-+	 * for short reads and some apps depended on it, this is both safe
-+	 * and prudent for compatibility.
-+	 */
-+	if (r->length <= sizeof(*r) - offsetof(typeof(*r), data))
-+		queue_event(client, &response->event, r, sizeof(*r),
-+			    r->data, r->length);
-+	else
-+		queue_event(client, &response->event, r, sizeof(*r) + r->length,
-+			    NULL, 0);
+-	spin_lock_irqsave(&device->card->lock, flags);
++	mutex_lock(&device->client_list_mutex);
+ 	list_add_tail(&client->link, &device->client_list);
+-	spin_unlock_irqrestore(&device->card->lock, flags);
++	mutex_unlock(&device->client_list_mutex);
+ 
+ 	return 0;
+ }
+@@ -205,12 +206,14 @@ fw_device_op_read(struct file *file,
+ 	return dequeue_event(client, buffer, count);
  }
  
- static int ioctl_send_request(struct client *client, void *buffer)
+-/* caller must hold card->lock so that node pointers can be dereferenced here */
+ static void
+ fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
+ 		     struct client *client)
+ {
+ 	struct fw_card *card = client->device->card;
++	unsigned long flags;
++
++	spin_lock_irqsave(&card->lock, flags);
+ 
+ 	event->closure	     = client->bus_reset_closure;
+ 	event->type          = FW_CDEV_EVENT_BUS_RESET;
+@@ -220,22 +223,20 @@ fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
+ 	event->bm_node_id    = 0; /* FIXME: We don't track the BM. */
+ 	event->irm_node_id   = card->irm_node->node_id;
+ 	event->root_node_id  = card->root_node->node_id;
++
++	spin_unlock_irqrestore(&card->lock, flags);
+ }
+ 
+ static void
+ for_each_client(struct fw_device *device,
+ 		void (*callback)(struct client *client))
+ {
+-	struct fw_card *card = device->card;
+ 	struct client *c;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&card->lock, flags);
+ 
++	mutex_lock(&device->client_list_mutex);
+ 	list_for_each_entry(c, &device->client_list, link)
+ 		callback(c);
+-
+-	spin_unlock_irqrestore(&card->lock, flags);
++	mutex_unlock(&device->client_list_mutex);
+ }
+ 
+ static void
+@@ -243,7 +244,7 @@ queue_bus_reset_event(struct client *client)
+ {
+ 	struct bus_reset *bus_reset;
+ 
+-	bus_reset = kzalloc(sizeof(*bus_reset), GFP_ATOMIC);
++	bus_reset = kzalloc(sizeof(*bus_reset), GFP_KERNEL);
+ 	if (bus_reset == NULL) {
+ 		fw_notify("Out of memory when allocating bus reset event\n");
+ 		return;
+@@ -274,11 +275,11 @@ static int ioctl_get_info(struct client *client, void *buffer)
+ {
+ 	struct fw_cdev_get_info *get_info = buffer;
+ 	struct fw_cdev_event_bus_reset bus_reset;
+-	struct fw_card *card = client->device->card;
+ 	unsigned long ret = 0;
+ 
+ 	client->version = get_info->version;
+ 	get_info->version = FW_CDEV_VERSION;
++	get_info->card = client->device->card->index;
+ 
+ 	down_read(&fw_device_rwsem);
+ 
+@@ -300,18 +301,12 @@ static int ioctl_get_info(struct client *client, void *buffer)
+ 	client->bus_reset_closure = get_info->bus_reset_closure;
+ 	if (get_info->bus_reset != 0) {
+ 		void __user *uptr = u64_to_uptr(get_info->bus_reset);
+-		unsigned long flags;
+ 
+-		spin_lock_irqsave(&card->lock, flags);
+ 		fill_bus_reset_event(&bus_reset, client);
+-		spin_unlock_irqrestore(&card->lock, flags);
+-
+ 		if (copy_to_user(uptr, &bus_reset, sizeof(bus_reset)))
+ 			return -EFAULT;
+ 	}
+ 
+-	get_info->card = card->index;
+-
+ 	return 0;
+ }
+ 
+@@ -720,8 +715,8 @@ static int ioctl_create_iso_context(struct client *client, void *buffer)
+ #define GET_PAYLOAD_LENGTH(v)	((v) & 0xffff)
+ #define GET_INTERRUPT(v)	(((v) >> 16) & 0x01)
+ #define GET_SKIP(v)		(((v) >> 17) & 0x01)
+-#define GET_TAG(v)		(((v) >> 18) & 0x02)
+-#define GET_SY(v)		(((v) >> 20) & 0x04)
++#define GET_TAG(v)		(((v) >> 18) & 0x03)
++#define GET_SY(v)		(((v) >> 20) & 0x0f)
+ #define GET_HEADER_LENGTH(v)	(((v) >> 24) & 0xff)
+ 
+ static int ioctl_queue_iso(struct client *client, void *buffer)
+@@ -913,7 +908,7 @@ dispatch_ioctl(struct client *client, unsigned int cmd, void __user *arg)
+ 			return -EFAULT;
+ 	}
+ 
+-	return 0;
++	return retval;
+ }
+ 
+ static long
+@@ -990,7 +985,6 @@ static int fw_device_op_release(struct inode *inode, struct file *file)
+ 	struct client *client = file->private_data;
+ 	struct event *e, *next_e;
+ 	struct client_resource *r, *next_r;
+-	unsigned long flags;
+ 
+ 	if (client->buffer.pages)
+ 		fw_iso_buffer_destroy(&client->buffer, client->device->card);
+@@ -1009,9 +1003,9 @@ static int fw_device_op_release(struct inode *inode, struct file *file)
+ 	list_for_each_entry_safe(e, next_e, &client->event_list, link)
+ 		kfree(e);
+ 
+-	spin_lock_irqsave(&client->device->card->lock, flags);
++	mutex_lock(&client->device->client_list_mutex);
+ 	list_del(&client->link);
+-	spin_unlock_irqrestore(&client->device->card->lock, flags);
++	mutex_unlock(&client->device->client_list_mutex);
+ 
+ 	fw_device_put(client->device);
+ 	kfree(client);
 diff --git a/drivers/firewire/fw-device.c b/drivers/firewire/fw-device.c
-index d9c8daf..3fccdd4 100644
+index 0855fb5..dd72d5e 100644
 --- a/drivers/firewire/fw-device.c
 +++ b/drivers/firewire/fw-device.c
-@@ -168,7 +168,7 @@ static void fw_device_release(struct device *dev)
- 	fw_node_put(device->node);
- 	kfree(device->config_rom);
- 	kfree(device);
--	atomic_dec(&card->device_count);
-+	fw_card_put(card);
- }
- 
- int fw_device_enable_phys_dma(struct fw_device *device)
-@@ -381,46 +381,21 @@ static struct device_attribute fw_device_attributes[] = {
+@@ -26,8 +26,10 @@
+ #include <linux/delay.h>
+ #include <linux/idr.h>
+ #include <linux/string.h>
++#include <linux/mutex.h>
+ #include <linux/rwsem.h>
+ #include <linux/semaphore.h>
++#include <linux/spinlock.h>
+ #include <asm/system.h>
+ #include <linux/ctype.h>
+ #include "fw-transaction.h"
+@@ -381,46 +383,21 @@ static struct device_attribute fw_device_attributes[] = {
  	__ATTR_NULL,
  };
  
@@ -337,50 +354,72 @@ index d9c8daf..3fccdd4 100644
  }
  
  #define READ_BIB_ROM_SIZE	256
-@@ -946,8 +921,7 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event)
- 		 */
- 		device_initialize(&device->device);
- 		atomic_set(&device->state, FW_DEVICE_INITIALIZING);
--		atomic_inc(&card->device_count);
--		device->card = card;
-+		device->card = fw_card_get(card);
+@@ -950,6 +927,7 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event)
  		device->node = fw_node_get(node);
  		device->node_id = node->node_id;
  		device->generation = card->generation;
++		mutex_init(&device->client_list_mutex);
+ 		INIT_LIST_HEAD(&device->client_list);
+ 
+ 		/*
 diff --git a/drivers/firewire/fw-device.h b/drivers/firewire/fw-device.h
-index 5f131f5..42305bb 100644
+index 42305bb..32c628e 100644
 --- a/drivers/firewire/fw-device.h
 +++ b/drivers/firewire/fw-device.h
-@@ -62,7 +62,6 @@ struct fw_device {
+@@ -22,6 +22,7 @@
+ #include <linux/fs.h>
+ #include <linux/cdev.h>
+ #include <linux/rwsem.h>
++#include <linux/mutex.h>
+ #include <asm/atomic.h>
+ 
+ enum fw_device_state {
+@@ -62,7 +63,10 @@ struct fw_device {
  	bool cmc;
  	struct fw_card *card;
  	struct device device;
--	struct list_head link;
++
++	struct mutex client_list_mutex;
  	struct list_head client_list;
++
  	u32 *config_rom;
  	size_t config_rom_length;
+ 	int config_rom_retries;
 diff --git a/drivers/firewire/fw-ohci.c b/drivers/firewire/fw-ohci.c
-index 0b66306..9d7b889 100644
+index 251416f..79c20c4 100644
 --- a/drivers/firewire/fw-ohci.c
 +++ b/drivers/firewire/fw-ohci.c
-@@ -171,7 +171,6 @@ struct iso_context {
- struct fw_ohci {
- 	struct fw_card card;
+@@ -476,6 +476,7 @@ static int ar_context_add_page(struct ar_context *ctx)
+ 	if (ab == NULL)
+ 		return -ENOMEM;
  
--	u32 version;
- 	__iomem char *registers;
- 	dma_addr_t self_id_bus;
- 	__le32 *self_id_cpu;
-@@ -180,6 +179,8 @@ struct fw_ohci {
- 	int generation;
- 	int request_generation;	/* for timestamping incoming requests */
- 	u32 bus_seconds;
++	ab->next = NULL;
+ 	memset(&ab->descriptor, 0, sizeof(ab->descriptor));
+ 	ab->descriptor.control        = cpu_to_le16(DESCRIPTOR_INPUT_MORE |
+ 						    DESCRIPTOR_STATUS |
+@@ -496,6 +497,21 @@ static int ar_context_add_page(struct ar_context *ctx)
+ 	return 0;
+ }
+ 
++static void ar_context_release(struct ar_context *ctx)
++{
++	struct ar_buffer *ab, *ab_next;
++	size_t offset;
++	dma_addr_t ab_bus;
 +
-+	bool use_dualbuffer;
- 	bool old_uninorth;
- 	bool bus_reset_packet_quirk;
- 
-@@ -1745,6 +1746,28 @@ ohci_get_bus_time(struct fw_card *card)
++	for (ab = ctx->current_buffer; ab; ab = ab_next) {
++		ab_next = ab->next;
++		offset = offsetof(struct ar_buffer, data);
++		ab_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
++		dma_free_coherent(ctx->ohci->card.device, PAGE_SIZE,
++				  ab, ab_bus);
++	}
++}
++
+ #if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
+ #define cond_le32_to_cpu(v) \
+ 	(ohci->old_uninorth ? (__force __u32)(v) : le32_to_cpu(v))
+@@ -1746,6 +1762,28 @@ ohci_get_bus_time(struct fw_card *card)
  	return bus_time;
  }
  
@@ -409,7 +448,7 @@ index 0b66306..9d7b889 100644
  static int handle_ir_dualbuffer_packet(struct context *context,
  				       struct descriptor *d,
  				       struct descriptor *last)
-@@ -1755,7 +1778,6 @@ static int handle_ir_dualbuffer_packet(struct context *context,
+@@ -1756,7 +1794,6 @@ static int handle_ir_dualbuffer_packet(struct context *context,
  	__le32 *ir_header;
  	size_t header_length;
  	void *p, *end;
@@ -417,7 +456,7 @@ index 0b66306..9d7b889 100644
  
  	if (db->first_res_count != 0 && db->second_res_count != 0) {
  		if (ctx->excess_bytes <= le16_to_cpu(db->second_req_count)) {
-@@ -1768,25 +1790,14 @@ static int handle_ir_dualbuffer_packet(struct context *context,
+@@ -1769,25 +1806,14 @@ static int handle_ir_dualbuffer_packet(struct context *context,
  	header_length = le16_to_cpu(db->first_req_count) -
  		le16_to_cpu(db->first_res_count);
  
@@ -446,7 +485,7 @@ index 0b66306..9d7b889 100644
  
  	ctx->excess_bytes -= le16_to_cpu(db->second_req_count) -
  		le16_to_cpu(db->second_res_count);
-@@ -1812,7 +1823,6 @@ static int handle_ir_packet_per_buffer(struct context *context,
+@@ -1813,7 +1839,6 @@ static int handle_ir_packet_per_buffer(struct context *context,
  	struct descriptor *pd;
  	__le32 *ir_header;
  	void *p;
@@ -454,7 +493,7 @@ index 0b66306..9d7b889 100644
  
  	for (pd = d; pd <= last; pd++) {
  		if (pd->transfer_status)
-@@ -1822,21 +1832,8 @@ static int handle_ir_packet_per_buffer(struct context *context,
+@@ -1823,21 +1848,8 @@ static int handle_ir_packet_per_buffer(struct context *context,
  		/* Descriptor(s) not done yet, stop iteration */
  		return 0;
  
@@ -478,25 +517,7 @@ index 0b66306..9d7b889 100644
  
  	if (le16_to_cpu(last->control) & DESCRIPTOR_IRQ_ALWAYS) {
  		ir_header = (__le32 *) p;
-@@ -1885,7 +1882,7 @@ ohci_allocate_iso_context(struct fw_card *card, int type, size_t header_size)
- 	} else {
- 		mask = &ohci->ir_context_mask;
- 		list = ohci->ir_context_list;
--		if (ohci->version >= OHCI_VERSION_1_1)
-+		if (ohci->use_dualbuffer)
- 			callback = handle_ir_dualbuffer_packet;
- 		else
- 			callback = handle_ir_packet_per_buffer;
-@@ -1949,7 +1946,7 @@ static int ohci_start_iso(struct fw_iso_context *base,
- 	} else {
- 		index = ctx - ohci->ir_context_list;
- 		control = IR_CONTEXT_ISOCH_HEADER;
--		if (ohci->version >= OHCI_VERSION_1_1)
-+		if (ohci->use_dualbuffer)
- 			control |= IR_CONTEXT_DUAL_BUFFER_MODE;
- 		match = (tags << 28) | (sync << 8) | ctx->base.channel;
- 		if (cycle >= 0) {
-@@ -2131,11 +2128,11 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
+@@ -2132,11 +2144,11 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
  	z = 2;
  
  	/*
@@ -511,7 +532,7 @@ index 0b66306..9d7b889 100644
  
  	/* Get header size in number of descriptors. */
  	header_z = DIV_ROUND_UP(header_size, sizeof(*d));
-@@ -2153,7 +2150,8 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
+@@ -2154,7 +2166,8 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
  		db = (struct db_descriptor *) d;
  		db->control = cpu_to_le16(DESCRIPTOR_STATUS |
  					  DESCRIPTOR_BRANCH_ALWAYS);
@@ -521,7 +542,7 @@ index 0b66306..9d7b889 100644
  		if (p->skip && rest == p->payload_length) {
  			db->control |= cpu_to_le16(DESCRIPTOR_WAIT);
  			db->first_req_count = db->first_size;
-@@ -2203,11 +2201,11 @@ ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
+@@ -2204,11 +2217,11 @@ ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
  	int page, offset, packet_count, header_size, payload_per_buffer;
  
  	/*
@@ -536,142 +557,135 @@ index 0b66306..9d7b889 100644
  
  	/* Get header size in number of descriptors. */
  	header_z = DIV_ROUND_UP(header_size, sizeof(*d));
-@@ -2279,7 +2277,7 @@ ohci_queue_iso(struct fw_iso_context *base,
- 	spin_lock_irqsave(&ctx->context.ohci->lock, flags);
- 	if (base->type == FW_ISO_CONTEXT_TRANSMIT)
- 		retval = ohci_queue_iso_transmit(base, packet, buffer, payload);
--	else if (ctx->context.ohci->version >= OHCI_VERSION_1_1)
-+	else if (ctx->context.ohci->use_dualbuffer)
- 		retval = ohci_queue_iso_receive_dualbuffer(base, packet,
- 							 buffer, payload);
- 	else
-@@ -2292,7 +2290,6 @@ ohci_queue_iso(struct fw_iso_context *base,
- }
+@@ -2349,8 +2362,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
  
- static const struct fw_card_driver ohci_driver = {
--	.name			= ohci_driver_name,
- 	.enable			= ohci_enable,
- 	.update_phy_reg		= ohci_update_phy_reg,
- 	.set_config_rom		= ohci_set_config_rom,
-@@ -2342,7 +2339,7 @@ static int __devinit
- pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- {
- 	struct fw_ohci *ohci;
--	u32 bus_options, max_receive, link_speed;
-+	u32 bus_options, max_receive, link_speed, version;
- 	u64 guid;
- 	int err;
- 	size_t size;
-@@ -2367,12 +2364,6 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 	pci_write_config_dword(dev, OHCI1394_PCI_HCI_Control, 0);
- 	pci_set_drvdata(dev, ohci);
- 
--#if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
--	ohci->old_uninorth = dev->vendor == PCI_VENDOR_ID_APPLE &&
--			     dev->device == PCI_DEVICE_ID_APPLE_UNI_N_FW;
--#endif
--	ohci->bus_reset_packet_quirk = dev->vendor == PCI_VENDOR_ID_TI;
--
- 	spin_lock_init(&ohci->lock);
- 
- 	tasklet_init(&ohci->bus_reset_tasklet,
-@@ -2391,6 +2382,23 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 		goto fail_iomem;
+ 	ohci = kzalloc(sizeof(*ohci), GFP_KERNEL);
+ 	if (ohci == NULL) {
+-		fw_error("Could not malloc fw_ohci data.\n");
+-		return -ENOMEM;
++		err = -ENOMEM;
++		goto fail;
  	}
  
-+	version = reg_read(ohci, OHCI1394_Version) & 0x00ff00ff;
-+	ohci->use_dualbuffer = version >= OHCI_VERSION_1_1;
-+
-+/* x86-32 currently doesn't use highmem for dma_alloc_coherent */
-+#if !defined(CONFIG_X86_32)
-+	/* dual-buffer mode is broken with descriptor addresses above 2G */
-+	if (dev->vendor == PCI_VENDOR_ID_TI &&
-+	    dev->device == PCI_DEVICE_ID_TI_TSB43AB22)
-+		ohci->use_dualbuffer = false;
-+#endif
-+
-+#if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
-+	ohci->old_uninorth = dev->vendor == PCI_VENDOR_ID_APPLE &&
-+			     dev->device == PCI_DEVICE_ID_APPLE_UNI_N_FW;
-+#endif
-+	ohci->bus_reset_packet_quirk = dev->vendor == PCI_VENDOR_ID_TI;
-+
- 	ar_context_init(&ohci->ar_request_ctx, ohci,
- 			OHCI1394_AsReqRcvContextControlSet);
+ 	fw_card_initialize(&ohci->card, &ohci_driver, &dev->dev);
+@@ -2359,7 +2372,7 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
  
-@@ -2442,9 +2450,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 	if (err < 0)
- 		goto fail_self_id;
+ 	err = pci_enable_device(dev);
+ 	if (err) {
+-		fw_error("Failed to enable OHCI hardware.\n");
++		fw_error("Failed to enable OHCI hardware\n");
+ 		goto fail_free;
+ 	}
  
--	ohci->version = reg_read(ohci, OHCI1394_Version) & 0x00ff00ff;
- 	fw_notify("Added fw-ohci device %s, OHCI version %x.%x\n",
--		  dev->dev.bus_id, ohci->version >> 16, ohci->version & 0xff);
-+		  dev->dev.bus_id, version >> 16, version & 0xff);
- 	return 0;
+@@ -2427,9 +2440,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
+ 	ohci->ir_context_list = kzalloc(size, GFP_KERNEL);
  
+ 	if (ohci->it_context_list == NULL || ohci->ir_context_list == NULL) {
+-		fw_error("Out of memory for it/ir contexts.\n");
+ 		err = -ENOMEM;
+-		goto fail_registers;
++		goto fail_contexts;
+ 	}
+ 
+ 	/* self-id dma buffer allocation */
+@@ -2438,9 +2450,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
+ 					       &ohci->self_id_bus,
+ 					       GFP_KERNEL);
+ 	if (ohci->self_id_cpu == NULL) {
+-		fw_error("Out of memory for self ID buffer.\n");
+ 		err = -ENOMEM;
+-		goto fail_registers;
++		goto fail_contexts;
+ 	}
+ 
+ 	bus_options = reg_read(ohci, OHCI1394_BusOptions);
+@@ -2460,9 +2471,13 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
   fail_self_id:
+ 	dma_free_coherent(ohci->card.device, SELF_ID_BUF_SIZE,
+ 			  ohci->self_id_cpu, ohci->self_id_bus);
+- fail_registers:
+-	kfree(ohci->it_context_list);
++ fail_contexts:
+ 	kfree(ohci->ir_context_list);
++	kfree(ohci->it_context_list);
++	context_release(&ohci->at_response_ctx);
++	context_release(&ohci->at_request_ctx);
++	ar_context_release(&ohci->ar_response_ctx);
++	ar_context_release(&ohci->ar_request_ctx);
+ 	pci_iounmap(dev, ohci->registers);
+  fail_iomem:
+ 	pci_release_region(dev, 0);
+@@ -2471,6 +2486,9 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
+  fail_free:
+ 	kfree(&ohci->card);
+ 	ohci_pmac_off(dev);
++ fail:
++	if (err == -ENOMEM)
++		fw_error("Out of memory\n");
+ 
+ 	return err;
+ }
+@@ -2491,8 +2509,19 @@ static void pci_remove(struct pci_dev *dev)
+ 
+ 	software_reset(ohci);
+ 	free_irq(dev->irq, ohci);
++
++	if (ohci->next_config_rom && ohci->next_config_rom != ohci->config_rom)
++		dma_free_coherent(ohci->card.device, CONFIG_ROM_SIZE,
++				  ohci->next_config_rom, ohci->next_config_rom_bus);
++	if (ohci->config_rom)
++		dma_free_coherent(ohci->card.device, CONFIG_ROM_SIZE,
++				  ohci->config_rom, ohci->config_rom_bus);
+ 	dma_free_coherent(ohci->card.device, SELF_ID_BUF_SIZE,
+ 			  ohci->self_id_cpu, ohci->self_id_bus);
++	ar_context_release(&ohci->ar_request_ctx);
++	ar_context_release(&ohci->ar_response_ctx);
++	context_release(&ohci->at_request_ctx);
++	context_release(&ohci->at_response_ctx);
+ 	kfree(ohci->it_context_list);
+ 	kfree(ohci->ir_context_list);
+ 	pci_iounmap(dev, ohci->registers);
 diff --git a/drivers/firewire/fw-sbp2.c b/drivers/firewire/fw-sbp2.c
-index 227d2e0..ad006cb 100644
+index aaff50e..d334cac 100644
 --- a/drivers/firewire/fw-sbp2.c
 +++ b/drivers/firewire/fw-sbp2.c
-@@ -86,6 +86,11 @@ MODULE_PARM_DESC(exclusive_login, "Exclusive login to sbp2 device "
-  * - delay inquiry
-  *   Wait extra SBP2_INQUIRY_DELAY seconds after login before SCSI inquiry.
-  *
-+ * - power condition
-+ *   Set the power condition field in the START STOP UNIT commands sent by
-+ *   sd_mod on suspend, resume, and shutdown (if manage_start_stop is on).
-+ *   Some disks need this to spin down or to resume properly.
-+ *
-  * - override internal blacklist
-  *   Instead of adding to the built-in blacklist, use only the workarounds
-  *   specified in the module load parameter.
-@@ -97,6 +102,7 @@ MODULE_PARM_DESC(exclusive_login, "Exclusive login to sbp2 device "
- #define SBP2_WORKAROUND_FIX_CAPACITY	0x8
- #define SBP2_WORKAROUND_DELAY_INQUIRY	0x10
- #define SBP2_INQUIRY_DELAY		12
-+#define SBP2_WORKAROUND_POWER_CONDITION	0x20
- #define SBP2_WORKAROUND_OVERRIDE	0x100
+@@ -29,6 +29,7 @@
+  */
  
- static int sbp2_param_workarounds;
-@@ -107,6 +113,8 @@ MODULE_PARM_DESC(workarounds, "Work around device bugs (default = 0"
- 	", skip mode page 8 = "   __stringify(SBP2_WORKAROUND_MODE_SENSE_8)
- 	", fix capacity = "       __stringify(SBP2_WORKAROUND_FIX_CAPACITY)
- 	", delay inquiry = "      __stringify(SBP2_WORKAROUND_DELAY_INQUIRY)
-+	", set power condition in start stop unit = "
-+				  __stringify(SBP2_WORKAROUND_POWER_CONDITION)
- 	", override internal blacklist = " __stringify(SBP2_WORKAROUND_OVERRIDE)
- 	", or a combination)");
+ #include <linux/blkdev.h>
++#include <linux/bug.h>
+ #include <linux/delay.h>
+ #include <linux/device.h>
+ #include <linux/dma-mapping.h>
+@@ -172,6 +173,9 @@ struct sbp2_target {
+ 	int blocked;	/* ditto */
+ };
  
-@@ -310,18 +318,25 @@ static const struct {
- 		.firmware_revision	= 0x002800,
- 		.model			= 0x001010,
- 		.workarounds		= SBP2_WORKAROUND_INQUIRY_36 |
--					  SBP2_WORKAROUND_MODE_SENSE_8,
-+					  SBP2_WORKAROUND_MODE_SENSE_8 |
-+					  SBP2_WORKAROUND_POWER_CONDITION,
- 	},
- 	/* DViCO Momobay FX-3A with TSB42AA9A bridge */ {
- 		.firmware_revision	= 0x002800,
- 		.model			= 0x000000,
--		.workarounds		= SBP2_WORKAROUND_DELAY_INQUIRY,
-+		.workarounds		= SBP2_WORKAROUND_DELAY_INQUIRY |
-+					  SBP2_WORKAROUND_POWER_CONDITION,
- 	},
- 	/* Initio bridges, actually only needed for some older ones */ {
- 		.firmware_revision	= 0x000200,
- 		.model			= ~0,
- 		.workarounds		= SBP2_WORKAROUND_INQUIRY_36,
- 	},
-+	/* PL-3507 bridge with Prolific firmware */ {
-+		.firmware_revision	= 0x012800,
-+		.model			= ~0,
-+		.workarounds		= SBP2_WORKAROUND_POWER_CONDITION,
-+	},
- 	/* Symbios bridge */ {
- 		.firmware_revision	= 0xa0b800,
- 		.model			= ~0,
-@@ -606,25 +621,15 @@ sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
++/* Impossible login_id, to detect logout attempt before successful login */
++#define INVALID_LOGIN_ID 0x10000
++
+ /*
+  * Per section 7.4.8 of the SBP-2 spec, a mgt_ORB_timeout value can be
+  * provided in the config rom. Most devices do provide a value, which
+@@ -181,10 +185,16 @@ struct sbp2_target {
+ #define SBP2_MAX_LOGIN_ORB_TIMEOUT	40000U	/* Timeout in ms */
+ #define SBP2_ORB_TIMEOUT		2000U	/* Timeout in ms */
+ #define SBP2_ORB_NULL			0x80000000
+-#define SBP2_MAX_SG_ELEMENT_LENGTH	0xf000
+ #define SBP2_RETRY_LIMIT		0xf		/* 15 retries */
+ #define SBP2_CYCLE_LIMIT		(0xc8 << 12)	/* 200 125us cycles */
+ 
++/*
++ * The default maximum s/g segment size of a FireWire controller is
++ * usually 0x10000, but SBP-2 only allows 0xffff. Since buffers have to
++ * be quadlet-aligned, we set the length limit to 0xffff & ~3.
++ */
++#define SBP2_MAX_SEG_SIZE		0xfffc
++
+ /* Unit directory keys */
+ #define SBP2_CSR_UNIT_CHARACTERISTICS	0x3a
+ #define SBP2_CSR_FIRMWARE_REVISION	0x3c
+@@ -621,25 +631,15 @@ sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
  	return retval;
  }
  
@@ -702,7 +716,7 @@ index 227d2e0..ad006cb 100644
  }
  
  static void
-@@ -638,7 +643,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
+@@ -653,7 +653,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
  {
  	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
  	struct fw_transaction *t;
@@ -711,7 +725,7 @@ index 227d2e0..ad006cb 100644
  
  	t = kmalloc(sizeof(*t), GFP_ATOMIC);
  	if (t == NULL)
-@@ -647,7 +652,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
+@@ -662,7 +662,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
  	fw_send_request(device->card, t, TCODE_WRITE_QUADLET_REQUEST,
  			lu->tgt->node_id, lu->generation, device->max_speed,
  			lu->command_block_agent_address + SBP2_AGENT_RESET,
@@ -720,21 +734,66 @@ index 227d2e0..ad006cb 100644
  }
  
  static void sbp2_set_generation(struct sbp2_logical_unit *lu, int generation)
-@@ -808,13 +813,6 @@ static void sbp2_target_put(struct sbp2_target *tgt)
+@@ -791,9 +791,20 @@ static void sbp2_release_target(struct kref *kref)
+ 			scsi_remove_device(sdev);
+ 			scsi_device_put(sdev);
+ 		}
+-		sbp2_send_management_orb(lu, tgt->node_id, lu->generation,
+-				SBP2_LOGOUT_REQUEST, lu->login_id, NULL);
+-
++		if (lu->login_id != INVALID_LOGIN_ID) {
++			int generation, node_id;
++			/*
++			 * tgt->node_id may be obsolete here if we failed
++			 * during initial login or after a bus reset where
++			 * the topology changed.
++			 */
++			generation = device->generation;
++			smp_rmb(); /* node_id vs. generation */
++			node_id    = device->node_id;
++			sbp2_send_management_orb(lu, node_id, generation,
++						 SBP2_LOGOUT_REQUEST,
++						 lu->login_id, NULL);
++		}
+ 		fw_core_remove_address_handler(&lu->address_handler);
+ 		list_del(&lu->link);
+ 		kfree(lu);
+@@ -808,26 +819,20 @@ static void sbp2_release_target(struct kref *kref)
+ 
+ static struct workqueue_struct *sbp2_wq;
+ 
+-/*
+- * Always get the target's kref when scheduling work on one its units.
+- * Each workqueue job is responsible to call sbp2_target_put() upon return.
+- */
+-static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
+-{
+-	if (queue_delayed_work(sbp2_wq, &lu->work, delay))
+-		kref_get(&lu->tgt->kref);
+-}
+-
+ static void sbp2_target_put(struct sbp2_target *tgt)
+ {
  	kref_put(&tgt->kref, sbp2_release_target);
  }
  
 -static void
 -complete_set_busy_timeout(struct fw_card *card, int rcode,
 -			  void *payload, size_t length, void *done)
--{
++/*
++ * Always get the target's kref when scheduling work on one its units.
++ * Each workqueue job is responsible to call sbp2_target_put() upon return.
++ */
++static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
+ {
 -	complete(done);
--}
--
++	kref_get(&lu->tgt->kref);
++	if (!queue_delayed_work(sbp2_wq, &lu->work, delay))
++		sbp2_target_put(lu->tgt);
+ }
+ 
  /*
-  * Write retransmit retry values into the BUSY_TIMEOUT register.
-  * - The single-phase retry protocol is supported by all SBP-2 devices, but the
-@@ -834,17 +832,12 @@ complete_set_busy_timeout(struct fw_card *card, int rcode,
+@@ -849,17 +854,12 @@ complete_set_busy_timeout(struct fw_card *card, int rcode,
  static void sbp2_set_busy_timeout(struct sbp2_logical_unit *lu)
  {
  	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
@@ -757,35 +816,179 @@ index 227d2e0..ad006cb 100644
  }
  
  static void sbp2_reconnect(struct work_struct *work);
-@@ -1530,6 +1523,9 @@ static int sbp2_scsi_slave_configure(struct scsi_device *sdev)
+@@ -993,6 +993,7 @@ static int sbp2_add_logical_unit(struct sbp2_target *tgt, int lun_entry)
  
- 	sdev->use_10_for_rw = 1;
+ 	lu->tgt      = tgt;
+ 	lu->lun      = lun_entry & 0xffff;
++	lu->login_id = INVALID_LOGIN_ID;
+ 	lu->retries  = 0;
+ 	lu->has_sdev = false;
+ 	lu->blocked  = false;
+@@ -1121,6 +1122,10 @@ static int sbp2_probe(struct device *dev)
+ 	struct Scsi_Host *shost;
+ 	u32 model, firmware_revision;
  
-+	if (sbp2_param_exclusive_login)
-+		sdev->manage_start_stop = 1;
++	if (dma_get_max_seg_size(device->card->device) > SBP2_MAX_SEG_SIZE)
++		BUG_ON(dma_set_max_seg_size(device->card->device,
++					    SBP2_MAX_SEG_SIZE));
 +
- 	if (sdev->type == TYPE_ROM)
- 		sdev->use_10_for_ms = 1;
+ 	shost = scsi_host_alloc(&scsi_driver_template, sizeof(*tgt));
+ 	if (shost == NULL)
+ 		return -ENOMEM;
+@@ -1158,7 +1163,7 @@ static int sbp2_probe(struct device *dev)
  
-@@ -1540,6 +1536,9 @@ static int sbp2_scsi_slave_configure(struct scsi_device *sdev)
- 	if (lu->tgt->workarounds & SBP2_WORKAROUND_FIX_CAPACITY)
- 		sdev->fix_capacity = 1;
+ 	/* Do the login in a workqueue so we can easily reschedule retries. */
+ 	list_for_each_entry(lu, &tgt->lu_list, link)
+-		sbp2_queue_work(lu, 0);
++		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
+ 	return 0;
  
-+	if (lu->tgt->workarounds & SBP2_WORKAROUND_POWER_CONDITION)
-+		sdev->start_stop_pwr_cond = 1;
+  fail_tgt_put:
+@@ -1369,14 +1374,12 @@ static int
+ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
+ 		     struct sbp2_logical_unit *lu)
+ {
+-	struct scatterlist *sg;
+-	int sg_len, l, i, j, count;
+-	dma_addr_t sg_addr;
+-
+-	sg = scsi_sglist(orb->cmd);
+-	count = dma_map_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
+-			   orb->cmd->sc_data_direction);
+-	if (count == 0)
++	struct scatterlist *sg = scsi_sglist(orb->cmd);
++	int i, n;
 +
++	n = dma_map_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
++		       orb->cmd->sc_data_direction);
++	if (n == 0)
+ 		goto fail;
+ 
+ 	/*
+@@ -1386,7 +1389,7 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
+ 	 * as the second generation iPod which doesn't support page
+ 	 * tables.
+ 	 */
+-	if (count == 1 && sg_dma_len(sg) < SBP2_MAX_SG_ELEMENT_LENGTH) {
++	if (n == 1) {
+ 		orb->request.data_descriptor.high =
+ 			cpu_to_be32(lu->tgt->address_high);
+ 		orb->request.data_descriptor.low  =
+@@ -1396,29 +1399,9 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
+ 		return 0;
+ 	}
+ 
+-	/*
+-	 * Convert the scatterlist to an sbp2 page table.  If any
+-	 * scatterlist entries are too big for sbp2, we split them as we
+-	 * go.  Even if we ask the block I/O layer to not give us sg
+-	 * elements larger than 65535 bytes, some IOMMUs may merge sg elements
+-	 * during DMA mapping, and Linux currently doesn't prevent this.
+-	 */
+-	for (i = 0, j = 0; i < count; i++, sg = sg_next(sg)) {
+-		sg_len = sg_dma_len(sg);
+-		sg_addr = sg_dma_address(sg);
+-		while (sg_len) {
+-			/* FIXME: This won't get us out of the pinch. */
+-			if (unlikely(j >= ARRAY_SIZE(orb->page_table))) {
+-				fw_error("page table overflow\n");
+-				goto fail_page_table;
+-			}
+-			l = min(sg_len, SBP2_MAX_SG_ELEMENT_LENGTH);
+-			orb->page_table[j].low = cpu_to_be32(sg_addr);
+-			orb->page_table[j].high = cpu_to_be32(l << 16);
+-			sg_addr += l;
+-			sg_len -= l;
+-			j++;
+-		}
++	for_each_sg(sg, sg, n, i) {
++		orb->page_table[i].high = cpu_to_be32(sg_dma_len(sg) << 16);
++		orb->page_table[i].low = cpu_to_be32(sg_dma_address(sg));
+ 	}
+ 
+ 	orb->page_table_bus =
+@@ -1437,13 +1420,13 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
+ 	orb->request.data_descriptor.high = cpu_to_be32(lu->tgt->address_high);
+ 	orb->request.data_descriptor.low  = cpu_to_be32(orb->page_table_bus);
+ 	orb->request.misc |= cpu_to_be32(COMMAND_ORB_PAGE_TABLE_PRESENT |
+-					 COMMAND_ORB_DATA_SIZE(j));
++					 COMMAND_ORB_DATA_SIZE(n));
+ 
+ 	return 0;
+ 
+  fail_page_table:
+-	dma_unmap_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
+-		     orb->cmd->sc_data_direction);
++	dma_unmap_sg(device->card->device, scsi_sglist(orb->cmd),
++		     scsi_sg_count(orb->cmd), orb->cmd->sc_data_direction);
+  fail:
+ 	return -ENOMEM;
+ }
+@@ -1456,7 +1439,7 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
+ 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
+ 	struct sbp2_command_orb *orb;
+ 	unsigned int max_payload;
+-	int retval = SCSI_MLQUEUE_HOST_BUSY;
++	int generation, retval = SCSI_MLQUEUE_HOST_BUSY;
+ 
+ 	/*
+ 	 * Bidirectional commands are not yet implemented, and unknown
+@@ -1500,6 +1483,9 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
+ 	if (cmd->sc_data_direction == DMA_FROM_DEVICE)
+ 		orb->request.misc |= cpu_to_be32(COMMAND_ORB_DIRECTION);
+ 
++	generation = device->generation;
++	smp_rmb();    /* sbp2_map_scatterlist looks at tgt->address_high */
++
+ 	if (scsi_sg_count(cmd) && sbp2_map_scatterlist(orb, device, lu) < 0)
+ 		goto out;
+ 
+@@ -1512,7 +1498,7 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
+ 	if (dma_mapping_error(device->card->device, orb->base.request_bus))
+ 		goto out;
+ 
+-	sbp2_send_orb(&orb->base, lu, lu->tgt->node_id, lu->generation,
++	sbp2_send_orb(&orb->base, lu, lu->tgt->node_id, generation,
+ 		      lu->command_block_agent_address + SBP2_ORB_POINTER);
+ 	retval = 0;
+  out:
+@@ -1564,6 +1550,8 @@ static int sbp2_scsi_slave_configure(struct scsi_device *sdev)
  	if (lu->tgt->workarounds & SBP2_WORKAROUND_128K_MAX_TRANS)
  		blk_queue_max_sectors(sdev->request_queue, 128 * 1024 / 512);
  
++	blk_queue_max_segment_size(sdev->request_queue, SBP2_MAX_SEG_SIZE);
++
+ 	return 0;
+ }
+ 
 diff --git a/drivers/firewire/fw-topology.c b/drivers/firewire/fw-topology.c
-index 213b0ff..e059acd 100644
+index c1b8107..c42acb8 100644
 --- a/drivers/firewire/fw-topology.c
 +++ b/drivers/firewire/fw-topology.c
-@@ -510,7 +510,29 @@ fw_core_handle_bus_reset(struct fw_card *card,
+@@ -413,7 +413,7 @@ static void
+ update_tree(struct fw_card *card, struct fw_node *root)
+ {
+ 	struct list_head list0, list1;
+-	struct fw_node *node0, *node1;
++	struct fw_node *node0, *node1, *next1;
+ 	int i, event;
+ 
+ 	INIT_LIST_HEAD(&list0);
+@@ -485,7 +485,9 @@ update_tree(struct fw_card *card, struct fw_node *root)
+ 		}
+ 
+ 		node0 = fw_node(node0->link.next);
+-		node1 = fw_node(node1->link.next);
++		next1 = fw_node(node1->link.next);
++		fw_node_put(node1);
++		node1 = next1;
+ 	}
+ }
+ 
+@@ -510,6 +512,18 @@ fw_core_handle_bus_reset(struct fw_card *card,
  	struct fw_node *local_node;
  	unsigned long flags;
  
--	fw_flush_transactions(card);
 +	/*
 +	 * If the selfID buffer is not the immediate successor of the
 +	 * previously processed one, we cannot reliably compare the
@@ -798,61 +1001,14 @@ index 213b0ff..e059acd 100644
 +		card->bm_retries = 0;
 +	}
 +
-+	/*
-+	 * If the selfID buffer is not the immediate successor of the
-+	 * previously processed one, we cannot reliably compare the
-+	 * old and new topologies.
-+	 */
-+	if (!is_next_generation(generation, card->generation) &&
-+	    card->local_node != NULL) {
-+		fw_notify("skipped bus generations, destroying all nodes\n");
-+		fw_destroy_nodes(card);
-+		card->bm_retries = 0;
-+	}
- 
  	spin_lock_irqsave(&card->lock, flags);
  
+ 	/*
 diff --git a/drivers/firewire/fw-transaction.c b/drivers/firewire/fw-transaction.c
-index 03ae8a7..022ac4f 100644
+index e5d1a0b..022ac4f 100644
 --- a/drivers/firewire/fw-transaction.c
 +++ b/drivers/firewire/fw-transaction.c
-@@ -22,6 +22,7 @@
- #include <linux/kernel.h>
- #include <linux/kref.h>
- #include <linux/module.h>
-+#include <linux/mutex.h>
- #include <linux/init.h>
- #include <linux/interrupt.h>
- #include <linux/pci.h>
-@@ -55,6 +56,9 @@
- #define HEADER_GET_DATA_LENGTH(q)	(((q) >> 16) & 0xffff)
- #define HEADER_GET_EXTENDED_TCODE(q)	(((q) >> 0) & 0xffff)
- 
-+#define HEADER_DESTINATION_IS_BROADCAST(q) \
-+	(((q) & HEADER_DESTINATION(0x3f)) == HEADER_DESTINATION(0x3f))
-+
- #define PHY_CONFIG_GAP_COUNT(gap_count)	(((gap_count) << 16) | (1 << 22))
- #define PHY_CONFIG_ROOT_ID(node_id)	((((node_id) & 0x3f) << 24) | (1 << 23))
- #define PHY_IDENTIFIER(id)		((id) << 30)
-@@ -148,7 +152,7 @@ transmit_complete_callback(struct fw_packet *packet,
- 
- static void
- fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
--		int node_id, int source_id, int generation, int speed,
-+		int destination_id, int source_id, int generation, int speed,
- 		unsigned long long offset, void *payload, size_t length)
- {
- 	int ext_tcode;
-@@ -163,7 +167,7 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
- 		HEADER_RETRY(RETRY_X) |
- 		HEADER_TLABEL(tlabel) |
- 		HEADER_TCODE(tcode) |
--		HEADER_DESTINATION(node_id);
-+		HEADER_DESTINATION(destination_id);
- 	packet->header[1] =
- 		HEADER_OFFSET_HIGH(offset >> 32) | HEADER_SOURCE(source_id);
- 	packet->header[2] =
-@@ -243,13 +247,13 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
+@@ -247,7 +247,7 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
   */
  void
  fw_send_request(struct fw_card *card, struct fw_transaction *t,
@@ -861,60 +1017,34 @@ index 03ae8a7..022ac4f 100644
  		unsigned long long offset,
  		void *payload, size_t length,
  		fw_transaction_callback_t callback, void *callback_data)
- {
- 	unsigned long flags;
--	int tlabel, source;
-+	int tlabel;
- 
- 	/*
- 	 * Bump the flush timer up 100ms first of all so we
-@@ -265,7 +269,6 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
- 
- 	spin_lock_irqsave(&card->lock, flags);
- 
--	source = card->node_id;
- 	tlabel = card->current_tlabel;
- 	if (card->tlabel_mask & (1 << tlabel)) {
- 		spin_unlock_irqrestore(&card->lock, flags);
-@@ -276,77 +279,98 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
+@@ -279,13 +279,14 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
  	card->current_tlabel = (card->current_tlabel + 1) & 0x1f;
  	card->tlabel_mask |= (1 << tlabel);
  
--	list_add_tail(&t->link, &card->transaction_list);
--
--	spin_unlock_irqrestore(&card->lock, flags);
--
--	/* Initialize rest of transaction, fill out packet and send it. */
 -	t->node_id = node_id;
 +	t->node_id = destination_id;
  	t->tlabel = tlabel;
  	t->callback = callback;
  	t->callback_data = callback_data;
  
- 	fw_fill_request(&t->packet, tcode, t->tlabel,
--			node_id, source, generation,
+-	fw_fill_request(&t->packet, tcode, t->tlabel, node_id, card->node_id,
+-			generation, speed, offset, payload, length);
++	fw_fill_request(&t->packet, tcode, t->tlabel,
 +			destination_id, card->node_id, generation,
- 			speed, offset, payload, length);
++			speed, offset, payload, length);
  	t->packet.callback = transmit_complete_callback;
  
-+	list_add_tail(&t->link, &card->transaction_list);
-+
-+	spin_unlock_irqrestore(&card->lock, flags);
-+
- 	card->driver->send_request(card, &t->packet);
+ 	list_add_tail(&t->link, &card->transaction_list);
+@@ -296,6 +297,45 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
  }
  EXPORT_SYMBOL(fw_send_request);
  
--struct fw_phy_packet {
--	struct fw_packet packet;
 +struct transaction_callback_data {
- 	struct completion done;
--	struct kref kref;
++	struct completion done;
 +	void *payload;
 +	int rcode;
- };
- 
--static void phy_packet_release(struct kref *kref)
++};
++
 +static void transaction_callback(struct fw_card *card, int rcode,
 +				 void *payload, size_t length, void *data)
 +{
@@ -934,10 +1064,7 @@ index 03ae8a7..022ac4f 100644
 +int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
 +		int generation, int speed, unsigned long long offset,
 +		void *data, size_t length)
- {
--	struct fw_phy_packet *p =
--			container_of(kref, struct fw_phy_packet, kref);
--	kfree(p);
++{
 +	struct transaction_callback_data d;
 +	struct fw_transaction t;
 +
@@ -948,209 +1075,29 @@ index 03ae8a7..022ac4f 100644
 +	wait_for_completion(&d.done);
 +
 +	return d.rcode;
- }
++}
 +EXPORT_SYMBOL(fw_run_transaction);
 +
-+static DEFINE_MUTEX(phy_config_mutex);
-+static DECLARE_COMPLETION(phy_config_done);
+ static DEFINE_MUTEX(phy_config_mutex);
+ static DECLARE_COMPLETION(phy_config_done);
  
- static void transmit_phy_packet_callback(struct fw_packet *packet,
- 					 struct fw_card *card, int status)
- {
--	struct fw_phy_packet *p =
--			container_of(packet, struct fw_phy_packet, packet);
--
--	complete(&p->done);
--	kref_put(&p->kref, phy_packet_release);
-+	complete(&phy_config_done);
- }
- 
-+static struct fw_packet phy_config_packet = {
-+	.header_length	= 8,
-+	.payload_length	= 0,
-+	.speed		= SCODE_100,
-+	.callback	= transmit_phy_packet_callback,
-+};
-+
- void fw_send_phy_config(struct fw_card *card,
- 			int node_id, int generation, int gap_count)
- {
--	struct fw_phy_packet *p;
- 	long timeout = DIV_ROUND_UP(HZ, 10);
- 	u32 data = PHY_IDENTIFIER(PHY_PACKET_CONFIG) |
- 		   PHY_CONFIG_ROOT_ID(node_id) |
- 		   PHY_CONFIG_GAP_COUNT(gap_count);
- 
--	p = kmalloc(sizeof(*p), GFP_KERNEL);
--	if (p == NULL)
--		return;
-+	mutex_lock(&phy_config_mutex);
-+
-+	phy_config_packet.header[0] = data;
-+	phy_config_packet.header[1] = ~data;
-+	phy_config_packet.generation = generation;
-+	INIT_COMPLETION(phy_config_done);
-+
-+	card->driver->send_request(card, &phy_config_packet);
-+	wait_for_completion_timeout(&phy_config_done, timeout);
- 
--	p->packet.header[0] = data;
--	p->packet.header[1] = ~data;
--	p->packet.header_length = 8;
--	p->packet.payload_length = 0;
--	p->packet.speed = SCODE_100;
--	p->packet.generation = generation;
--	p->packet.callback = transmit_phy_packet_callback;
--	init_completion(&p->done);
--	kref_set(&p->kref, 2);
--
--	card->driver->send_request(card, &p->packet);
--	timeout = wait_for_completion_timeout(&p->done, timeout);
--	kref_put(&p->kref, phy_packet_release);
--
--	/* will leak p if the callback is never executed */
--	WARN_ON(timeout == 0);
-+	mutex_unlock(&phy_config_mutex);
- }
- 
- void fw_flush_transactions(struct fw_card *card)
-@@ -624,12 +648,9 @@ allocate_request(struct fw_packet *p)
- void
- fw_send_response(struct fw_card *card, struct fw_request *request, int rcode)
- {
--	/*
--	 * Broadcast packets are reported as ACK_COMPLETE, so this
--	 * check is sufficient to ensure we don't send response to
--	 * broadcast packets or posted writes.
--	 */
--	if (request->ack != ACK_PENDING) {
-+	/* unified transaction or broadcast transaction: don't respond */
-+	if (request->ack != ACK_PENDING ||
-+	    HEADER_DESTINATION_IS_BROADCAST(request->request_header[0])) {
- 		kfree(request);
- 		return;
- 	}
-@@ -817,12 +838,13 @@ handle_registers(struct fw_card *card, struct fw_request *request,
- 	int reg = offset & ~CSR_REGISTER_BASE;
- 	unsigned long long bus_time;
- 	__be32 *data = payload;
-+	int rcode = RCODE_COMPLETE;
- 
- 	switch (reg) {
- 	case CSR_CYCLE_TIME:
- 	case CSR_BUS_TIME:
- 		if (!TCODE_IS_READ_REQUEST(tcode) || length != 4) {
--			fw_send_response(card, request, RCODE_TYPE_ERROR);
-+			rcode = RCODE_TYPE_ERROR;
- 			break;
- 		}
- 
-@@ -831,7 +853,17 @@ handle_registers(struct fw_card *card, struct fw_request *request,
- 			*data = cpu_to_be32(bus_time);
- 		else
- 			*data = cpu_to_be32(bus_time >> 25);
--		fw_send_response(card, request, RCODE_COMPLETE);
-+		break;
-+
-+	case CSR_BROADCAST_CHANNEL:
-+		if (tcode == TCODE_READ_QUADLET_REQUEST)
-+			*data = cpu_to_be32(card->broadcast_channel);
-+		else if (tcode == TCODE_WRITE_QUADLET_REQUEST)
-+			card->broadcast_channel =
-+			    (be32_to_cpu(*data) & BROADCAST_CHANNEL_VALID) |
-+			    BROADCAST_CHANNEL_INITIAL;
-+		else
-+			rcode = RCODE_TYPE_ERROR;
- 		break;
- 
- 	case CSR_BUS_MANAGER_ID:
-@@ -850,10 +882,13 @@ handle_registers(struct fw_card *card, struct fw_request *request,
- 
- 	case CSR_BUSY_TIMEOUT:
- 		/* FIXME: Implement this. */
-+
- 	default:
--		fw_send_response(card, request, RCODE_ADDRESS_ERROR);
-+		rcode = RCODE_ADDRESS_ERROR;
- 		break;
- 	}
-+
-+	fw_send_response(card, request, rcode);
- }
- 
- static struct fw_address_handler registers = {
 diff --git a/drivers/firewire/fw-transaction.h b/drivers/firewire/fw-transaction.h
-index 04d3854..2f354c4 100644
+index 2ae1b0d..add8a3a 100644
 --- a/drivers/firewire/fw-transaction.h
 +++ b/drivers/firewire/fw-transaction.h
-@@ -19,14 +19,15 @@
- #ifndef __fw_transaction_h
- #define __fw_transaction_h
+@@ -248,7 +248,7 @@ struct fw_card {
+ 	struct fw_node *local_node;
+ 	struct fw_node *root_node;
+ 	struct fw_node *irm_node;
+-	int color;
++	u8 color; /* must be u8 to match the definition in struct fw_node */
+ 	int gap_count;
+ 	bool beta_repeaters_present;
  
-+#include <linux/completion.h>
- #include <linux/device.h>
--#include <linux/timer.h>
--#include <linux/interrupt.h>
--#include <linux/list.h>
--#include <linux/fs.h>
- #include <linux/dma-mapping.h>
- #include <linux/firewire-constants.h>
--#include <asm/atomic.h>
-+#include <linux/kref.h>
-+#include <linux/list.h>
-+#include <linux/spinlock_types.h>
-+#include <linux/timer.h>
-+#include <linux/workqueue.h>
+@@ -277,6 +277,15 @@ static inline void fw_card_put(struct fw_card *card)
+ }
  
- #define TCODE_IS_READ_REQUEST(tcode)	(((tcode) & ~1) == 4)
- #define TCODE_IS_BLOCK_PACKET(tcode)	(((tcode) &  1) != 0)
-@@ -80,6 +81,9 @@
- #define CSR_SPEED_MAP			0x2000
- #define CSR_SPEED_MAP_END		0x3000
- 
-+#define BROADCAST_CHANNEL_INITIAL	(1 << 31 | 31)
-+#define BROADCAST_CHANNEL_VALID		(1 << 30)
-+
- #define fw_notify(s, args...) printk(KERN_NOTICE KBUILD_MODNAME ": " s, ## args)
- #define fw_error(s, args...) printk(KERN_ERR KBUILD_MODNAME ": " s, ## args)
- 
-@@ -216,7 +220,8 @@ extern struct bus_type fw_bus_type;
- struct fw_card {
- 	const struct fw_card_driver *driver;
- 	struct device *device;
--	atomic_t device_count;
-+	struct kref kref;
-+	struct completion done;
- 
- 	int node_id;
- 	int generation;
-@@ -236,6 +241,7 @@ struct fw_card {
- 	 */
- 	int self_id_count;
- 	u32 topology_map[252 + 3];
-+	u32 broadcast_channel;
- 
- 	spinlock_t lock; /* Take this lock when handling the lists in
- 			  * this struct. */
-@@ -256,6 +262,29 @@ struct fw_card {
- 	int bm_generation;
- };
- 
-+static inline struct fw_card *fw_card_get(struct fw_card *card)
-+{
-+	kref_get(&card->kref);
-+
-+	return card;
-+}
-+
-+void fw_card_release(struct kref *kref);
-+
-+static inline void fw_card_put(struct fw_card *card)
-+{
-+	kref_put(&card->kref, fw_card_release);
-+}
-+
-+/*
+ /*
 + * Check whether new_generation is the immediate successor of old_generation.
 + * Take counter roll-over at 255 (as per to OHCI) into account.
 + */
@@ -1159,19 +1106,11 @@ index 04d3854..2f354c4 100644
 +	return (new_generation & 0xff) == ((old_generation + 1) & 0xff);
 +}
 +
- /*
++/*
   * The iso packet format allows for an immediate header/payload part
   * stored in 'header' immediately after the packet info plus an
-@@ -348,8 +377,6 @@ int
- fw_iso_context_stop(struct fw_iso_context *ctx);
- 
- struct fw_card_driver {
--	const char *name;
--
- 	/*
- 	 * Enable the given card with the given initial config rom.
- 	 * This function is expected to activate the card, and either
-@@ -408,11 +435,14 @@ fw_core_initiate_bus_reset(struct fw_card *card, int short_reset);
+  * indirect payload part that is pointer to by the 'payload' field.
+@@ -426,11 +435,14 @@ fw_core_initiate_bus_reset(struct fw_card *card, int short_reset);
  
  void
  fw_send_request(struct fw_card *card, struct fw_transaction *t,
@@ -1190,7 +1129,7 @@ index 04d3854..2f354c4 100644
  			  struct fw_transaction *transaction);
  
 diff --git a/drivers/ieee1394/csr1212.c b/drivers/ieee1394/csr1212.c
-index e8122de..5e38a68 100644
+index 9f95337..5e38a68 100644
 --- a/drivers/ieee1394/csr1212.c
 +++ b/drivers/ieee1394/csr1212.c
 @@ -84,7 +84,7 @@ static const u8 csr1212_key_id_type_map[0x30] = {
@@ -1202,72 +1141,19 @@ index e8122de..5e38a68 100644
  
  static void free_keyval(struct csr1212_keyval *kv)
  {
-@@ -1049,6 +1049,24 @@ int csr1212_read(struct csr1212_csr *csr, u32 offset, void *buffer, u32 len)
- 	return -ENOENT;
- }
+diff --git a/drivers/ieee1394/dv1394.c b/drivers/ieee1394/dv1394.c
+index b6eb2cf..df70f51 100644
+--- a/drivers/ieee1394/dv1394.c
++++ b/drivers/ieee1394/dv1394.c
+@@ -918,7 +918,7 @@ static int do_dv1394_init(struct video_card *video, struct dv1394_init *init)
+ 		/* default SYT offset is 3 cycles */
+ 		init->syt_offset = 3;
  
-+/*
-+ * Apparently there are many different wrong implementations of the CRC
-+ * algorithm.  We don't fail, we just warn... approximately once per GUID.
-+ */
-+static void
-+csr1212_check_crc(const u32 *buffer, size_t length, u16 crc, __be32 *guid)
-+{
-+	static u64 last_bad_eui64;
-+	u64 eui64 = ((u64)be32_to_cpu(guid[0]) << 32) | be32_to_cpu(guid[1]);
-+
-+	if (csr1212_crc16(buffer, length) == crc ||
-+	    csr1212_msft_crc16(buffer, length) == crc ||
-+	    eui64 == last_bad_eui64)
-+		return;
-+
-+	printk(KERN_DEBUG "ieee1394: config ROM CRC error\n");
-+	last_bad_eui64 = eui64;
-+}
+-	if ( (init->channel > 63) || (init->channel < 0) )
++	if (init->channel > 63)
+ 		init->channel = 63;
  
- /* Parse a chunk of data as a Config ROM */
- 
-@@ -1092,11 +1110,8 @@ static int csr1212_parse_bus_info_block(struct csr1212_csr *csr)
- 			return ret;
- 	}
- 
--	/* Apparently there are many different wrong implementations of the CRC
--	 * algorithm.  We don't fail, we just warn. */
--	if ((csr1212_crc16(bi->data, bi->crc_length) != bi->crc) &&
--	    (csr1212_msft_crc16(bi->data, bi->crc_length) != bi->crc))
--		printk(KERN_DEBUG "IEEE 1394 device has ROM CRC error\n");
-+	csr1212_check_crc(bi->data, bi->crc_length, bi->crc,
-+			  &csr->bus_info_data[3]);
- 
- 	cr = CSR1212_MALLOC(sizeof(*cr));
- 	if (!cr)
-@@ -1205,11 +1220,8 @@ int csr1212_parse_keyval(struct csr1212_keyval *kv,
- 		&cache->data[bytes_to_quads(kv->offset - cache->offset)];
- 	kvi_len = be16_to_cpu(kvi->length);
- 
--	/* Apparently there are many different wrong implementations of the CRC
--	 * algorithm.  We don't fail, we just warn. */
--	if ((csr1212_crc16(kvi->data, kvi_len) != kvi->crc) &&
--	    (csr1212_msft_crc16(kvi->data, kvi_len) != kvi->crc))
--		printk(KERN_DEBUG "IEEE 1394 device has ROM CRC error\n");
-+	/* GUID is wrong in here in case of extended ROM.  We don't care. */
-+	csr1212_check_crc(kvi->data, kvi_len, kvi->crc, &cache->data[3]);
- 
- 	switch (kv->key.type) {
- 	case CSR1212_KV_TYPE_DIRECTORY:
-diff --git a/drivers/ieee1394/dma.c b/drivers/ieee1394/dma.c
-index 73685e7..1aba8c1 100644
---- a/drivers/ieee1394/dma.c
-+++ b/drivers/ieee1394/dma.c
-@@ -274,7 +274,7 @@ int dma_region_mmap(struct dma_region *dma, struct file *file,
- 	vma->vm_ops = &dma_region_vm_ops;
- 	vma->vm_private_data = dma;
- 	vma->vm_file = file;
--	vma->vm_flags |= VM_RESERVED;
-+	vma->vm_flags |= VM_RESERVED | VM_ALWAYSDUMP;
- 
- 	return 0;
- }
+ 	chan_mask = (u64)1 << init->channel;
 diff --git a/drivers/ieee1394/eth1394.c b/drivers/ieee1394/eth1394.c
 index b166b35..2012869 100644
 --- a/drivers/ieee1394/eth1394.c
@@ -1281,252 +1167,1408 @@ index b166b35..2012869 100644
  }
  
  static unsigned int ether1394_encapsulate(struct sk_buff *skb,
-diff --git a/drivers/ieee1394/highlevel.c b/drivers/ieee1394/highlevel.c
-index fa2bfec..918ffc4 100644
---- a/drivers/ieee1394/highlevel.c
-+++ b/drivers/ieee1394/highlevel.c
-@@ -228,10 +228,8 @@ void hpsb_register_highlevel(struct hpsb_highlevel *hl)
- {
- 	unsigned long flags;
+diff --git a/drivers/ieee1394/nodemgr.c b/drivers/ieee1394/nodemgr.c
+index 16240a7..2376b72 100644
+--- a/drivers/ieee1394/nodemgr.c
++++ b/drivers/ieee1394/nodemgr.c
+@@ -154,9 +154,6 @@ struct host_info {
  
-+	hpsb_init_highlevel(hl);
- 	INIT_LIST_HEAD(&hl->addr_list);
--	INIT_LIST_HEAD(&hl->host_info_list);
+ static int nodemgr_bus_match(struct device * dev, struct device_driver * drv);
+ static int nodemgr_uevent(struct device *dev, struct kobj_uevent_env *env);
+-static void nodemgr_resume_ne(struct node_entry *ne);
+-static void nodemgr_remove_ne(struct node_entry *ne);
+-static struct node_entry *find_entry_by_guid(u64 guid);
+ 
+ struct bus_type ieee1394_bus_type = {
+ 	.name		= "ieee1394",
+@@ -385,27 +382,6 @@ static ssize_t fw_get_ignore_driver(struct device *dev, struct device_attribute
+ static DEVICE_ATTR(ignore_driver, S_IWUSR | S_IRUGO, fw_get_ignore_driver, fw_set_ignore_driver);
+ 
+ 
+-static ssize_t fw_set_destroy_node(struct bus_type *bus, const char *buf, size_t count)
+-{
+-	struct node_entry *ne;
+-	u64 guid = (u64)simple_strtoull(buf, NULL, 16);
 -
--	rwlock_init(&hl->host_info_lock);
- 
- 	down_write(&hl_drivers_sem);
- 	list_add_tail(&hl->hl_list, &hl_drivers);
-diff --git a/drivers/ieee1394/highlevel.h b/drivers/ieee1394/highlevel.h
-index eb9fe32..bc5d085 100644
---- a/drivers/ieee1394/highlevel.h
-+++ b/drivers/ieee1394/highlevel.h
-@@ -2,7 +2,7 @@
- #define IEEE1394_HIGHLEVEL_H
- 
- #include <linux/list.h>
--#include <linux/spinlock_types.h>
-+#include <linux/spinlock.h>
- #include <linux/types.h>
- 
- struct module;
-@@ -103,6 +103,17 @@ int highlevel_lock64(struct hpsb_host *host, int nodeid, octlet_t *store,
- void highlevel_fcp_request(struct hpsb_host *host, int nodeid, int direction,
- 			   void *data, size_t length);
- 
-+/**
-+ * hpsb_init_highlevel - initialize a struct hpsb_highlevel
-+ *
-+ * This is only necessary if hpsb_get_hostinfo_bykey can be called
-+ * before hpsb_register_highlevel.
-+ */
-+static inline void hpsb_init_highlevel(struct hpsb_highlevel *hl)
-+{
-+	rwlock_init(&hl->host_info_lock);
-+	INIT_LIST_HEAD(&hl->host_info_list);
-+}
- void hpsb_register_highlevel(struct hpsb_highlevel *hl);
- void hpsb_unregister_highlevel(struct hpsb_highlevel *hl);
- 
-diff --git a/drivers/ieee1394/raw1394.c b/drivers/ieee1394/raw1394.c
-index ec2a0ad..96f2847 100644
---- a/drivers/ieee1394/raw1394.c
-+++ b/drivers/ieee1394/raw1394.c
-@@ -2549,8 +2549,8 @@ static int raw1394_mmap(struct file *file, struct vm_area_struct *vma)
- }
- 
- /* ioctl is only used for rawiso operations */
--static int raw1394_ioctl(struct inode *inode, struct file *file,
--			 unsigned int cmd, unsigned long arg)
-+static long do_raw1394_ioctl(struct file *file, unsigned int cmd,
-+							unsigned long arg)
+-	ne = find_entry_by_guid(guid);
+-
+-	if (ne == NULL || !ne->in_limbo)
+-		return -EINVAL;
+-
+-	nodemgr_remove_ne(ne);
+-
+-	return count;
+-}
+-static ssize_t fw_get_destroy_node(struct bus_type *bus, char *buf)
+-{
+-	return sprintf(buf, "You can destroy in_limbo nodes by writing their GUID to this file\n");
+-}
+-static BUS_ATTR(destroy_node, S_IWUSR | S_IRUGO, fw_get_destroy_node, fw_set_destroy_node);
+-
+-
+ static ssize_t fw_set_rescan(struct bus_type *bus, const char *buf,
+ 			     size_t count)
  {
- 	struct file_info *fi = file->private_data;
- 	void __user *argp = (void __user *)arg;
-@@ -2656,6 +2656,16 @@ static int raw1394_ioctl(struct inode *inode, struct file *file,
- 	return -EINVAL;
+@@ -442,7 +418,6 @@ static BUS_ATTR(ignore_drivers, S_IWUSR | S_IRUGO, fw_get_ignore_drivers, fw_set
+ 
+ 
+ struct bus_attribute *const fw_bus_attrs[] = {
+-	&bus_attr_destroy_node,
+ 	&bus_attr_rescan,
+ 	&bus_attr_ignore_drivers,
+ 	NULL
+@@ -734,10 +709,10 @@ static int nodemgr_bus_match(struct device * dev, struct device_driver * drv)
+ 
+ static DEFINE_MUTEX(nodemgr_serialize_remove_uds);
+ 
+-static int __match_ne(struct device *dev, void *data)
++static int match_ne(struct device *dev, void *data)
+ {
+ 	struct unit_directory *ud;
+-	struct node_entry *ne = (struct node_entry *)data;
++	struct node_entry *ne = data;
+ 
+ 	ud = container_of(dev, struct unit_directory, unit_dev);
+ 	return ud->ne == ne;
+@@ -754,8 +729,7 @@ static void nodemgr_remove_uds(struct node_entry *ne)
+ 	 */
+ 	mutex_lock(&nodemgr_serialize_remove_uds);
+ 	for (;;) {
+-		dev = class_find_device(&nodemgr_ud_class, NULL, ne,
+-					__match_ne);
++		dev = class_find_device(&nodemgr_ud_class, NULL, ne, match_ne);
+ 		if (!dev)
+ 			break;
+ 		ud = container_of(dev, struct unit_directory, unit_dev);
+@@ -785,7 +759,7 @@ static void nodemgr_remove_ne(struct node_entry *ne)
+ 	put_device(dev);
  }
  
-+static long raw1394_ioctl(struct file *file, unsigned int cmd,
-+							unsigned long arg)
-+{
-+	long ret;
-+	lock_kernel();
-+	ret = do_raw1394_ioctl(file, cmd, arg);
-+	unlock_kernel();
-+	return ret;
+-static int __nodemgr_remove_host_dev(struct device *dev, void *data)
++static int remove_host_dev(struct device *dev, void *data)
+ {
+ 	if (dev->bus == &ieee1394_bus_type)
+ 		nodemgr_remove_ne(container_of(dev, struct node_entry,
+@@ -795,7 +769,7 @@ static int __nodemgr_remove_host_dev(struct device *dev, void *data)
+ 
+ static void nodemgr_remove_host_dev(struct device *dev)
+ {
+-	WARN_ON(device_for_each_child(dev, NULL, __nodemgr_remove_host_dev));
++	device_for_each_child(dev, NULL, remove_host_dev);
+ 	sysfs_remove_link(&dev->kobj, "irm_id");
+ 	sysfs_remove_link(&dev->kobj, "busmgr_id");
+ 	sysfs_remove_link(&dev->kobj, "host_id");
+@@ -830,11 +804,10 @@ static void nodemgr_update_bus_options(struct node_entry *ne)
+ }
+ 
+ 
+-static struct node_entry *nodemgr_create_node(octlet_t guid, struct csr1212_csr *csr,
+-					      struct host_info *hi, nodeid_t nodeid,
+-					      unsigned int generation)
++static struct node_entry *nodemgr_create_node(octlet_t guid,
++				struct csr1212_csr *csr, struct hpsb_host *host,
++				nodeid_t nodeid, unsigned int generation)
+ {
+-	struct hpsb_host *host = hi->host;
+ 	struct node_entry *ne;
+ 
+ 	ne = kzalloc(sizeof(*ne), GFP_KERNEL);
+@@ -888,10 +861,10 @@ fail_alloc:
+ 	return NULL;
+ }
+ 
+-static int __match_ne_guid(struct device *dev, void *data)
++static int match_ne_guid(struct device *dev, void *data)
+ {
+ 	struct node_entry *ne;
+-	u64 *guid = (u64 *)data;
++	u64 *guid = data;
+ 
+ 	ne = container_of(dev, struct node_entry, node_dev);
+ 	return ne->guid == *guid;
+@@ -902,8 +875,7 @@ static struct node_entry *find_entry_by_guid(u64 guid)
+ 	struct device *dev;
+ 	struct node_entry *ne;
+ 
+-	dev = class_find_device(&nodemgr_ne_class, NULL, &guid,
+-				__match_ne_guid);
++	dev = class_find_device(&nodemgr_ne_class, NULL, &guid, match_ne_guid);
+ 	if (!dev)
+ 		return NULL;
+ 	ne = container_of(dev, struct node_entry, node_dev);
+@@ -912,21 +884,21 @@ static struct node_entry *find_entry_by_guid(u64 guid)
+ 	return ne;
+ }
+ 
+-struct match_nodeid_param {
++struct match_nodeid_parameter {
+ 	struct hpsb_host *host;
+ 	nodeid_t nodeid;
+ };
+ 
+-static int __match_ne_nodeid(struct device *dev, void *data)
++static int match_ne_nodeid(struct device *dev, void *data)
+ {
+ 	int found = 0;
+ 	struct node_entry *ne;
+-	struct match_nodeid_param *param = (struct match_nodeid_param *)data;
++	struct match_nodeid_parameter *p = data;
+ 
+ 	if (!dev)
+ 		goto ret;
+ 	ne = container_of(dev, struct node_entry, node_dev);
+-	if (ne->host == param->host && ne->nodeid == param->nodeid)
++	if (ne->host == p->host && ne->nodeid == p->nodeid)
+ 		found = 1;
+ ret:
+ 	return found;
+@@ -937,13 +909,12 @@ static struct node_entry *find_entry_by_nodeid(struct hpsb_host *host,
+ {
+ 	struct device *dev;
+ 	struct node_entry *ne;
+-	struct match_nodeid_param param;
++	struct match_nodeid_parameter p;
+ 
+-	param.host = host;
+-	param.nodeid = nodeid;
++	p.host = host;
++	p.nodeid = nodeid;
+ 
+-	dev = class_find_device(&nodemgr_ne_class, NULL, &param,
+-				__match_ne_nodeid);
++	dev = class_find_device(&nodemgr_ne_class, NULL, &p, match_ne_nodeid);
+ 	if (!dev)
+ 		return NULL;
+ 	ne = container_of(dev, struct node_entry, node_dev);
+@@ -990,7 +961,7 @@ fail_devreg:
+  * immediate unit directories looking for software_id and
+  * software_version entries, in order to get driver autoloading working. */
+ static struct unit_directory *nodemgr_process_unit_directory
+-	(struct host_info *hi, struct node_entry *ne, struct csr1212_keyval *ud_kv,
++	(struct node_entry *ne, struct csr1212_keyval *ud_kv,
+ 	 unsigned int *id, struct unit_directory *parent)
+ {
+ 	struct unit_directory *ud;
+@@ -1083,7 +1054,7 @@ static struct unit_directory *nodemgr_process_unit_directory
+ 					nodemgr_register_device(ne, ud, &ne->device);
+ 				
+ 				/* process the child unit */
+-				ud_child = nodemgr_process_unit_directory(hi, ne, kv, id, ud);
++				ud_child = nodemgr_process_unit_directory(ne, kv, id, ud);
+ 
+ 				if (ud_child == NULL)
+ 					break;
+@@ -1137,7 +1108,7 @@ unit_directory_error:
+ }
+ 
+ 
+-static void nodemgr_process_root_directory(struct host_info *hi, struct node_entry *ne)
++static void nodemgr_process_root_directory(struct node_entry *ne)
+ {
+ 	unsigned int ud_id = 0;
+ 	struct csr1212_dentry *dentry;
+@@ -1157,7 +1128,7 @@ static void nodemgr_process_root_directory(struct host_info *hi, struct node_ent
+ 			break;
+ 
+ 		case CSR1212_KV_ID_UNIT:
+-			nodemgr_process_unit_directory(hi, ne, kv, &ud_id, NULL);
++			nodemgr_process_unit_directory(ne, kv, &ud_id, NULL);
+ 			break;
+ 
+ 		case CSR1212_KV_ID_DESCRIPTOR:
+@@ -1273,8 +1244,7 @@ void hpsb_unregister_protocol(struct hpsb_protocol_driver *driver)
+  * the to take whatever actions required.
+  */
+ static void nodemgr_update_node(struct node_entry *ne, struct csr1212_csr *csr,
+-				struct host_info *hi, nodeid_t nodeid,
+-				unsigned int generation)
++				nodeid_t nodeid, unsigned int generation)
+ {
+ 	if (ne->nodeid != nodeid) {
+ 		HPSB_DEBUG("Node changed: " NODE_BUS_FMT " -> " NODE_BUS_FMT,
+@@ -1305,19 +1275,23 @@ static void nodemgr_update_node(struct node_entry *ne, struct csr1212_csr *csr,
+ 		csr1212_destroy_csr(csr);
+ 	}
+ 
+-	if (ne->in_limbo)
+-		nodemgr_resume_ne(ne);
+-
+ 	/* Mark the node current */
+ 	ne->generation = generation;
+-}
+ 
++	if (ne->in_limbo) {
++		device_remove_file(&ne->device, &dev_attr_ne_in_limbo);
++		ne->in_limbo = false;
+ 
++		HPSB_DEBUG("Node reactivated: "
++			   "ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
++			   NODE_BUS_ARGS(ne->host, ne->nodeid),
++			   (unsigned long long)ne->guid);
++	}
++}
+ 
+-static void nodemgr_node_scan_one(struct host_info *hi,
++static void nodemgr_node_scan_one(struct hpsb_host *host,
+ 				  nodeid_t nodeid, int generation)
+ {
+-	struct hpsb_host *host = hi->host;
+ 	struct node_entry *ne;
+ 	octlet_t guid;
+ 	struct csr1212_csr *csr;
+@@ -1373,16 +1347,15 @@ static void nodemgr_node_scan_one(struct host_info *hi,
+ 	}
+ 
+ 	if (!ne)
+-		nodemgr_create_node(guid, csr, hi, nodeid, generation);
++		nodemgr_create_node(guid, csr, host, nodeid, generation);
+ 	else
+-		nodemgr_update_node(ne, csr, hi, nodeid, generation);
++		nodemgr_update_node(ne, csr, nodeid, generation);
+ }
+ 
+ 
+-static void nodemgr_node_scan(struct host_info *hi, int generation)
++static void nodemgr_node_scan(struct hpsb_host *host, int generation)
+ {
+ 	int count;
+-	struct hpsb_host *host = hi->host;
+ 	struct selfid *sid = (struct selfid *)host->topology_map;
+ 	nodeid_t nodeid = LOCAL_BUS;
+ 
+@@ -1395,89 +1368,26 @@ static void nodemgr_node_scan(struct host_info *hi, int generation)
+ 			nodeid++;
+ 			continue;
+ 		}
+-		nodemgr_node_scan_one(hi, nodeid++, generation);
+-	}
+-}
+-
+-static int __nodemgr_driver_suspend(struct device *dev, void *data)
+-{
+-	struct unit_directory *ud;
+-	struct device_driver *drv;
+-	struct node_entry *ne = (struct node_entry *)data;
+-	int error;
+-
+-	ud = container_of(dev, struct unit_directory, unit_dev);
+-	if (ud->ne == ne) {
+-		drv = get_driver(ud->device.driver);
+-		if (drv) {
+-			error = 1; /* release if suspend is not implemented */
+-			if (drv->suspend) {
+-				down(&ud->device.sem);
+-				error = drv->suspend(&ud->device, PMSG_SUSPEND);
+-				up(&ud->device.sem);
+-			}
+-			if (error)
+-				device_release_driver(&ud->device);
+-			put_driver(drv);
+-		}
+-	}
+-
+-	return 0;
+-}
+-
+-static int __nodemgr_driver_resume(struct device *dev, void *data)
+-{
+-	struct unit_directory *ud;
+-	struct device_driver *drv;
+-	struct node_entry *ne = (struct node_entry *)data;
+-
+-	ud = container_of(dev, struct unit_directory, unit_dev);
+-	if (ud->ne == ne) {
+-		drv = get_driver(ud->device.driver);
+-		if (drv) {
+-			if (drv->resume) {
+-				down(&ud->device.sem);
+-				drv->resume(&ud->device);
+-				up(&ud->device.sem);
+-			}
+-			put_driver(drv);
+-		}
++		nodemgr_node_scan_one(host, nodeid++, generation);
+ 	}
+-
+-	return 0;
+ }
+ 
+-static void nodemgr_suspend_ne(struct node_entry *ne)
++static void nodemgr_pause_ne(struct node_entry *ne)
+ {
+-	HPSB_DEBUG("Node suspended: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
++	HPSB_DEBUG("Node paused: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
+ 		   NODE_BUS_ARGS(ne->host, ne->nodeid),
+ 		   (unsigned long long)ne->guid);
+ 
+-	ne->in_limbo = 1;
++	ne->in_limbo = true;
+ 	WARN_ON(device_create_file(&ne->device, &dev_attr_ne_in_limbo));
+-
+-	class_for_each_device(&nodemgr_ud_class, NULL, ne,
+-			      __nodemgr_driver_suspend);
+-}
+-
+-
+-static void nodemgr_resume_ne(struct node_entry *ne)
+-{
+-	ne->in_limbo = 0;
+-	device_remove_file(&ne->device, &dev_attr_ne_in_limbo);
+-
+-	class_for_each_device(&nodemgr_ud_class, NULL, ne,
+-			      __nodemgr_driver_resume);
+-	HPSB_DEBUG("Node resumed: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
+-		   NODE_BUS_ARGS(ne->host, ne->nodeid), (unsigned long long)ne->guid);
+ }
+ 
+-static int __nodemgr_update_pdrv(struct device *dev, void *data)
++static int update_pdrv(struct device *dev, void *data)
+ {
+ 	struct unit_directory *ud;
+ 	struct device_driver *drv;
+ 	struct hpsb_protocol_driver *pdrv;
+-	struct node_entry *ne = (struct node_entry *)data;
++	struct node_entry *ne = data;
+ 	int error;
+ 
+ 	ud = container_of(dev, struct unit_directory, unit_dev);
+@@ -1503,11 +1413,9 @@ static int __nodemgr_update_pdrv(struct device *dev, void *data)
+ 
+ static void nodemgr_update_pdrv(struct node_entry *ne)
+ {
+-	class_for_each_device(&nodemgr_ud_class, NULL, ne,
+-			      __nodemgr_update_pdrv);
++	class_for_each_device(&nodemgr_ud_class, NULL, ne, update_pdrv);
+ }
+ 
+-
+ /* Write the BROADCAST_CHANNEL as per IEEE1394a 8.3.2.3.11 and 8.4.2.3.  This
+  * seems like an optional service but in the end it is practically mandatory
+  * as a consequence of these clauses.
+@@ -1535,11 +1443,12 @@ static void nodemgr_irm_write_bc(struct node_entry *ne, int generation)
+ }
+ 
+ 
+-static void nodemgr_probe_ne(struct host_info *hi, struct node_entry *ne, int generation)
++static void nodemgr_probe_ne(struct hpsb_host *host, struct node_entry *ne,
++			     int generation)
+ {
+ 	struct device *dev;
+ 
+-	if (ne->host != hi->host || ne->in_limbo)
++	if (ne->host != host || ne->in_limbo)
+ 		return;
+ 
+ 	dev = get_device(&ne->device);
+@@ -1554,40 +1463,40 @@ static void nodemgr_probe_ne(struct host_info *hi, struct node_entry *ne, int ge
+ 	 * down to the drivers. Otherwise, this is a dead node and we
+ 	 * suspend it. */
+ 	if (ne->needs_probe)
+-		nodemgr_process_root_directory(hi, ne);
++		nodemgr_process_root_directory(ne);
+ 	else if (ne->generation == generation)
+ 		nodemgr_update_pdrv(ne);
+ 	else
+-		nodemgr_suspend_ne(ne);
++		nodemgr_pause_ne(ne);
+ 
+ 	put_device(dev);
+ }
+ 
+-struct probe_param {
+-	struct host_info *hi;
++struct node_probe_parameter {
++	struct hpsb_host *host;
+ 	int generation;
+ 	bool probe_now;
+ };
+ 
+ static int node_probe(struct device *dev, void *data)
+ {
+-	struct probe_param *p = data;
++	struct node_probe_parameter *p = data;
+ 	struct node_entry *ne;
+ 
+-	if (p->generation != get_hpsb_generation(p->hi->host))
++	if (p->generation != get_hpsb_generation(p->host))
+ 		return -EAGAIN;
+ 
+ 	ne = container_of(dev, struct node_entry, node_dev);
+ 	if (ne->needs_probe == p->probe_now)
+-		nodemgr_probe_ne(p->hi, ne, p->generation);
++		nodemgr_probe_ne(p->host, ne, p->generation);
+ 	return 0;
+ }
+ 
+-static void nodemgr_node_probe(struct host_info *hi, int generation)
++static int nodemgr_node_probe(struct hpsb_host *host, int generation)
+ {
+-	struct probe_param p;
++	struct node_probe_parameter p;
+ 
+-	p.hi = hi;
++	p.host = host;
+ 	p.generation = generation;
+ 	/*
+ 	 * Do some processing of the nodes we've probed. This pulls them
+@@ -1604,11 +1513,11 @@ static void nodemgr_node_probe(struct host_info *hi, int generation)
+ 	 */
+ 	p.probe_now = false;
+ 	if (class_for_each_device(&nodemgr_ne_class, NULL, &p, node_probe) != 0)
+-		return;
++		return 0;
+ 
+ 	p.probe_now = true;
+ 	if (class_for_each_device(&nodemgr_ne_class, NULL, &p, node_probe) != 0)
+-		return;
++		return 0;
+ 	/*
+ 	 * Now let's tell the bus to rescan our devices. This may seem
+ 	 * like overhead, but the driver-model core will only scan a
+@@ -1620,6 +1529,27 @@ static void nodemgr_node_probe(struct host_info *hi, int generation)
+ 	 */
+ 	if (bus_rescan_devices(&ieee1394_bus_type) != 0)
+ 		HPSB_DEBUG("bus_rescan_devices had an error");
++
++	return 1;
 +}
 +
- #ifdef CONFIG_COMPAT
- struct raw1394_iso_packets32 {
-         __u32 n_packets;
-@@ -2690,7 +2700,7 @@ static long raw1394_iso_xmit_recv_packets32(struct file *file, unsigned int cmd,
++static int remove_nodes_in_limbo(struct device *dev, void *data)
++{
++	struct node_entry *ne;
++
++	if (dev->bus != &ieee1394_bus_type)
++		return 0;
++
++	ne = container_of(dev, struct node_entry, device);
++	if (ne->in_limbo)
++		nodemgr_remove_ne(ne);
++
++	return 0;
++}
++
++static void nodemgr_remove_nodes_in_limbo(struct hpsb_host *host)
++{
++	device_for_each_child(&host->device, NULL, remove_nodes_in_limbo);
+ }
+ 
+ static int nodemgr_send_resume_packet(struct hpsb_host *host)
+@@ -1730,10 +1660,9 @@ static int nodemgr_check_irm_capability(struct hpsb_host *host, int cycles)
+ 	return 1;
+ }
+ 
+-static int nodemgr_host_thread(void *__hi)
++static int nodemgr_host_thread(void *data)
+ {
+-	struct host_info *hi = (struct host_info *)__hi;
+-	struct hpsb_host *host = hi->host;
++	struct hpsb_host *host = data;
+ 	unsigned int g, generation = 0;
+ 	int i, reset_cycles = 0;
+ 
+@@ -1787,36 +1716,48 @@ static int nodemgr_host_thread(void *__hi)
+ 		 * entries. This does not do the sysfs stuff, since that
+ 		 * would trigger uevents and such, which is a bad idea at
+ 		 * this point. */
+-		nodemgr_node_scan(hi, generation);
++		nodemgr_node_scan(host, generation);
+ 
+ 		/* This actually does the full probe, with sysfs
+ 		 * registration. */
+-		nodemgr_node_probe(hi, generation);
++		if (!nodemgr_node_probe(host, generation))
++			continue;
+ 
+ 		/* Update some of our sysfs symlinks */
+ 		nodemgr_update_host_dev_links(host);
++
++		/* Sleep 3 seconds */
++		for (i = 3000/200; i; i--) {
++			msleep_interruptible(200);
++			if (kthread_should_stop())
++				goto exit;
++
++			if (generation != get_hpsb_generation(host))
++				break;
++		}
++		/* Remove nodes which are gone, unless a bus reset happened */
++		if (!i)
++			nodemgr_remove_nodes_in_limbo(host);
+ 	}
+ exit:
+ 	HPSB_VERBOSE("NodeMgr: Exiting thread");
+ 	return 0;
+ }
+ 
+-struct host_iter_param {
++struct per_host_parameter {
+ 	void *data;
+ 	int (*cb)(struct hpsb_host *, void *);
+ };
+ 
+-static int __nodemgr_for_each_host(struct device *dev, void *data)
++static int per_host(struct device *dev, void *data)
+ {
+ 	struct hpsb_host *host;
+-	struct host_iter_param *hip = (struct host_iter_param *)data;
+-	int error = 0;
++	struct per_host_parameter *p = data;
+ 
+ 	host = container_of(dev, struct hpsb_host, host_dev);
+-	error = hip->cb(host, hip->data);
+-
+-	return error;
++	return p->cb(host, p->data);
+ }
++
+ /**
+  * nodemgr_for_each_host - call a function for each IEEE 1394 host
+  * @data: an address to supply to the callback
+@@ -1831,15 +1772,11 @@ static int __nodemgr_for_each_host(struct device *dev, void *data)
+  */
+ int nodemgr_for_each_host(void *data, int (*cb)(struct hpsb_host *, void *))
+ {
+-	struct host_iter_param hip;
+-	int error;
+-
+-	hip.cb = cb;
+-	hip.data = data;
+-	error = class_for_each_device(&hpsb_host_class, NULL, &hip,
+-				      __nodemgr_for_each_host);
++	struct per_host_parameter p;
+ 
+-	return error;
++	p.cb = cb;
++	p.data = data;
++	return class_for_each_device(&hpsb_host_class, NULL, &p, per_host);
+ }
+ 
+ /* The following two convenience functions use a struct node_entry
+@@ -1893,7 +1830,7 @@ static void nodemgr_add_host(struct hpsb_host *host)
+ 		return;
+ 	}
+ 	hi->host = host;
+-	hi->thread = kthread_run(nodemgr_host_thread, hi, "knodemgrd_%d",
++	hi->thread = kthread_run(nodemgr_host_thread, host, "knodemgrd_%d",
+ 				 host->id);
+ 	if (IS_ERR(hi->thread)) {
+ 		HPSB_ERR("NodeMgr: cannot start thread for host %d", host->id);
+diff --git a/drivers/ieee1394/nodemgr.h b/drivers/ieee1394/nodemgr.h
+index 6eb2646..4f287a3 100644
+--- a/drivers/ieee1394/nodemgr.h
++++ b/drivers/ieee1394/nodemgr.h
+@@ -110,7 +110,7 @@ struct node_entry {
+ 	struct device node_dev;
+ 
+ 	/* Means this node is not attached anymore */
+-	int in_limbo;
++	bool in_limbo;
+ 
+ 	struct csr1212_csr *csr;
+ };
+diff --git a/drivers/ieee1394/raw1394-private.h b/drivers/ieee1394/raw1394-private.h
+index a06aaad..7a225a4 100644
+--- a/drivers/ieee1394/raw1394-private.h
++++ b/drivers/ieee1394/raw1394-private.h
+@@ -22,6 +22,7 @@ enum raw1394_iso_state { RAW1394_ISO_INACTIVE = 0,
+ struct file_info {
+         struct list_head list;
+ 
++	struct mutex state_mutex;
+         enum { opened, initialized, connected } state;
+         unsigned int protocol_version;
+ 
+diff --git a/drivers/ieee1394/raw1394.c b/drivers/ieee1394/raw1394.c
+index 6fa9e4a..2cf4ae7 100644
+--- a/drivers/ieee1394/raw1394.c
++++ b/drivers/ieee1394/raw1394.c
+@@ -34,6 +34,7 @@
+ #include <linux/fs.h>
+ #include <linux/poll.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/vmalloc.h>
+@@ -2267,6 +2268,8 @@ static ssize_t raw1394_write(struct file *file, const char __user * buffer,
+ 		return -EFAULT;
+ 	}
+ 
++	mutex_lock(&fi->state_mutex);
++
+ 	switch (fi->state) {
+ 	case opened:
+ 		retval = state_opened(fi, req);
+@@ -2281,6 +2284,8 @@ static ssize_t raw1394_write(struct file *file, const char __user * buffer,
+ 		break;
+ 	}
+ 
++	mutex_unlock(&fi->state_mutex);
++
+ 	if (retval < 0) {
+ 		free_pending_request(req);
+ 	} else {
+@@ -2541,109 +2546,120 @@ static int raw1394_read_cycle_timer(struct file_info *fi, void __user * uaddr)
+ static int raw1394_mmap(struct file *file, struct vm_area_struct *vma)
+ {
+ 	struct file_info *fi = file->private_data;
++	int ret;
++
++	mutex_lock(&fi->state_mutex);
+ 
+ 	if (fi->iso_state == RAW1394_ISO_INACTIVE)
+-		return -EINVAL;
++		ret = -EINVAL;
++	else
++		ret = dma_region_mmap(&fi->iso_handle->data_buf, file, vma);
++
++	mutex_unlock(&fi->state_mutex);
+ 
+-	return dma_region_mmap(&fi->iso_handle->data_buf, file, vma);
++	return ret;
+ }
+ 
+-/* ioctl is only used for rawiso operations */
+-static long do_raw1394_ioctl(struct file *file, unsigned int cmd,
+-							unsigned long arg)
++static long raw1394_ioctl_inactive(struct file_info *fi, unsigned int cmd,
++				   void __user *argp)
++{
++	switch (cmd) {
++	case RAW1394_IOC_ISO_XMIT_INIT:
++		return raw1394_iso_xmit_init(fi, argp);
++	case RAW1394_IOC_ISO_RECV_INIT:
++		return raw1394_iso_recv_init(fi, argp);
++	default:
++		return -EINVAL;
++	}
++}
++
++static long raw1394_ioctl_recv(struct file_info *fi, unsigned int cmd,
++			       unsigned long arg)
+ {
+-	struct file_info *fi = file->private_data;
+ 	void __user *argp = (void __user *)arg;
+ 
+-	switch (fi->iso_state) {
+-	case RAW1394_ISO_INACTIVE:
+-		switch (cmd) {
+-		case RAW1394_IOC_ISO_XMIT_INIT:
+-			return raw1394_iso_xmit_init(fi, argp);
+-		case RAW1394_IOC_ISO_RECV_INIT:
+-			return raw1394_iso_recv_init(fi, argp);
+-		default:
+-			break;
++	switch (cmd) {
++	case RAW1394_IOC_ISO_RECV_START:{
++			int args[3];
++
++			if (copy_from_user(&args[0], argp, sizeof(args)))
++				return -EFAULT;
++			return hpsb_iso_recv_start(fi->iso_handle,
++						   args[0], args[1], args[2]);
+ 		}
+-		break;
+-	case RAW1394_ISO_RECV:
+-		switch (cmd) {
+-		case RAW1394_IOC_ISO_RECV_START:{
+-				/* copy args from user-space */
+-				int args[3];
+-				if (copy_from_user
+-				    (&args[0], argp, sizeof(args)))
+-					return -EFAULT;
+-				return hpsb_iso_recv_start(fi->iso_handle,
+-							   args[0], args[1],
+-							   args[2]);
+-			}
+-		case RAW1394_IOC_ISO_XMIT_RECV_STOP:
+-			hpsb_iso_stop(fi->iso_handle);
+-			return 0;
+-		case RAW1394_IOC_ISO_RECV_LISTEN_CHANNEL:
+-			return hpsb_iso_recv_listen_channel(fi->iso_handle,
+-							    arg);
+-		case RAW1394_IOC_ISO_RECV_UNLISTEN_CHANNEL:
+-			return hpsb_iso_recv_unlisten_channel(fi->iso_handle,
+-							      arg);
+-		case RAW1394_IOC_ISO_RECV_SET_CHANNEL_MASK:{
+-				/* copy the u64 from user-space */
+-				u64 mask;
+-				if (copy_from_user(&mask, argp, sizeof(mask)))
+-					return -EFAULT;
+-				return hpsb_iso_recv_set_channel_mask(fi->
+-								      iso_handle,
+-								      mask);
+-			}
+-		case RAW1394_IOC_ISO_GET_STATUS:
+-			return raw1394_iso_get_status(fi, argp);
+-		case RAW1394_IOC_ISO_RECV_PACKETS:
+-			return raw1394_iso_recv_packets(fi, argp);
+-		case RAW1394_IOC_ISO_RECV_RELEASE_PACKETS:
+-			return hpsb_iso_recv_release_packets(fi->iso_handle,
+-							     arg);
+-		case RAW1394_IOC_ISO_RECV_FLUSH:
+-			return hpsb_iso_recv_flush(fi->iso_handle);
+-		case RAW1394_IOC_ISO_SHUTDOWN:
+-			raw1394_iso_shutdown(fi);
+-			return 0;
+-		case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
+-			queue_rawiso_event(fi);
+-			return 0;
++	case RAW1394_IOC_ISO_XMIT_RECV_STOP:
++		hpsb_iso_stop(fi->iso_handle);
++		return 0;
++	case RAW1394_IOC_ISO_RECV_LISTEN_CHANNEL:
++		return hpsb_iso_recv_listen_channel(fi->iso_handle, arg);
++	case RAW1394_IOC_ISO_RECV_UNLISTEN_CHANNEL:
++		return hpsb_iso_recv_unlisten_channel(fi->iso_handle, arg);
++	case RAW1394_IOC_ISO_RECV_SET_CHANNEL_MASK:{
++			u64 mask;
++
++			if (copy_from_user(&mask, argp, sizeof(mask)))
++				return -EFAULT;
++			return hpsb_iso_recv_set_channel_mask(fi->iso_handle,
++							      mask);
+ 		}
+-		break;
+-	case RAW1394_ISO_XMIT:
+-		switch (cmd) {
+-		case RAW1394_IOC_ISO_XMIT_START:{
+-				/* copy two ints from user-space */
+-				int args[2];
+-				if (copy_from_user
+-				    (&args[0], argp, sizeof(args)))
+-					return -EFAULT;
+-				return hpsb_iso_xmit_start(fi->iso_handle,
+-							   args[0], args[1]);
+-			}
+-		case RAW1394_IOC_ISO_XMIT_SYNC:
+-			return hpsb_iso_xmit_sync(fi->iso_handle);
+-		case RAW1394_IOC_ISO_XMIT_RECV_STOP:
+-			hpsb_iso_stop(fi->iso_handle);
+-			return 0;
+-		case RAW1394_IOC_ISO_GET_STATUS:
+-			return raw1394_iso_get_status(fi, argp);
+-		case RAW1394_IOC_ISO_XMIT_PACKETS:
+-			return raw1394_iso_send_packets(fi, argp);
+-		case RAW1394_IOC_ISO_SHUTDOWN:
+-			raw1394_iso_shutdown(fi);
+-			return 0;
+-		case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
+-			queue_rawiso_event(fi);
+-			return 0;
++	case RAW1394_IOC_ISO_GET_STATUS:
++		return raw1394_iso_get_status(fi, argp);
++	case RAW1394_IOC_ISO_RECV_PACKETS:
++		return raw1394_iso_recv_packets(fi, argp);
++	case RAW1394_IOC_ISO_RECV_RELEASE_PACKETS:
++		return hpsb_iso_recv_release_packets(fi->iso_handle, arg);
++	case RAW1394_IOC_ISO_RECV_FLUSH:
++		return hpsb_iso_recv_flush(fi->iso_handle);
++	case RAW1394_IOC_ISO_SHUTDOWN:
++		raw1394_iso_shutdown(fi);
++		return 0;
++	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
++		queue_rawiso_event(fi);
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static long raw1394_ioctl_xmit(struct file_info *fi, unsigned int cmd,
++			       void __user *argp)
++{
++	switch (cmd) {
++	case RAW1394_IOC_ISO_XMIT_START:{
++			int args[2];
++
++			if (copy_from_user(&args[0], argp, sizeof(args)))
++				return -EFAULT;
++			return hpsb_iso_xmit_start(fi->iso_handle,
++						   args[0], args[1]);
+ 		}
+-		break;
++	case RAW1394_IOC_ISO_XMIT_SYNC:
++		return hpsb_iso_xmit_sync(fi->iso_handle);
++	case RAW1394_IOC_ISO_XMIT_RECV_STOP:
++		hpsb_iso_stop(fi->iso_handle);
++		return 0;
++	case RAW1394_IOC_ISO_GET_STATUS:
++		return raw1394_iso_get_status(fi, argp);
++	case RAW1394_IOC_ISO_XMIT_PACKETS:
++		return raw1394_iso_send_packets(fi, argp);
++	case RAW1394_IOC_ISO_SHUTDOWN:
++		raw1394_iso_shutdown(fi);
++		return 0;
++	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
++		queue_rawiso_event(fi);
++		return 0;
+ 	default:
+-		break;
++		return -EINVAL;
+ 	}
++}
++
++/* ioctl is only used for rawiso operations */
++static long raw1394_ioctl(struct file *file, unsigned int cmd,
++			  unsigned long arg)
++{
++	struct file_info *fi = file->private_data;
++	void __user *argp = (void __user *)arg;
++	long ret;
+ 
+ 	/* state-independent commands */
+ 	switch(cmd) {
+@@ -2653,16 +2669,25 @@ static long do_raw1394_ioctl(struct file *file, unsigned int cmd,
+ 		break;
+ 	}
+ 
+-	return -EINVAL;
+-}
++	mutex_lock(&fi->state_mutex);
++
++	switch (fi->iso_state) {
++	case RAW1394_ISO_INACTIVE:
++		ret = raw1394_ioctl_inactive(fi, cmd, argp);
++		break;
++	case RAW1394_ISO_RECV:
++		ret = raw1394_ioctl_recv(fi, cmd, arg);
++		break;
++	case RAW1394_ISO_XMIT:
++		ret = raw1394_ioctl_xmit(fi, cmd, argp);
++		break;
++	default:
++		ret = -EINVAL;
++		break;
++	}
++
++	mutex_unlock(&fi->state_mutex);
+ 
+-static long raw1394_ioctl(struct file *file, unsigned int cmd,
+-							unsigned long arg)
+-{
+-	long ret;
+-	lock_kernel();
+-	ret = do_raw1394_ioctl(file, cmd, arg);
+-	unlock_kernel();
+ 	return ret;
+ }
+ 
+@@ -2700,7 +2725,7 @@ static long raw1394_iso_xmit_recv_packets32(struct file *file, unsigned int cmd,
  	    !copy_from_user(&infos32, &arg->infos, sizeof infos32)) {
  		infos = compat_ptr(infos32);
  		if (!copy_to_user(&dst->infos, &infos, sizeof infos))
--			err = raw1394_ioctl(NULL, file, cmd, (unsigned long)dst);
-+			err = do_raw1394_ioctl(file, cmd, (unsigned long)dst);
+-			err = do_raw1394_ioctl(file, cmd, (unsigned long)dst);
++			err = raw1394_ioctl(file, cmd, (unsigned long)dst);
  	}
  	return err;
  }
-@@ -2731,7 +2741,7 @@ static long raw1394_compat_ioctl(struct file *file,
+@@ -2724,7 +2749,6 @@ static long raw1394_compat_ioctl(struct file *file,
+ 	void __user *argp = (void __user *)arg;
+ 	long err;
+ 
+-	lock_kernel();
+ 	switch (cmd) {
+ 	/* These requests have same format as long as 'int' has same size. */
+ 	case RAW1394_IOC_ISO_RECV_INIT:
+@@ -2741,7 +2765,7 @@ static long raw1394_compat_ioctl(struct file *file,
  	case RAW1394_IOC_ISO_GET_STATUS:
  	case RAW1394_IOC_ISO_SHUTDOWN:
  	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
--		err = raw1394_ioctl(NULL, file, cmd, arg);
-+		err = do_raw1394_ioctl(file, cmd, arg);
+-		err = do_raw1394_ioctl(file, cmd, arg);
++		err = raw1394_ioctl(file, cmd, arg);
  		break;
  	/* These request have different format. */
  	case RAW1394_IOC_ISO_RECV_PACKETS32:
-@@ -2984,7 +2994,7 @@ static const struct file_operations raw1394_fops = {
- 	.read = raw1394_read,
- 	.write = raw1394_write,
- 	.mmap = raw1394_mmap,
--	.ioctl = raw1394_ioctl,
-+	.unlocked_ioctl = raw1394_ioctl,
- #ifdef CONFIG_COMPAT
- 	.compat_ioctl = raw1394_compat_ioctl,
- #endif
+@@ -2757,7 +2781,6 @@ static long raw1394_compat_ioctl(struct file *file,
+ 		err = -EINVAL;
+ 		break;
+ 	}
+-	unlock_kernel();
+ 
+ 	return err;
+ }
+@@ -2791,6 +2814,7 @@ static int raw1394_open(struct inode *inode, struct file *file)
+ 	fi->notification = (u8) RAW1394_NOTIFY_ON;	/* busreset notification */
+ 
+ 	INIT_LIST_HEAD(&fi->list);
++	mutex_init(&fi->state_mutex);
+ 	fi->state = opened;
+ 	INIT_LIST_HEAD(&fi->req_pending);
+ 	INIT_LIST_HEAD(&fi->req_complete);
 diff --git a/drivers/ieee1394/sbp2.c b/drivers/ieee1394/sbp2.c
-index a5ceff2..9cbf315 100644
+index 1d6ad34..c52f6e6 100644
 --- a/drivers/ieee1394/sbp2.c
 +++ b/drivers/ieee1394/sbp2.c
-@@ -186,6 +186,11 @@ MODULE_PARM_DESC(exclusive_login, "Exclusive login to sbp2 device "
-  * - delay inquiry
-  *   Wait extra SBP2_INQUIRY_DELAY seconds after login before SCSI inquiry.
-  *
-+ * - power condition
-+ *   Set the power condition field in the START STOP UNIT commands sent by
-+ *   sd_mod on suspend, resume, and shutdown (if manage_start_stop is on).
-+ *   Some disks need this to spin down or to resume properly.
-+ *
-  * - override internal blacklist
-  *   Instead of adding to the built-in blacklist, use only the workarounds
-  *   specified in the module load parameter.
-@@ -199,6 +204,8 @@ MODULE_PARM_DESC(workarounds, "Work around device bugs (default = 0"
- 	", skip mode page 8 = "   __stringify(SBP2_WORKAROUND_MODE_SENSE_8)
- 	", fix capacity = "       __stringify(SBP2_WORKAROUND_FIX_CAPACITY)
- 	", delay inquiry = "      __stringify(SBP2_WORKAROUND_DELAY_INQUIRY)
-+	", set power condition in start stop unit = "
-+				  __stringify(SBP2_WORKAROUND_POWER_CONDITION)
- 	", override internal blacklist = " __stringify(SBP2_WORKAROUND_OVERRIDE)
- 	", or a combination)");
+@@ -526,26 +526,41 @@ static void sbp2util_write_doorbell(struct work_struct *work)
  
-@@ -359,18 +366,25 @@ static const struct {
- 		.firmware_revision	= 0x002800,
- 		.model_id		= 0x001010,
- 		.workarounds		= SBP2_WORKAROUND_INQUIRY_36 |
--					  SBP2_WORKAROUND_MODE_SENSE_8,
-+					  SBP2_WORKAROUND_MODE_SENSE_8 |
-+					  SBP2_WORKAROUND_POWER_CONDITION,
- 	},
- 	/* DViCO Momobay FX-3A with TSB42AA9A bridge */ {
- 		.firmware_revision	= 0x002800,
- 		.model_id		= 0x000000,
--		.workarounds		= SBP2_WORKAROUND_DELAY_INQUIRY,
-+		.workarounds		= SBP2_WORKAROUND_DELAY_INQUIRY |
-+					  SBP2_WORKAROUND_POWER_CONDITION,
- 	},
- 	/* Initio bridges, actually only needed for some older ones */ {
- 		.firmware_revision	= 0x000200,
- 		.model_id		= SBP2_ROM_VALUE_WILDCARD,
- 		.workarounds		= SBP2_WORKAROUND_INQUIRY_36,
- 	},
-+	/* PL-3507 bridge with Prolific firmware */ {
-+		.firmware_revision	= 0x012800,
-+		.model_id		= SBP2_ROM_VALUE_WILDCARD,
-+		.workarounds		= SBP2_WORKAROUND_POWER_CONDITION,
-+	},
- 	/* Symbios bridge */ {
- 		.firmware_revision	= 0xa0b800,
- 		.model_id		= SBP2_ROM_VALUE_WILDCARD,
-@@ -1995,6 +2009,8 @@ static int sbp2scsi_slave_configure(struct scsi_device *sdev)
+ static int sbp2util_create_command_orb_pool(struct sbp2_lu *lu)
+ {
+-	struct sbp2_fwhost_info *hi = lu->hi;
+ 	struct sbp2_command_info *cmd;
++	struct device *dmadev = lu->hi->host->device.parent;
+ 	int i, orbs = sbp2_serialize_io ? 2 : SBP2_MAX_CMDS;
  
- 	sdev->use_10_for_rw = 1;
+ 	for (i = 0; i < orbs; i++) {
+ 		cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+ 		if (!cmd)
+-			return -ENOMEM;
+-		cmd->command_orb_dma = dma_map_single(hi->host->device.parent,
+-						&cmd->command_orb,
+-						sizeof(struct sbp2_command_orb),
+-						DMA_TO_DEVICE);
+-		cmd->sge_dma = dma_map_single(hi->host->device.parent,
+-					&cmd->scatter_gather_element,
+-					sizeof(cmd->scatter_gather_element),
+-					DMA_TO_DEVICE);
++			goto failed_alloc;
++
++		cmd->command_orb_dma =
++		    dma_map_single(dmadev, &cmd->command_orb,
++				   sizeof(struct sbp2_command_orb),
++				   DMA_TO_DEVICE);
++		if (dma_mapping_error(dmadev, cmd->command_orb_dma))
++			goto failed_orb;
++
++		cmd->sge_dma =
++		    dma_map_single(dmadev, &cmd->scatter_gather_element,
++				   sizeof(cmd->scatter_gather_element),
++				   DMA_TO_DEVICE);
++		if (dma_mapping_error(dmadev, cmd->sge_dma))
++			goto failed_sge;
++
+ 		INIT_LIST_HEAD(&cmd->list);
+ 		list_add_tail(&cmd->list, &lu->cmd_orb_completed);
+ 	}
+ 	return 0;
++
++failed_sge:
++	dma_unmap_single(dmadev, cmd->command_orb_dma,
++			 sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
++failed_orb:
++	kfree(cmd);
++failed_alloc:
++	return -ENOMEM;
+ }
  
-+	if (sbp2_exclusive_login)
-+		sdev->manage_start_stop = 1;
- 	if (sdev->type == TYPE_ROM)
- 		sdev->use_10_for_ms = 1;
- 	if (sdev->type == TYPE_DISK &&
-@@ -2002,6 +2018,8 @@ static int sbp2scsi_slave_configure(struct scsi_device *sdev)
- 		sdev->skip_ms_page_8 = 1;
- 	if (lu->workarounds & SBP2_WORKAROUND_FIX_CAPACITY)
- 		sdev->fix_capacity = 1;
-+	if (lu->workarounds & SBP2_WORKAROUND_POWER_CONDITION)
-+		sdev->start_stop_pwr_cond = 1;
+ static void sbp2util_remove_command_orb_pool(struct sbp2_lu *lu,
+@@ -641,24 +656,11 @@ static struct sbp2_command_info *sbp2util_allocate_command_orb(
+ static void sbp2util_mark_command_completed(struct sbp2_lu *lu,
+ 					    struct sbp2_command_info *cmd)
+ {
+-	struct hpsb_host *host = lu->ud->ne->host;
+-
+-	if (cmd->cmd_dma) {
+-		if (cmd->dma_type == CMD_DMA_SINGLE)
+-			dma_unmap_single(host->device.parent, cmd->cmd_dma,
+-					 cmd->dma_size, cmd->dma_dir);
+-		else if (cmd->dma_type == CMD_DMA_PAGE)
+-			dma_unmap_page(host->device.parent, cmd->cmd_dma,
+-				       cmd->dma_size, cmd->dma_dir);
+-		/* XXX: Check for CMD_DMA_NONE bug */
+-		cmd->dma_type = CMD_DMA_NONE;
+-		cmd->cmd_dma = 0;
+-	}
+-	if (cmd->sge_buffer) {
+-		dma_unmap_sg(host->device.parent, cmd->sge_buffer,
+-			     cmd->dma_size, cmd->dma_dir);
+-		cmd->sge_buffer = NULL;
+-	}
++	if (scsi_sg_count(cmd->Current_SCpnt))
++		dma_unmap_sg(lu->ud->ne->host->device.parent,
++			     scsi_sglist(cmd->Current_SCpnt),
++			     scsi_sg_count(cmd->Current_SCpnt),
++			     cmd->Current_SCpnt->sc_data_direction);
+ 	list_move_tail(&cmd->list, &lu->cmd_orb_completed);
+ }
+ 
+@@ -823,6 +825,10 @@ static struct sbp2_lu *sbp2_alloc_device(struct unit_directory *ud)
+ #endif
+ 	}
+ 
++	if (dma_get_max_seg_size(hi->host->device.parent) > SBP2_MAX_SEG_SIZE)
++		BUG_ON(dma_set_max_seg_size(hi->host->device.parent,
++					    SBP2_MAX_SEG_SIZE));
++
+ 	/* Prevent unloading of the 1394 host */
+ 	if (!try_module_get(hi->host->driver->owner)) {
+ 		SBP2_ERR("failed to get a reference on 1394 host driver");
+@@ -1494,84 +1500,65 @@ static int sbp2_agent_reset(struct sbp2_lu *lu, int wait)
+ 	return 0;
+ }
+ 
+-static void sbp2_prep_command_orb_sg(struct sbp2_command_orb *orb,
+-				     struct sbp2_fwhost_info *hi,
+-				     struct sbp2_command_info *cmd,
+-				     unsigned int scsi_use_sg,
+-				     struct scatterlist *sg,
+-				     u32 orb_direction,
+-				     enum dma_data_direction dma_dir)
++static int sbp2_prep_command_orb_sg(struct sbp2_command_orb *orb,
++				    struct sbp2_fwhost_info *hi,
++				    struct sbp2_command_info *cmd,
++				    unsigned int sg_count,
++				    struct scatterlist *sg,
++				    u32 orb_direction,
++				    enum dma_data_direction dma_dir)
+ {
+-	cmd->dma_dir = dma_dir;
++	struct device *dmadev = hi->host->device.parent;
++	struct sbp2_unrestricted_page_table *pt;
++	int i, n;
++
++	n = dma_map_sg(dmadev, sg, sg_count, dma_dir);
++	if (n == 0)
++		return -ENOMEM;
++
+ 	orb->data_descriptor_hi = ORB_SET_NODE_ID(hi->host->node_id);
+ 	orb->misc |= ORB_SET_DIRECTION(orb_direction);
+ 
+ 	/* special case if only one element (and less than 64KB in size) */
+-	if (scsi_use_sg == 1 && sg->length <= SBP2_MAX_SG_ELEMENT_LENGTH) {
+-
+-		cmd->dma_size = sg->length;
+-		cmd->dma_type = CMD_DMA_PAGE;
+-		cmd->cmd_dma = dma_map_page(hi->host->device.parent,
+-					    sg_page(sg), sg->offset,
+-					    cmd->dma_size, cmd->dma_dir);
+-
+-		orb->data_descriptor_lo = cmd->cmd_dma;
+-		orb->misc |= ORB_SET_DATA_SIZE(cmd->dma_size);
+-
++	if (n == 1) {
++		orb->misc |= ORB_SET_DATA_SIZE(sg_dma_len(sg));
++		orb->data_descriptor_lo = sg_dma_address(sg);
+ 	} else {
+-		struct sbp2_unrestricted_page_table *sg_element =
+-						&cmd->scatter_gather_element[0];
+-		u32 sg_count, sg_len;
+-		dma_addr_t sg_addr;
+-		int i, count = dma_map_sg(hi->host->device.parent, sg,
+-					  scsi_use_sg, dma_dir);
+-
+-		cmd->dma_size = scsi_use_sg;
+-		cmd->sge_buffer = sg;
+-
+-		/* use page tables (s/g) */
+-		orb->misc |= ORB_SET_PAGE_TABLE_PRESENT(0x1);
+-		orb->data_descriptor_lo = cmd->sge_dma;
++		pt = &cmd->scatter_gather_element[0];
+ 
+-		/* loop through and fill out our SBP-2 page tables
+-		 * (and split up anything too large) */
+-		for (i = 0, sg_count = 0; i < count; i++, sg = sg_next(sg)) {
+-			sg_len = sg_dma_len(sg);
+-			sg_addr = sg_dma_address(sg);
+-			while (sg_len) {
+-				sg_element[sg_count].segment_base_lo = sg_addr;
+-				if (sg_len > SBP2_MAX_SG_ELEMENT_LENGTH) {
+-					sg_element[sg_count].length_segment_base_hi =
+-						PAGE_TABLE_SET_SEGMENT_LENGTH(SBP2_MAX_SG_ELEMENT_LENGTH);
+-					sg_addr += SBP2_MAX_SG_ELEMENT_LENGTH;
+-					sg_len -= SBP2_MAX_SG_ELEMENT_LENGTH;
+-				} else {
+-					sg_element[sg_count].length_segment_base_hi =
+-						PAGE_TABLE_SET_SEGMENT_LENGTH(sg_len);
+-					sg_len = 0;
+-				}
+-				sg_count++;
+-			}
++		dma_sync_single_for_cpu(dmadev, cmd->sge_dma,
++					sizeof(cmd->scatter_gather_element),
++					DMA_TO_DEVICE);
++
++		for_each_sg(sg, sg, n, i) {
++			pt[i].high = cpu_to_be32(sg_dma_len(sg) << 16);
++			pt[i].low = cpu_to_be32(sg_dma_address(sg));
+ 		}
+ 
+-		orb->misc |= ORB_SET_DATA_SIZE(sg_count);
++		orb->misc |= ORB_SET_PAGE_TABLE_PRESENT(0x1) |
++			     ORB_SET_DATA_SIZE(n);
++		orb->data_descriptor_lo = cmd->sge_dma;
+ 
+-		sbp2util_cpu_to_be32_buffer(sg_element,
+-				(sizeof(struct sbp2_unrestricted_page_table)) *
+-				sg_count);
++		dma_sync_single_for_device(dmadev, cmd->sge_dma,
++					   sizeof(cmd->scatter_gather_element),
++					   DMA_TO_DEVICE);
+ 	}
++	return 0;
+ }
+ 
+-static void sbp2_create_command_orb(struct sbp2_lu *lu,
+-				    struct sbp2_command_info *cmd,
+-				    struct scsi_cmnd *SCpnt)
++static int sbp2_create_command_orb(struct sbp2_lu *lu,
++				   struct sbp2_command_info *cmd,
++				   struct scsi_cmnd *SCpnt)
+ {
+-	struct sbp2_fwhost_info *hi = lu->hi;
++	struct device *dmadev = lu->hi->host->device.parent;
+ 	struct sbp2_command_orb *orb = &cmd->command_orb;
+-	u32 orb_direction;
+ 	unsigned int scsi_request_bufflen = scsi_bufflen(SCpnt);
+ 	enum dma_data_direction dma_dir = SCpnt->sc_data_direction;
++	u32 orb_direction;
++	int ret;
+ 
++	dma_sync_single_for_cpu(dmadev, cmd->command_orb_dma,
++				sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
+ 	/*
+ 	 * Set-up our command ORB.
+ 	 *
+@@ -1602,15 +1589,21 @@ static void sbp2_create_command_orb(struct sbp2_lu *lu,
+ 		orb->data_descriptor_hi = 0x0;
+ 		orb->data_descriptor_lo = 0x0;
+ 		orb->misc |= ORB_SET_DIRECTION(1);
+-	} else
+-		sbp2_prep_command_orb_sg(orb, hi, cmd, scsi_sg_count(SCpnt),
+-					 scsi_sglist(SCpnt),
+-					 orb_direction, dma_dir);
+-
++		ret = 0;
++	} else {
++		ret = sbp2_prep_command_orb_sg(orb, lu->hi, cmd,
++					       scsi_sg_count(SCpnt),
++					       scsi_sglist(SCpnt),
++					       orb_direction, dma_dir);
++	}
+ 	sbp2util_cpu_to_be32_buffer(orb, sizeof(*orb));
+ 
+ 	memset(orb->cdb, 0, sizeof(orb->cdb));
+ 	memcpy(orb->cdb, SCpnt->cmnd, SCpnt->cmd_len);
++
++	dma_sync_single_for_device(dmadev, cmd->command_orb_dma,
++			sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
++	return ret;
+ }
+ 
+ static void sbp2_link_orb_command(struct sbp2_lu *lu,
+@@ -1624,14 +1617,6 @@ static void sbp2_link_orb_command(struct sbp2_lu *lu,
+ 	size_t length;
+ 	unsigned long flags;
+ 
+-	dma_sync_single_for_device(hi->host->device.parent,
+-				   cmd->command_orb_dma,
+-				   sizeof(struct sbp2_command_orb),
+-				   DMA_TO_DEVICE);
+-	dma_sync_single_for_device(hi->host->device.parent, cmd->sge_dma,
+-				   sizeof(cmd->scatter_gather_element),
+-				   DMA_TO_DEVICE);
+-
+ 	/* check to see if there are any previous orbs to use */
+ 	spin_lock_irqsave(&lu->cmd_orb_lock, flags);
+ 	last_orb = lu->last_orb;
+@@ -1699,9 +1684,10 @@ static int sbp2_send_command(struct sbp2_lu *lu, struct scsi_cmnd *SCpnt,
+ 	if (!cmd)
+ 		return -EIO;
+ 
+-	sbp2_create_command_orb(lu, cmd, SCpnt);
+-	sbp2_link_orb_command(lu, cmd);
++	if (sbp2_create_command_orb(lu, cmd, SCpnt))
++		return -ENOMEM;
+ 
++	sbp2_link_orb_command(lu, cmd);
+ 	return 0;
+ }
+ 
+@@ -1789,13 +1775,6 @@ static int sbp2_handle_status_write(struct hpsb_host *host, int nodeid,
+ 	else
+ 		cmd = sbp2util_find_command_for_orb(lu, sb->ORB_offset_lo);
+ 	if (cmd) {
+-		dma_sync_single_for_cpu(hi->host->device.parent,
+-					cmd->command_orb_dma,
+-					sizeof(struct sbp2_command_orb),
+-					DMA_TO_DEVICE);
+-		dma_sync_single_for_cpu(hi->host->device.parent, cmd->sge_dma,
+-					sizeof(cmd->scatter_gather_element),
+-					DMA_TO_DEVICE);
+ 		/* Grab SCSI command pointers and check status. */
+ 		/*
+ 		 * FIXME: If the src field in the status is 1, the ORB DMA must
+@@ -1912,7 +1891,6 @@ done:
+ 
+ static void sbp2scsi_complete_all_commands(struct sbp2_lu *lu, u32 status)
+ {
+-	struct sbp2_fwhost_info *hi = lu->hi;
+ 	struct list_head *lh;
+ 	struct sbp2_command_info *cmd;
+ 	unsigned long flags;
+@@ -1921,13 +1899,6 @@ static void sbp2scsi_complete_all_commands(struct sbp2_lu *lu, u32 status)
+ 	while (!list_empty(&lu->cmd_orb_inuse)) {
+ 		lh = lu->cmd_orb_inuse.next;
+ 		cmd = list_entry(lh, struct sbp2_command_info, list);
+-		dma_sync_single_for_cpu(hi->host->device.parent,
+-				        cmd->command_orb_dma,
+-					sizeof(struct sbp2_command_orb),
+-					DMA_TO_DEVICE);
+-		dma_sync_single_for_cpu(hi->host->device.parent, cmd->sge_dma,
+-					sizeof(cmd->scatter_gather_element),
+-					DMA_TO_DEVICE);
+ 		sbp2util_mark_command_completed(lu, cmd);
+ 		if (cmd->Current_SCpnt) {
+ 			cmd->Current_SCpnt->result = status << 16;
+@@ -2033,6 +2004,8 @@ static int sbp2scsi_slave_configure(struct scsi_device *sdev)
+ 		sdev->start_stop_pwr_cond = 1;
  	if (lu->workarounds & SBP2_WORKAROUND_128K_MAX_TRANS)
  		blk_queue_max_sectors(sdev->request_queue, 128 * 1024 / 512);
++
++	blk_queue_max_segment_size(sdev->request_queue, SBP2_MAX_SEG_SIZE);
  	return 0;
+ }
+ 
+@@ -2049,7 +2022,6 @@ static void sbp2scsi_slave_destroy(struct scsi_device *sdev)
+ static int sbp2scsi_abort(struct scsi_cmnd *SCpnt)
+ {
+ 	struct sbp2_lu *lu = (struct sbp2_lu *)SCpnt->device->host->hostdata[0];
+-	struct sbp2_fwhost_info *hi = lu->hi;
+ 	struct sbp2_command_info *cmd;
+ 	unsigned long flags;
+ 
+@@ -2063,14 +2035,6 @@ static int sbp2scsi_abort(struct scsi_cmnd *SCpnt)
+ 		spin_lock_irqsave(&lu->cmd_orb_lock, flags);
+ 		cmd = sbp2util_find_command_for_SCpnt(lu, SCpnt);
+ 		if (cmd) {
+-			dma_sync_single_for_cpu(hi->host->device.parent,
+-					cmd->command_orb_dma,
+-					sizeof(struct sbp2_command_orb),
+-					DMA_TO_DEVICE);
+-			dma_sync_single_for_cpu(hi->host->device.parent,
+-					cmd->sge_dma,
+-					sizeof(cmd->scatter_gather_element),
+-					DMA_TO_DEVICE);
+ 			sbp2util_mark_command_completed(lu, cmd);
+ 			if (cmd->Current_SCpnt) {
+ 				cmd->Current_SCpnt->result = DID_ABORT << 16;
 diff --git a/drivers/ieee1394/sbp2.h b/drivers/ieee1394/sbp2.h
-index 80d8e09..875428b 100644
+index 875428b..c5036f1 100644
 --- a/drivers/ieee1394/sbp2.h
 +++ b/drivers/ieee1394/sbp2.h
-@@ -345,6 +345,7 @@ enum sbp2lu_state_types {
- #define SBP2_WORKAROUND_FIX_CAPACITY	0x8
- #define SBP2_WORKAROUND_DELAY_INQUIRY	0x10
- #define SBP2_INQUIRY_DELAY		12
-+#define SBP2_WORKAROUND_POWER_CONDITION	0x20
- #define SBP2_WORKAROUND_OVERRIDE	0x100
+@@ -139,13 +139,10 @@ struct sbp2_logout_orb {
+ 	u32 status_fifo_lo;
+ } __attribute__((packed));
  
- #endif /* SBP2_H */
+-#define PAGE_TABLE_SET_SEGMENT_BASE_HI(v)	((v) & 0xffff)
+-#define PAGE_TABLE_SET_SEGMENT_LENGTH(v)	(((v) & 0xffff) << 16)
+-
+ struct sbp2_unrestricted_page_table {
+-	u32 length_segment_base_hi;
+-	u32 segment_base_lo;
+-} __attribute__((packed));
++	__be32 high;
++	__be32 low;
++};
+ 
+ #define RESP_STATUS_REQUEST_COMPLETE		0x0
+ #define RESP_STATUS_TRANSPORT_FAILURE		0x1
+@@ -216,15 +213,18 @@ struct sbp2_status_block {
+ #define SBP2_UNIT_SPEC_ID_ENTRY			0x0000609e
+ #define SBP2_SW_VERSION_ENTRY			0x00010483
+ 
+-
+ /*
+- * SCSI specific definitions
++ * The default maximum s/g segment size of a FireWire controller is
++ * usually 0x10000, but SBP-2 only allows 0xffff. Since buffers have to
++ * be quadlet-aligned, we set the length limit to 0xffff & ~3.
+  */
++#define SBP2_MAX_SEG_SIZE			0xfffc
+ 
+-#define SBP2_MAX_SG_ELEMENT_LENGTH		0xf000
+-/* There is no real limitation of the queue depth (i.e. length of the linked
++/*
++ * There is no real limitation of the queue depth (i.e. length of the linked
+  * list of command ORBs) at the target. The chosen depth is merely an
+- * implementation detail of the sbp2 driver. */
++ * implementation detail of the sbp2 driver.
++ */
+ #define SBP2_MAX_CMDS				8
+ 
+ #define SBP2_SCSI_STATUS_GOOD			0x0
+@@ -240,12 +240,6 @@ struct sbp2_status_block {
+  * Representations of commands and devices
+  */
+ 
+-enum sbp2_dma_types {
+-	CMD_DMA_NONE,
+-	CMD_DMA_PAGE,
+-	CMD_DMA_SINGLE
+-};
+-
+ /* Per SCSI command */
+ struct sbp2_command_info {
+ 	struct list_head list;
+@@ -258,11 +252,6 @@ struct sbp2_command_info {
+ 	struct sbp2_unrestricted_page_table
+ 		scatter_gather_element[SG_ALL] __attribute__((aligned(8)));
+ 	dma_addr_t sge_dma;
+-	void *sge_buffer;
+-	dma_addr_t cmd_dma;
+-	enum sbp2_dma_types dma_type;
+-	unsigned long dma_size;
+-	enum dma_data_direction dma_dir;
+ };
+ 
+ /* Per FireWire host */
 diff --git a/drivers/ieee1394/video1394.c b/drivers/ieee1394/video1394.c
-index e24772d..069b9f6 100644
+index 25db6e6..fa9e7d8 100644
 --- a/drivers/ieee1394/video1394.c
 +++ b/drivers/ieee1394/video1394.c
-@@ -1503,6 +1503,8 @@ static int __init video1394_init_module (void)
- {
- 	int ret;
+@@ -893,7 +893,7 @@ static long video1394_ioctl(struct file *file,
+ 		if (unlikely(d == NULL))
+ 			return -EFAULT;
  
-+	hpsb_init_highlevel(&video1394_highlevel);
-+
- 	cdev_init(&video1394_cdev, &video1394_fops);
- 	video1394_cdev.owner = THIS_MODULE;
- 	ret = cdev_add(&video1394_cdev, IEEE1394_VIDEO1394_DEV, 16);
-diff --git a/drivers/scsi/sd.c b/drivers/scsi/sd.c
-index 01cefbb..d53312c 100644
---- a/drivers/scsi/sd.c
-+++ b/drivers/scsi/sd.c
-@@ -1124,6 +1124,8 @@ sd_spinup_disk(struct scsi_disk *sdkp)
- 				cmd[1] = 1;	/* Return immediately */
- 				memset((void *) &cmd[2], 0, 8);
- 				cmd[4] = 1;	/* Start spin cycle */
-+				if (sdkp->device->start_stop_pwr_cond)
-+					cmd[4] |= 1 << 4;
- 				scsi_execute_req(sdkp->device, cmd, DMA_NONE,
- 						 NULL, 0, &sshdr,
- 						 SD_TIMEOUT, SD_MAX_RETRIES);
-@@ -1790,6 +1792,9 @@ static int sd_start_stop_device(struct scsi_disk *sdkp, int start)
- 	if (start)
- 		cmd[4] |= 1;	/* START */
+-		if (unlikely((v.buffer<0) || (v.buffer>=d->num_desc - 1))) {
++		if (unlikely(v.buffer >= d->num_desc - 1)) {
+ 			PRINT(KERN_ERR, ohci->host->id,
+ 			      "Buffer %d out of range",v.buffer);
+ 			return -EINVAL;
+@@ -959,7 +959,7 @@ static long video1394_ioctl(struct file *file,
+ 		if (unlikely(d == NULL))
+ 			return -EFAULT;
  
-+	if (sdp->start_stop_pwr_cond)
-+		cmd[4] |= start ? 1 << 4 : 3 << 4;	/* Active or Standby */
-+
- 	if (!scsi_device_online(sdp))
- 		return -ENODEV;
+-		if (unlikely((v.buffer<0) || (v.buffer>d->num_desc - 1))) {
++		if (unlikely(v.buffer > d->num_desc - 1)) {
+ 			PRINT(KERN_ERR, ohci->host->id,
+ 			      "Buffer %d out of range",v.buffer);
+ 			return -EINVAL;
+@@ -1030,7 +1030,7 @@ static long video1394_ioctl(struct file *file,
+ 		d = find_ctx(&ctx->context_list, OHCI_ISO_TRANSMIT, v.channel);
+ 		if (d == NULL) return -EFAULT;
  
-diff --git a/include/linux/pci_ids.h b/include/linux/pci_ids.h
-index 6595382..720d675 100644
---- a/include/linux/pci_ids.h
-+++ b/include/linux/pci_ids.h
-@@ -748,6 +748,7 @@
- #define PCI_VENDOR_ID_TI		0x104c
- #define PCI_DEVICE_ID_TI_TVP4020	0x3d07
- #define PCI_DEVICE_ID_TI_4450		0x8011
-+#define PCI_DEVICE_ID_TI_TSB43AB22	0x8023
- #define PCI_DEVICE_ID_TI_XX21_XX11	0x8031
- #define PCI_DEVICE_ID_TI_XX21_XX11_FM	0x8033
- #define PCI_DEVICE_ID_TI_XX21_XX11_SD	0x8034
-diff --git a/include/scsi/scsi_device.h b/include/scsi/scsi_device.h
-index f6a9fe0..00b7876 100644
---- a/include/scsi/scsi_device.h
-+++ b/include/scsi/scsi_device.h
-@@ -134,6 +134,7 @@ struct scsi_device {
- 	unsigned no_start_on_add:1;	/* do not issue start on add */
- 	unsigned allow_restart:1; /* issue START_UNIT in error handler */
- 	unsigned manage_start_stop:1;	/* Let HLD (sd) manage start/stop */
-+	unsigned start_stop_pwr_cond:1;	/* Set power cond. in START_STOP_UNIT */
- 	unsigned no_uld_attach:1; /* disable connecting to upper level drivers */
- 	unsigned select_no_atn:1;
- 	unsigned fix_capacity:1;	/* READ_CAPACITY is too high by 1 */
+-		if ((v.buffer<0) || (v.buffer>=d->num_desc - 1)) {
++		if (v.buffer >= d->num_desc - 1) {
+ 			PRINT(KERN_ERR, ohci->host->id,
+ 			      "Buffer %d out of range",v.buffer);
+ 			return -EINVAL;
+@@ -1137,7 +1137,7 @@ static long video1394_ioctl(struct file *file,
+ 		d = find_ctx(&ctx->context_list, OHCI_ISO_TRANSMIT, v.channel);
+ 		if (d == NULL) return -EFAULT;
+ 
+-		if ((v.buffer<0) || (v.buffer>=d->num_desc-1)) {
++		if (v.buffer >= d->num_desc - 1) {
+ 			PRINT(KERN_ERR, ohci->host->id,
+ 			      "Buffer %d out of range",v.buffer);
+ 			return -EINVAL;
+diff --git a/include/linux/firewire-cdev.h b/include/linux/firewire-cdev.h
+index 0f0e271..4d078e9 100644
+--- a/include/linux/firewire-cdev.h
++++ b/include/linux/firewire-cdev.h
+@@ -154,8 +154,13 @@ struct fw_cdev_event_iso_interrupt {
+  * @request:       Valid if @common.type == %FW_CDEV_EVENT_REQUEST
+  * @iso_interrupt: Valid if @common.type == %FW_CDEV_EVENT_ISO_INTERRUPT
+  *
+- * Convenience union for userspace use.  Events could be read(2) into a char
+- * buffer and then cast to this union for further processing.
++ * Convenience union for userspace use.  Events could be read(2) into an
++ * appropriately aligned char buffer and then cast to this union for further
++ * processing.  Note that for a request, response or iso_interrupt event,
++ * the data[] or header[] may make the size of the full event larger than
++ * sizeof(union fw_cdev_event).  Also note that if you attempt to read(2)
++ * an event into a buffer that is not large enough for it, the data that does
++ * not fit will be discarded so that the next read(2) will return a new event.
+  */
+ union fw_cdev_event {
+ 	struct fw_cdev_event_common common;

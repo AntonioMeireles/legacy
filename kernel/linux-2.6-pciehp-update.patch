@@ -1,0 +1,124 @@
+diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_core.c linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_core.c
+--- vanilla-2.6.27/drivers/pci/hotplug/pciehp_core.c	2008-10-09 23:13:53.000000000 +0100
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_core.c	2008-11-04 13:43:48.000000000 +0000
+@@ -41,6 +41,7 @@
+ int pciehp_poll_mode;
+ int pciehp_poll_time;
+ int pciehp_force;
++int pciehp_passive;
+ struct workqueue_struct *pciehp_wq;
+ 
+ #define DRIVER_VERSION	"0.4"
+@@ -50,15 +51,18 @@
+ MODULE_AUTHOR(DRIVER_AUTHOR);
+ MODULE_DESCRIPTION(DRIVER_DESC);
+ MODULE_LICENSE("GPL");
++MODULE_ALIAS("acpi*:PNP0A08:*");
+ 
+ module_param(pciehp_debug, bool, 0644);
+ module_param(pciehp_poll_mode, bool, 0644);
+ module_param(pciehp_poll_time, int, 0644);
+ module_param(pciehp_force, bool, 0644);
++module_param(pciehp_passive, bool, 0644);
+ MODULE_PARM_DESC(pciehp_debug, "Debugging mode enabled or not");
+ MODULE_PARM_DESC(pciehp_poll_mode, "Using polling mechanism for hot-plug events or not");
+ MODULE_PARM_DESC(pciehp_poll_time, "Polling mechanism frequency, in seconds");
+ MODULE_PARM_DESC(pciehp_force, "Force pciehp, even if _OSC and OSHP are missing");
++MODULE_PARM_DESC(pciehp_passive, "Listen for pciehp events, even if _OSC and OSHP are missing");
+ 
+ #define PCIE_MODULE_NAME "pciehp"
+ 
+@@ -85,6 +89,13 @@
+   	.get_cur_bus_speed =	get_cur_bus_speed,
+ };
+ 
++static struct hotplug_slot_ops pciehp_passive_hotplug_slot_ops = {
++	.owner =		THIS_MODULE,
++	.get_adapter_status =	get_adapter_status,
++	.get_max_bus_speed =	get_max_bus_speed,
++	.get_cur_bus_speed =	get_cur_bus_speed,
++};
++
+ /*
+  * Check the status of the Electro Mechanical Interlock (EMI)
+  */
+@@ -208,7 +219,11 @@
+ 		hotplug_slot->name = slot->name;
+ 		hotplug_slot->private = slot;
+ 		hotplug_slot->release = &release_slot;
+-		hotplug_slot->ops = &pciehp_hotplug_slot_ops;
++		if (pciehp_passive &&
++		    pciehp_get_hp_hw_control_from_firmware(ctrl->pci_dev))
++			hotplug_slot->ops = &pciehp_passive_hotplug_slot_ops;
++		else
++			hotplug_slot->ops = &pciehp_hotplug_slot_ops;
+ 		get_power_status(hotplug_slot, &info->power_status);
+ 		get_attention_status(hotplug_slot, &info->attention_status);
+ 		get_latch_status(hotplug_slot, &info->latch_status);
+@@ -401,10 +416,7 @@
+ 	u8 value;
+ 	struct pci_dev *pdev = dev->port;
+ 
+-	if (pciehp_force)
+-		dbg("Bypassing BIOS check for pciehp use on %s\n",
+-		    pci_name(pdev));
+-	else if (pciehp_get_hp_hw_control_from_firmware(pdev))
++	if (!pciehp_passive && pciehp_get_hp_hw_control_from_firmware(pdev))
+ 		goto err_out_none;
+ 
+ 	ctrl = pcie_init(dev);
+@@ -429,11 +441,9 @@
+ 	t_slot = pciehp_find_slot(ctrl, ctrl->slot_device_offset);
+ 
+ 	t_slot->hpc_ops->get_adapter_status(t_slot, &value); /* Check if slot is occupied */
+-	if (value && pciehp_force) {
+-		rc = pciehp_enable_slot(t_slot);
+-		if (rc)	/* -ENODEV: shouldn't happen, but deal with it */
+-			value = 0;
+-	}
++	if (value && (pciehp_force || pciehp_passive))
++		pciehp_enable_slot(t_slot);
++
+ 	if ((POWER_CTRL(ctrl)) && !value) {
+ 		rc = t_slot->hpc_ops->power_off_slot(t_slot); /* Power off slot if not occupied*/
+ 		if (rc)
+@@ -467,8 +477,11 @@
+ 
+ static int pciehp_resume (struct pcie_device *dev)
+ {
++	struct pci_dev *pdev = dev->port;
+ 	printk("%s ENTRY\n", __func__);
+-	if (pciehp_force) {
++
++	if (pciehp_force || (pciehp_passive &&
++			     pciehp_get_hp_hw_control_from_firmware(pdev))) {
+ 		struct controller *ctrl = get_service_data(dev);
+ 		struct slot *t_slot;
+ 		u8 status;
+diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_ctrl.c linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_ctrl.c
+--- vanilla-2.6.27/drivers/pci/hotplug/pciehp_ctrl.c	2008-10-09 23:13:53.000000000 +0100
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_ctrl.c	2008-11-04 13:38:40.000000000 +0000
+@@ -179,7 +179,8 @@
+ 	 * before taking any action that relies on power having been
+ 	 * removed from the slot/adapter.
+ 	 */
+-	msleep(1000);
++	if (PWR_LED(ctrl) || ATTN_LED(ctrl))
++		msleep(1000);
+ 
+ 	if (PWR_LED(ctrl))
+ 		pslot->hpc_ops->green_led_off(pslot);
+diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp.h linux-2.6.27.noarch/drivers/pci/hotplug/pciehp.h
+--- vanilla-2.6.27/drivers/pci/hotplug/pciehp.h	2008-10-09 23:13:53.000000000 +0100
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp.h	2008-11-04 13:38:40.000000000 +0000
+@@ -206,6 +206,10 @@
+ {
+ 	u32 flags = (OSC_PCI_EXPRESS_NATIVE_HP_CONTROL |
+ 		     OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL);
++	if (pciehp_force) {
++		dev_info(&dev->dev, "Bypassing BIOS check for pciehp\n");
++		return 0;
++	}
+ 	return acpi_get_hp_hw_control_from_firmware(dev, flags);
+ }
+ 

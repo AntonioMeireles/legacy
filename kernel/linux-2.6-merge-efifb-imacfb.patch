@@ -1,15 +1,15 @@
 
  Kconfig  |   15 --
  Makefile |    1 
- efifb.c  |  178 ++++++++++++++++++++++++++++-
+ efifb.c  |  191 ++++++++++++++++++++++++++++++--
  imacfb.c |  376 ---------------------------------------------------------------
- 4 files changed, 171 insertions(+), 399 deletions(-)
+ 4 files changed, 184 insertions(+), 399 deletions(-)
 
 diff --git a/drivers/video/Kconfig b/drivers/video/Kconfig
-index 1bd5fb3..474c375 100644
+index 70d135e..be947ff 100644
 --- a/drivers/video/Kconfig
 +++ b/drivers/video/Kconfig
-@@ -689,23 +689,14 @@ config FB_VESA
+@@ -687,23 +687,14 @@ config FB_VESA
  
  config FB_EFI
  	bool "EFI-based Framebuffer Support"
@@ -37,10 +37,10 @@ index 1bd5fb3..474c375 100644
  config FB_N411
         tristate "N411 Apollo/Hecuba devkit support"
 diff --git a/drivers/video/Makefile b/drivers/video/Makefile
-index 11c0e5e..c789b01 100644
+index a6b5529..2e0cd0c 100644
 --- a/drivers/video/Makefile
 +++ b/drivers/video/Makefile
-@@ -118,7 +118,6 @@ obj-$(CONFIG_FB_OMAP)             += omap/
+@@ -125,7 +125,6 @@ obj-$(CONFIG_FB_CARMINE)          += carminefb.o
  # Platform or fallback drivers go here
  obj-$(CONFIG_FB_UVESA)            += uvesafb.o
  obj-$(CONFIG_FB_VESA)             += vesafb.o
@@ -49,7 +49,7 @@ index 11c0e5e..c789b01 100644
  obj-$(CONFIG_FB_VGA16)            += vga16fb.o
  obj-$(CONFIG_FB_OF)               += offb.o
 diff --git a/drivers/video/efifb.c b/drivers/video/efifb.c
-index bd779ae..d4b47d4 100644
+index bd779ae..daf9b81 100644
 --- a/drivers/video/efifb.c
 +++ b/drivers/video/efifb.c
 @@ -12,6 +12,7 @@
@@ -60,7 +60,7 @@ index bd779ae..d4b47d4 100644
  
  #include <video/vga.h>
  
-@@ -33,6 +34,92 @@ static struct fb_fix_screeninfo efifb_fix __initdata = {
+@@ -33,6 +34,105 @@ static struct fb_fix_screeninfo efifb_fix __initdata = {
  	.visual			= FB_VISUAL_TRUECOLOR,
  };
  
@@ -71,10 +71,14 @@ index bd779ae..d4b47d4 100644
 +	M_I24,		/* 24-Inch iMac */
 +	M_MINI,		/* Mac Mini */
 +	M_MB,		/* MacBook */
++	M_MB_2,		/* MacBook, 2nd rev. */
++	M_MB_3,		/* MacBook, 3rd rev. */
++	M_MB_SR,	/* MacBook, 2nd gen, (Santa Rosa) */
 +	M_MBA,		/* MacBook Air */
 +	M_MBP,		/* MacBook Pro */
 +	M_MBP_2,	/* MacBook Pro 2nd gen */
 +	M_MBP_SR,	/* MacBook Pro (Santa Rosa) */
++	M_MBP_4,	/* MacBook Pro, 4th gen */
 +	M_UNKNOWN	/* placeholder */
 +};
 +
@@ -95,6 +99,7 @@ index bd779ae..d4b47d4 100644
 +	[M_MBP] = { "mbp", 0x80010000, 1472 * 4, 1440, 900 },
 +	[M_MBP_2] = { "mbp2", 0, 0, 0, 0 }, /* placeholder */
 +	[M_MBP_SR] = { "mbp3", 0x80030000, 2048 * 4, 1440, 900 },
++	[M_MBP_4] = { "mbp4", 0xc0060000, 2048 * 4, 1920, 1200 },
 +	[M_UNKNOWN] = { NULL, 0, 0, 0, 0 }
 +};
 +
@@ -117,12 +122,20 @@ index bd779ae..d4b47d4 100644
 +	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "iMac7,1", M_I20_SR),
 +	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "Macmini1,1", M_MINI),
 +	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook1,1", M_MB),
++	/* At least one of these two will be right; maybe both? */
++	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook2,1", M_MB),
++	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook2,1", M_MB),
++	/* At least one of these two will be right; maybe both? */
++	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook3,1", M_MB),
++	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook3,1", M_MB),
++	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook4,1", M_MB),
 +	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookAir1,1", M_MBA),
 +	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro1,1", M_MBP),
 +	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro2,1", M_MBP_2),
 +	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro2,1", M_MBP_2),
 +	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro3,1", M_MBP_SR),
 +	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro3,1", M_MBP_SR),
++	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro4,1", M_MBP_4),
 +	{},
 +};
 +
@@ -153,7 +166,7 @@ index bd779ae..d4b47d4 100644
  static int efifb_setcolreg(unsigned regno, unsigned red, unsigned green,
  			   unsigned blue, unsigned transp,
  			   struct fb_info *info)
-@@ -67,6 +154,38 @@ static struct fb_ops efifb_ops = {
+@@ -67,6 +167,38 @@ static struct fb_ops efifb_ops = {
  	.fb_imageblit	= cfb_imageblit,
  };
  
@@ -192,7 +205,7 @@ index bd779ae..d4b47d4 100644
  static int __init efifb_probe(struct platform_device *dev)
  {
  	struct fb_info *info;
-@@ -74,6 +193,26 @@ static int __init efifb_probe(struct platform_device *dev)
+@@ -74,6 +206,26 @@ static int __init efifb_probe(struct platform_device *dev)
  	unsigned int size_vmode;
  	unsigned int size_remap;
  	unsigned int size_total;
@@ -219,7 +232,7 @@ index bd779ae..d4b47d4 100644
  
  	efifb_fix.smem_start = screen_info.lfb_base;
  	efifb_defined.bits_per_pixel = screen_info.lfb_depth;
-@@ -98,21 +237,25 @@ static int __init efifb_probe(struct platform_device *dev)
+@@ -98,21 +250,25 @@ static int __init efifb_probe(struct platform_device *dev)
  	 *                 option to simply use size_total as that
  	 *                 wastes plenty of kernel address space. */
  	size_remap  = size_vmode * 2;
@@ -244,11 +257,11 @@ index bd779ae..d4b47d4 100644
  
  	info = framebuffer_alloc(sizeof(u32) * 16, &dev->dev);
  	if (!info) {
-+		printk(KERN_ERR "efifb: cannot allocate framebuffer\n"); 
++		printk(KERN_ERR "efifb: cannot allocate framebuffer\n");
  		err = -ENOMEM;
  		goto err_release_mem;
  	}
-@@ -125,7 +268,7 @@ static int __init efifb_probe(struct platform_device *dev)
+@@ -125,7 +281,7 @@ static int __init efifb_probe(struct platform_device *dev)
  				"0x%x @ 0x%lx\n",
  			efifb_fix.smem_len, efifb_fix.smem_start);
  		err = -EIO;
@@ -257,7 +270,7 @@ index bd779ae..d4b47d4 100644
  	}
  
  	printk(KERN_INFO "efifb: framebuffer at 0x%lx, mapped to 0x%p, "
-@@ -178,25 +321,27 @@ static int __init efifb_probe(struct platform_device *dev)
+@@ -178,25 +334,27 @@ static int __init efifb_probe(struct platform_device *dev)
  	info->fix = efifb_fix;
  	info->flags = FBINFO_FLAG_DEFAULT;
  
@@ -291,7 +304,7 @@ index bd779ae..d4b47d4 100644
  	return err;
  }
  
-@@ -214,9 +359,22 @@ static struct platform_device efifb_device = {
+@@ -214,9 +372,22 @@ static struct platform_device efifb_device = {
  static int __init efifb_init(void)
  {
  	int ret;

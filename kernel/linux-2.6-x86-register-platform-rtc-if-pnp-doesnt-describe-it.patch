@@ -1,0 +1,61 @@
+From: Bjorn Helgaas <bjorn.helgaas@hp.com>
+Date: Tue, 14 Oct 2008 23:01:03 +0000 (-0600)
+Subject: x86: register a platform RTC device if PNP doesn't describe it
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=758a7f7bb86b520aadc484f23da85e547b3bf3d8
+
+x86: register a platform RTC device if PNP doesn't describe it
+
+Most if not all x86 platforms have an RTC device, but sometimes the RTC
+is not exposed as a PNP0b00/PNP0b01/PNP0b02 device in PNPBIOS or ACPI:
+
+    http://bugzilla.kernel.org/show_bug.cgi?id=11580
+    https://bugzilla.redhat.com/show_bug.cgi?id=451188
+
+It's best if we can discover the RTC via PNP because then we know
+which flavor of device it is, where it lives, and which IRQ it uses.
+
+But if we can't, we should register a platform device using the
+compiled-in RTC_PORT/RTC_IRQ resource assumptions.
+
+Signed-off-by: Bjorn Helgaas <bjorn.helgaas@hp.com>
+Acked-by: Rafael J. Wysocki <rjw@sisk.pl>
+Acked-by: David Brownell <dbrownell@users.sourceforge.net>
+Reported-by: Rik Theys <rik.theys@esat.kuleuven.be>
+Reported-by: shr_msn@yahoo.com.tw
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/x86/kernel/rtc.c b/arch/x86/kernel/rtc.c
+index 05191bb..0a23b57 100644
+--- a/arch/x86/kernel/rtc.c
++++ b/arch/x86/kernel/rtc.c
+@@ -223,11 +223,25 @@ static struct platform_device rtc_device = {
+ static __init int add_rtc_cmos(void)
+ {
+ #ifdef CONFIG_PNP
+-	if (!pnp_platform_devices)
+-		platform_device_register(&rtc_device);
+-#else
++	static const char *ids[] __initconst =
++	    { "PNP0b00", "PNP0b01", "PNP0b02", };
++	struct pnp_dev *dev;
++	struct pnp_id *id;
++	int i;
++
++	pnp_for_each_dev(dev) {
++		for (id = dev->id; id; id = id->next) {
++			for (i = 0; i < ARRAY_SIZE(ids); i++) {
++				if (compare_pnp_id(id, ids[i]) != 0)
++					return 0;
++			}
++		}
++	}
++#endif
++
+ 	platform_device_register(&rtc_device);
+-#endif /* CONFIG_PNP */
++	dev_info(&rtc_device.dev,
++		 "registered platform RTC device (no PNP device found)\n");
+ 	return 0;
+ }
+ device_initcall(add_rtc_cmos);

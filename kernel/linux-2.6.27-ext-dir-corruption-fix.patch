@@ -1,54 +1,7 @@
-From 4b40893918203ee1a1f6a114316c2a19c072e9bd Mon Sep 17 00:00:00 2001
-From: Matthias Hopf <mhopf@suse.de>
-Date: Sat, 18 Oct 2008 07:18:05 +1000
-Subject: drm/i915: fix ioremap of a user address for non-root (CVE-2008-3831)
-
-From: Matthias Hopf <mhopf@suse.de>
-
-commit 4b40893918203ee1a1f6a114316c2a19c072e9bd upstream
-
-Olaf Kirch noticed that the i915_set_status_page() function of the i915
-kernel driver calls ioremap with an address offset that is supplied by
-userspace via ioctl. The function zeroes the mapped memory via memset
-and tells the hardware about the address. Turns out that access to that
-ioctl is not restricted to root so users could probably exploit that to
-do nasty things. We haven't tried to write actual exploit code though.
-
-It only affects the Intel G33 series and newer.
-
-Signed-off-by: Dave Airlie <airlied@redhat.com>
-Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
-
----
- drivers/gpu/drm/i915/i915_dma.c |    2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
---- a/drivers/gpu/drm/i915/i915_dma.c
-+++ b/drivers/gpu/drm/i915/i915_dma.c
-@@ -836,7 +836,7 @@ struct drm_ioctl_desc i915_ioctls[] = {
- 	DRM_IOCTL_DEF(DRM_I915_SET_VBLANK_PIPE,  i915_vblank_pipe_set, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY ),
- 	DRM_IOCTL_DEF(DRM_I915_GET_VBLANK_PIPE,  i915_vblank_pipe_get, DRM_AUTH ),
- 	DRM_IOCTL_DEF(DRM_I915_VBLANK_SWAP, i915_vblank_swap, DRM_AUTH),
--	DRM_IOCTL_DEF(DRM_I915_HWS_ADDR, i915_set_status_page, DRM_AUTH),
-+	DRM_IOCTL_DEF(DRM_I915_HWS_ADDR, i915_set_status_page, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
- };
- 
- int i915_max_ioctl = DRM_ARRAY_SIZE(i915_ioctls);
-From sandeen@redhat.com  Thu Oct 23 13:13:44 2008
-From: Eric Sandeen <sandeen@redhat.com>
-Date: Wed, 22 Oct 2008 10:11:52 -0500
-Subject: ext[234]: Avoid printk floods in the face of directory corruption (CVE-2008-3528)
-To: stable@kernel.org
-Cc: ext4 development <linux-ext4@vger.kernel.org>
-Message-ID: <48FF42B8.3030606@redhat.com>
-
-From: Eric Sandeen <sandeen@redhat.com>
-
 This is a trivial backport of the following upstream commits:
 
 - bd39597cbd42a784105a04010100e27267481c67 (ext2)
 - cdbf6dba28e8e6268c8420857696309470009fd9 (ext3)
-- 9d9f177572d9e4eba0f2e18523b44f90dd51fe74 (ext4)
 
 This addresses CVE-2008-3528
 
@@ -69,16 +22,12 @@ Signed-off-by: Eric Sandeen <sandeen@redhat.com>
 Signed-off-by: "Theodore Ts'o" <tytso@mit.edu>
 Cc: linux-ext4@vger.kernel.org
 Cc: Eugene Teo <eugeneteo@kernel.sg>
-Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
-
 ---
- fs/ext2/dir.c |   60 +++++++++++++++++++++++++++++++++-------------------------
- fs/ext3/dir.c |   10 ++++++---
- fs/ext4/dir.c |   11 +++++++---
- 3 files changed, 50 insertions(+), 31 deletions(-)
 
---- a/fs/ext2/dir.c
-+++ b/fs/ext2/dir.c
+Index: linux-2.6.27.noarch/fs/ext2/dir.c
+===================================================================
+--- linux-2.6.27.noarch.orig/fs/ext2/dir.c	2008-10-09 17:13:53.000000000 -0500
++++ linux-2.6.27.noarch/fs/ext2/dir.c	2008-10-22 10:17:18.596064472 -0500
 @@ -103,7 +103,7 @@ static int ext2_commit_chunk(struct page
  	return err;
  }
@@ -228,8 +177,10 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
  
  		kaddr = page_address(page);
  		de = (ext2_dirent *)kaddr;
---- a/fs/ext3/dir.c
-+++ b/fs/ext3/dir.c
+Index: linux-2.6.27.noarch/fs/ext3/dir.c
+===================================================================
+--- linux-2.6.27.noarch.orig/fs/ext3/dir.c	2008-10-09 17:13:53.000000000 -0500
++++ linux-2.6.27.noarch/fs/ext3/dir.c	2008-10-22 10:17:18.614001252 -0500
 @@ -102,6 +102,7 @@ static int ext3_readdir(struct file * fi
  	int err;
  	struct inode *inode = filp->f_path.dentry->d_inode;
@@ -249,33 +200,6 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
 +				ext3_error(sb, __func__, "directory #%lu "
 +					"contains a hole at offset %lld",
 +					inode->i_ino, filp->f_pos);
-+				dir_has_error = 1;
-+			}
- 			/* corrupt size?  Maybe no more blocks to read */
- 			if (filp->f_pos > inode->i_blocks << 9)
- 				break;
---- a/fs/ext4/dir.c
-+++ b/fs/ext4/dir.c
-@@ -102,6 +102,7 @@ static int ext4_readdir(struct file * fi
- 	int err;
- 	struct inode *inode = filp->f_path.dentry->d_inode;
- 	int ret = 0;
-+	int dir_has_error = 0;
- 
- 	sb = inode->i_sb;
- 
-@@ -148,9 +149,13 @@ static int ext4_readdir(struct file * fi
- 		 * of recovering data when there's a bad sector
- 		 */
- 		if (!bh) {
--			ext4_error (sb, "ext4_readdir",
--				"directory #%lu contains a hole at offset %lu",
--				inode->i_ino, (unsigned long)filp->f_pos);
-+			if (!dir_has_error) {
-+				ext4_error(sb, __func__, "directory #%lu "
-+					   "contains a hole at offset %Lu",
-+					   inode->i_ino,
-+					   (unsigned long long) filp->f_pos);
 +				dir_has_error = 1;
 +			}
  			/* corrupt size?  Maybe no more blocks to read */

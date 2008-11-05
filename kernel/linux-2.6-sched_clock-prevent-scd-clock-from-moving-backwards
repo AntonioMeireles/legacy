@@ -1,0 +1,42 @@
+From: Dave Kleikamp <shaggy@linux.vnet.ibm.com>
+Date: Thu, 9 Oct 2008 18:21:30 +0000 (-0500)
+Subject: sched_clock: prevent scd->clock from moving backwards
+X-Git-Tag: v2.6.28-rc1~43^2~10^2
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=5b7dba4
+
+sched_clock: prevent scd->clock from moving backwards
+
+When sched_clock_cpu() couples the clocks between two cpus, it may
+increment scd->clock beyond the GTOD tick window that __update_sched_clock()
+uses to clamp the clock.  A later call to __update_sched_clock() may move
+the clock back to scd->tick_gtod + TICK_NSEC, violating the clock's
+monotonic property.
+
+This patch ensures that scd->clock will not be set backward.
+
+Signed-off-by: Dave Kleikamp <shaggy@linux.vnet.ibm.com>
+Acked-by: Peter Zijlstra <a.p.zijlstra@chello.nl>
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+---
+
+diff --git a/kernel/sched_clock.c b/kernel/sched_clock.c
+index e8ab096..8178724 100644
+--- a/kernel/sched_clock.c
++++ b/kernel/sched_clock.c
+@@ -118,13 +118,13 @@ static u64 __update_sched_clock(struct sched_clock_data *scd, u64 now)
+ 
+ 	/*
+ 	 * scd->clock = clamp(scd->tick_gtod + delta,
+-	 * 		      max(scd->tick_gtod, scd->clock),
+-	 * 		      scd->tick_gtod + TICK_NSEC);
++	 *		      max(scd->tick_gtod, scd->clock),
++	 *		      max(scd->clock, scd->tick_gtod + TICK_NSEC));
+ 	 */
+ 
+ 	clock = scd->tick_gtod + delta;
+ 	min_clock = wrap_max(scd->tick_gtod, scd->clock);
+-	max_clock = scd->tick_gtod + TICK_NSEC;
++	max_clock = wrap_max(scd->clock, scd->tick_gtod + TICK_NSEC);
+ 
+ 	clock = wrap_max(clock, min_clock);
+ 	clock = wrap_min(clock, max_clock);
