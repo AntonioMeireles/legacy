@@ -16,6 +16,4 @@ echo "$PATH" | fgrep -q '%(jdkhome)s/jre/bin' || \
 
 echo "$PATH" | fgrep -q '%(jdkhome)s/bin' || \
     export PATH="%(jdkhome)s/bin:$PATH"
-echo "$MANPATH" | fgrep -q '%(jdkhome)s/man' || \
-    export MANPATH=`echo "%(jdkhome)s/man:$MANPATH" | sed -r 's/:$//'`
 
