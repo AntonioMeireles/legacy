@@ -2,6 +2,9 @@ From 4b40893918203ee1a1f6a114316c2a19c072e9bd Mon Sep 17 00:00:00 2001
 From: Matthias Hopf <mhopf@suse.de>
 Date: Sat, 18 Oct 2008 07:18:05 +1000
 Subject: drm/i915: fix ioremap of a user address for non-root (CVE-2008-3831)
+Status: O
+Content-Length: 1367
+Lines: 30
 
 From: Matthias Hopf <mhopf@suse.de>
 
@@ -34,250 +37,348 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
  };
  
  int i915_max_ioctl = DRM_ARRAY_SIZE(i915_ioctls);
-From sandeen@redhat.com  Thu Oct 23 13:13:44 2008
-From: Eric Sandeen <sandeen@redhat.com>
-Date: Wed, 22 Oct 2008 10:11:52 -0500
-Subject: ext[234]: Avoid printk floods in the face of directory corruption (CVE-2008-3528)
+From cebbert@redhat.com  Mon Oct 27 13:55:39 2008
+Status: RO
+Content-Length: 324
+Lines: 7
+
+Revert these patches from the stable queue:
+firewire-fix-ioctl-return-code.patch
+firewire-fix-setting-tag-and-sy-in-iso-transmission.patch
+firewire-fix-struct-fw_node-memory-leak.patch
+firewire-fw-sbp2-delay-first-login-to-avoid-retries.patch
+firewire-fw-sbp2-fix-races.patch
+firewire-survive-more-than-256-bus-resets.patch
+
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:55:39 2008
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Date: Mon, 27 Oct 2008 23:26:35 +0100 (CET)
+Subject: firewire: fix ioctl() return code
 To: stable@kernel.org
-Cc: ext4 development <linux-ext4@vger.kernel.org>
-Message-ID: <48FF42B8.3030606@redhat.com>
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.509dbd5216c80cfd@s5r6.in-berlin.de>
+Content-Disposition: INLINE
+Status: O
+Content-Length: 680
+Lines: 27
 
-From: Eric Sandeen <sandeen@redhat.com>
 
-This is a trivial backport of the following upstream commits:
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
 
-- bd39597cbd42a784105a04010100e27267481c67 (ext2)
-- cdbf6dba28e8e6268c8420857696309470009fd9 (ext3)
-- 9d9f177572d9e4eba0f2e18523b44f90dd51fe74 (ext4)
+commit 99692f71ee04c6f249d0bf6a581359f32f409a38 upstream
 
-This addresses CVE-2008-3528
+Reported by Jay Fenlason:  ioctl() did not return as intended
+  - the size of data read into ioctl_send_request,
+  - the number of datagrams enqueued by ioctl_queue_iso.
 
-ext[234]: Avoid printk floods in the face of directory corruption
 
-Note: some people thinks this represents a security bug, since it
-might make the system go away while it is printing a large number of
-console messages, especially if a serial console is involved.  Hence,
-it has been assigned CVE-2008-3528, but it requires that the attacker
-either has physical access to your machine to insert a USB disk with a
-corrupted filesystem image (at which point why not just hit the power
-button), or is otherwise able to convince the system administrator to
-mount an arbitrary filesystem image (at which point why not just
-include a setuid shell or world-writable hard disk device file or some
-such).  Me, I think they're just being silly. --tytso
-
-Signed-off-by: Eric Sandeen <sandeen@redhat.com>
-Signed-off-by: "Theodore Ts'o" <tytso@mit.edu>
-Cc: linux-ext4@vger.kernel.org
-Cc: Eugene Teo <eugeneteo@kernel.sg>
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
 Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
 
 ---
- fs/ext2/dir.c |   60 +++++++++++++++++++++++++++++++++-------------------------
- fs/ext3/dir.c |   10 ++++++---
- fs/ext4/dir.c |   11 +++++++---
- 3 files changed, 50 insertions(+), 31 deletions(-)
+ drivers/firewire/fw-cdev.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
---- a/fs/ext2/dir.c
-+++ b/fs/ext2/dir.c
-@@ -103,7 +103,7 @@ static int ext2_commit_chunk(struct page
- 	return err;
- }
- 
--static void ext2_check_page(struct page *page)
-+static void ext2_check_page(struct page *page, int quiet)
- {
- 	struct inode *dir = page->mapping->host;
- 	struct super_block *sb = dir->i_sb;
-@@ -146,10 +146,10 @@ out:
- 	/* Too bad, we had an error */
- 
- Ebadsize:
--	ext2_error(sb, "ext2_check_page",
--		"size of directory #%lu is not a multiple of chunk size",
--		dir->i_ino
--	);
-+	if (!quiet)
-+		ext2_error(sb, __func__,
-+			"size of directory #%lu is not a multiple "
-+			"of chunk size", dir->i_ino);
- 	goto fail;
- Eshort:
- 	error = "rec_len is smaller than minimal";
-@@ -166,32 +166,36 @@ Espan:
- Einumber:
- 	error = "inode out of bounds";
- bad_entry:
--	ext2_error (sb, "ext2_check_page", "bad entry in directory #%lu: %s - "
--		"offset=%lu, inode=%lu, rec_len=%d, name_len=%d",
--		dir->i_ino, error, (page->index<<PAGE_CACHE_SHIFT)+offs,
--		(unsigned long) le32_to_cpu(p->inode),
--		rec_len, p->name_len);
-+	if (!quiet)
-+		ext2_error(sb, __func__, "bad entry in directory #%lu: : %s - "
-+			"offset=%lu, inode=%lu, rec_len=%d, name_len=%d",
-+			dir->i_ino, error, (page->index<<PAGE_CACHE_SHIFT)+offs,
-+			(unsigned long) le32_to_cpu(p->inode),
-+			rec_len, p->name_len);
- 	goto fail;
- Eend:
--	p = (ext2_dirent *)(kaddr + offs);
--	ext2_error (sb, "ext2_check_page",
--		"entry in directory #%lu spans the page boundary"
--		"offset=%lu, inode=%lu",
--		dir->i_ino, (page->index<<PAGE_CACHE_SHIFT)+offs,
--		(unsigned long) le32_to_cpu(p->inode));
-+	if (!quiet) {
-+		p = (ext2_dirent *)(kaddr + offs);
-+		ext2_error(sb, "ext2_check_page",
-+			"entry in directory #%lu spans the page boundary"
-+			"offset=%lu, inode=%lu",
-+			dir->i_ino, (page->index<<PAGE_CACHE_SHIFT)+offs,
-+			(unsigned long) le32_to_cpu(p->inode));
-+	}
- fail:
- 	SetPageChecked(page);
- 	SetPageError(page);
- }
- 
--static struct page * ext2_get_page(struct inode *dir, unsigned long n)
-+static struct page * ext2_get_page(struct inode *dir, unsigned long n,
-+				   int quiet)
- {
- 	struct address_space *mapping = dir->i_mapping;
- 	struct page *page = read_mapping_page(mapping, n, NULL);
- 	if (!IS_ERR(page)) {
- 		kmap(page);
- 		if (!PageChecked(page))
--			ext2_check_page(page);
-+			ext2_check_page(page, quiet);
- 		if (PageError(page))
- 			goto fail;
+--- a/drivers/firewire/fw-cdev.c
++++ b/drivers/firewire/fw-cdev.c
+@@ -913,7 +913,7 @@ dispatch_ioctl(struct client *client, un
+ 			return -EFAULT;
  	}
-@@ -292,7 +296,7 @@ ext2_readdir (struct file * filp, void *
- 	for ( ; n < npages; n++, offset = 0) {
- 		char *kaddr, *limit;
- 		ext2_dirent *de;
--		struct page *page = ext2_get_page(inode, n);
-+		struct page *page = ext2_get_page(inode, n, 0);
  
- 		if (IS_ERR(page)) {
- 			ext2_error(sb, __func__,
-@@ -361,6 +365,7 @@ struct ext2_dir_entry_2 * ext2_find_entr
- 	struct page *page = NULL;
- 	struct ext2_inode_info *ei = EXT2_I(dir);
- 	ext2_dirent * de;
-+	int dir_has_error = 0;
+-	return 0;
++	return retval;
+ }
  
- 	if (npages == 0)
- 		goto out;
-@@ -374,7 +379,7 @@ struct ext2_dir_entry_2 * ext2_find_entr
- 	n = start;
- 	do {
- 		char *kaddr;
--		page = ext2_get_page(dir, n);
-+		page = ext2_get_page(dir, n, dir_has_error);
- 		if (!IS_ERR(page)) {
- 			kaddr = page_address(page);
- 			de = (ext2_dirent *) kaddr;
-@@ -391,7 +396,9 @@ struct ext2_dir_entry_2 * ext2_find_entr
- 				de = ext2_next_entry(de);
- 			}
- 			ext2_put_page(page);
--		}
-+		} else
-+			dir_has_error = 1;
+ static long
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:54:50 2008
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Date: Mon, 27 Oct 2008 23:26:00 +0100 (CET)
+Subject: firewire: fix setting tag and sy in iso transmission
+To: stable@kernel.org
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.c6c9e197bd5d3af2@s5r6.in-berlin.de>
+Content-Disposition: INLINE
+Status: O
+Content-Length: 948
+Lines: 26
+
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+
+commit 7a1003449c693f0d57443c8786bbf19717921ae0 upstream
+
+Reported by Jay Fenlason:
+The iso packet control accessors in fw-cdev.c had bogus masks.
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/firewire/fw-cdev.c |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/drivers/firewire/fw-cdev.c
++++ b/drivers/firewire/fw-cdev.c
+@@ -720,8 +720,8 @@ static int ioctl_create_iso_context(stru
+ #define GET_PAYLOAD_LENGTH(v)	((v) & 0xffff)
+ #define GET_INTERRUPT(v)	(((v) >> 16) & 0x01)
+ #define GET_SKIP(v)		(((v) >> 17) & 0x01)
+-#define GET_TAG(v)		(((v) >> 18) & 0x02)
+-#define GET_SY(v)		(((v) >> 20) & 0x04)
++#define GET_TAG(v)		(((v) >> 18) & 0x03)
++#define GET_SY(v)		(((v) >> 20) & 0x0f)
+ #define GET_HEADER_LENGTH(v)	(((v) >> 24) & 0xff)
+ 
+ static int ioctl_queue_iso(struct client *client, void *buffer)
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:57:03 2008
+From: Jay Fenlason <fenlason@redhat.com>
+Date: Mon, 27 Oct 2008 23:28:14 +0100 (CET)
+Subject: firewire: fix struct fw_node memory leak
+To: stable@kernel.org
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.e499a05eaa0ec529@s5r6.in-berlin.de>
+Content-Disposition: INLINE
+Status: O
+Content-Length: 1050
+Lines: 36
+
+From: Jay Fenlason <fenlason@redhat.com>
+
+commit 77e557191701afa55ae7320d42ad6458a2ad292e upstream
+
+With the bus_resets patch applied, it is easy to see this memory leak
+by repeatedly resetting the firewire bus while running slabtop in
+another window.  Just watch kmalloc-32 grow and grow...
+
+Signed-off-by: Jay Fenlason <fenlason@redhat.com>
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+
+---
+ drivers/firewire/fw-topology.c |    6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+--- a/drivers/firewire/fw-topology.c
++++ b/drivers/firewire/fw-topology.c
+@@ -413,7 +413,7 @@ static void
+ update_tree(struct fw_card *card, struct fw_node *root)
+ {
+ 	struct list_head list0, list1;
+-	struct fw_node *node0, *node1;
++	struct fw_node *node0, *node1, *next1;
+ 	int i, event;
+ 
+ 	INIT_LIST_HEAD(&list0);
+@@ -485,7 +485,9 @@ update_tree(struct fw_card *card, struct
+ 		}
+ 
+ 		node0 = fw_node(node0->link.next);
+-		node1 = fw_node(node1->link.next);
++		next1 = fw_node(node1->link.next);
++		fw_node_put(node1);
++		node1 = next1;
+ 	}
+ }
+ 
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:57:36 2008
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Date: Mon, 27 Oct 2008 23:29:00 +0100 (CET)
+Subject: firewire: fw-sbp2: delay first login to avoid retries
+To: stable@kernel.org
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.9bc21c3b6a97bebe@s5r6.in-berlin.de>
+Content-Disposition: INLINE
+Status: O
+Content-Length: 1597
+Lines: 40
+
+From: Stefan Richter <stefanr@s5r6.in-berlin.de>
+
+commit 0dcfeb7e3c8695c5aa3677dda8efb9bef2e7e64d upstream
+
+This optimizes firewire-sbp2's device probe for the case that the local
+node and the SBP-2 node were discovered at the same time.  In this case,
+fw-core's bus management work and fw-sbp2's login and SCSI probe work
+are scheduled in parallel (in the globally shared workqueue and in
+fw-sbp2's workqueue, respectively).  The bus reset from fw-core may then
+disturb and extremely delay the login and SCSI probe because the latter
+fails with several command timeouts and retries and has to be retried
+from scratch.
+
+We avoid this particular situation of sbp2_login() and fw_card_bm_work()
+running in parallel by delaying the first sbp2_login() a little bit.
+
+This is meant to be a short-term fix for
+https://bugzilla.redhat.com/show_bug.cgi?id=466679.  In the long run,
+the SCSI probe, i.e. fw-sbp2's call of __scsi_add_device(), should be
+parallelized with sbp2_reconnect().
+
+Problem reported and fix tested and confirmed by Alex Kanavin.
+
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/firewire/fw-sbp2.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/drivers/firewire/fw-sbp2.c
++++ b/drivers/firewire/fw-sbp2.c
+@@ -1158,7 +1158,7 @@ static int sbp2_probe(struct device *dev
+ 
+ 	/* Do the login in a workqueue so we can easily reschedule retries. */
+ 	list_for_each_entry(lu, &tgt->lu_list, link)
+-		sbp2_queue_work(lu, 0);
++		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
+ 	return 0;
+ 
+  fail_tgt_put:
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:58:11 2008
+From: Jay Fenlason <fenlason@redhat.com>
+Date: Mon, 27 Oct 2008 23:29:32 +0100 (CET)
+Subject: firewire: fw-sbp2: fix races
+To: stable@kernel.org
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.84265bc39337ceb3@s5r6.in-berlin.de>
+Status: O
+Content-Length: 3223
+Lines: 95
+
+From: Jay Fenlason <fenlason@redhat.com>
+
+Same as commit cd1f70fdb4823c97328a1f151f328eb36fafd579 upstream
+
+1: There is a small race between queue_delayed_work() and its
+   corresponding kref_get().  Do the kref_get first, and _put it again
+   if the queue_delayed_work() failed, so there is no chance of the
+   kref going to zero while the work is scheduled.
+2: An SBP2_LOGOUT_REQUEST could be sent out with a login_id full of
+   garbage.  Initialize it to an invalid value so we can tell if we
+   ever got a valid login_id.
+3: The node ID and generation may have changed but the new values may
+   not yet have been recorded in lu and tgt when the final logout is
+   attempted.  Use the latest values from the device in
+   sbp2_release_target().
+
+Signed-off-by: Jay Fenlason <fenlason@redhat.com>
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/firewire/fw-sbp2.c |   36 ++++++++++++++++++++++++++----------
+ 1 file changed, 26 insertions(+), 10 deletions(-)
+
+--- a/drivers/firewire/fw-sbp2.c
++++ b/drivers/firewire/fw-sbp2.c
+@@ -172,6 +172,9 @@ struct sbp2_target {
+ 	int blocked;	/* ditto */
+ };
+ 
++/* Impossible login_id, to detect logout attempt before successful login */
++#define INVALID_LOGIN_ID 0x10000
 +
- 		if (++n >= npages)
- 			n = 0;
- 		/* next page is past the blocks we've got */
-@@ -414,7 +421,7 @@ found:
- 
- struct ext2_dir_entry_2 * ext2_dotdot (struct inode *dir, struct page **p)
- {
--	struct page *page = ext2_get_page(dir, 0);
-+	struct page *page = ext2_get_page(dir, 0, 0);
- 	ext2_dirent *de = NULL;
- 
- 	if (!IS_ERR(page)) {
-@@ -487,7 +494,7 @@ int ext2_add_link (struct dentry *dentry
- 	for (n = 0; n <= npages; n++) {
- 		char *dir_end;
- 
--		page = ext2_get_page(dir, n);
-+		page = ext2_get_page(dir, n, 0);
- 		err = PTR_ERR(page);
- 		if (IS_ERR(page))
- 			goto out;
-@@ -655,14 +662,17 @@ int ext2_empty_dir (struct inode * inode
- {
- 	struct page *page = NULL;
- 	unsigned long i, npages = dir_pages(inode);
-+	int dir_has_error = 0;
- 
- 	for (i = 0; i < npages; i++) {
- 		char *kaddr;
- 		ext2_dirent * de;
--		page = ext2_get_page(inode, i);
-+		page = ext2_get_page(inode, i, dir_has_error);
- 
--		if (IS_ERR(page))
-+		if (IS_ERR(page)) {
-+			dir_has_error = 1;
- 			continue;
+ /*
+  * Per section 7.4.8 of the SBP-2 spec, a mgt_ORB_timeout value can be
+  * provided in the config rom. Most devices do provide a value, which
+@@ -791,9 +794,20 @@ static void sbp2_release_target(struct k
+ 			scsi_remove_device(sdev);
+ 			scsi_device_put(sdev);
+ 		}
+-		sbp2_send_management_orb(lu, tgt->node_id, lu->generation,
+-				SBP2_LOGOUT_REQUEST, lu->login_id, NULL);
+-
++		if (lu->login_id != INVALID_LOGIN_ID) {
++			int generation, node_id;
++			/*
++			 * tgt->node_id may be obsolete here if we failed
++			 * during initial login or after a bus reset where
++			 * the topology changed.
++			 */
++			generation = device->generation;
++			smp_rmb(); /* node_id vs. generation */
++			node_id    = device->node_id;
++			sbp2_send_management_orb(lu, node_id, generation,
++						 SBP2_LOGOUT_REQUEST,
++						 lu->login_id, NULL);
 +		}
+ 		fw_core_remove_address_handler(&lu->address_handler);
+ 		list_del(&lu->link);
+ 		kfree(lu);
+@@ -808,19 +822,20 @@ static void sbp2_release_target(struct k
  
- 		kaddr = page_address(page);
- 		de = (ext2_dirent *)kaddr;
---- a/fs/ext3/dir.c
-+++ b/fs/ext3/dir.c
-@@ -102,6 +102,7 @@ static int ext3_readdir(struct file * fi
- 	int err;
- 	struct inode *inode = filp->f_path.dentry->d_inode;
- 	int ret = 0;
-+	int dir_has_error = 0;
+ static struct workqueue_struct *sbp2_wq;
  
- 	sb = inode->i_sb;
++static void sbp2_target_put(struct sbp2_target *tgt)
++{
++	kref_put(&tgt->kref, sbp2_release_target);
++}
++
+ /*
+  * Always get the target's kref when scheduling work on one its units.
+  * Each workqueue job is responsible to call sbp2_target_put() upon return.
+  */
+ static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
+ {
+-	if (queue_delayed_work(sbp2_wq, &lu->work, delay))
+-		kref_get(&lu->tgt->kref);
+-}
+-
+-static void sbp2_target_put(struct sbp2_target *tgt)
+-{
+-	kref_put(&tgt->kref, sbp2_release_target);
++	kref_get(&lu->tgt->kref);
++	if (!queue_delayed_work(sbp2_wq, &lu->work, delay))
++		sbp2_target_put(lu->tgt);
+ }
  
-@@ -148,9 +149,12 @@ static int ext3_readdir(struct file * fi
- 		 * of recovering data when there's a bad sector
- 		 */
- 		if (!bh) {
--			ext3_error (sb, "ext3_readdir",
--				"directory #%lu contains a hole at offset %lu",
--				inode->i_ino, (unsigned long)filp->f_pos);
-+			if (!dir_has_error) {
-+				ext3_error(sb, __func__, "directory #%lu "
-+					"contains a hole at offset %lld",
-+					inode->i_ino, filp->f_pos);
-+				dir_has_error = 1;
-+			}
- 			/* corrupt size?  Maybe no more blocks to read */
- 			if (filp->f_pos > inode->i_blocks << 9)
- 				break;
---- a/fs/ext4/dir.c
-+++ b/fs/ext4/dir.c
-@@ -102,6 +102,7 @@ static int ext4_readdir(struct file * fi
- 	int err;
- 	struct inode *inode = filp->f_path.dentry->d_inode;
- 	int ret = 0;
-+	int dir_has_error = 0;
+ static void
+@@ -993,6 +1008,7 @@ static int sbp2_add_logical_unit(struct 
  
- 	sb = inode->i_sb;
+ 	lu->tgt      = tgt;
+ 	lu->lun      = lun_entry & 0xffff;
++	lu->login_id = INVALID_LOGIN_ID;
+ 	lu->retries  = 0;
+ 	lu->has_sdev = false;
+ 	lu->blocked  = false;
+From stefanr@s5r6.in-berlin.de  Tue Nov  4 13:56:10 2008
+From: Jay Fenlason <fenlason@redhat.com>
+Date: Mon, 27 Oct 2008 23:27:37 +0100 (CET)
+Subject: firewire: Survive more than 256 bus resets
+To: stable@kernel.org
+Cc: linux1394-devel@lists.sourceforge.net, linux-kernel@vger.kernel.org
+Message-ID: <tkrat.6faab57f3da8f9b9@s5r6.in-berlin.de>
+Content-Disposition: INLINE
+Status: O
+Content-Length: 1058
+Lines: 31
+
+From: Jay Fenlason <fenlason@redhat.com>
+
+Same as commit 4f9740d4f5a17fa6a1b097fa3ccdfb7246660307 upstream
+
+The "color" is used during the topology building after a bus reset,
+hovever in "struct fw_node"s it is stored in a u8, but in struct fw_card
+it is stored in an int.  When the value wraps in one struct, but not
+the other, disaster strikes.
+
+Fixes http://bugzilla.kernel.org/show_bug.cgi?id=10922 -
+machine locks up solid if a series of bus resets occurs.
+
+
+Signed-off-by: Jay Fenlason <fenlason@redhat.com>
+Signed-off-by: Stefan Richter <stefanr@s5r6.in-berlin.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/firewire/fw-transaction.h |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/drivers/firewire/fw-transaction.h
++++ b/drivers/firewire/fw-transaction.h
+@@ -248,7 +248,7 @@ struct fw_card {
+ 	struct fw_node *local_node;
+ 	struct fw_node *root_node;
+ 	struct fw_node *irm_node;
+-	int color;
++	u8 color; /* must be u8 to match the definition in struct fw_node */
+ 	int gap_count;
+ 	bool beta_repeaters_present;
  
-@@ -148,9 +149,13 @@ static int ext4_readdir(struct file * fi
- 		 * of recovering data when there's a bad sector
- 		 */
- 		if (!bh) {
--			ext4_error (sb, "ext4_readdir",
--				"directory #%lu contains a hole at offset %lu",
--				inode->i_ino, (unsigned long)filp->f_pos);
-+			if (!dir_has_error) {
-+				ext4_error(sb, __func__, "directory #%lu "
-+					   "contains a hole at offset %Lu",
-+					   inode->i_ino,
-+					   (unsigned long long) filp->f_pos);
-+				dir_has_error = 1;
-+			}
- 			/* corrupt size?  Maybe no more blocks to read */
- 			if (filp->f_pos > inode->i_blocks << 9)
- 				break;

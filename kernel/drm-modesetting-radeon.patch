@@ -1,3 +1,90 @@
+commit 735cba61bd0bff256c6a01add80a78418f7ffa29
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Mon Nov 10 15:39:25 2008 +1000
+
+    radeon: fix dumbness in cp ring check
+
+commit b138f1300f5781ccc432efa817e0a2e7817dbae1
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Mon Nov 10 14:26:11 2008 +1000
+
+    radeon: add gart useable size to report to userspace
+
+commit fafafa93d2f78110826defa3ed1052159ab3f232
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Sun Nov 9 20:34:49 2008 +1000
+
+    radeon: fix powerpc oops on rv280
+
+commit 63a8fbb9886095425a86e91fb5dd247e4f846dc5
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Sun Nov 9 10:23:43 2008 +1000
+
+    radeon: upgrade atom headers
+
+commit 92c626a8e7c8c61c80acf3c687f4d7dbacc6f354
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Sat Nov 8 14:39:41 2008 +1000
+
+    radeon: fix fence race condition hopefully
+    
+    For some reason reading the SCRATCH reg from RAM causes some race to occur.
+    Hopefully fix this.
+
+commit bb1fe264b4a57713e8f0ee5e04d29f5061e45e15
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Sat Nov 8 11:31:03 2008 +1000
+
+    drm/radeon: add dpms connector functions
+
+commit 0e88e45a884a1c38084b060c8dc588ead17a3382
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Fri Nov 7 16:22:22 2008 +1000
+
+    radeon: avivo cursors are across the full surface.
+    
+    fixes cursor on second head
+
+commit 898c6e16d6390e1aea99d45e15e86a6c4ddd38e8
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Fri Nov 7 16:21:03 2008 +1000
+
+    modesetting: set the crtc x,y after the mode base change
+
+commit 34bfe1d2d06576aa8d7a6b2c689fa8fb43545407
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Wed Nov 5 10:23:35 2008 +1000
+
+    drm/radeon: add uncached allocator to drm ttm code.
+    
+    This allows re-use of uc/wc marked pages
+
+commit dca718feb536730d005b32d081737e191e05ce60
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Wed Nov 5 10:22:27 2008 +1000
+
+    radeon: fix ring tail overflow issue since alignment
+
+commit d115749300ee625cd23e6ff50d4f3e14c4616d35
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Tue Nov 4 13:18:02 2008 +1000
+
+    radeon: disable HDP read cache for now
+
+commit df1c660505fcecaba8e6d76430da0be80c67923a
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Tue Nov 4 12:02:55 2008 +1000
+
+    radeon: force all ring writes to 16-dword alignment.
+    
+    Also set the fetch size to what tcore/fglrx uses.
+
+commit 3cacc2f41bbd6f46d7eb13948db318c7c13e5c60
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Mon Nov 3 15:43:08 2008 +1000
+
+    radeon: fixup vram visible calculation to take a/c pinned objects for now
+
 commit 96b17b8573d9d8d9507602c9dfb0a1b87e6ff1f5
 Author: Dave Airlie <airlied@redhat.com>
 Date:   Mon Nov 3 09:56:02 2008 +1100
@@ -1294,20 +1381,22 @@ index 9097500..ee58462 100644
  	tristate "Intel I810"
  	depends on DRM && AGP && AGP_INTEL
 diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
-index 74da994..48567a9 100644
+index 74da994..cf6af69 100644
 --- a/drivers/gpu/drm/Makefile
 +++ b/drivers/gpu/drm/Makefile
-@@ -9,7 +9,9 @@ drm-y       :=	drm_auth.o drm_bufs.o drm_cache.o \
+@@ -9,8 +9,10 @@ drm-y       :=	drm_auth.o drm_bufs.o drm_cache.o \
  		drm_drv.o drm_fops.o drm_gem.o drm_ioctl.o drm_irq.o \
  		drm_lock.o drm_memory.o drm_proc.o drm_stub.o drm_vm.o \
  		drm_agpsupport.o drm_scatter.o ati_pcigart.o drm_pci.o \
 -		drm_sysfs.o drm_hashtab.o drm_sman.o drm_mm.o
+-
 +		drm_sysfs.o drm_hashtab.o drm_sman.o drm_mm.o \
 +		drm_fence.o drm_bo.o drm_ttm.o drm_bo_move.o \
-+		drm_crtc.o drm_crtc_helper.o drm_modes.o drm_edid.o
- 
++		drm_crtc.o drm_crtc_helper.o drm_modes.o drm_edid.o drm_uncached.o
++	
  drm-$(CONFIG_COMPAT) += drm_ioc32.o
  
+ obj-$(CONFIG_DRM)	+= drm.o
 diff --git a/drivers/gpu/drm/ati_pcigart.c b/drivers/gpu/drm/ati_pcigart.c
 index c533d0c..adc57dd 100644
 --- a/drivers/gpu/drm/ati_pcigart.c
@@ -1920,10 +2009,10 @@ index a734627..ca7a9ef 100644
  	return -EINVAL;
 diff --git a/drivers/gpu/drm/drm_bo.c b/drivers/gpu/drm/drm_bo.c
 new file mode 100644
-index 0000000..5cec5a0
+index 0000000..3d7c623
 --- /dev/null
 +++ b/drivers/gpu/drm/drm_bo.c
-@@ -0,0 +1,2116 @@
+@@ -0,0 +1,2119 @@
 +/**************************************************************************
 + *
 + * Copyright (c) 2006-2007 Tungsten Graphics, Inc., Cedar Park, TX., USA
@@ -3763,6 +3852,7 @@ index 0000000..5cec5a0
 +	if (bm->dummy_read_page)
 +		__free_page(bm->dummy_read_page);
 +
++	drm_uncached_fini();
 +out:
 +	mutex_unlock(&dev->struct_mutex);
 +	return ret;
@@ -3781,6 +3871,8 @@ index 0000000..5cec5a0
 +	struct drm_bo_driver *driver = dev->driver->bo_driver;
 +	struct drm_buffer_manager *bm = &dev->bm;
 +	int ret = -EINVAL;
++
++	drm_uncached_init();
 +
 +	bm->dummy_read_page = NULL;
 +	mutex_lock(&dev->struct_mutex);
@@ -4911,7 +5003,7 @@ index d505f69..bb94eb7 100644
  			dev->driver->context_dtor(dev, ctx->handle);
 diff --git a/drivers/gpu/drm/drm_crtc.c b/drivers/gpu/drm/drm_crtc.c
 new file mode 100644
-index 0000000..15b9f3e
+index 0000000..558de02
 --- /dev/null
 +++ b/drivers/gpu/drm/drm_crtc.c
 @@ -0,0 +1,2391 @@
@@ -6338,7 +6430,7 @@ index 0000000..15b9f3e
 +	set.mode = mode;
 +	set.connectors = connector_set;
 +	set.num_connectors = crtc_req->count_connectors;
-+	set.fb =fb;
++	set.fb = fb;
 +	ret = crtc->funcs->set_config(&set);
 +
 +out:
@@ -7308,10 +7400,10 @@ index 0000000..15b9f3e
 +}
 diff --git a/drivers/gpu/drm/drm_crtc_helper.c b/drivers/gpu/drm/drm_crtc_helper.c
 new file mode 100644
-index 0000000..776a98e
+index 0000000..ebb4479
 --- /dev/null
 +++ b/drivers/gpu/drm/drm_crtc_helper.c
-@@ -0,0 +1,804 @@
+@@ -0,0 +1,833 @@
 +/* (c) 2006-2007 Intel Corporation
 + * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
 + *
@@ -7997,6 +8089,8 @@ index 0000000..776a98e
 +		if (set->crtc->fb != set->fb)
 +			set->crtc->fb = set->fb;
 +		crtc_funcs->mode_set_base(set->crtc, set->x, set->y);
++		set->crtc->x = set->x;
++		set->crtc->y = set->y;
 +	}
 +
 +	kfree(save_encoders);
@@ -8116,6 +8210,33 @@ index 0000000..776a98e
 +	return 0;
 +}
 +EXPORT_SYMBOL(drm_helper_resume_force_mode);
++
++void drm_helper_set_connector_dpms(struct drm_connector *connector,
++				  int dpms_mode)
++{
++	int i = 0;
++	struct drm_encoder *encoder;
++	struct drm_encoder_helper_funcs *encoder_funcs;
++	struct drm_mode_object *obj;
++
++	for (i = 0; i < DRM_CONNECTOR_MAX_ENCODER; i++) {
++		if (connector->encoder_ids[i] == 0)
++			break;
++		
++		obj = drm_mode_object_find(connector->dev,
++					   connector->encoder_ids[i],
++					   DRM_MODE_OBJECT_ENCODER);
++		if (!obj)
++			continue;
++		
++		encoder = obj_to_encoder(obj);
++		encoder_funcs = encoder->helper_private;
++		if (encoder_funcs->dpms)
++			encoder_funcs->dpms(encoder, dpms_mode);
++			
++	}
++}
++EXPORT_SYMBOL(drm_helper_set_connector_dpms);
 diff --git a/drivers/gpu/drm/drm_dma.c b/drivers/gpu/drm/drm_dma.c
 index 7a8e2fb..0b2df71 100644
 --- a/drivers/gpu/drm/drm_dma.c
@@ -11594,10 +11715,10 @@ index 1611b9b..79a4f92 100644
  }
 diff --git a/drivers/gpu/drm/drm_ttm.c b/drivers/gpu/drm/drm_ttm.c
 new file mode 100644
-index 0000000..4e4c0b8
+index 0000000..0fe40e6
 --- /dev/null
 +++ b/drivers/gpu/drm/drm_ttm.c
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,473 @@
 +/**************************************************************************
 + *
 + * Copyright (c) 2006-2007 Tungsten Graphics, Inc., Cedar Park, TX., USA
@@ -11670,14 +11791,18 @@ index 0000000..4e4c0b8
 +	ttm->pages = NULL;
 +}
 +
-+static struct page *drm_ttm_alloc_page(void)
++static struct page *drm_ttm_alloc_page(struct drm_ttm *ttm)
 +{
 +	struct page *page;
 +
 +	if (drm_alloc_memctl(PAGE_SIZE))
 +		return NULL;
 +
-+	page = alloc_page(GFP_KERNEL | __GFP_ZERO | GFP_DMA32);
++	if (ttm->dev->bm.allocator_type == _DRM_BM_ALLOCATOR_UNCACHED)
++		page = drm_get_uncached_page();
++	else
++		page = alloc_page(GFP_KERNEL | __GFP_ZERO | GFP_DMA32);
++
 +	if (!page) {
 +		drm_free_memctl(PAGE_SIZE);
 +		return NULL;
@@ -11694,6 +11819,9 @@ index 0000000..4e4c0b8
 +{
 +	int i;
 +	struct page **cur_page;
++
++	if (ttm->dev->bm.allocator_type == _DRM_BM_ALLOCATOR_UNCACHED)
++		return 0;
 +
 +	if ((ttm->page_flags & DRM_TTM_PAGE_UNCACHED) == noncached)
 +		return 0;
@@ -11762,11 +11890,15 @@ index 0000000..4e4c0b8
 +	for (i = 0; i < ttm->num_pages; ++i) {
 +		cur_page = ttm->pages + i;
 +		if (*cur_page) {
-+			if (page_count(*cur_page) != 1)
-+				DRM_ERROR("Erroneous page count. Leaking pages.\n");
-+			if (page_mapped(*cur_page))
-+				DRM_ERROR("Erroneous map count. Leaking page mappings.\n");
-+			__free_page(*cur_page);
++			if (ttm->dev->bm.allocator_type == _DRM_BM_ALLOCATOR_UNCACHED)
++				drm_put_uncached_page(*cur_page);
++			else {
++				if (page_count(*cur_page) != 1)
++					DRM_ERROR("Erroneous page count. Leaking pages.\n");
++				if (page_mapped(*cur_page))
++					DRM_ERROR("Erroneous map count. Leaking page mappings.\n");
++				__free_page(*cur_page);
++			}
 +			drm_free_memctl(PAGE_SIZE);
 +			--bm->cur_pages;
 +		}
@@ -11812,7 +11944,7 @@ index 0000000..4e4c0b8
 +	struct drm_buffer_manager *bm = &ttm->dev->bm;
 +
 +	while(NULL == (p = ttm->pages[index])) {
-+		p = drm_ttm_alloc_page();
++		p = drm_ttm_alloc_page(ttm);
 +		if (!p)
 +			return NULL;
 +
@@ -12060,6 +12192,150 @@ index 0000000..4e4c0b8
 +	return 0;
 +}
 +EXPORT_SYMBOL(drm_ttm_bind);
+diff --git a/drivers/gpu/drm/drm_uncached.c b/drivers/gpu/drm/drm_uncached.c
+new file mode 100644
+index 0000000..9c7183b
+--- /dev/null
++++ b/drivers/gpu/drm/drm_uncached.c
+@@ -0,0 +1,138 @@
++/*
++ * Copyright (c) Red Hat Inc.
++
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sub license,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the
++ * next paragraph) shall be included in all copies or substantial portions
++ * of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *
++ * Authors: Dave Airlie <airlied@redhat.com>
++ */
++
++/* simple list based uncached page allocator 
++ * - Add chunks of 1MB to the allocator at a time.
++ * - Use page->lru to keep a free list
++ * - doesn't track currently in use pages
++ * 
++ *  TODO: Add shrinker support
++ */
++
++#include "drmP.h"
++#include <asm/agp.h>
++
++static struct list_head uncached_free_list;
++
++static struct mutex uncached_mutex;
++static int uncached_inited;
++static int total_uncached_pages;
++
++/* add 1MB at a time */
++#define NUM_PAGES_TO_ADD 256
++
++static void drm_uncached_page_put(struct page *page)
++{
++	unmap_page_from_agp(page);
++	put_page(page);
++	__free_page(page);
++}
++
++int drm_uncached_add_pages_locked(int num_pages)
++{
++	struct page *page;
++	int i;
++
++	DRM_DEBUG("adding uncached memory %ld\n", num_pages * PAGE_SIZE);
++	for (i = 0; i < num_pages; i++) {
++
++		page = alloc_page(GFP_KERNEL | __GFP_ZERO | GFP_DMA32);
++		if (!page) {
++			DRM_ERROR("unable to get page %d\n", i);
++			return i;
++		}
++
++		get_page(page);
++#ifdef CONFIG_X86
++		set_memory_wc((unsigned long)page_address(page), 1);
++#else
++		map_page_into_agp(page);
++#endif
++
++		list_add(&page->lru, &uncached_free_list);
++		total_uncached_pages++;
++	}
++	return i;
++}
++
++struct page *drm_get_uncached_page(void)
++{
++	struct page *page = NULL;
++	int ret;
++
++	mutex_lock(&uncached_mutex);
++	if (list_empty(&uncached_free_list)) {
++		ret = drm_uncached_add_pages_locked(NUM_PAGES_TO_ADD);
++		if (ret == 0)
++			return NULL;
++	}
++
++	page = list_first_entry(&uncached_free_list, struct page, lru);
++	list_del(&page->lru);
++
++	mutex_unlock(&uncached_mutex);
++	return page;
++}
++
++void drm_put_uncached_page(struct page *page)
++{
++	mutex_lock(&uncached_mutex);
++	list_add(&page->lru, &uncached_free_list);
++	mutex_unlock(&uncached_mutex);
++}
++
++void drm_uncached_release_all_pages(void)
++{
++	struct page *page, *tmp;
++
++	list_for_each_entry_safe(page, tmp, &uncached_free_list, lru) {
++		list_del(&page->lru);
++		drm_uncached_page_put(page);
++	}
++}
++
++int drm_uncached_init(void)
++{
++
++	if (uncached_inited)
++		return 0;
++
++	INIT_LIST_HEAD(&uncached_free_list);
++
++	mutex_init(&uncached_mutex);
++	uncached_inited = 1;
++	return 0;
++
++}
++
++void drm_uncached_fini(void)
++{
++	if (!uncached_inited)
++		return;
++	
++	uncached_inited = 0;
++	drm_uncached_release_all_pages();
++}
++
 diff --git a/drivers/gpu/drm/drm_vm.c b/drivers/gpu/drm/drm_vm.c
 index c234c6f..e37ee29 100644
 --- a/drivers/gpu/drm/drm_vm.c
@@ -12813,10 +13089,10 @@ index feb521e..5d6bc6c 100644
  
 diff --git a/drivers/gpu/drm/radeon/ObjectID.h b/drivers/gpu/drm/radeon/ObjectID.h
 new file mode 100644
-index 0000000..4b106cf
+index 0000000..f1f18a4
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/ObjectID.h
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,518 @@
 +/*
 +* Copyright 2006-2007 Advanced Micro Devices, Inc.  
 +*
@@ -12897,6 +13173,10 @@ index 0000000..4b106cf
 +#define ENCODER_OBJECT_ID_DP_DP501                0x1D
 +#define ENCODER_OBJECT_ID_INTERNAL_UNIPHY         0x1E
 +#define ENCODER_OBJECT_ID_INTERNAL_KLDSCP_LVTMA   0x1F
++#define ENCODER_OBJECT_ID_INTERNAL_UNIPHY1        0x20
++#define ENCODER_OBJECT_ID_INTERNAL_UNIPHY2        0x21
++
++#define ENCODER_OBJECT_ID_GENERAL_EXTERNAL_DVO    0xFF
 +
 +/****************************************************/
 +/* Connector Object ID Definition                   */
@@ -12937,6 +13217,8 @@ index 0000000..4b106cf
 +#define GRAPH_OBJECT_ENUM_ID2                     0x02
 +#define GRAPH_OBJECT_ENUM_ID3                     0x03
 +#define GRAPH_OBJECT_ENUM_ID4                     0x04
++#define GRAPH_OBJECT_ENUM_ID5                     0x05
++#define GRAPH_OBJECT_ENUM_ID6                     0x06
 +
 +/****************************************************/
 +/* Graphics Object ID Bit definition                */
@@ -12992,7 +13274,7 @@ index 0000000..4b106cf
 +#define ENCODER_SI178_ENUM_ID1                   0x2117 
 +#define ENCODER_MVPU_FPGA_ENUM_ID1               0x2118
 +#define ENCODER_INTERNAL_DDI_ENUM_ID1            0x2119
-+#define ENCODER_VT1625_ENUM_ID1               0x211A
++#define ENCODER_VT1625_ENUM_ID1                  0x211A
 +#define ENCODER_HDMI_SI1932_ENUM_ID1             0x211B
 +#define ENCODER_ENCODER_DP_AN9801_ENUM_ID1       0x211C
 +#define ENCODER_DP_DP501_ENUM_ID1                0x211D
@@ -13142,6 +13424,26 @@ index 0000000..4b106cf
 +                                                 GRAPH_OBJECT_ENUM_ID1 << ENUM_ID_SHIFT |\
 +                                                 ENCODER_OBJECT_ID_INTERNAL_KLDSCP_LVTMA << OBJECT_ID_SHIFT)  
 +
++#define ENCODER_INTERNAL_UNIPHY1_ENUM_ID1         ( GRAPH_OBJECT_TYPE_ENCODER << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID1 << ENUM_ID_SHIFT |\
++                                                 ENCODER_OBJECT_ID_INTERNAL_UNIPHY1 << OBJECT_ID_SHIFT)
++
++#define ENCODER_INTERNAL_UNIPHY1_ENUM_ID2         ( GRAPH_OBJECT_TYPE_ENCODER << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID2 << ENUM_ID_SHIFT |\
++                                                 ENCODER_OBJECT_ID_INTERNAL_UNIPHY1 << OBJECT_ID_SHIFT)
++
++#define ENCODER_INTERNAL_UNIPHY2_ENUM_ID1         ( GRAPH_OBJECT_TYPE_ENCODER << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID1 << ENUM_ID_SHIFT |\
++                                                 ENCODER_OBJECT_ID_INTERNAL_UNIPHY2 << OBJECT_ID_SHIFT)
++
++#define ENCODER_INTERNAL_UNIPHY2_ENUM_ID2         ( GRAPH_OBJECT_TYPE_ENCODER << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID2 << ENUM_ID_SHIFT |\
++                                                 ENCODER_OBJECT_ID_INTERNAL_UNIPHY2 << OBJECT_ID_SHIFT)
++
++#define ENCODER_GENERAL_EXTERNAL_DVO_ENUM_ID1    ( GRAPH_OBJECT_TYPE_ENCODER << OBJECT_TYPE_SHIFT |\
++                                                  GRAPH_OBJECT_ENUM_ID1 << ENUM_ID_SHIFT |\
++                                                  ENCODER_OBJECT_ID_GENERAL_EXTERNAL_DVO << OBJECT_ID_SHIFT)
++
 +/****************************************************/
 +/* Connector Object ID definition - Shared with BIOS */
 +/****************************************************/
@@ -13270,6 +13572,14 @@ index 0000000..4b106cf
 +
 +#define CONNECTOR_DISPLAYPORT_ENUM_ID2         ( GRAPH_OBJECT_TYPE_CONNECTOR << OBJECT_TYPE_SHIFT |\
 +                                                 GRAPH_OBJECT_ENUM_ID2 << ENUM_ID_SHIFT |\
++                                                 CONNECTOR_OBJECT_ID_DISPLAYPORT << OBJECT_ID_SHIFT)
++
++#define CONNECTOR_DISPLAYPORT_ENUM_ID3         ( GRAPH_OBJECT_TYPE_CONNECTOR << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID3 << ENUM_ID_SHIFT |\
++                                                 CONNECTOR_OBJECT_ID_DISPLAYPORT << OBJECT_ID_SHIFT)
++
++#define CONNECTOR_DISPLAYPORT_ENUM_ID4         ( GRAPH_OBJECT_TYPE_CONNECTOR << OBJECT_TYPE_SHIFT |\
++                                                 GRAPH_OBJECT_ENUM_ID4 << ENUM_ID_SHIFT |\
 +                                                 CONNECTOR_OBJECT_ID_DISPLAYPORT << OBJECT_ID_SHIFT)
 +
 +/****************************************************/
@@ -14814,10 +15124,10 @@ index 0000000..a5d9332
 +#endif
 diff --git a/drivers/gpu/drm/radeon/atombios.h b/drivers/gpu/drm/radeon/atombios.h
 new file mode 100644
-index 0000000..2e7dc6c
+index 0000000..9932b09
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/atombios.h
-@@ -0,0 +1,4498 @@
+@@ -0,0 +1,5025 @@
 +/*
 + * Copyright 2006-2007 Advanced Micro Devices, Inc.  
 + *
@@ -15086,7 +15396,7 @@ index 0000000..2e7dc6c
 +  USHORT SetCRTC_UsingDTDTiming;                 //Atomic Table,  directly used by various SW components,latest version 1.1
 +  USHORT ExternalEncoderControl;                 //Atomic Table,  directly used by various SW components,latest version 2.1
 +  USHORT LVTMAOutputControl;                     //Atomic Table,  directly used by various SW components,latest version 1.1
-+  USHORT VRAM_BlockDetectionByStrap;
++  USHORT VRAM_BlockDetectionByStrap;             //Atomic Table,  used only by Bios
 +  USHORT MemoryCleanUp;                          //Atomic Table,  only used by Bios    
 +  USHORT ProcessI2cChannelTransaction;           //Function Table,only used by Bios
 +  USHORT WriteOneByteToHWAssistedI2C;            //Function Table,indirectly used by various SW components 
@@ -15096,9 +15406,9 @@ index 0000000..2e7dc6c
 +  USHORT MC_Synchronization;                     //Atomic Table,  indirectly used by various SW components,called from SetMemoryClock
 +  USHORT ComputeMemoryEnginePLL;                 //Atomic Table,  indirectly used by various SW components,called from SetMemory/EngineClock
 +  USHORT MemoryRefreshConversion;                //Atomic Table,  indirectly used by various SW components,called from SetMemory or SetEngineClock
-+  USHORT VRAM_GetCurrentInfoBlock;
++  USHORT VRAM_GetCurrentInfoBlock;               //Atomic Table,  used only by Bios
 +  USHORT DynamicMemorySettings;                  //Atomic Table,  indirectly used by various SW components,called from SetMemoryClock
-+  USHORT MemoryTraining;
++  USHORT MemoryTraining;                         //Atomic Table,  used only by Bios
 +  USHORT EnableSpreadSpectrumOnPPLL;             //Atomic Table,  directly used by various SW components,latest version 1.2
 +  USHORT TMDSAOutputControl;                     //Atomic Table,  directly used by various SW components,latest version 1.1
 +  USHORT SetVoltage;                             //Function Table,directly and/or indirectly used by various SW components,latest version 1.1
@@ -15116,11 +15426,12 @@ index 0000000..2e7dc6c
 +  USHORT DPEncoderService;											 //Function Table,only used by Bios
 +}ATOM_MASTER_LIST_OF_COMMAND_TABLES;   
 +
++// For backward compatible 
 +#define ReadEDIDFromHWAssistedI2C                ProcessI2cChannelTransaction
-+
 +#define UNIPHYTransmitterControl						     DIG1TransmitterControl
 +#define LVTMATransmitterControl							     DIG2TransmitterControl
-+#define SetCRTC_DPM_State                                    GetConditionalGoldenSetting
++#define SetCRTC_DPM_State                        GetConditionalGoldenSetting
++#define SetUniphyInstance                        ASIC_StaticPwrMgtStatusChange
 +
 +typedef struct _ATOM_MASTER_COMMAND_TABLE
 +{
@@ -15128,6 +15439,9 @@ index 0000000..2e7dc6c
 +  ATOM_MASTER_LIST_OF_COMMAND_TABLES ListOfCommandTables;
 +}ATOM_MASTER_COMMAND_TABLE;
 +
++/****************************************************************************/	
++// Structures used in every command table
++/****************************************************************************/	
 +typedef struct _ATOM_TABLE_ATTRIBUTE
 +{
 +#if ATOM_BIG_ENDIAN
@@ -15147,23 +15461,20 @@ index 0000000..2e7dc6c
 +  USHORT               susAccess;
 +}ATOM_TABLE_ATTRIBUTE_ACCESS;
 +
++/****************************************************************************/	
 +// Common header for all command tables.
-+//Every table pointed by _ATOM_MASTER_COMMAND_TABLE has this common header. 
-+//And the pointer actually points to this header.
-+
++// Every table pointed by _ATOM_MASTER_COMMAND_TABLE has this common header. 
++// And the pointer actually points to this header.
++/****************************************************************************/	
 +typedef struct _ATOM_COMMON_ROM_COMMAND_TABLE_HEADER
 +{
 +  ATOM_COMMON_TABLE_HEADER CommonHeader;
 +  ATOM_TABLE_ATTRIBUTE     TableAttribute;	
 +}ATOM_COMMON_ROM_COMMAND_TABLE_HEADER;
 +
-+
-+typedef struct _ASIC_INIT_PARAMETERS
-+{
-+  ULONG ulDefaultEngineClock;         //In 10Khz unit
-+  ULONG ulDefaultMemoryClock;         //In 10Khz unit
-+}ASIC_INIT_PARAMETERS;
-+
++/****************************************************************************/	
++// Structures used by ComputeMemoryEnginePLLTable
++/****************************************************************************/	
 +#define COMPUTE_MEMORY_PLL_PARAM        1
 +#define COMPUTE_ENGINE_PLL_PARAM        2
 +
@@ -15200,6 +15511,57 @@ index 0000000..2e7dc6c
 +#define b3FIRST_TIME_CHANGE_CLOCK									0x08       //Applicable to both memory and engine clock change,when set, it means this is 1st time to change clock after ASIC bootup
 +#define b3SKIP_SW_PROGRAM_PLL											0x10			 //Applicable to both memory and engine clock change, when set, it means the table will not program SPLL/MPLL
 +
++typedef struct _ATOM_COMPUTE_CLOCK_FREQ
++{
++#if ATOM_BIG_ENDIAN
++  ULONG ulComputeClockFlag:8;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
++  ULONG ulClockFreq:24;                       // in unit of 10kHz
++#else
++  ULONG ulClockFreq:24;                       // in unit of 10kHz
++  ULONG ulComputeClockFlag:8;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
++#endif
++}ATOM_COMPUTE_CLOCK_FREQ;
++
++typedef struct _ATOM_S_MPLL_FB_DIVIDER
++{
++  USHORT usFbDivFrac;  
++  USHORT usFbDiv;  
++}ATOM_S_MPLL_FB_DIVIDER;
++
++typedef struct _COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V3
++{
++  union
++  {
++    ATOM_COMPUTE_CLOCK_FREQ  ulClock;         //Input Parameter
++    ATOM_S_MPLL_FB_DIVIDER   ulFbDiv;         //Output Parameter
++  };
++  UCHAR   ucRefDiv;                           //Output Parameter      
++  UCHAR   ucPostDiv;                          //Output Parameter      
++  UCHAR   ucCntlFlag;                         //Output Parameter      
++  UCHAR   ucReserved;
++}COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V3;
++
++// ucCntlFlag
++#define ATOM_PLL_CNTL_FLAG_PLL_POST_DIV_EN          1
++#define ATOM_PLL_CNTL_FLAG_MPLL_VCO_MODE            2
++#define ATOM_PLL_CNTL_FLAG_FRACTION_DISABLE         4
++
++typedef struct _DYNAMICE_MEMORY_SETTINGS_PARAMETER
++{
++  ATOM_COMPUTE_CLOCK_FREQ ulClock;
++  ULONG ulReserved[2];
++}DYNAMICE_MEMORY_SETTINGS_PARAMETER;
++
++typedef struct _DYNAMICE_ENGINE_SETTINGS_PARAMETER
++{
++  ATOM_COMPUTE_CLOCK_FREQ ulClock;
++  ULONG ulMemoryClock;
++  ULONG ulReserved;
++}DYNAMICE_ENGINE_SETTINGS_PARAMETER;
++
++/****************************************************************************/	
++// Structures used by SetEngineClockTable
++/****************************************************************************/	
 +typedef struct _SET_ENGINE_CLOCK_PARAMETERS
 +{
 +  ULONG ulTargetEngineClock;          //In 10Khz unit
@@ -15211,7 +15573,9 @@ index 0000000..2e7dc6c
 +  COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_PS_ALLOCATION sReserved;
 +}SET_ENGINE_CLOCK_PS_ALLOCATION;
 +
-+
++/****************************************************************************/	
++// Structures used by SetMemoryClockTable
++/****************************************************************************/	
 +typedef struct _SET_MEMORY_CLOCK_PARAMETERS
 +{
 +  ULONG ulTargetMemoryClock;          //In 10Khz unit
@@ -15223,13 +15587,24 @@ index 0000000..2e7dc6c
 +  COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_PS_ALLOCATION sReserved;
 +}SET_MEMORY_CLOCK_PS_ALLOCATION;
 +
++/****************************************************************************/	
++// Structures used by ASIC_Init.ctb
++/****************************************************************************/	
++typedef struct _ASIC_INIT_PARAMETERS
++{
++  ULONG ulDefaultEngineClock;         //In 10Khz unit
++  ULONG ulDefaultMemoryClock;         //In 10Khz unit
++}ASIC_INIT_PARAMETERS;
++
 +typedef struct _ASIC_INIT_PS_ALLOCATION
 +{
 +  ASIC_INIT_PARAMETERS sASICInitClocks;
 +  SET_ENGINE_CLOCK_PS_ALLOCATION sReserved; //Caller doesn't need to init this structure
 +}ASIC_INIT_PS_ALLOCATION;
 +
-+
++/****************************************************************************/	
++// Structure used by DynamicClockGatingTable.ctb
++/****************************************************************************/	
 +typedef struct _DYNAMIC_CLOCK_GATING_PARAMETERS 
 +{
 +  UCHAR ucEnable;                     // ATOM_ENABLE or ATOM_DISABLE
@@ -15237,7 +15612,9 @@ index 0000000..2e7dc6c
 +}DYNAMIC_CLOCK_GATING_PARAMETERS;
 +#define  DYNAMIC_CLOCK_GATING_PS_ALLOCATION  DYNAMIC_CLOCK_GATING_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structure used by EnableASIC_StaticPwrMgtTable.ctb
++/****************************************************************************/	
 +typedef struct _ENABLE_ASIC_STATIC_PWR_MGT_PARAMETERS
 +{
 +  UCHAR ucEnable;                     // ATOM_ENABLE or ATOM_DISABLE
@@ -15245,7 +15622,9 @@ index 0000000..2e7dc6c
 +}ENABLE_ASIC_STATIC_PWR_MGT_PARAMETERS;
 +#define ENABLE_ASIC_STATIC_PWR_MGT_PS_ALLOCATION  ENABLE_ASIC_STATIC_PWR_MGT_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by DAC_LoadDetectionTable.ctb
++/****************************************************************************/	
 +typedef struct _DAC_LOAD_DETECTION_PARAMETERS
 +{
 +  USHORT usDeviceID;                  //{ATOM_DEVICE_CRTx_SUPPORT,ATOM_DEVICE_TVx_SUPPORT,ATOM_DEVICE_CVx_SUPPORT}
@@ -15256,14 +15635,15 @@ index 0000000..2e7dc6c
 +// DAC_LOAD_DETECTION_PARAMETERS.ucMisc
 +#define DAC_LOAD_MISC_YPrPb						0x01
 +
-+
 +typedef struct _DAC_LOAD_DETECTION_PS_ALLOCATION
 +{
 +  DAC_LOAD_DETECTION_PARAMETERS            sDacload;
 +  ULONG                                    Reserved[2];// Don't set this one, allocation for EXT DAC
 +}DAC_LOAD_DETECTION_PS_ALLOCATION;
 +
-+
++/****************************************************************************/	
++// Structures used by DAC1EncoderControlTable.ctb and DAC2EncoderControlTable.ctb
++/****************************************************************************/	
 +typedef struct _DAC_ENCODER_CONTROL_PARAMETERS 
 +{
 +  USHORT usPixelClock;                // in 10KHz; for bios convenient
@@ -15275,14 +15655,11 @@ index 0000000..2e7dc6c
 +
 +#define DAC_ENCODER_CONTROL_PS_ALLOCATION  DAC_ENCODER_CONTROL_PARAMETERS
 +
-+typedef struct _TV_ENCODER_CONTROL_PARAMETERS
-+{
-+  USHORT usPixelClock;                // in 10KHz; for bios convenient
-+  UCHAR  ucTvStandard;                // See definition "ATOM_TV_NTSC ..."
-+  UCHAR  ucAction;                    // 0: turn off encoder
-+                                      // 1: setup and turn on encoder
-+}TV_ENCODER_CONTROL_PARAMETERS;
-+
++/****************************************************************************/	
++// Structures used by DIG1EncoderControlTable
++//                    DIG2EncoderControlTable
++//                    ExternalEncoderControlTable
++/****************************************************************************/	
 +typedef struct _DIG_ENCODER_CONTROL_PARAMETERS
 +{
 +  USHORT usPixelClock;		// in 10KHz; for bios convenient
@@ -15307,7 +15684,6 @@ index 0000000..2e7dc6c
 +}DIG_ENCODER_CONTROL_PARAMETERS;
 +#define DIG_ENCODER_CONTROL_PS_ALLOCATION			  DIG_ENCODER_CONTROL_PARAMETERS
 +#define EXTERNAL_ENCODER_CONTROL_PARAMETER			DIG_ENCODER_CONTROL_PARAMETERS
-+#define EXTERNAL_ENCODER_CONTROL_PS_ALLOCATION	DIG_ENCODER_CONTROL_PS_ALLOCATION
 +
 +//ucConfig
 +#define ATOM_ENCODER_CONFIG_DPLINKRATE_MASK				0x01
@@ -15338,6 +15714,56 @@ index 0000000..2e7dc6c
 +#define ATOM_ENCODER_MODE_CV											14
 +#define ATOM_ENCODER_MODE_CRT											15
 +
++typedef struct _ATOM_DIG_ENCODER_CONFIG_V2
++{
++#if ATOM_BIG_ENDIAN
++    UCHAR ucReserved1:2;
++    UCHAR ucTransmitterSel:2;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
++    UCHAR ucLinkSel:1;            // =0: linkA/C/E =1: linkB/D/F
++    UCHAR ucReserved:1;
++    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
++#else
++    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
++    UCHAR ucReserved:1;
++    UCHAR ucLinkSel:1;            // =0: linkA/C/E =1: linkB/D/F
++    UCHAR ucTransmitterSel:2;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
++    UCHAR ucReserved1:2;
++#endif
++}ATOM_DIG_ENCODER_CONFIG_V2;
++
++
++typedef struct _DIG_ENCODER_CONTROL_PARAMETERS_V2
++{
++  USHORT usPixelClock;      // in 10KHz; for bios convenient
++  ATOM_DIG_ENCODER_CONFIG_V2 acConfig;
++  UCHAR ucAction;                                       
++  UCHAR ucEncoderMode;
++                            // =0: DP   encoder      
++                            // =1: LVDS encoder          
++                            // =2: DVI  encoder  
++                            // =3: HDMI encoder
++                            // =4: SDVO encoder
++  UCHAR ucLaneNum;          // how many lanes to enable
++  UCHAR ucReserved[2];
++}DIG_ENCODER_CONTROL_PARAMETERS_V2;
++
++//ucConfig
++#define ATOM_ENCODER_CONFIG_V2_DPLINKRATE_MASK				0x01
++#define ATOM_ENCODER_CONFIG_V2_DPLINKRATE_1_62GHZ		  0x00
++#define ATOM_ENCODER_CONFIG_V2_DPLINKRATE_2_70GHZ		  0x01
++#define ATOM_ENCODER_CONFIG_V2_LINK_SEL_MASK				  0x04
++#define ATOM_ENCODER_CONFIG_V2_LINKA								  0x00
++#define ATOM_ENCODER_CONFIG_V2_LINKB								  0x04
++#define ATOM_ENCODER_CONFIG_V2_TRANSMITTER_SEL_MASK	  0x18
++#define ATOM_ENCODER_CONFIG_V2_TRANSMITTER1				    0x00
++#define ATOM_ENCODER_CONFIG_V2_TRANSMITTER2				    0x08
++#define ATOM_ENCODER_CONFIG_V2_TRANSMITTER3				    0x10
++
++/****************************************************************************/	
++// Structures used by UNIPHYTransmitterControlTable
++//                    LVTMATransmitterControlTable
++//                    DVOOutputControlTable
++/****************************************************************************/	
 +typedef struct _ATOM_DP_VS_MODE
 +{
 +  UCHAR ucLaneSel;
@@ -15415,7 +15841,82 @@ index 0000000..2e7dc6c
 +#define ATOM_TRANSMITTER_ACTION_SETUP						       10
 +#define ATOM_TRANSMITTER_ACTION_SETUP_VSEMPH           11
 +
-+/****************************Device Output Control Command Table Definitions**********************/
++
++// Following are used for DigTransmitterControlTable ver1.2
++typedef struct _ATOM_DIG_TRANSMITTER_CONFIG_V2
++{
++#if ATOM_BIG_ENDIAN
++  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
++                                    //        =1 Dig Transmitter 2 ( Uniphy CD )
++                                    //        =2 Dig Transmitter 3 ( Uniphy EF )
++  UCHAR ucReserved:1;               
++  UCHAR fDPConnector:1;             //bit4=0: DP connector  =1: None DP connector
++  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
++  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
++                                    //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
++
++  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
++  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
++#else
++  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
++  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
++  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
++                                    //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
++  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
++  UCHAR fDPConnector:1;             //bit4=0: DP connector  =1: None DP connector
++  UCHAR ucReserved:1;               
++  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
++                                    //        =1 Dig Transmitter 2 ( Uniphy CD )
++                                    //        =2 Dig Transmitter 3 ( Uniphy EF )
++#endif
++}ATOM_DIG_TRANSMITTER_CONFIG_V2;
++
++//ucConfig 
++//Bit0
++#define ATOM_TRANSMITTER_CONFIG_V2_DUAL_LINK_CONNECTOR			0x01
++
++//Bit1
++#define ATOM_TRANSMITTER_CONFIG_V2_COHERENT				          0x02
++
++//Bit2
++#define ATOM_TRANSMITTER_CONFIG_V2_LINK_SEL_MASK		        0x04
++#define ATOM_TRANSMITTER_CONFIG_V2_LINKA  			            0x00			
++#define ATOM_TRANSMITTER_CONFIG_V2_LINKB				            0x04
++
++// Bit3
++#define ATOM_TRANSMITTER_CONFIG_V2_ENCODER_SEL_MASK	        0x08
++#define ATOM_TRANSMITTER_CONFIG_V2_DIG1_ENCODER		          0x00				// only used when ucAction == ATOM_TRANSMITTER_ACTION_ENABLE or ATOM_TRANSMITTER_ACTION_SETUP
++#define ATOM_TRANSMITTER_CONFIG_V2_DIG2_ENCODER		          0x08				// only used when ucAction == ATOM_TRANSMITTER_ACTION_ENABLE or ATOM_TRANSMITTER_ACTION_SETUP
++
++// Bit4
++#define ATOM_TRASMITTER_CONFIG_V2_DP_CONNECTOR			        0x10
++
++// Bit7:6
++#define ATOM_TRANSMITTER_CONFIG_V2_TRANSMITTER_SEL_MASK     0xC0
++#define ATOM_TRANSMITTER_CONFIG_V2_TRANSMITTER1           	0x00	//AB
++#define ATOM_TRANSMITTER_CONFIG_V2_TRANSMITTER2           	0x40	//CD
++#define ATOM_TRANSMITTER_CONFIG_V2_TRANSMITTER3           	0x80	//EF
++
++typedef struct _DIG_TRANSMITTER_CONTROL_PARAMETERS_V2
++{
++	union
++	{
++  USHORT usPixelClock;		// in 10KHz; for bios convenient
++	USHORT usInitInfo;			// when init uniphy,lower 8bit is used for connector type defined in objectid.h
++  ATOM_DP_VS_MODE asMode; // DP Voltage swing mode
++	};
++  ATOM_DIG_TRANSMITTER_CONFIG_V2 acConfig;
++	UCHAR ucAction;				  // define as ATOM_TRANSMITER_ACTION_XXX	                       
++  UCHAR ucReserved[4];
++}DIG_TRANSMITTER_CONTROL_PARAMETERS_V2;
++
++
++/****************************************************************************/	
++// Structures used by DAC1OuputControlTable
++//                    DAC2OuputControlTable
++//                    LVTMAOutputControlTable  (Before DEC30)
++//                    TMDSAOutputControlTable  (Before DEC30)
++/****************************************************************************/	
 +typedef struct _DISPLAY_DEVICE_OUTPUT_CONTROL_PARAMETERS
 +{
 +  UCHAR  ucAction;                    // Possible input:ATOM_ENABLE||ATOMDISABLE
@@ -15454,7 +15955,9 @@ index 0000000..2e7dc6c
 +#define DVO_OUTPUT_CONTROL_PS_ALLOCATION   DIG_TRANSMITTER_CONTROL_PS_ALLOCATION
 +#define DVO_OUTPUT_CONTROL_PARAMETERS_V3	 DIG_TRANSMITTER_CONTROL_PARAMETERS
 +
-+/**************************************************************************/
++/****************************************************************************/	
++// Structures used by BlankCRTCTable
++/****************************************************************************/	
 +typedef struct _BLANK_CRTC_PARAMETERS
 +{
 +  UCHAR  ucCRTC;                    	// ATOM_CRTC1 or ATOM_CRTC2
@@ -15465,7 +15968,11 @@ index 0000000..2e7dc6c
 +}BLANK_CRTC_PARAMETERS;
 +#define BLANK_CRTC_PS_ALLOCATION    BLANK_CRTC_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by EnableCRTCTable
++//                    EnableCRTCMemReqTable
++//                    UpdateCRTC_DoubleBufferRegistersTable
++/****************************************************************************/	
 +typedef struct _ENABLE_CRTC_PARAMETERS
 +{
 +  UCHAR ucCRTC;                    	  // ATOM_CRTC1 or ATOM_CRTC2
@@ -15474,7 +15981,9 @@ index 0000000..2e7dc6c
 +}ENABLE_CRTC_PARAMETERS;
 +#define ENABLE_CRTC_PS_ALLOCATION   ENABLE_CRTC_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by SetCRTC_OverScanTable
++/****************************************************************************/	
 +typedef struct _SET_CRTC_OVERSCAN_PARAMETERS
 +{
 +  USHORT usOverscanRight;             // right
@@ -15486,7 +15995,9 @@ index 0000000..2e7dc6c
 +}SET_CRTC_OVERSCAN_PARAMETERS;
 +#define SET_CRTC_OVERSCAN_PS_ALLOCATION  SET_CRTC_OVERSCAN_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by SetCRTC_ReplicationTable
++/****************************************************************************/	
 +typedef struct _SET_CRTC_REPLICATION_PARAMETERS
 +{
 +  UCHAR ucH_Replication;              // horizontal replication
@@ -15496,7 +16007,9 @@ index 0000000..2e7dc6c
 +}SET_CRTC_REPLICATION_PARAMETERS;
 +#define SET_CRTC_REPLICATION_PS_ALLOCATION  SET_CRTC_REPLICATION_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by SelectCRTC_SourceTable
++/****************************************************************************/	
 +typedef struct _SELECT_CRTC_SOURCE_PARAMETERS
 +{
 +  UCHAR ucCRTC;                    	  // ATOM_CRTC1 or ATOM_CRTC2
@@ -15533,6 +16046,10 @@ index 0000000..2e7dc6c
 +//#define ATOM_ENCODER_MODE_CV										14
 +//#define ATOM_ENCODER_MODE_CRT										15
 +
++/****************************************************************************/	
++// Structures used by SetPixelClockTable
++//                    GetPixelClockTable 
++/****************************************************************************/	
 +//Major revision=1., Minor revision=1
 +typedef struct _PIXEL_CLOCK_PARAMETERS
 +{
@@ -15547,7 +16064,6 @@ index 0000000..2e7dc6c
 +  UCHAR  ucCRTC;                      // Which CRTC uses this Ppll
 +  UCHAR  ucPadding;
 +}PIXEL_CLOCK_PARAMETERS;
-+
 +
 +//Major revision=1., Minor revision=2, add ucMiscIfno
 +//ucMiscInfo:
@@ -15619,6 +16135,9 @@ index 0000000..2e7dc6c
 +#define PIXEL_CLOCK_PARAMETERS_LAST			PIXEL_CLOCK_PARAMETERS_V2
 +#define GET_PIXEL_CLOCK_PS_ALLOCATION		PIXEL_CLOCK_PARAMETERS_LAST
 +
++/****************************************************************************/	
++// Structures used by AdjustDisplayPllTable
++/****************************************************************************/	
 +typedef struct _ADJUST_DISPLAY_PLL_PARAMETERS
 +{
 +	USHORT usPixelClock;
@@ -15636,6 +16155,9 @@ index 0000000..2e7dc6c
 +
 +#define ADJUST_DISPLAY_PLL_PS_ALLOCATION			ADJUST_DISPLAY_PLL_PARAMETERS
 +
++/****************************************************************************/	
++// Structures used by EnableYUVTable
++/****************************************************************************/	
 +typedef struct _ENABLE_YUV_PARAMETERS
 +{
 +  UCHAR ucEnable;                     // ATOM_ENABLE:Enable YUV or ATOM_DISABLE:Disable YUV (RGB)
@@ -15644,20 +16166,27 @@ index 0000000..2e7dc6c
 +}ENABLE_YUV_PARAMETERS;
 +#define ENABLE_YUV_PS_ALLOCATION ENABLE_YUV_PARAMETERS
 +
++/****************************************************************************/	
++// Structures used by GetMemoryClockTable
++/****************************************************************************/	
 +typedef struct _GET_MEMORY_CLOCK_PARAMETERS
 +{
 +  ULONG ulReturnMemoryClock;          // current memory speed in 10KHz unit
 +} GET_MEMORY_CLOCK_PARAMETERS;
 +#define GET_MEMORY_CLOCK_PS_ALLOCATION  GET_MEMORY_CLOCK_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structures used by GetEngineClockTable
++/****************************************************************************/	
 +typedef struct _GET_ENGINE_CLOCK_PARAMETERS
 +{
 +  ULONG ulReturnEngineClock;          // current engine speed in 10KHz unit
 +} GET_ENGINE_CLOCK_PARAMETERS;
 +#define GET_ENGINE_CLOCK_PS_ALLOCATION  GET_ENGINE_CLOCK_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Following Structures and constant may be obsolete
++/****************************************************************************/	
 +//Maxium 8 bytes,the data read in will be placed in the parameter space.
 +//Read operaion successeful when the paramter space is non-zero, otherwise read operation failed
 +typedef struct _READ_EDID_FROM_HW_I2C_DATA_PARAMETERS
@@ -15707,6 +16236,9 @@ index 0000000..2e7dc6c
 +/**************************************************************************/
 +#define SPEED_FAN_CONTROL_PS_ALLOCATION   WRITE_ONE_BYTE_HW_I2C_DATA_PARAMETERS
 +
++/****************************************************************************/	
++// Structures used by PowerConnectorDetectionTable
++/****************************************************************************/	
 +typedef struct	_POWER_CONNECTOR_DETECTION_PARAMETERS
 +{
 +  UCHAR   ucPowerConnectorStatus;      //Used for return value 0: detected, 1:not detected
@@ -15723,6 +16255,10 @@ index 0000000..2e7dc6c
 +}POWER_CONNECTOR_DETECTION_PS_ALLOCATION;
 +
 +/****************************LVDS SS Command Table Definitions**********************/
++
++/****************************************************************************/	
++// Structures used by EnableSpreadSpectrumOnPPLLTable
++/****************************************************************************/	
 +typedef struct	_ENABLE_LVDS_SS_PARAMETERS
 +{
 +  USHORT  usSpreadSpectrumPercentage;       
@@ -15768,6 +16304,9 @@ index 0000000..2e7dc6c
 +
 +#define ENABLE_VGA_RENDER_PS_ALLOCATION   SET_PIXEL_CLOCK_PS_ALLOCATION
 +
++/****************************************************************************/	
++// Structures used by ###
++/****************************************************************************/	
 +typedef struct	_MEMORY_TRAINING_PARAMETERS
 +{
 +  ULONG ulTargetMemoryClock;          //In 10Khz unit
@@ -15775,8 +16314,14 @@ index 0000000..2e7dc6c
 +#define MEMORY_TRAINING_PS_ALLOCATION MEMORY_TRAINING_PARAMETERS
 +
 +
-+
 +/****************************LVDS and other encoder command table definitions **********************/
++
++
++/****************************************************************************/	
++// Structures used by LVDSEncoderControlTable   (Before DCE30)
++//                    LVTMAEncoderControlTable  (Before DCE30)
++//                    TMDSAEncoderControlTable  (Before DCE30)
++/****************************************************************************/	
 +typedef struct _LVDS_ENCODER_CONTROL_PARAMETERS
 +{
 +  USHORT usPixelClock;  // in 10KHz; for bios convenient
@@ -15795,19 +16340,6 @@ index 0000000..2e7dc6c
 +
 +#define TMDS2_ENCODER_CONTROL_PARAMETERS    TMDS1_ENCODER_CONTROL_PARAMETERS
 +#define TMDS2_ENCODER_CONTROL_PS_ALLOCATION TMDS2_ENCODER_CONTROL_PARAMETERS
-+
-+typedef struct _ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS
-+{                               
-+  UCHAR    ucEnable;            // Enable or Disable External TMDS encoder
-+  UCHAR    ucMisc;              // Bit0=0:Enable Single link;=1:Enable Dual link;Bit1 {=0:666RGB, =1:888RGB}
-+  UCHAR    ucPadding[2];
-+}ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS;
-+
-+typedef struct _ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION
-+{                               
-+  ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS    sXTmdsEncoder;
-+  WRITE_ONE_BYTE_HW_I2C_DATA_PS_ALLOCATION   sReserved;     //Caller doesn't need to init this portion
-+}ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION;
 +
 +
 +//ucTableFormatRevision=1,ucTableContentRevision=2
@@ -15848,6 +16380,32 @@ index 0000000..2e7dc6c
 +  
 +#define TMDS2_ENCODER_CONTROL_PARAMETERS_V2    TMDS1_ENCODER_CONTROL_PARAMETERS_V2
 +#define TMDS2_ENCODER_CONTROL_PS_ALLOCATION_V2 TMDS2_ENCODER_CONTROL_PARAMETERS_V2
++
++#define LVDS_ENCODER_CONTROL_PARAMETERS_V3     LVDS_ENCODER_CONTROL_PARAMETERS_V2
++#define LVDS_ENCODER_CONTROL_PS_ALLOCATION_V3  LVDS_ENCODER_CONTROL_PARAMETERS_V3
++
++#define TMDS1_ENCODER_CONTROL_PARAMETERS_V3    LVDS_ENCODER_CONTROL_PARAMETERS_V3
++#define TMDS1_ENCODER_CONTROL_PS_ALLOCATION_V3 TMDS1_ENCODER_CONTROL_PARAMETERS_V3
++
++#define TMDS2_ENCODER_CONTROL_PARAMETERS_V3    LVDS_ENCODER_CONTROL_PARAMETERS_V3
++#define TMDS2_ENCODER_CONTROL_PS_ALLOCATION_V3 TMDS2_ENCODER_CONTROL_PARAMETERS_V3
++
++/****************************************************************************/	
++// Structures used by ###
++/****************************************************************************/	
++typedef struct _ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS
++{                               
++  UCHAR    ucEnable;            // Enable or Disable External TMDS encoder
++  UCHAR    ucMisc;              // Bit0=0:Enable Single link;=1:Enable Dual link;Bit1 {=0:666RGB, =1:888RGB}
++  UCHAR    ucPadding[2];
++}ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS;
++
++typedef struct _ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION
++{                               
++  ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS    sXTmdsEncoder;
++  WRITE_ONE_BYTE_HW_I2C_DATA_PS_ALLOCATION   sReserved;     //Caller doesn't need to init this portion
++}ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION;
++
 +#define ENABLE_EXTERNAL_TMDS_ENCODER_PARAMETERS_V2  LVDS_ENCODER_CONTROL_PARAMETERS_V2
 +
 +typedef struct _ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION_V2
@@ -15856,7 +16414,15 @@ index 0000000..2e7dc6c
 +  WRITE_ONE_BYTE_HW_I2C_DATA_PS_ALLOCATION      sReserved;     //Caller doesn't need to init this portion
 +}ENABLE_EXTERNAL_TMDS_ENCODER_PS_ALLOCATION_V2;
 +
++typedef struct _EXTERNAL_ENCODER_CONTROL_PS_ALLOCATION
++{
++  DIG_ENCODER_CONTROL_PARAMETERS            sDigEncoder;
++  WRITE_ONE_BYTE_HW_I2C_DATA_PS_ALLOCATION sReserved;
++}EXTERNAL_ENCODER_CONTROL_PS_ALLOCATION;
 +
++/****************************************************************************/	
++// Structures used by DVOEncoderControlTable
++/****************************************************************************/	
 +//ucTableFormatRevision=1,ucTableContentRevision=3
 +
 +//ucDVOConfig:
@@ -15881,15 +16447,6 @@ index 0000000..2e7dc6c
 +//ucTableContentRevision=3 structure is not changed but usMisc add bit 1 as another input for 
 +// bit1=0: non-coherent mode
 +//     =1: coherent mode
-+
-+#define LVDS_ENCODER_CONTROL_PARAMETERS_V3     LVDS_ENCODER_CONTROL_PARAMETERS_V2
-+#define LVDS_ENCODER_CONTROL_PS_ALLOCATION_V3  LVDS_ENCODER_CONTROL_PARAMETERS_V3
-+
-+#define TMDS1_ENCODER_CONTROL_PARAMETERS_V3    LVDS_ENCODER_CONTROL_PARAMETERS_V3
-+#define TMDS1_ENCODER_CONTROL_PS_ALLOCATION_V3 TMDS1_ENCODER_CONTROL_PARAMETERS_V3
-+
-+#define TMDS2_ENCODER_CONTROL_PARAMETERS_V3    LVDS_ENCODER_CONTROL_PARAMETERS_V3
-+#define TMDS2_ENCODER_CONTROL_PS_ALLOCATION_V3 TMDS2_ENCODER_CONTROL_PARAMETERS_V3
 +
 +//==========================================================================================
 +//Only change is here next time when changing encoder parameter definitions again!
@@ -15934,20 +16491,23 @@ index 0000000..2e7dc6c
 +#define PANEL_ENCODER_75FRC_E                  0x00
 +#define PANEL_ENCODER_75FRC_F                  0x80
 +
-+/**************************************************************************/
-+
++/****************************************************************************/	
++// Structures used by SetVoltageTable
++/****************************************************************************/	
 +#define SET_VOLTAGE_TYPE_ASIC_VDDC             1
 +#define SET_VOLTAGE_TYPE_ASIC_MVDDC            2
 +#define SET_VOLTAGE_TYPE_ASIC_MVDDQ            3
 +#define SET_VOLTAGE_TYPE_ASIC_VDDCI            4
++#define SET_VOLTAGE_INIT_MODE                  5
++#define SET_VOLTAGE_GET_MAX_VOLTAGE            6					//Gets the Max. voltage for the soldered Asic
 +
 +#define SET_ASIC_VOLTAGE_MODE_ALL_SOURCE       0x1
 +#define SET_ASIC_VOLTAGE_MODE_SOURCE_A         0x2
 +#define SET_ASIC_VOLTAGE_MODE_SOURCE_B         0x4
 +
-+#define	SET_ASIC_VOLTAGE_MODE_SET_VOLTAGE			 0x0
-+#define	SET_ASIC_VOLTAGE_MODE_GET_GPIOVAL			 0x1	
-+#define	SET_ASIC_VOLTAGE_MODE_GET_GPIOMASK		 0x2
++#define	SET_ASIC_VOLTAGE_MODE_SET_VOLTAGE      0x0
++#define	SET_ASIC_VOLTAGE_MODE_GET_GPIOVAL      0x1	
++#define	SET_ASIC_VOLTAGE_MODE_GET_GPIOMASK     0x2
 +
 +typedef struct	_SET_VOLTAGE_PARAMETERS
 +{
@@ -15957,7 +16517,6 @@ index 0000000..2e7dc6c
 +  UCHAR    ucReserved;          
 +}SET_VOLTAGE_PARAMETERS;
 +
-+
 +typedef struct	_SET_VOLTAGE_PARAMETERS_V2
 +{
 +  UCHAR    ucVoltageType;               // To tell which voltage to set up, VDDC/MVDDC/MVDDQ
@@ -15965,12 +16524,22 @@ index 0000000..2e7dc6c
 +  USHORT   usVoltageLevel;              // real voltage level
 +}SET_VOLTAGE_PARAMETERS_V2;
 +
-+
 +typedef struct _SET_VOLTAGE_PS_ALLOCATION
 +{
 +  SET_VOLTAGE_PARAMETERS sASICSetVoltage;
 +  WRITE_ONE_BYTE_HW_I2C_DATA_PS_ALLOCATION sReserved;
 +}SET_VOLTAGE_PS_ALLOCATION;
++
++/****************************************************************************/	
++// Structures used by TVEncoderControlTable
++/****************************************************************************/	
++typedef struct _TV_ENCODER_CONTROL_PARAMETERS
++{
++  USHORT usPixelClock;                // in 10KHz; for bios convenient
++  UCHAR  ucTvStandard;                // See definition "ATOM_TV_NTSC ..."
++  UCHAR  ucAction;                    // 0: turn off encoder
++                                      // 1: setup and turn on encoder
++}TV_ENCODER_CONTROL_PARAMETERS;
 +
 +typedef struct _TV_ENCODER_CONTROL_PS_ALLOCATION
 +{
@@ -15985,6 +16554,9 @@ index 0000000..2e7dc6c
 +	#define	USHORT	void*
 +#endif
 +
++/****************************************************************************/	
++// Structure used in Data.mtb
++/****************************************************************************/	
 +typedef struct _ATOM_MASTER_LIST_OF_DATA_TABLES
 +{
 +  USHORT        UtilityPipeLine;	        // Offest for the utility to get parser info,Don't change this position!
@@ -16027,14 +16599,15 @@ index 0000000..2e7dc6c
 +	#define	USHORT	UTEMP
 +#endif
 +
-+
 +typedef struct _ATOM_MASTER_DATA_TABLE
 +{ 
 +  ATOM_COMMON_TABLE_HEADER sHeader;  
 +  ATOM_MASTER_LIST_OF_DATA_TABLES   ListOfDataTables;
 +}ATOM_MASTER_DATA_TABLE;
 +
-+
++/****************************************************************************/	
++// Structure used in MultimediaCapabilityInfoTable
++/****************************************************************************/	
 +typedef struct _ATOM_MULTIMEDIA_CAPABILITY_INFO
 +{
 +  ATOM_COMMON_TABLE_HEADER sHeader;  
@@ -16045,7 +16618,9 @@ index 0000000..2e7dc6c
 +  UCHAR                    ucHostPortInfo;   // Provides host port configuration information
 +}ATOM_MULTIMEDIA_CAPABILITY_INFO;
 +
-+
++/****************************************************************************/	
++// Structure used in MultimediaConfigInfoTable
++/****************************************************************************/	
 +typedef struct _ATOM_MULTIMEDIA_CONFIG_INFO
 +{
 +  ATOM_COMMON_TABLE_HEADER sHeader;
@@ -16064,7 +16639,9 @@ index 0000000..2e7dc6c
 +  UCHAR                    ucVideoInput4Info;// Video Input 4 Type (1:0) F/B setting (2) physical connector ID (5:3) reserved (7:6)
 +}ATOM_MULTIMEDIA_CONFIG_INFO;
 +
-+/****************************Firmware Info Table Definitions**********************/
++/****************************************************************************/	
++// Structures used in FirmwareInfoTable
++/****************************************************************************/	
 +
 +// usBIOSCapability Defintion:
 +// Bit 0 = 0: Bios image is not Posted, =1:Bios image is Posted; 
@@ -16279,6 +16856,9 @@ index 0000000..2e7dc6c
 +
 +#define ATOM_FIRMWARE_INFO_LAST  ATOM_FIRMWARE_INFO_V1_4
 +
++/****************************************************************************/	
++// Structures used in IntegratedSystemInfoTable
++/****************************************************************************/	
 +#define IGP_CAP_FLAG_DYNAMIC_CLOCK_EN      0x2
 +#define IGP_CAP_FLAG_AC_CARD               0x4
 +#define IGP_CAP_FLAG_SDVO_CARD             0x8
@@ -16360,11 +16940,11 @@ index 0000000..2e7dc6c
 +{
 +  ATOM_COMMON_TABLE_HEADER   sHeader;
 +  ULONG	                     ulBootUpEngineClock;       //in 10kHz unit
-+  ULONG			                 ulReserved1[2];            //must be 0x0 for the reserved
++  ULONG			     ulReserved1[2];            //must be 0x0 for the reserved
 +  ULONG	                     ulBootUpUMAClock;          //in 10kHz unit
 +  ULONG	                     ulBootUpSidePortClock;     //in 10kHz unit
 +  ULONG	                     ulMinSidePortClock;        //in 10kHz unit
-+  ULONG			                 ulReserved2[6];            //must be 0x0 for the reserved
++  ULONG			     ulReserved2[6];            //must be 0x0 for the reserved
 +  ULONG                      ulSystemConfig;            //see explanation below
 +  ULONG                      ulBootUpReqDisplayVector;
 +  ULONG                      ulOtherDisplayMisc;
@@ -16387,7 +16967,13 @@ index 0000000..2e7dc6c
 +  USHORT                     usUMADataReturnTime;
 +  USHORT                     usLinkStatusZeroTime;
 +  USHORT                     usReserved;
-+  ULONG                      ulReserved3[101];          //must be 0x0
++  ULONG                      ulHighVoltageHTLinkFreq;     // in 10Khz
++  ULONG                      ulLowVoltageHTLinkFreq;      // in 10Khz
++  USHORT                     usMaxUpStreamHTLinkWidth;
++  USHORT                     usMaxDownStreamHTLinkWidth;
++  USHORT                     usMinUpStreamHTLinkWidth;
++  USHORT                     usMinDownStreamHTLinkWidth;
++  ULONG                      ulReserved3[97];          //must be 0x0
 +}ATOM_INTEGRATED_SYSTEM_INFO_V2;   
 +
 +/*
@@ -16396,8 +16982,20 @@ index 0000000..2e7dc6c
 +ulBootUpSidePortClock: Boot-up SidePort Clock in 10Khz; it must be 0x0 when SidePort Memory is not present,this could be equal to or less than maximum supported Sideport memory clock
 +
 +ulSystemConfig:  
-+Bit[0]: =1 PowerExpress mode =0 Non-PowerExpress mode; 
-+Bit[1]=1: system is running at overdrived engine clock =0:system is not running at overdrived engine clock
++Bit[0]=1: PowerExpress mode =0 Non-PowerExpress mode; 
++Bit[1]=1: system boots up at AMD overdrived state or user customized  mode. In this case, driver will just stick to this boot-up mode. No other PowerPlay state
++      =0: system boots up at driver control state. Power state depends on PowerPlay table.
++Bit[2]=1: PWM method is used on NB voltage control. =0: GPIO method is used.
++Bit[3]=1: Only one power state(Performance) will be supported.
++      =0: Multiple power states supported from PowerPlay table.
++Bit[4]=1: CLMC is supported and enabled on current system. 
++      =0: CLMC is not supported or enabled on current system. SBIOS need to support HT link/freq change through ATIF interface.  
++Bit[5]=1: Enable CDLW for all driver control power states. Max HT width is from SBIOS, while Min HT width is determined by display requirement.  
++      =0: CDLW is disabled. If CLMC is enabled case, Min HT width will be set equal to Max HT width. If CLMC disabled case, Max HT width will be applied.
++Bit[6]=1: High Voltage requested for all power states. In this case, voltage will be forced at 1.1v and powerplay table voltage drop/throttling request will be ignored.
++      =0: Voltage settings is determined by powerplay table.
++Bit[7]=1: Enable CLMC as hybrid Mode. CDLD and CILR will be disabled in this case and we're using legacy C1E. This is workaround for CPU(Griffin) performance issue.
++      =0: Enable CLMC as regular mode, CDLD and CILR will be enabled.
 +
 +ulBootUpReqDisplayVector: This dword is a bit vector indicates what display devices are requested during boot-up. Refer to ATOM_DEVICE_xxx_SUPPORT for the bit vector definitions.
 +
@@ -16426,16 +17024,21 @@ index 0000000..2e7dc6c
 +ucDockingPinPolarity:Polarity of the pin when docked;
 +
 +ulCPUCapInfo:        [7:0]=1:Griffin;[7:0]=2:Greyhound;[7:0]=3:K8, other bits reserved for now and must be 0x0
-+ 
++
 +usNumberOfCyclesInPeriod:Indicate how many cycles when PWM duty is 100%.
-+usMaxNBVoltage:Voltage regulator dependent PWM value.Set this one to 0xFF if VC without PWM. Set this to 0x0 if no VC at all.
-+usMinNBVoltage:Voltage regulator dependent PWM value.Set this one to 0x00 if VC without PWM or no VC at all.
++usMaxNBVoltage:Max. voltage control value in either PWM or GPIO mode. 
++usMinNBVoltage:Min. voltage control value in either PWM or GPIO mode.
++                    GPIO mode: both usMaxNBVoltage & usMinNBVoltage have a valid value ulSystemConfig.SYSTEM_CONFIG_USE_PWM_ON_VOLTAGE=0
++                    PWM mode: both usMaxNBVoltage & usMinNBVoltage have a valid value ulSystemConfig.SYSTEM_CONFIG_USE_PWM_ON_VOLTAGE=1
++                    GPU SW don't control mode: usMaxNBVoltage & usMinNBVoltage=0 and no care about ulSystemConfig.SYSTEM_CONFIG_USE_PWM_ON_VOLTAGE
 +usBootUpNBVoltage:Boot-up voltage regulator dependent PWM value.
 +
++ulHTLinkFreq:       Bootup HT link Frequency in 10Khz.
++usMinHTLinkWidth:   Bootup minimum HT link width. If CDLW disabled, this is equal to usMaxHTLinkWidth. 
++                    If CDLW enabled, both upstream and downstream width should be the same during bootup.
++usMaxHTLinkWidth:   Bootup maximum HT link width. If CDLW disabled, this is equal to usMinHTLinkWidth. 
++                    If CDLW enabled, both upstream and downstream width should be the same during bootup.  
 +
-+ulHTLinkFreq:        Current HT link Frequency in 10Khz.
-+usMinHTLinkWidth:   
-+usMaxHTLinkWidth:
 +usUMASyncStartDelay: Memory access latency, required for watermark calculation 
 +usUMADataReturnTime: Memory access latency, required for watermark calculation
 +usLinkStatusZeroTime:Memory access latency required for watermark calculation, set this to 0x0 for K8 CPU, set a proper value in 0.01 the unit of us 
@@ -16444,10 +17047,27 @@ index 0000000..2e7dc6c
 +                     if T0Ttime [5:4]=01b, then usLinkStatusZeroTime=T0Ttime [3:0]*0.5us (0.0 to 7.5us)
 +                     if T0Ttime [5:4]=10b, then usLinkStatusZeroTime=T0Ttime [3:0]*2.0us (0.0 to 30us)
 +                     if T0Ttime [5:4]=11b, and T0Ttime [3:0]=0x0 to 0xa, then usLinkStatusZeroTime=T0Ttime [3:0]*20us (0.0 to 200us)
++
++ulHighVoltageHTLinkFreq:     HT link frequency for power state with low voltage. If boot up runs in HT1, this must be 0.
++                             This must be less than or equal to ulHTLinkFreq(bootup frequency). 
++ulLowVoltageHTLinkFreq:      HT link frequency for power state with low voltage or voltage scaling 1.0v~1.1v. If boot up runs in HT1, this must be 0.
++                             This must be less than or equal to ulHighVoltageHTLinkFreq.
++
++usMaxUpStreamHTLinkWidth:    Asymmetric link width support in the future, to replace usMaxHTLinkWidth. Not used for now.
++usMaxDownStreamHTLinkWidth:  same as above.
++usMinUpStreamHTLinkWidth:    Asymmetric link width support in the future, to replace usMinHTLinkWidth. Not used for now.
++usMinDownStreamHTLinkWidth:  same as above.
 +*/
++
 +
 +#define SYSTEM_CONFIG_POWEREXPRESS_ENABLE                 0x00000001
 +#define SYSTEM_CONFIG_RUN_AT_OVERDRIVE_ENGINE             0x00000002
++#define SYSTEM_CONFIG_USE_PWM_ON_VOLTAGE                  0x00000004 
++#define SYSTEM_CONFIG_PERFORMANCE_POWERSTATE_ONLY         0x00000008
++#define SYSTEM_CONFIG_CLMC_ENABLED                        0x00000010
++#define SYSTEM_CONFIG_CDLW_ENABLED                        0x00000020
++#define SYSTEM_CONFIG_HIGH_VOLTAGE_REQUESTED              0x00000040
++#define SYSTEM_CONFIG_CLMC_HYBRID_MODE_ENABLED            0x00000080
 +
 +#define IGP_DDI_SLOT_LANE_CONFIG_MASK                     0x000000FF
 +
@@ -16503,14 +17123,16 @@ index 0000000..2e7dc6c
 +#define ATOM_DEVICE_DFP2_INDEX                            0x00000007
 +#define ATOM_DEVICE_CV_INDEX                              0x00000008
 +#define ATOM_DEVICE_DFP3_INDEX														0x00000009
-+#define ATOM_DEVICE_RESERVEDA_INDEX                       0x0000000A
-+#define ATOM_DEVICE_RESERVEDB_INDEX                       0x0000000B
++#define ATOM_DEVICE_DFP4_INDEX														0x0000000A
++#define ATOM_DEVICE_DFP5_INDEX														0x0000000B
 +#define ATOM_DEVICE_RESERVEDC_INDEX                       0x0000000C
 +#define ATOM_DEVICE_RESERVEDD_INDEX                       0x0000000D
 +#define ATOM_DEVICE_RESERVEDE_INDEX                       0x0000000E
 +#define ATOM_DEVICE_RESERVEDF_INDEX                       0x0000000F
-+#define ATOM_MAX_SUPPORTED_DEVICE_INFO                    (ATOM_DEVICE_CV_INDEX+2)
++#define ATOM_MAX_SUPPORTED_DEVICE_INFO                    (ATOM_DEVICE_DFP3_INDEX+1)
 +#define ATOM_MAX_SUPPORTED_DEVICE_INFO_2                  ATOM_MAX_SUPPORTED_DEVICE_INFO
++#define ATOM_MAX_SUPPORTED_DEVICE_INFO_3                  (ATOM_DEVICE_DFP5_INDEX + 1 )
++
 +#define ATOM_MAX_SUPPORTED_DEVICE                         (ATOM_DEVICE_RESERVEDF_INDEX+1)
 +
 +#define ATOM_DEVICE_CRT1_SUPPORT                          (0x1L << ATOM_DEVICE_CRT1_INDEX )
@@ -16523,9 +17145,11 @@ index 0000000..2e7dc6c
 +#define ATOM_DEVICE_DFP2_SUPPORT                          (0x1L << ATOM_DEVICE_DFP2_INDEX)
 +#define ATOM_DEVICE_CV_SUPPORT                            (0x1L << ATOM_DEVICE_CV_INDEX   )
 +#define ATOM_DEVICE_DFP3_SUPPORT													(0x1L << ATOM_DEVICE_DFP3_INDEX )
++#define ATOM_DEVICE_DFP4_SUPPORT													(0x1L << ATOM_DEVICE_DFP4_INDEX )
++#define ATOM_DEVICE_DFP5_SUPPORT													(0x1L << ATOM_DEVICE_DFP5_INDEX )
 +
 +#define ATOM_DEVICE_CRT_SUPPORT                           ATOM_DEVICE_CRT1_SUPPORT | ATOM_DEVICE_CRT2_SUPPORT
-+#define ATOM_DEVICE_DFP_SUPPORT                           ATOM_DEVICE_DFP1_SUPPORT | ATOM_DEVICE_DFP2_SUPPORT |  ATOM_DEVICE_DFP3_SUPPORT
++#define ATOM_DEVICE_DFP_SUPPORT                           ATOM_DEVICE_DFP1_SUPPORT | ATOM_DEVICE_DFP2_SUPPORT |  ATOM_DEVICE_DFP3_SUPPORT | ATOM_DEVICE_DFP4_SUPPORT | ATOM_DEVICE_DFP5_SUPPORT
 +#define ATOM_DEVICE_TV_SUPPORT                            ATOM_DEVICE_TV1_SUPPORT  | ATOM_DEVICE_TV2_SUPPORT
 +#define ATOM_DEVICE_LCD_SUPPORT                           ATOM_DEVICE_LCD1_SUPPORT | ATOM_DEVICE_LCD2_SUPPORT
 +
@@ -16596,7 +17220,6 @@ index 0000000..2e7dc6c
 +//                          =	3-7	Reserved for future I2C engines
 +//		[3-0] - I2C_LINE_MUX  = A Mux number when it's HW assisted I2C or GPIO ID when it's SW I2C
 +
-+
 +typedef struct _ATOM_I2C_ID_CONFIG
 +{
 +#if ATOM_BIG_ENDIAN
@@ -16617,6 +17240,9 @@ index 0000000..2e7dc6c
 +}ATOM_I2C_ID_CONFIG_ACCESS;
 +   
 +
++/****************************************************************************/	
++// Structure used in GPIO_I2C_InfoTable
++/****************************************************************************/	
 +typedef struct _ATOM_GPIO_I2C_ASSIGMENT
 +{
 +  USHORT                    usClkMaskRegisterIndex;
@@ -16646,6 +17272,9 @@ index 0000000..2e7dc6c
 +  ATOM_GPIO_I2C_ASSIGMENT   asGPIO_Info[ATOM_MAX_SUPPORTED_DEVICE];
 +}ATOM_GPIO_I2C_INFO;
 +
++/****************************************************************************/	
++// Common Structure used in other structures
++/****************************************************************************/	
 +
 +#ifndef _H2INC
 +  
@@ -16728,7 +17357,9 @@ index 0000000..2e7dc6c
 +//	VESA_HSYNC_WIDTH	=	VESA_HSYNC_TIME	=	EDID_HSPW
 +//	VESA_BORDER			=	EDID_BORDER
 +
-+
++/****************************************************************************/	
++// Structure used in SetCRTC_UsingDTDTimingTable
++/****************************************************************************/	
 +typedef struct _SET_CRTC_USING_DTD_TIMING_PARAMETERS
 +{
 +  USHORT  usH_Size;
@@ -16746,6 +17377,9 @@ index 0000000..2e7dc6c
 +  UCHAR   ucPadding[3];
 +}SET_CRTC_USING_DTD_TIMING_PARAMETERS;
 +
++/****************************************************************************/	
++// Structure used in SetCRTC_TimingTable
++/****************************************************************************/	
 +typedef struct _SET_CRTC_TIMING_PARAMETERS
 +{
 +  USHORT                      usH_Total;        // horizontal total
@@ -16766,7 +17400,11 @@ index 0000000..2e7dc6c
 +}SET_CRTC_TIMING_PARAMETERS;
 +#define SET_CRTC_TIMING_PARAMETERS_PS_ALLOCATION SET_CRTC_TIMING_PARAMETERS
 +
-+
++/****************************************************************************/	
++// Structure used in StandardVESA_TimingTable
++//                   AnalogTV_InfoTable 
++//                   ComponentVideoInfoTable
++/****************************************************************************/	
 +typedef struct _ATOM_MODE_TIMING
 +{
 +  USHORT  usCRTC_H_Total;
@@ -16788,7 +17426,6 @@ index 0000000..2e7dc6c
 +  UCHAR   ucRefreshRate;
 +}ATOM_MODE_TIMING;
 +
-+ 
 +typedef struct _ATOM_DTD_FORMAT
 +{
 +  USHORT  usPixClk;
@@ -16809,12 +17446,19 @@ index 0000000..2e7dc6c
 +  UCHAR   ucRefreshRate;
 +}ATOM_DTD_FORMAT;
 +
++/****************************************************************************/	
++// Structure used in LVDS_InfoTable 
++//  * Need a document to describe this table
++/****************************************************************************/	
 +#define SUPPORTED_LCD_REFRESHRATE_30Hz          0x0004
 +#define SUPPORTED_LCD_REFRESHRATE_40Hz          0x0008
 +#define SUPPORTED_LCD_REFRESHRATE_50Hz          0x0010
 +#define SUPPORTED_LCD_REFRESHRATE_60Hz          0x0020
 +
-+/****************************LVDS Info Table Definitions **********************/
++//Once DAL sees this CAP is set, it will read EDID from LCD on its own instead of using sLCDTiming in ATOM_LVDS_INFO_V12. 
++//Other entries in ATOM_LVDS_INFO_V12 are still valid/useful to DAL 
++#define	LCDPANEL_CAP_READ_EDID									0x1
++
 +//ucTableFormatRevision=1
 +//ucTableContentRevision=1
 +typedef struct _ATOM_LVDS_INFO
@@ -16943,9 +17587,9 @@ index 0000000..2e7dc6c
 +  ATOM_SPREAD_SPECTRUM_ASSIGNMENT   asSS_Info[ATOM_MAX_SS_ENTRY];
 +}ATOM_SPREAD_SPECTRUM_INFO;
 +
-+
-+
-+
++/****************************************************************************/	
++// Structure used in AnalogTV_InfoTable (Top level)
++/****************************************************************************/	
 +//ucTVBootUpDefaultStd definiton:
 +
 +//ATOM_TV_NTSC                1
@@ -16956,7 +17600,6 @@ index 0000000..2e7dc6c
 +//ATOM_TV_PALN                6
 +//ATOM_TV_PAL60               7
 +//ATOM_TV_SECAM               8
-+
 +
 +//ucTVSuppportedStd definition:
 +#define NTSC_SUPPORT          0x1
@@ -17047,7 +17690,15 @@ index 0000000..2e7dc6c
 +#define ATOM_DFP3_DTD_MODE_TBL_ADDR     (ATOM_DFP3_EDID_ADDR + ATOM_EDID_RAW_DATASIZE)
 +#define ATOM_DFP3_STD_MODE_TBL_ADDR     (ATOM_DFP3_DTD_MODE_TBL_ADDR + ATOM_DTD_MODE_SUPPORT_TBL_SIZE)
 +
-+#define ATOM_DP_TRAINING_TBL_ADDR				(ATOM_DFP3_STD_MODE_TBL_ADDR+ATOM_STD_MODE_SUPPORT_TBL_SIZE)       
++#define ATOM_DFP4_EDID_ADDR             (ATOM_DFP3_STD_MODE_TBL_ADDR + ATOM_STD_MODE_SUPPORT_TBL_SIZE)
++#define ATOM_DFP4_DTD_MODE_TBL_ADDR     (ATOM_DFP4_EDID_ADDR + ATOM_EDID_RAW_DATASIZE)
++#define ATOM_DFP4_STD_MODE_TBL_ADDR     (ATOM_DFP4_DTD_MODE_TBL_ADDR + ATOM_DTD_MODE_SUPPORT_TBL_SIZE)
++
++#define ATOM_DFP5_EDID_ADDR             (ATOM_DFP4_STD_MODE_TBL_ADDR + ATOM_STD_MODE_SUPPORT_TBL_SIZE)
++#define ATOM_DFP5_DTD_MODE_TBL_ADDR     (ATOM_DFP5_EDID_ADDR + ATOM_EDID_RAW_DATASIZE)
++#define ATOM_DFP5_STD_MODE_TBL_ADDR     (ATOM_DFP5_DTD_MODE_TBL_ADDR + ATOM_DTD_MODE_SUPPORT_TBL_SIZE)
++
++#define ATOM_DP_TRAINING_TBL_ADDR				(ATOM_DFP5_STD_MODE_TBL_ADDR+ATOM_STD_MODE_SUPPORT_TBL_SIZE)       
 +
 +#define ATOM_STACK_STORAGE_START        (ATOM_DP_TRAINING_TBL_ADDR+256)       
 +#define ATOM_STACK_STORAGE_END          ATOM_STACK_STORAGE_START+512        
@@ -17060,6 +17711,15 @@ index 0000000..2e7dc6c
 +#define	ATOM_VRAM_BLOCK_NEEDS_NO_RESERVATION   0x1
 +#define	ATOM_VRAM_BLOCK_NEEDS_RESERVATION      0x0
 +
++/***********************************************************************************/	
++// Structure used in VRAM_UsageByFirmwareTable
++// Note1: This table is filled by SetBiosReservationStartInFB in CoreCommSubs.asm
++//        at running time.   
++// note2: From RV770, the memory is more than 32bit addressable, so we will change 
++//        ucTableFormatRevision=1,ucTableContentRevision=4, the strcuture remains 
++//        exactly same as 1.1 and 1.2 (1.3 is never in use), but ulStartAddrUsedByFirmware 
++//        (in offset to start of memory address) is KB aligned instead of byte aligend.
++/***********************************************************************************/	
 +#define ATOM_MAX_FIRMWARE_VRAM_USAGE_INFO			1
 +
 +typedef struct _ATOM_FIRMWARE_VRAM_RESERVE_INFO
@@ -17075,8 +17735,9 @@ index 0000000..2e7dc6c
 +  ATOM_FIRMWARE_VRAM_RESERVE_INFO	asFirmwareVramReserveInfo[ATOM_MAX_FIRMWARE_VRAM_USAGE_INFO];
 +}ATOM_VRAM_USAGE_BY_FIRMWARE;
 +
-+/**************************************************************************/
-+//GPIO Pin lut table definition
++/****************************************************************************/	
++// Structure used in GPIO_Pin_LUTTable
++/****************************************************************************/	
 +typedef struct _ATOM_GPIO_PIN_ASSIGNMENT
 +{
 +  USHORT                   usGpioPin_AIndex;
@@ -17090,9 +17751,9 @@ index 0000000..2e7dc6c
 +  ATOM_GPIO_PIN_ASSIGNMENT	asGPIO_Pin[1];
 +}ATOM_GPIO_PIN_LUT;
 +
-+/**************************************************************************/
-+
-+
++/****************************************************************************/	
++// Structure used in ComponentVideoInfoTable	
++/****************************************************************************/	
 +#define GPIO_PIN_ACTIVE_HIGH          0x1
 +
 +#define MAX_SUPPORTED_CV_STANDARDS    5
@@ -17182,8 +17843,9 @@ index 0000000..2e7dc6c
 +
 +#define ATOM_COMPONENT_VIDEO_INFO_LAST  ATOM_COMPONENT_VIDEO_INFO_V21
 +
-+/**************************************************************************/
-+//Object table starts here
++/****************************************************************************/	
++// Structure used in object_InfoTable
++/****************************************************************************/	
 +typedef struct _ATOM_OBJECT_HEADER
 +{ 
 +  ATOM_COMMON_TABLE_HEADER	sHeader;
@@ -17428,9 +18090,9 @@ index 0000000..2e7dc6c
 +#define ATOM_ROUTER_MUX_PIN_STATE_MASK								0x0f
 +#define ATOM_ROUTER_MUX_PIN_SINGLE_STATE_COMPLEMENT		0x01
 +
-+/**************************************************************************/
-+//ASIC voltage data table starts here
-+
++/****************************************************************************/	
++// ASIC voltage data table
++/****************************************************************************/	
 +typedef struct  _ATOM_VOLTAGE_INFO_HEADER
 +{
 +   USHORT   usVDDCBaseLevel;                //In number of 50mv unit
@@ -17656,13 +18318,16 @@ index 0000000..2e7dc6c
 +#define ATOM_S0_CV_DIN                  0x00002000L
 +#define ATOM_S0_CV_MASK                 (ATOM_S0_CV+ATOM_S0_CV_DIN)
 +
-+
 +#define ATOM_S0_DFP1                    0x00010000L
 +#define ATOM_S0_DFP2                    0x00020000L
 +#define ATOM_S0_LCD1                    0x00040000L
 +#define ATOM_S0_LCD2                    0x00080000L
 +#define ATOM_S0_TV2                     0x00100000L
 +#define ATOM_S0_DFP3										0x00200000L
++#define ATOM_S0_DFP4										0x00400000L
++#define ATOM_S0_DFP5										0x00800000L
++
++#define ATOM_S0_DFP_MASK                ATOM_S0_DFP1 | ATOM_S0_DFP2 | ATOM_S0_DFP3 | ATOM_S0_DFP4 | ATOM_S0_DFP5
 +
 +#define ATOM_S0_FAD_REGISTER_BUG        0x02000000L // If set, indicates we are running a PCIE asic with 
 +                                                    // the FAD/HDP reg access bug.  Bit is read by DAL
@@ -17720,7 +18385,6 @@ index 0000000..2e7dc6c
 +#define ATOM_S1_ROM_LOCATION_MASK       0x0000FFFFL
 +#define ATOM_S1_PCI_BUS_DEV_MASK        0xFFFF0000L
 +
-+     
 +//	BIOS_2_SCRATCH Definition
 +#define ATOM_S2_TV1_STANDARD_MASK       0x0000000FL
 +#define ATOM_S2_CURRENT_BL_LEVEL_MASK   0x0000FF00L
@@ -17736,12 +18400,14 @@ index 0000000..2e7dc6c
 +#define ATOM_S2_DFP2_DPMS_STATE         0x00800000L
 +#define ATOM_S2_CV_DPMS_STATE           0x01000000L
 +#define ATOM_S2_DFP3_DPMS_STATE					0x02000000L
++#define ATOM_S2_DFP4_DPMS_STATE					0x04000000L
++#define ATOM_S2_DFP5_DPMS_STATE					0x08000000L
++
++#define ATOM_S2_DFP_DPM_STATE           ATOM_S2_DFP1_DPMS_STATE | ATOM_S2_DFP2_DPMS_STATE | ATOM_S2_DFP3_DPMS_STATE | ATOM_S2_DFP4_DPMS_STATE | ATOM_S2_DFP5_DPMS_STATE
 +
 +#define ATOM_S2_DEVICE_DPMS_STATE       (ATOM_S2_CRT1_DPMS_STATE+ATOM_S2_LCD1_DPMS_STATE+ATOM_S2_TV1_DPMS_STATE+\
-+                                        ATOM_S2_DFP1I_DPMS_STATE+ATOM_S2_CRT2_DPMS_STATE+ATOM_S2_LCD2_DPMS_STATE+\
-+                                        ATOM_S2_TV2_DPMS_STATE+ATOM_S2_DFP1X_DPMS_STATE+ATOM_S2_CV_DPMS_STATE+\
-+                                        ATOM_S2_DFP3_DPMS_STATE)
-+
++                                        ATOM_S2_DFP_DPMS_STATE+ATOM_S2_CRT2_DPMS_STATE+ATOM_S2_LCD2_DPMS_STATE+\
++                                        ATOM_S2_TV2_DPMS_STATE+ATOM_S2_CV_DPMS_STATE
 +
 +#define ATOM_S2_FORCEDLOWPWRMODE_STATE_MASK       0x0C000000L
 +#define ATOM_S2_FORCEDLOWPWRMODE_STATE_MASK_SHIFT 26
@@ -17770,6 +18436,8 @@ index 0000000..2e7dc6c
 +#define ATOM_S2_DFP2_DPMS_STATEb2       0x80
 +#define ATOM_S2_CV_DPMS_STATEb3         0x01
 +#define ATOM_S2_DFP3_DPMS_STATEb3				0x02
++#define ATOM_S2_DFP4_DPMS_STATEb3				0x04
++#define ATOM_S2_DFP5_DPMS_STATEb3				0x08
 +
 +#define ATOM_S2_DEVICE_DPMS_MASKw1      0x3FF
 +#define ATOM_S2_FORCEDLOWPWRMODE_STATE_MASKb3     0x0C
@@ -17789,6 +18457,8 @@ index 0000000..2e7dc6c
 +#define ATOM_S3_DFP2_ACTIVE             0x00000080L
 +#define ATOM_S3_CV_ACTIVE               0x00000100L
 +#define ATOM_S3_DFP3_ACTIVE							0x00000200L
++#define ATOM_S3_DFP4_ACTIVE							0x00000400L
++#define ATOM_S3_DFP5_ACTIVE							0x00000800L
 +
 +#define ATOM_S3_DEVICE_ACTIVE_MASK      0x000003FFL
 +
@@ -17805,8 +18475,10 @@ index 0000000..2e7dc6c
 +#define ATOM_S3_DFP2_CRTC_ACTIVE        0x00800000L
 +#define ATOM_S3_CV_CRTC_ACTIVE          0x01000000L
 +#define ATOM_S3_DFP3_CRTC_ACTIVE				0x02000000L
++#define ATOM_S3_DFP4_CRTC_ACTIVE				0x04000000L
++#define ATOM_S3_DFP5_CRTC_ACTIVE				0x08000000L
 +
-+#define ATOM_S3_DEVICE_CRTC_ACTIVE_MASK 0x03FF0000L
++#define ATOM_S3_DEVICE_CRTC_ACTIVE_MASK 0x0FFF0000L
 +#define ATOM_S3_ASIC_GUI_ENGINE_HUNG    0x20000000L
 +#define ATOM_S3_ALLOW_FAST_PWR_SWITCH   0x40000000L
 +#define ATOM_S3_RQST_GPU_USE_MIN_PWR    0x80000000L
@@ -17822,8 +18494,10 @@ index 0000000..2e7dc6c
 +#define ATOM_S3_DFP2_ACTIVEb0           0x80
 +#define ATOM_S3_CV_ACTIVEb1             0x01
 +#define ATOM_S3_DFP3_ACTIVEb1						0x02
++#define ATOM_S3_DFP4_ACTIVEb1						0x04
++#define ATOM_S3_DFP5_ACTIVEb1						0x08
 +
-+#define ATOM_S3_ACTIVE_CRTC1w0          0x3FF
++#define ATOM_S3_ACTIVE_CRTC1w0          0xFFF
 +
 +#define ATOM_S3_CRT1_CRTC_ACTIVEb2      0x01
 +#define ATOM_S3_LCD1_CRTC_ACTIVEb2      0x02
@@ -17835,8 +18509,10 @@ index 0000000..2e7dc6c
 +#define ATOM_S3_DFP2_CRTC_ACTIVEb2      0x80
 +#define ATOM_S3_CV_CRTC_ACTIVEb3        0x01
 +#define ATOM_S3_DFP3_CRTC_ACTIVEb3			0x02
++#define ATOM_S3_DFP4_CRTC_ACTIVEb3			0x04
++#define ATOM_S3_DFP5_CRTC_ACTIVEb3			0x08
 +
-+#define ATOM_S3_ACTIVE_CRTC2w1          0x3FF
++#define ATOM_S3_ACTIVE_CRTC2w1          0xFFF
 +
 +#define ATOM_S3_ASIC_GUI_ENGINE_HUNGb3	0x20
 +#define ATOM_S3_ALLOW_FAST_PWR_SWITCHb3 0x40
@@ -17847,12 +18523,10 @@ index 0000000..2e7dc6c
 +#define ATOM_S4_LCD1_REFRESH_MASK       0x0000FF00L
 +#define ATOM_S4_LCD1_REFRESH_SHIFT      8
 +
-+
 +//Byte aligned defintion for BIOS usage
 +#define ATOM_S4_LCD1_PANEL_ID_MASKb0	  0x0FF
 +#define ATOM_S4_LCD1_REFRESH_MASKb1		  ATOM_S4_LCD1_PANEL_ID_MASKb0
 +#define ATOM_S4_VRAM_INFO_MASKb2        ATOM_S4_LCD1_PANEL_ID_MASKb0
-+
 +
 +// BIOS_5_SCRATCH Definition, BIOS_5_SCRATCH is used by Firmware only !!!!
 +#define ATOM_S5_DOS_REQ_CRT1b0          0x01
@@ -17865,6 +18539,8 @@ index 0000000..2e7dc6c
 +#define ATOM_S5_DOS_REQ_DFP2b0          0x80
 +#define ATOM_S5_DOS_REQ_CVb1            0x01
 +#define ATOM_S5_DOS_REQ_DFP3b1					0x02
++#define ATOM_S5_DOS_REQ_DFP4b1					0x04
++#define ATOM_S5_DOS_REQ_DFP5b1					0x08
 +
 +#define ATOM_S5_DOS_REQ_DEVICEw0        0x03FF
 +
@@ -17878,6 +18554,8 @@ index 0000000..2e7dc6c
 +#define ATOM_S5_DOS_REQ_DFP2            0x0080
 +#define ATOM_S5_DOS_REQ_CV              0x0100
 +#define ATOM_S5_DOS_REQ_DFP3						0x0200
++#define ATOM_S5_DOS_REQ_DFP4						0x0400
++#define ATOM_S5_DOS_REQ_DFP5						0x0800
 +
 +#define ATOM_S5_DOS_FORCE_CRT1b2        ATOM_S5_DOS_REQ_CRT1b0
 +#define ATOM_S5_DOS_FORCE_TV1b2         ATOM_S5_DOS_REQ_TV1b0
@@ -17905,7 +18583,6 @@ index 0000000..2e7dc6c
 +#define ATOM_S6_DISPLAY_STATE_CHANGE    0x00004000L        //This bit is recycled when ATOM_BIOS_INFO_BIOS_SCRATCH6_SCL2_REDEFINE is set,previously it's SCL2_H_expansion
 +#define ATOM_S6_I2C_STATE_CHANGE        0x00008000L        //This bit is recycled,when ATOM_BIOS_INFO_BIOS_SCRATCH6_SCL2_REDEFINE is set,previously it's SCL2_V_expansion
 +
-+
 +#define ATOM_S6_ACC_REQ_CRT1            0x00010000L
 +#define ATOM_S6_ACC_REQ_LCD1            0x00020000L
 +#define ATOM_S6_ACC_REQ_TV1             0x00040000L
@@ -17916,8 +18593,10 @@ index 0000000..2e7dc6c
 +#define ATOM_S6_ACC_REQ_DFP2            0x00800000L
 +#define ATOM_S6_ACC_REQ_CV              0x01000000L
 +#define ATOM_S6_ACC_REQ_DFP3						0x02000000L
++#define ATOM_S6_ACC_REQ_DFP4						0x04000000L
++#define ATOM_S6_ACC_REQ_DFP5						0x08000000L
 +
-+#define ATOM_S6_ACC_REQ_MASK                0x03FF0000L
++#define ATOM_S6_ACC_REQ_MASK                0x0FFF0000L
 +#define ATOM_S6_SYSTEM_POWER_MODE_CHANGE    0x10000000L
 +#define ATOM_S6_ACC_BLOCK_DISPLAY_SWITCH    0x20000000L
 +#define ATOM_S6_VRI_BRIGHTNESS_CHANGE       0x40000000L
@@ -17949,6 +18628,8 @@ index 0000000..2e7dc6c
 +#define ATOM_S6_ACC_REQ_DFP2b2          0x80
 +#define ATOM_S6_ACC_REQ_CVb3            0x01
 +#define ATOM_S6_ACC_REQ_DFP3b3					0x02
++#define ATOM_S6_ACC_REQ_DFP4b3					0x04
++#define ATOM_S6_ACC_REQ_DFP5b3					0x08
 +
 +#define ATOM_S6_ACC_REQ_DEVICEw1        ATOM_S5_DOS_REQ_DEVICEw0
 +#define ATOM_S6_SYSTEM_POWER_MODE_CHANGEb3 0x10
@@ -18223,7 +18904,7 @@ index 0000000..2e7dc6c
 +typedef struct _ATOM_STANDARD_VESA_TIMING
 +{
 +  ATOM_COMMON_TABLE_HEADER sHeader;  
-+  ATOM_MODE_TIMING				 aModeTimings[16];      // 16 is not the real array number, just for initial allocation
++  ATOM_DTD_FORMAT 				 aModeTimings[16];      // 16 is not the real array number, just for initial allocation
 +}ATOM_STANDARD_VESA_TIMING;
 +
 +
@@ -18302,6 +18983,11 @@ index 0000000..2e7dc6c
 +#define VALUE_SAME_AS_ABOVE     0
 +#define VALUE_MASK_DWORD        0x84
 +
++#define INDEX_ACCESS_RANGE_BEGIN	    (VALUE_DWORD + 1)
++#define INDEX_ACCESS_RANGE_END		    (INDEX_ACCESS_RANGE_BEGIN + 1)
++#define VALUE_INDEX_ACCESS_SINGLE	    (INDEX_ACCESS_RANGE_END + 1)
++
++
 +typedef struct _ATOM_MC_INIT_PARAM_TABLE
 +{ 
 +  ATOM_COMMON_TABLE_HEADER		sHeader;
@@ -18339,6 +19025,28 @@ index 0000000..2e7dc6c
 +
 +#define QIMONDA             INFINEON
 +#define PROMOS              MOSEL
++
++/////////////Support for GDDR5 MC uCode to reside in upper 64K of ROM/////////////
++
++#define UCODE_ROM_START_ADDRESS		0x1c000
++#define	UCODE_SIGNATURE			0x4375434d // 'MCuC' - MC uCode
++
++//uCode block header for reference
++
++typedef struct _MCuCodeHeader
++{
++  ULONG  ulSignature;
++  UCHAR  ucRevision;
++  UCHAR  ucChecksum;
++  UCHAR  ucReserved1;
++  UCHAR  ucReserved2;
++  USHORT usParametersLength;
++  USHORT usUCodeLength;
++  USHORT usReserved1;
++  USHORT usReserved2;
++} MCuCodeHeader;
++
++//////////////////////////////////////////////////////////////////////////////////
 +
 +#define ATOM_MAX_NUMBER_OF_VRAM_MODULE	16
 +
@@ -18396,6 +19104,42 @@ index 0000000..2e7dc6c
 +typedef	struct _ATOM_MEMORY_TIMING_FORMAT
 +{
 +	ULONG											 ulClkRange;				// memory clock in 10kHz unit, when target memory clock is below this clock, use this memory timing 	
++  union{
++	  USHORT										 usMRS;							// mode register						
++    USHORT                     usDDR3_MR0;
++  };
++  union{
++	  USHORT										 usEMRS;						// extended mode register
++    USHORT                     usDDR3_MR1;
++  };
++	UCHAR											 ucCL;							// CAS latency
++	UCHAR											 ucWL;							// WRITE Latency				
++	UCHAR											 uctRAS;						// tRAS
++	UCHAR											 uctRC;							// tRC	
++	UCHAR											 uctRFC;						// tRFC
++	UCHAR											 uctRCDR;						// tRCDR	
++	UCHAR											 uctRCDW;						// tRCDW
++	UCHAR											 uctRP;							// tRP
++	UCHAR											 uctRRD;						// tRRD	
++	UCHAR											 uctWR;							// tWR
++	UCHAR											 uctWTR;						// tWTR
++	UCHAR											 uctPDIX;						// tPDIX
++	UCHAR											 uctFAW;						// tFAW
++	UCHAR											 uctAOND;						// tAOND
++  union 
++  {
++    struct {
++	    UCHAR											 ucflag;						// flag to control memory timing calculation. bit0= control EMRS2 Infineon 
++	    UCHAR											 ucReserved;						
++    };
++    USHORT                   usDDR3_MR2;
++  };
++}ATOM_MEMORY_TIMING_FORMAT;
++
++
++typedef	struct _ATOM_MEMORY_TIMING_FORMAT_V1
++{
++	ULONG											 ulClkRange;				// memory clock in 10kHz unit, when target memory clock is below this clock, use this memory timing 	
 +	USHORT										 usMRS;							// mode register						
 +	USHORT										 usEMRS;						// extended mode register
 +	UCHAR											 ucCL;							// CAS latency
@@ -18413,16 +19157,31 @@ index 0000000..2e7dc6c
 +	UCHAR											 uctFAW;						// tFAW
 +	UCHAR											 uctAOND;						// tAOND
 +	UCHAR											 ucflag;						// flag to control memory timing calculation. bit0= control EMRS2 Infineon 
-+	UCHAR											 ucReserved;				// 
-+}ATOM_MEMORY_TIMING_FORMAT;
++////////////////////////////////////GDDR parameters///////////////////////////////////
++	UCHAR											 uctCCDL;						// 
++	UCHAR											 uctCRCRL;						// 
++	UCHAR											 uctCRCWL;						// 
++	UCHAR											 uctCKE;						// 
++	UCHAR											 uctCKRSE;						// 
++	UCHAR											 uctCKRSX;						// 
++	UCHAR											 uctFAW32;						// 
++	UCHAR											 ucReserved1;					// 
++	UCHAR											 ucReserved2;					// 
++	UCHAR											 ucTerminator;
++}ATOM_MEMORY_TIMING_FORMAT_V1;
 +
-+#define	MEM_TIMING_FLAG_APP_MODE								0x01									// =0 mid clock range  =1 high clock range
 +
 +typedef	struct _ATOM_MEMORY_FORMAT
 +{
 +	ULONG											 ulDllDisClock;			// memory DLL will be disable when target memory clock is below this clock
-+  USHORT                     usEMRS2Value;      // EMRS2 Value is used for GDDR2 and GDDR4 memory type
-+  USHORT                     usEMRS3Value;      // EMRS3 Value is used for GDDR2 and GDDR4 memory type
++  union{
++    USHORT                     usEMRS2Value;      // EMRS2 Value is used for GDDR2 and GDDR4 memory type
++    USHORT                     usDDR3_Reserved;   // Not used for DDR3 memory
++  };
++  union{
++    USHORT                     usEMRS3Value;      // EMRS3 Value is used for GDDR2 and GDDR4 memory type
++    USHORT                     usDDR3_MR3;        // Used for DDR3 memory
++  };
 +  UCHAR                      ucMemoryType;      // [7:4]=0x1:DDR1;=0x2:DDR2;=0x3:DDR3;=0x4:DDR4;[3:0] - must not be used for now;
 +  UCHAR                      ucMemoryVenderID;  // Predefined,never change across designs or memory type/vender. If not predefined, vendor detection table gets executed
 +  UCHAR                      ucRow;             // Number of Row,in power of 2;
@@ -18461,6 +19220,79 @@ index 0000000..2e7dc6c
 +
 +#define ATOM_VRAM_MODULE		 ATOM_VRAM_MODULE_V3
 +
++typedef struct _ATOM_VRAM_MODULE_V4
++{
++  ULONG	  ulChannelMapCfg;	                // board dependent parameter: Channel combination
++  USHORT  usModuleSize;                     // size of ATOM_VRAM_MODULE_V4, make it easy for VBIOS to look for next entry of VRAM_MODULE
++  USHORT  usPrivateReserved;                // BIOS internal reserved space to optimize code size, updated by the compiler, shouldn't be modified manually!!
++                                            // MC_ARB_RAMCFG (includes NOOFBANK,NOOFRANKS,NOOFROWS,NOOFCOLS)
++  USHORT  usReserved;
++  UCHAR   ucExtMemoryID;    		            // An external indicator (by hardcode, callback or pin) to tell what is the current memory module
++  UCHAR   ucMemoryType;                     // [7:4]=0x1:DDR1;=0x2:DDR2;=0x3:DDR3;=0x4:DDR4; 0x5:DDR5 [3:0] - Must be 0x0 for now;
++  UCHAR   ucChannelNum;                     // Number of channels present in this module config
++  UCHAR   ucChannelWidth;                   // 0 - 32 bits; 1 - 64 bits
++	UCHAR   ucDensity;                        // _8Mx32, _16Mx32, _16Mx16, _32Mx16
++	UCHAR	  ucFlag;						                // To enable/disable functionalities based on memory type
++	UCHAR	  ucMisc;						                // bit0: 0 - single rank; 1 - dual rank;   bit2: 0 - burstlength 4, 1 - burstlength 8
++  UCHAR		ucVREFI;                          // board dependent parameter
++  UCHAR   ucNPL_RT;                         // board dependent parameter:NPL round trip delay, used for calculate memory timing parameters
++  UCHAR		ucPreamble;                       // [7:4] Write Preamble, [3:0] Read Preamble
++  UCHAR   ucMemorySize;                     // BIOS internal reserved space to optimize code size, updated by the compiler, shouldn't be modified manually!!
++                                            // Total memory size in unit of 16MB for CONFIG_MEMSIZE - bit[23:0] zeros
++  UCHAR   ucReserved[3];
++
++//compare with V3, we flat the struct by merging ATOM_MEMORY_FORMAT (as is) into V4 as the same level
++  union{
++    USHORT	usEMRS2Value;                   // EMRS2 Value is used for GDDR2 and GDDR4 memory type
++    USHORT  usDDR3_Reserved;
++  };
++  union{
++    USHORT	usEMRS3Value;                   // EMRS3 Value is used for GDDR2 and GDDR4 memory type
++    USHORT  usDDR3_MR3;                     // Used for DDR3 memory
++  };  
++  UCHAR   ucMemoryVenderID;  		            // Predefined, If not predefined, vendor detection table gets executed
++  UCHAR	  ucRefreshRateFactor;              // [1:0]=RefreshFactor (00=8ms, 01=16ms, 10=32ms,11=64ms)
++  UCHAR   ucReserved2[2];
++  ATOM_MEMORY_TIMING_FORMAT  asMemTiming[5];//Memory Timing block sort from lower clock to higher clock
++}ATOM_VRAM_MODULE_V4;
++
++#define VRAM_MODULE_V4_MISC_RANK_MASK       0x3
++#define VRAM_MODULE_V4_MISC_DUAL_RANK       0x1
++#define VRAM_MODULE_V4_MISC_BL_MASK         0x4
++#define VRAM_MODULE_V4_MISC_BL8             0x4
++#define VRAM_MODULE_V4_MISC_DUAL_CS         0x10
++
++typedef struct _ATOM_VRAM_MODULE_V5
++{
++  ULONG	  ulChannelMapCfg;	                // board dependent parameter: Channel combination
++  USHORT  usModuleSize;                     // size of ATOM_VRAM_MODULE_V4, make it easy for VBIOS to look for next entry of VRAM_MODULE
++  USHORT  usPrivateReserved;                // BIOS internal reserved space to optimize code size, updated by the compiler, shouldn't be modified manually!!
++                                            // MC_ARB_RAMCFG (includes NOOFBANK,NOOFRANKS,NOOFROWS,NOOFCOLS)
++  USHORT  usReserved;
++  UCHAR   ucExtMemoryID;    		            // An external indicator (by hardcode, callback or pin) to tell what is the current memory module
++  UCHAR   ucMemoryType;                     // [7:4]=0x1:DDR1;=0x2:DDR2;=0x3:DDR3;=0x4:DDR4; 0x5:DDR5 [3:0] - Must be 0x0 for now;
++  UCHAR   ucChannelNum;                     // Number of channels present in this module config
++  UCHAR   ucChannelWidth;                   // 0 - 32 bits; 1 - 64 bits
++	UCHAR   ucDensity;                        // _8Mx32, _16Mx32, _16Mx16, _32Mx16
++	UCHAR	  ucFlag;						                // To enable/disable functionalities based on memory type
++	UCHAR	  ucMisc;						                // bit0: 0 - single rank; 1 - dual rank;   bit2: 0 - burstlength 4, 1 - burstlength 8
++  UCHAR		ucVREFI;                          // board dependent parameter
++  UCHAR   ucNPL_RT;                         // board dependent parameter:NPL round trip delay, used for calculate memory timing parameters
++  UCHAR		ucPreamble;                       // [7:4] Write Preamble, [3:0] Read Preamble
++  UCHAR   ucMemorySize;                     // BIOS internal reserved space to optimize code size, updated by the compiler, shouldn't be modified manually!!
++                                            // Total memory size in unit of 16MB for CONFIG_MEMSIZE - bit[23:0] zeros
++  UCHAR   ucReserved[3];
++
++//compare with V3, we flat the struct by merging ATOM_MEMORY_FORMAT (as is) into V4 as the same level
++  USHORT	usEMRS2Value;      		            // EMRS2 Value is used for GDDR2 and GDDR4 memory type
++  USHORT	usEMRS3Value;      		            // EMRS3 Value is used for GDDR2 and GDDR4 memory type
++  UCHAR   ucMemoryVenderID;  		            // Predefined, If not predefined, vendor detection table gets executed
++  UCHAR	  ucRefreshRateFactor;              // [1:0]=RefreshFactor (00=8ms, 01=16ms, 10=32ms,11=64ms)
++  UCHAR	  ucFIFODepth;			                // FIFO depth supposes to be detected during vendor detection, but if we dont do vendor detection we have to hardcode FIFO Depth
++  UCHAR   ucCDR_Bandwidth;		   // [0:3]=Read CDR bandwidth, [4:7] - Write CDR Bandwidth
++  ATOM_MEMORY_TIMING_FORMAT_V1  asMemTiming[5];//Memory Timing block sort from lower clock to higher clock
++}ATOM_VRAM_MODULE_V5;
++
 +typedef struct _ATOM_VRAM_INFO_V2
 +{
 +  ATOM_COMMON_TABLE_HEADER   sHeader;
@@ -18482,6 +19314,21 @@ index 0000000..2e7dc6c
 +}ATOM_VRAM_INFO_V3;
 +
 +#define	ATOM_VRAM_INFO_LAST	     ATOM_VRAM_INFO_V3
++
++typedef struct _ATOM_VRAM_INFO_V4
++{
++  ATOM_COMMON_TABLE_HEADER   sHeader;
++	USHORT										 usMemAdjustTblOffset;													 // offset of ATOM_INIT_REG_BLOCK structure for memory vendor specific MC adjust setting
++	USHORT										 usMemClkPatchTblOffset;												 //	offset of ATOM_INIT_REG_BLOCK structure for memory clock specific MC setting
++	USHORT										 usRerseved;
++	UCHAR           	         ucMemDQ7_0ByteRemap;													   // DQ line byte remap, =0: Memory Data line BYTE0, =1: BYTE1, =2: BYTE2, =3: BYTE3
++  ULONG                      ulMemDQ7_0BitRemap;                             // each DQ line ( 7~0) use 3bits, like: DQ0=Bit[2:0], DQ1:[5:3], ... DQ7:[23:21]
++  UCHAR                      ucReservde[4]; 
++  UCHAR                      ucNumOfVRAMModule;
++  ATOM_VRAM_MODULE_V4		     aVramInfo[ATOM_MAX_NUMBER_OF_VRAM_MODULE];      // just for allocation, real number of blocks is in ucNumOfVRAMModule;
++	ATOM_INIT_REG_BLOCK				 asMemPatch;																		 // for allocation
++																																						 //	ATOM_INIT_REG_BLOCK				 aMemAdjust;
++}ATOM_VRAM_INFO_V4;
 +
 +typedef struct _ATOM_VRAM_GPIO_DETECTION_INFO
 +{
@@ -18786,6 +19633,7 @@ index 0000000..2e7dc6c
 +#define ATOM_DP_ACTION_TRAINING_PATTERN_SEL				0x04
 +#define ATOM_DP_ACTION_SET_VSWING_PREEMP					0x05
 +#define ATOM_DP_ACTION_GET_VSWING_PREEMP					0x06
++#define ATOM_DP_ACTION_BLANKING                   0x07
 +
 +// ucConfig
 +#define ATOM_DP_CONFIG_ENCODER_SEL_MASK						0x03
@@ -19301,17 +20149,6 @@ index 0000000..2e7dc6c
 +#define ENABLE_LVDS_SS_PARAMETERS_V3  ENABLE_SPREAD_SPECTRUM_ON_PPLL  
 +
 +/*********************************************************************************/
-+#define ATOM_S3_SCALER2_ACTIVE_H          0x00004000L
-+#define ATOM_S3_SCALER2_ACTIVE_V          0x00008000L
-+#define ATOM_S6_REQ_SCALER2_H             0x00004000L
-+#define ATOM_S6_REQ_SCALER2_V             0x00008000L
-+ 
-+#define ATOM_S3_SCALER1_ACTIVE_H          ATOM_S3_LCD_FULLEXPANSION_ACTIVE
-+#define ATOM_S3_SCALER1_ACTIVE_V          ATOM_S3_LCD_EXPANSION_ASPEC_RATIO_ACTIVE
-+ 
-+#define ATOM_S6_REQ_SCALER1_H             ATOM_S6_REQ_LCD_EXPANSION_FULL
-+#define ATOM_S6_REQ_SCALER1_V             ATOM_S6_REQ_LCD_EXPANSION_ASPEC_RATIO
-+//==========================================================================================
 +
 +#pragma pack() // BIOS data must use byte aligment
 +
@@ -22928,10 +23765,10 @@ index 0000000..107a081
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_connectors.c b/drivers/gpu/drm/radeon/radeon_connectors.c
 new file mode 100644
-index 0000000..18873f0
+index 0000000..be1dbae
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/radeon_connectors.c
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,392 @@
 +/*
 + * Copyright 2007-8 Advanced Micro Devices, Inc.
 + * Copyright 2008 Red Hat Inc.
@@ -23011,6 +23848,22 @@ index 0000000..18873f0
 +	return mode;
 +}
 +
++int radeon_connector_set_property(struct drm_connector *connector, struct drm_property *property,
++				  uint64_t val)
++{
++	struct drm_device *dev = connector->dev;
++		
++	if (property == dev->mode_config.dpms_property) {
++		if (val > 3)
++			return -EINVAL;
++		
++		drm_helper_set_connector_dpms(connector, val);
++
++	}
++	return 0;
++}
++
++
 +static int radeon_lvds_get_modes(struct drm_connector *connector)
 +{
 +	struct radeon_connector *radeon_connector = to_radeon_connector(connector);
@@ -23080,6 +23933,7 @@ index 0000000..18873f0
 +	.detect = radeon_lvds_detect,
 +	.fill_modes = drm_helper_probe_single_connector_modes,
 +	.destroy = radeon_connector_destroy,
++	.set_property = radeon_connector_set_property,
 +};
 +
 +static int radeon_vga_get_modes(struct drm_connector *connector)
@@ -23131,6 +23985,7 @@ index 0000000..18873f0
 +	.detect = radeon_vga_detect,
 +	.fill_modes = drm_helper_probe_single_connector_modes,
 +	.destroy = radeon_connector_destroy,
++	.set_property = radeon_connector_set_property,
 +};
 +
 +
@@ -23223,6 +24078,7 @@ index 0000000..18873f0
 +struct drm_connector_funcs radeon_dvi_connector_funcs = {
 +	.detect = radeon_dvi_detect,
 +	.fill_modes = drm_helper_probe_single_connector_modes,
++	.set_property = radeon_connector_set_property,
 +	.destroy = radeon_connector_destroy,
 +};
 +
@@ -23306,7 +24162,7 @@ index 0000000..18873f0
 +	return NULL;
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_cp.c b/drivers/gpu/drm/radeon/radeon_cp.c
-index 59a2132..f3810bc 100644
+index 59a2132..819c6a3 100644
 --- a/drivers/gpu/drm/radeon/radeon_cp.c
 +++ b/drivers/gpu/drm/radeon/radeon_cp.c
 @@ -31,6 +31,7 @@
@@ -23442,7 +24298,9 @@ index 59a2132..f3810bc 100644
 +		RADEON_WRITE(RADEON_BUS_CNTL, tmp);
 +	} /* PCIE cards appears to not need this */
 +}
-+
+ 
+-	RADEON_WRITE8(RADEON_CLOCK_CNTL_INDEX, addr & 0x1f);
+-	return RADEON_READ(RADEON_CLOCK_CNTL_DATA);
 +void radeon_pll_errata_after_index(struct drm_radeon_private *dev_priv)
 +{
 +	if (!(dev_priv->pll_errata & CHIP_ERRATA_PLL_DUMMYREADS))
@@ -23479,9 +24337,7 @@ index 59a2132..f3810bc 100644
 +u32 RADEON_READ_PLL(struct drm_radeon_private *dev_priv, int addr)
 +{
 +	uint32_t data;
- 
--	RADEON_WRITE8(RADEON_CLOCK_CNTL_INDEX, addr & 0x1f);
--	return RADEON_READ(RADEON_CLOCK_CNTL_DATA);
++
 +	RADEON_WRITE8(RADEON_CLOCK_CNTL_INDEX, addr & 0x3f);
 +	radeon_pll_errata_after_index(dev_priv);
 +	data = RADEON_READ(RADEON_CLOCK_CNTL_DATA);
@@ -23717,23 +24573,23 @@ index 59a2132..f3810bc 100644
 +
 +	dev_priv->scratch[1] = 0;
 +	RADEON_WRITE(RADEON_LAST_DISPATCH_REG, 0);
-+
-+	dev_priv->scratch[2] = 0;
-+	RADEON_WRITE(RADEON_LAST_CLEAR_REG, 0);
  
 -	dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
 -	RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
-+	dev_priv->scratch[3] = 0;
-+	RADEON_WRITE(RADEON_LAST_SWI_REG, 0);
++	dev_priv->scratch[2] = 0;
++	RADEON_WRITE(RADEON_LAST_CLEAR_REG, 0);
  
 -	dev_priv->sarea_priv->last_dispatch = dev_priv->scratch[1] = 0;
 -	RADEON_WRITE(RADEON_LAST_DISPATCH_REG,
 -		     dev_priv->sarea_priv->last_dispatch);
-+	dev_priv->scratch[4] = 0;
-+	RADEON_WRITE(RADEON_SCRATCH_REG4, 0);
++	dev_priv->scratch[3] = 0;
++	RADEON_WRITE(RADEON_LAST_SWI_REG, 0);
  
 -	dev_priv->sarea_priv->last_clear = dev_priv->scratch[2] = 0;
 -	RADEON_WRITE(RADEON_LAST_CLEAR_REG, dev_priv->sarea_priv->last_clear);
++	dev_priv->scratch[4] = 0;
++	RADEON_WRITE(RADEON_SCRATCH_REG4, 0);
++
 +	dev_priv->scratch[6] = 0;
 +	RADEON_WRITE(RADEON_SCRATCH_REG6, 0);
  
@@ -23947,7 +24803,17 @@ index 59a2132..f3810bc 100644
  #if __OS_HAS_AGP
  	if (dev_priv->flags & RADEON_IS_AGP) {
  		drm_core_ioremap(dev_priv->cp_ring, dev);
-@@ -1167,28 +1345,41 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
+@@ -1151,8 +1329,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
+ 	dev_priv->ring.rptr_update = /* init->rptr_update */ 4096;
+ 	dev_priv->ring.rptr_update_l2qw = drm_order( /* init->rptr_update */ 4096 / 8);
+ 
+-	dev_priv->ring.fetch_size = /* init->fetch_size */ 32;
+-	dev_priv->ring.fetch_size_l2ow = drm_order( /* init->fetch_size */ 32 / 16);
++	dev_priv->ring.fetch_size_l2ow = 2;
+ 	dev_priv->ring.tail_mask = (dev_priv->ring.size / sizeof(u32)) - 1;
+ 
+ 	dev_priv->ring.high_mark = RADEON_RING_HIGH_MARK;
+@@ -1167,28 +1344,41 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
  		dev_priv->gart_info.table_mask = DMA_BIT_MASK(32);
  		/* if we have an offset set from userspace */
  		if (dev_priv->pcigart_offset_set) {
@@ -24009,7 +24875,7 @@ index 59a2132..f3810bc 100644
  			if (dev_priv->flags & RADEON_IS_IGPGART)
  				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_IGP;
  			else
-@@ -1197,12 +1388,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
+@@ -1197,12 +1387,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
  			    DRM_ATI_GART_MAIN;
  			dev_priv->gart_info.addr = NULL;
  			dev_priv->gart_info.bus_addr = 0;
@@ -24023,7 +24889,7 @@ index 59a2132..f3810bc 100644
  		}
  
  		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
-@@ -1215,6 +1401,9 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
+@@ -1215,6 +1400,9 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
  		radeon_set_pcigart(dev_priv, 1);
  	}
  
@@ -24033,7 +24899,7 @@ index 59a2132..f3810bc 100644
  	radeon_cp_load_microcode(dev_priv);
  	radeon_cp_init_ring_buffer(dev, dev_priv);
  
-@@ -1259,14 +1448,16 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
+@@ -1259,14 +1447,16 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
  		if (dev_priv->gart_info.bus_addr) {
  			/* Turn off PCI GART */
  			radeon_set_pcigart(dev_priv, 0);
@@ -24054,7 +24920,7 @@ index 59a2132..f3810bc 100644
  		}
  	}
  	/* only clear to the start of flags */
-@@ -1318,6 +1509,10 @@ static int radeon_do_resume_cp(struct drm_device * dev)
+@@ -1318,6 +1508,10 @@ static int radeon_do_resume_cp(struct drm_device * dev)
  int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_priv)
  {
  	drm_radeon_init_t *init = data;
@@ -24065,7 +24931,7 @@ index 59a2132..f3810bc 100644
  
  	LOCK_TEST_WITH_RETURN(dev, file_priv);
  
-@@ -1328,7 +1523,7 @@ int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_pri
+@@ -1328,7 +1522,7 @@ int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_pri
  	case RADEON_INIT_CP:
  	case RADEON_INIT_R200_CP:
  	case RADEON_INIT_R300_CP:
@@ -24074,7 +24940,7 @@ index 59a2132..f3810bc 100644
  	case RADEON_CLEANUP_CP:
  		return radeon_do_cleanup_cp(dev);
  	}
-@@ -1341,6 +1536,9 @@ int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *file_pr
+@@ -1341,6 +1535,9 @@ int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *file_pr
  	drm_radeon_private_t *dev_priv = dev->dev_private;
  	DRM_DEBUG("\n");
  
@@ -24084,7 +24950,7 @@ index 59a2132..f3810bc 100644
  	LOCK_TEST_WITH_RETURN(dev, file_priv);
  
  	if (dev_priv->cp_running) {
-@@ -1368,6 +1566,9 @@ int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_pri
+@@ -1368,6 +1565,9 @@ int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_pri
  	int ret;
  	DRM_DEBUG("\n");
  
@@ -24094,7 +24960,7 @@ index 59a2132..f3810bc 100644
  	LOCK_TEST_WITH_RETURN(dev, file_priv);
  
  	if (!dev_priv->cp_running)
-@@ -1406,6 +1607,9 @@ void radeon_do_release(struct drm_device * dev)
+@@ -1406,6 +1606,9 @@ void radeon_do_release(struct drm_device * dev)
  	drm_radeon_private_t *dev_priv = dev->dev_private;
  	int i, ret;
  
@@ -24104,7 +24970,7 @@ index 59a2132..f3810bc 100644
  	if (dev_priv) {
  		if (dev_priv->cp_running) {
  			/* Stop the cp */
-@@ -1439,6 +1643,9 @@ void radeon_do_release(struct drm_device * dev)
+@@ -1439,6 +1642,9 @@ void radeon_do_release(struct drm_device * dev)
  		radeon_mem_takedown(&(dev_priv->gart_heap));
  		radeon_mem_takedown(&(dev_priv->fb_heap));
  
@@ -24114,7 +24980,7 @@ index 59a2132..f3810bc 100644
  		/* deallocate kernel resources */
  		radeon_do_cleanup_cp(dev);
  	}
-@@ -1451,6 +1658,9 @@ int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_pr
+@@ -1451,6 +1657,9 @@ int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_pr
  	drm_radeon_private_t *dev_priv = dev->dev_private;
  	DRM_DEBUG("\n");
  
@@ -24124,7 +24990,7 @@ index 59a2132..f3810bc 100644
  	LOCK_TEST_WITH_RETURN(dev, file_priv);
  
  	if (!dev_priv) {
-@@ -1471,7 +1681,9 @@ int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_pri
+@@ -1471,7 +1680,9 @@ int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_pri
  	drm_radeon_private_t *dev_priv = dev->dev_private;
  	DRM_DEBUG("\n");
  
@@ -24135,7 +25001,7 @@ index 59a2132..f3810bc 100644
  
  	return radeon_do_cp_idle(dev_priv);
  }
-@@ -1481,6 +1693,9 @@ int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_pri
+@@ -1481,6 +1692,9 @@ int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_pri
  int radeon_cp_resume(struct drm_device *dev, void *data, struct drm_file *file_priv)
  {
  
@@ -24145,7 +25011,7 @@ index 59a2132..f3810bc 100644
  	return radeon_do_resume_cp(dev);
  }
  
-@@ -1488,6 +1703,9 @@ int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_file *fil
+@@ -1488,6 +1702,9 @@ int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_file *fil
  {
  	DRM_DEBUG("\n");
  
@@ -24155,7 +25021,7 @@ index 59a2132..f3810bc 100644
  	LOCK_TEST_WITH_RETURN(dev, file_priv);
  
  	return radeon_do_engine_reset(dev);
-@@ -1710,6 +1928,713 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
+@@ -1710,6 +1927,715 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
  	return ret;
  }
  
@@ -24753,8 +25619,7 @@ index 59a2132..f3810bc 100644
 +	dev_priv->ring.size_l2qw = drm_order(dev_priv->ring.size / 8);
 +	dev_priv->ring.rptr_update = 4096;
 +	dev_priv->ring.rptr_update_l2qw = drm_order(4096 / 8);
-+	dev_priv->ring.fetch_size = 32;
-+	dev_priv->ring.fetch_size_l2ow = drm_order(32 / 16);
++	dev_priv->ring.fetch_size_l2ow = 2; /* do what tcore does */
 +	dev_priv->ring.tail_mask = (dev_priv->ring.size / sizeof(u32)) - 1;
 +	dev_priv->ring.high_mark = RADEON_RING_HIGH_MARK;
 +
@@ -24762,6 +25627,9 @@ index 59a2132..f3810bc 100644
 +
 +	r300_init_reg_flags(dev);
 +
++	/* turn off HDP read cache for now */
++	RADEON_WRITE(RADEON_HOST_PATH_CNTL, RADEON_READ(RADEON_HOST_PATH_CNTL) | RADEON_HP_LIN_RD_CACHE_DIS);
++	      
 +#if __OS_HAS_AGP
 +	if (dev_priv->flags & RADEON_IS_AGP)
 +		radeon_modeset_agp_init(dev);
@@ -24869,7 +25737,7 @@ index 59a2132..f3810bc 100644
  int radeon_driver_load(struct drm_device *dev, unsigned long flags)
  {
  	drm_radeon_private_t *dev_priv;
-@@ -1723,6 +2648,8 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
+@@ -1723,6 +2649,8 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
  	dev->dev_private = (void *)dev_priv;
  	dev_priv->flags = flags;
  
@@ -24878,7 +25746,7 @@ index 59a2132..f3810bc 100644
  	switch (flags & RADEON_FAMILY_MASK) {
  	case CHIP_R100:
  	case CHIP_RV200:
-@@ -1743,6 +2670,18 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
+@@ -1743,6 +2671,18 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
  		break;
  	}
  
@@ -24897,7 +25765,7 @@ index 59a2132..f3810bc 100644
  	if (drm_device_is_agp(dev))
  		dev_priv->flags |= RADEON_IS_AGP;
  	else if (drm_device_is_pcie(dev))
-@@ -1752,7 +2691,119 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
+@@ -1752,33 +2692,130 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
  
  	DRM_DEBUG("%s card detected\n",
  		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
@@ -24964,13 +25832,13 @@ index 59a2132..f3810bc 100644
 +	}
 +
 +
- 	return ret;
++	return ret;
 +modeset_fail:
 +	dev->driver->driver_features &= ~DRIVER_MODESET;
 +	drm_put_minor(&dev->control);
-+	return ret;
-+}
-+
+ 	return ret;
+ }
+ 
 +int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 +{
 +	struct drm_radeon_master_private *master_priv;
@@ -25014,10 +25882,10 @@ index 59a2132..f3810bc 100644
 +	drm_free(master_priv, sizeof(*master_priv), DRM_MEM_DRIVER);
 +
 +	master->driver_priv = NULL;
- }
- 
++}
++
  /* Create mappings for registers and framebuffer so userland doesn't necessarily
-@@ -1760,25 +2811,10 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
+  * have to find them.
   */
  int radeon_driver_firstopen(struct drm_device *dev)
  {
@@ -25043,7 +25911,7 @@ index 59a2132..f3810bc 100644
  	return 0;
  }
  
-@@ -1786,9 +2822,44 @@ int radeon_driver_unload(struct drm_device *dev)
+@@ -1786,9 +2823,76 @@ int radeon_driver_unload(struct drm_device *dev)
  {
  	drm_radeon_private_t *dev_priv = dev->dev_private;
  
@@ -25087,6 +25955,38 @@ index 59a2132..f3810bc 100644
 +
 +	}
 +	
++}
++
++void radeon_commit_ring(drm_radeon_private_t *dev_priv)
++{
++	int i;
++	u32 *ring;
++	int tail_aligned;
++
++	/* check if the ring is padded out to 16-dword alignment */
++	
++	tail_aligned = dev_priv->ring.tail & 0xf;
++	if (tail_aligned) {
++		int num_p2 = 16 - tail_aligned;
++
++		ring = dev_priv->ring.start;
++		/* pad with some CP_PACKET2 */
++		for (i = 0; i < num_p2; i++)
++			ring[dev_priv->ring.tail + i] = CP_PACKET2();
++	
++		dev_priv->ring.tail += i;
++
++		dev_priv->ring.space -= num_p2 * sizeof(u32);
++	}
++
++	dev_priv->ring.tail &= dev_priv->ring.tail_mask;
++		
++	DRM_MEMORYBARRIER();
++	GET_RING_HEAD( dev_priv );
++
++	RADEON_WRITE( RADEON_CP_RB_WPTR, dev_priv->ring.tail );
++	/* read from PCI bus to ensure correct posting */
++	RADEON_READ( RADEON_CP_RB_RPTR );
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_cs.c b/drivers/gpu/drm/radeon/radeon_cs.c
 new file mode 100644
@@ -25705,10 +26605,10 @@ index 0000000..302dd93
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_cursor.c b/drivers/gpu/drm/radeon/radeon_cursor.c
 new file mode 100644
-index 0000000..d352d10
+index 0000000..fbd4143
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/radeon_cursor.c
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,247 @@
 +/*
 + * Copyright 2007-8 Advanced Micro Devices, Inc.
 + * Copyright 2008 Red Hat Inc.
@@ -25915,6 +26815,10 @@ index 0000000..d352d10
 +
 +	radeon_lock_cursor(crtc, true);
 +	if (radeon_is_avivo(dev_priv)) {
++		/* avivo cursor are offset into the total surface */
++		x += crtc->x;
++		y += crtc->y;
++		DRM_DEBUG("x %d y %d c->x %d c->y %d\n", x, y, crtc->x, crtc->y);
 +		RADEON_WRITE(AVIVO_D1CUR_POSITION + radeon_crtc->crtc_offset,
 +			     ((xorigin ? 0: x) << 16) |
 +			     (yorigin ? 0 : y));
@@ -26678,7 +27582,7 @@ index 0000000..46baf45
 +	drm_mode_config_cleanup(dev);
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_drv.c b/drivers/gpu/drm/radeon/radeon_drv.c
-index 71af746..50e2234 100644
+index 71af746..ddb291b 100644
 --- a/drivers/gpu/drm/radeon/radeon_drv.c
 +++ b/drivers/gpu/drm/radeon/radeon_drv.c
 @@ -35,53 +35,72 @@
@@ -26802,7 +27706,7 @@ index 71af746..50e2234 100644
  	.name = DRIVER_NAME,
  	.desc = DRIVER_DESC,
  	.date = DRIVER_DATE,
-@@ -134,6 +162,23 @@ static struct drm_driver driver = {
+@@ -134,6 +162,26 @@ static struct drm_driver driver = {
  static int __init radeon_init(void)
  {
  	driver.num_ioctls = radeon_max_ioctl;
@@ -26812,6 +27716,9 @@ index 71af746..50e2234 100644
 +	driver.driver_features |= DRIVER_MODESET;
 +	if (radeon_modeset == 0)
 +		driver.driver_features &= ~DRIVER_MODESET;
++#else
++	if (radeon_modeset == -1)
++		radeon_modeset = 0;
 +#endif
 +	if (radeon_modeset == 1)
 +		driver.driver_features |= DRIVER_MODESET;
@@ -26827,7 +27734,7 @@ index 71af746..50e2234 100644
  }
  
 diff --git a/drivers/gpu/drm/radeon/radeon_drv.h b/drivers/gpu/drm/radeon/radeon_drv.h
-index 4dbb813..57d4aab 100644
+index 4dbb813..ab47d3f 100644
 --- a/drivers/gpu/drm/radeon/radeon_drv.h
 +++ b/drivers/gpu/drm/radeon/radeon_drv.h
 @@ -34,6 +34,8 @@
@@ -26917,7 +27824,15 @@ index 4dbb813..57d4aab 100644
  
  typedef struct drm_radeon_freelist {
  	unsigned int age;
-@@ -226,14 +265,87 @@ struct radeon_virt_surface {
+@@ -180,7 +219,6 @@ typedef struct drm_radeon_ring_buffer {
+ 	int rptr_update; /* Double Words */
+ 	int rptr_update_l2qw; /* log2 Quad Words */
+ 
+-	int fetch_size; /* Double Words */
+ 	int fetch_size_l2ow; /* log2 Oct Words */
+ 
+ 	u32 tail;
+@@ -226,14 +264,89 @@ struct radeon_virt_surface {
  #define RADEON_FLUSH_EMITED	(1 < 0)
  #define RADEON_PURGE_EMITED	(1 < 1)
  
@@ -26935,6 +27850,8 @@ index 4dbb813..57d4aab 100644
 +	
 +	uint64_t gart_start;
 +	uint64_t gart_size;
++
++	uint64_t gart_useable;
 +
 +	void *pcie_table_backup;
 +	
@@ -26962,7 +27879,7 @@ index 4dbb813..57d4aab 100644
 +	uint32_t __user *chunk_data;
 +	uint32_t *kdata;
 +};
- 
++
 +struct drm_radeon_cs_parser {
 +	struct drm_device *dev;
 +	struct drm_file *file_priv;
@@ -26994,7 +27911,7 @@ index 4dbb813..57d4aab 100644
 +	int (*relocate)(struct drm_radeon_cs_parser *parser,
 +			uint32_t *reloc, uint32_t *offset);
 +};
-+
+ 
 +
 +
 +struct radeon_pm_regs {
@@ -27010,7 +27927,7 @@ index 4dbb813..57d4aab 100644
  	int gart_size;
  	u32 gart_vm_start;
  	unsigned long gart_buffers_offset;
-@@ -249,8 +361,6 @@ typedef struct drm_radeon_private {
+@@ -249,8 +362,6 @@ typedef struct drm_radeon_private {
  
  	int usec_timeout;
  
@@ -27019,7 +27936,7 @@ index 4dbb813..57d4aab 100644
  	struct {
  		u32 boxes;
  		int freelist_timeouts;
-@@ -286,8 +396,6 @@ typedef struct drm_radeon_private {
+@@ -286,8 +397,6 @@ typedef struct drm_radeon_private {
  	unsigned long buffers_offset;
  	unsigned long gart_textures_offset;
  
@@ -27028,7 +27945,7 @@ index 4dbb813..57d4aab 100644
  	drm_local_map_t *cp_ring;
  	drm_local_map_t *ring_rptr;
  	drm_local_map_t *gart_textures;
-@@ -296,8 +404,8 @@ typedef struct drm_radeon_private {
+@@ -296,8 +405,8 @@ typedef struct drm_radeon_private {
  	struct mem_block *fb_heap;
  
  	/* SW interrupt */
@@ -27038,7 +27955,7 @@ index 4dbb813..57d4aab 100644
  	int vblank_crtc;
  	uint32_t irq_enable_reg;
  	int irq_enabled;
-@@ -306,9 +414,6 @@ typedef struct drm_radeon_private {
+@@ -306,9 +415,6 @@ typedef struct drm_radeon_private {
  	struct radeon_surface surfaces[RADEON_MAX_SURFACES];
  	struct radeon_virt_surface virt_surfaces[2 * RADEON_MAX_SURFACES];
  
@@ -27048,7 +27965,7 @@ index 4dbb813..57d4aab 100644
  
  	u32 scratch_ages[5];
  
-@@ -318,6 +423,44 @@ typedef struct drm_radeon_private {
+@@ -318,6 +424,44 @@ typedef struct drm_radeon_private {
  
  	int num_gb_pipes;
  	int track_flush;
@@ -27093,7 +28010,7 @@ index 4dbb813..57d4aab 100644
  } drm_radeon_private_t;
  
  typedef struct drm_radeon_buf_priv {
-@@ -332,8 +475,12 @@ typedef struct drm_radeon_kcmd_buffer {
+@@ -332,8 +476,12 @@ typedef struct drm_radeon_kcmd_buffer {
  } drm_radeon_kcmd_buffer_t;
  
  extern int radeon_no_wb;
@@ -27106,7 +28023,7 @@ index 4dbb813..57d4aab 100644
  
  /* Check whether the given hardware address is inside the framebuffer or the
   * GART area.
-@@ -367,12 +514,9 @@ extern struct drm_buf *radeon_freelist_get(struct drm_device * dev);
+@@ -367,12 +515,9 @@ extern struct drm_buf *radeon_freelist_get(struct drm_device * dev);
  
  extern int radeon_wait_ring(drm_radeon_private_t * dev_priv, int n);
  
@@ -27120,7 +28037,7 @@ index 4dbb813..57d4aab 100644
  extern int radeon_mem_alloc(struct drm_device *dev, void *data, struct drm_file *file_priv);
  extern int radeon_mem_free(struct drm_device *dev, void *data, struct drm_file *file_priv);
  extern int radeon_mem_init_heap(struct drm_device *dev, void *data, struct drm_file *file_priv);
-@@ -400,16 +544,19 @@ extern int radeon_vblank_crtc_set(struct drm_device *dev, int64_t value);
+@@ -400,16 +545,19 @@ extern int radeon_vblank_crtc_set(struct drm_device *dev, int64_t value);
  extern int radeon_driver_load(struct drm_device *dev, unsigned long flags);
  extern int radeon_driver_unload(struct drm_device *dev);
  extern int radeon_driver_firstopen(struct drm_device *dev);
@@ -27144,7 +28061,7 @@ index 4dbb813..57d4aab 100644
  /* r300_cmdbuf.c */
  extern void r300_init_reg_flags(struct drm_device *dev);
  
-@@ -417,6 +564,11 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -417,6 +565,11 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  			     struct drm_file *file_priv,
  			     drm_radeon_kcmd_buffer_t *cmdbuf);
  
@@ -27156,7 +28073,7 @@ index 4dbb813..57d4aab 100644
  /* Flags for stats.boxes
   */
  #define RADEON_BOX_DMA_IDLE      0x1
-@@ -425,10 +577,14 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -425,10 +578,14 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_BOX_WAIT_IDLE     0x8
  #define RADEON_BOX_TEXTURE_LOAD  0x10
  
@@ -27171,7 +28088,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_AGP_COMMAND		0x0f60
  #define RADEON_AGP_COMMAND_PCI_CONFIG   0x0060	/* offset in PCI config */
  #	define RADEON_AGP_ENABLE	(1<<8)
-@@ -447,12 +603,12 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -447,12 +604,12 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
   * handling, not bus mastering itself.
   */
  #define RADEON_BUS_CNTL			0x0030
@@ -27189,7 +28106,7 @@ index 4dbb813..57d4aab 100644
  
  #define RADEON_BUS_CNTL1		0x0034
  #	define RADEON_PMI_BM_DIS		(1 << 2)
-@@ -554,16 +710,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -554,16 +711,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define R520_MC_IND_WR_EN (1 << 24)
  #define R520_MC_IND_DATA  0x74
  
@@ -27206,7 +28123,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_MPP_TB_CONFIG		0x01c0
  #define RADEON_MEM_CNTL			0x0140
  #define RADEON_MEM_SDRAM_MODE_REG	0x0158
-@@ -628,14 +774,23 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -628,14 +775,23 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_SCRATCH_REG3		0x15ec
  #define RADEON_SCRATCH_REG4		0x15f0
  #define RADEON_SCRATCH_REG5		0x15f4
@@ -27233,7 +28150,7 @@ index 4dbb813..57d4aab 100644
  
  #define RADEON_GEN_INT_CNTL		0x0040
  #	define RADEON_CRTC_VBLANK_MASK		(1 << 0)
-@@ -654,10 +809,11 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -654,10 +810,13 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #	define RADEON_SW_INT_FIRE		(1 << 26)
  #       define R500_DISPLAY_INT_STATUS          (1 << 0)
  
@@ -27242,14 +28159,16 @@ index 4dbb813..57d4aab 100644
 -#	define RADEON_HDP_WC_TIMEOUT_MASK	(7 << 28)
 -#	define RADEON_HDP_WC_TIMEOUT_28BCLK	(7 << 28)
 +#define RADEON_HOST_PATH_CNTL               0x0130
-+#       define RADEON_HDP_SOFT_RESET        (1 << 26)
 +#       define RADEON_HDP_APER_CNTL         (1 << 23)
++#       define RADEON_HP_LIN_RD_CACHE_DIS   (1 << 24)
++#       define RADEON_HDP_SOFT_RESET        (1 << 26)
++#       define RADEON_HDP_READ_BUFFER_INVALIDATED (1 << 27)
 +
 +#define RADEON_NB_TOM                       0x15c
  
  #define RADEON_ISYNC_CNTL		0x1724
  #	define RADEON_ISYNC_ANY2D_IDLE3D	(1 << 0)
-@@ -696,12 +852,17 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -696,12 +855,17 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_PP_TXFILTER_1		0x1c6c
  #define RADEON_PP_TXFILTER_2		0x1c84
  
@@ -27273,7 +28192,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_RB3D_CNTL		0x1c3c
  #	define RADEON_ALPHA_BLEND_ENABLE	(1 << 0)
  #	define RADEON_PLANE_MASK_ENABLE		(1 << 1)
-@@ -728,11 +889,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -728,11 +892,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #	define R300_ZC_FLUSH		        (1 << 0)
  #	define R300_ZC_FREE		        (1 << 1)
  #	define R300_ZC_BUSY		        (1 << 31)
@@ -27285,7 +28204,7 @@ index 4dbb813..57d4aab 100644
  #define R300_RB3D_DSTCACHE_CTLSTAT              0x4e4c
  #	define R300_RB3D_DC_FLUSH		(2 << 0)
  #	define R300_RB3D_DC_FREE		(2 << 2)
-@@ -740,15 +896,15 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -740,15 +899,15 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_RB3D_ZSTENCILCNTL	0x1c2c
  #	define RADEON_Z_TEST_MASK		(7 << 4)
  #	define RADEON_Z_TEST_ALWAYS		(7 << 4)
@@ -27305,7 +28224,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_RBBM_SOFT_RESET		0x00f0
  #	define RADEON_SOFT_RESET_CP		(1 <<  0)
  #	define RADEON_SOFT_RESET_HI		(1 <<  1)
-@@ -937,7 +1093,7 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -937,7 +1096,7 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  
  #define RADEON_AIC_CNTL			0x01d0
  #	define RADEON_PCIGART_TRANSLATE_EN	(1 << 0)
@@ -27314,7 +28233,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_AIC_STAT			0x01d4
  #define RADEON_AIC_PT_BASE		0x01d8
  #define RADEON_AIC_LO_ADDR		0x01dc
-@@ -1009,27 +1165,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -1009,27 +1168,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_NUM_VERTICES_SHIFT		16
  
  #define RADEON_COLOR_FORMAT_CI8		2
@@ -27342,7 +28261,7 @@ index 4dbb813..57d4aab 100644
  
  #define R200_PP_TXCBLEND_0                0x2f00
  #define R200_PP_TXCBLEND_1                0x2f10
-@@ -1140,16 +1275,44 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -1140,16 +1278,44 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  
  #define R200_SE_TCL_POINT_SPRITE_CNTL     0x22c4
  
@@ -27389,7 +28308,7 @@ index 4dbb813..57d4aab 100644
  #define R500_D1CRTC_STATUS 0x609c
  #define R500_D2CRTC_STATUS 0x689c
  #define R500_CRTC_V_BLANK (1<<0)
-@@ -1190,19 +1353,36 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
+@@ -1190,19 +1356,36 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
  #define RADEON_RING_HIGH_MARK		128
  
  #define RADEON_PCIGART_TABLE_SIZE      (32*1024)
@@ -27433,7 +28352,7 @@ index 4dbb813..57d4aab 100644
  #define RADEON_WRITE_PCIE(addr, val)					\
  do {									\
  	RADEON_WRITE8(RADEON_PCIE_INDEX,				\
-@@ -1259,7 +1439,7 @@ do {									\
+@@ -1259,7 +1442,7 @@ do {									\
  #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
  	OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );			\
  	OUT_RING( (RADEON_WAIT_2D_IDLECLEAN |				\
@@ -27442,7 +28361,7 @@ index 4dbb813..57d4aab 100644
  } while (0)
  
  #define RADEON_WAIT_UNTIL_3D_IDLE() do {				\
-@@ -1336,8 +1516,9 @@ do {									\
+@@ -1336,8 +1519,9 @@ do {									\
  } while (0)
  
  #define VB_AGE_TEST_WITH_RETURN( dev_priv )				\
@@ -27454,7 +28373,50 @@ index 4dbb813..57d4aab 100644
  	if ( sarea_priv->last_dispatch >= RADEON_MAX_VB_AGE ) {		\
  		int __ret = radeon_do_cp_idle( dev_priv );		\
  		if ( __ret ) return __ret;				\
-@@ -1443,4 +1624,146 @@ do {									\
+@@ -1367,15 +1551,16 @@ do {									\
+ 
+ #define RADEON_VERBOSE	0
+ 
+-#define RING_LOCALS	int write, _nr; unsigned int mask; u32 *ring;
++#define RING_LOCALS	int write, _nr, _align_nr; unsigned int mask; u32 *ring;
+ 
+ #define BEGIN_RING( n ) do {						\
+ 	if ( RADEON_VERBOSE ) {						\
+ 		DRM_INFO( "BEGIN_RING( %d )\n", (n));			\
+ 	}								\
+-	if ( dev_priv->ring.space <= (n) * sizeof(u32) ) {		\
++	_align_nr = (n + 0xf) & ~0xf;					\
++	if (dev_priv->ring.space <= (_align_nr * sizeof(u32))) {	\
+                 COMMIT_RING();						\
+-		radeon_wait_ring( dev_priv, (n) * sizeof(u32) );	\
++		radeon_wait_ring( dev_priv, _align_nr * sizeof(u32));	\
+ 	}								\
+ 	_nr = n; dev_priv->ring.space -= (n) * sizeof(u32);		\
+ 	ring = dev_priv->ring.start;					\
+@@ -1392,19 +1577,14 @@ do {									\
+ 		DRM_ERROR(						\
+ 			"ADVANCE_RING(): mismatch: nr: %x write: %x line: %d\n",	\
+ 			((dev_priv->ring.tail + _nr) & mask),		\
+-			write, __LINE__);						\
++			write, __LINE__);				\
+ 	} else								\
+ 		dev_priv->ring.tail = write;				\
+ } while (0)
+ 
+ #define COMMIT_RING() do {						\
+-	/* Flush writes to ring */					\
+-	DRM_MEMORYBARRIER();						\
+-	GET_RING_HEAD( dev_priv );					\
+-	RADEON_WRITE( RADEON_CP_RB_WPTR, dev_priv->ring.tail );		\
+-	/* read from PCI bus to ensure correct posting */		\
+-	RADEON_READ( RADEON_CP_RB_RPTR );				\
+-} while (0)
++		radeon_commit_ring(dev_priv);				\
++	} while(0)
+ 
+ #define OUT_RING( x ) do {						\
+ 	if ( RADEON_VERBOSE ) {						\
+@@ -1443,4 +1623,148 @@ do {									\
  	write &= mask;						\
  } while (0)
  
@@ -27597,6 +28559,8 @@ index 4dbb813..57d4aab 100644
 +#define MARK_SAFE		1
 +#define MARK_CHECK_OFFSET	2
 +#define MARK_CHECK_SCISSOR	3
++
++extern void radeon_commit_ring(drm_radeon_private_t *dev_priv);
 +
 +extern int r300_check_range(unsigned reg, int count);
 +extern int r300_get_reg_flags(unsigned reg);
@@ -28716,10 +29680,10 @@ index 0000000..7800035
 +}
 diff --git a/drivers/gpu/drm/radeon/radeon_fb.c b/drivers/gpu/drm/radeon/radeon_fb.c
 new file mode 100644
-index 0000000..cbf9a83
+index 0000000..244b066
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/radeon_fb.c
-@@ -0,0 +1,922 @@
+@@ -0,0 +1,927 @@
 +/*
 + * Copyright © 2007 David Airlie
 + *
@@ -29189,6 +30153,7 @@ index 0000000..cbf9a83
 +		   uint32_t surface_width, uint32_t surface_height,
 +		   struct radeon_framebuffer **radeon_fb_p)
 +{
++	struct drm_radeon_private *dev_priv = dev->dev_private;
 +	struct fb_info *info;
 +	struct radeonfb_par *par;
 +	struct drm_framebuffer *fb;
@@ -29224,6 +30189,8 @@ index 0000000..cbf9a83
 +		mutex_lock(&dev->struct_mutex);
 +		goto out_unref;
 +	}
++
++	dev_priv->mm.vram_visible -= aligned_size;
 +
 +	mutex_lock(&dev->struct_mutex);
 +	fb = radeon_framebuffer_create(dev, &mode_cmd, fbo);
@@ -29618,6 +30585,7 @@ index 0000000..cbf9a83
 +
 +int radeonfb_remove(struct drm_device *dev, struct drm_framebuffer *fb)
 +{
++	struct drm_radeon_private *dev_priv = dev->dev_private;
 +	struct fb_info *info;
 +	struct radeon_framebuffer *radeon_fb = to_radeon_framebuffer(fb);
 +
@@ -29629,6 +30597,7 @@ index 0000000..cbf9a83
 +	if (info) {
 +		unregister_framebuffer(info);
 +		drm_bo_kunmap(&radeon_fb->kmap_obj);
++		dev_priv->mm.vram_visible += radeon_fb->obj->size;
 +		mutex_lock(&dev->struct_mutex);
 +		drm_gem_object_unreference(radeon_fb->obj);
 +		radeon_fb->obj = NULL;
@@ -29644,10 +30613,10 @@ index 0000000..cbf9a83
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/gpu/drm/radeon/radeon_fence.c b/drivers/gpu/drm/radeon/radeon_fence.c
 new file mode 100644
-index 0000000..b662da2
+index 0000000..13af804
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/radeon_fence.c
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,99 @@
 +/**************************************************************************
 + * 
 + * Copyright 2006 Tungsten Graphics, Inc., Bismarck, ND., USA
@@ -29707,14 +30676,15 @@ index 0000000..b662da2
 +{
 +	struct drm_radeon_private *dev_priv = (struct drm_radeon_private *) dev->dev_private;
 +	uint32_t sequence;
-+        if (waiting_types & DRM_FENCE_TYPE_EXE) {
 +
-+                sequence = READ_BREADCRUMB(dev_priv);
++	sequence = RADEON_READ(RADEON_SCRATCH_REG3);
++	/* this used to be READ_BREADCRUMB(dev_priv); but it caused
++	 * a race somewhere in the fencing irq
++	 */
 +
-+		DRM_DEBUG("polling %d\n", sequence);
-+                drm_fence_handler(dev, 0, sequence,
-+                                  DRM_FENCE_TYPE_EXE, 0);
-+        }
++	DRM_DEBUG("polling %d\n", sequence);
++	drm_fence_handler(dev, 0, sequence,
++       			  DRM_FENCE_TYPE_EXE, 0);
 +}
 +
 +void radeon_fence_handler(struct drm_device * dev)
@@ -29748,10 +30718,10 @@ index 0000000..b662da2
 +
 diff --git a/drivers/gpu/drm/radeon/radeon_gem.c b/drivers/gpu/drm/radeon/radeon_gem.c
 new file mode 100644
-index 0000000..2e20de3
+index 0000000..2ed9bfc
 --- /dev/null
 +++ b/drivers/gpu/drm/radeon/radeon_gem.c
-@@ -0,0 +1,1597 @@
+@@ -0,0 +1,1608 @@
 +/*
 + * Copyright 2008 Red Hat Inc.
 + *
@@ -29822,7 +30792,7 @@ index 0000000..2e20de3
 +	args->vram_visible = dev_priv->mm.vram_visible;
 +
 +	args->gart_start = dev_priv->mm.gart_start;
-+	args->gart_size = dev_priv->mm.gart_size;
++	args->gart_size = dev_priv->mm.gart_useable;
 +
 +	return 0;
 +}
@@ -30340,6 +31310,9 @@ index 0000000..2e20de3
 +		if (ret)
 +			return -EINVAL;
 +
++		/* subtract from VRAM value reporting to userspace */
++		dev_priv->mm.vram_visible -= RADEON_PCIGART_TABLE_SIZE;
++
 +		dev_priv->mm.pcie_table_backup = kzalloc(RADEON_PCIGART_TABLE_SIZE, GFP_KERNEL);
 +		if (!dev_priv->mm.pcie_table_backup)
 +			return -EINVAL;
@@ -30430,6 +31403,8 @@ index 0000000..2e20de3
 +	DRM_DEBUG("Ring ptr %p mapped at %ld %p, read ptr %p maped at %ld %p\n",
 +		  dev_priv->mm.ring.bo, dev_priv->mm.ring.bo->offset, dev_priv->mm.ring.kmap.virtual,
 +		  dev_priv->mm.ring_read.bo, dev_priv->mm.ring_read.bo->offset, dev_priv->mm.ring_read.kmap.virtual);
++
++	dev_priv->mm.gart_useable -= RADEON_DEFAULT_RING_SIZE + PAGE_SIZE;
 +
 +	/* init the indirect buffers */
 +	radeon_gem_ib_init(dev);
@@ -30717,6 +31692,9 @@ index 0000000..2e20de3
 +	/* init TTM underneath */
 +	drm_bo_driver_init(dev);
 +
++	/* use the uncached allocator */
++	dev->bm.allocator_type = _DRM_BM_ALLOCATOR_UNCACHED;
++
 +	/* size the mappable VRAM memory for now */
 +	radeon_vram_setup(dev);
 +	
@@ -30737,6 +31715,7 @@ index 0000000..2e20de3
 +
 +	dev_priv->mm.gart_size = (32 * 1024 * 1024);
 +	dev_priv->mm.gart_start = 0;
++	dev_priv->mm.gart_useable = dev_priv->mm.gart_size;
 +	ret = radeon_gart_init(dev);
 +	if (ret)
 +		return -EINVAL;
@@ -31041,6 +32020,7 @@ index 0000000..2e20de3
 +			goto free_all;
 +	}
 +
++	dev_priv->mm.gart_useable -= RADEON_IB_SIZE * RADEON_NUM_IB;
 +	dev_priv->ib_alloc_bitmap = 0;
 +
 +	dev_priv->cs.ib_get = radeon_gem_ib_get;
@@ -31277,6 +32257,7 @@ index 0000000..2e20de3
 +		DRM_ERROR("Failed to mmap DMA buffers\n");
 +		return -ENOMEM;
 +	}
++	dev_priv->mm.gart_useable -= size;
 +	DRM_DEBUG("\n");
 +	radeon_gem_addbufs(dev);
 +
@@ -42120,10 +43101,10 @@ index 0000000..13fba4f
 +
 diff --git a/include/drm/drm_crtc_helper.h b/include/drm/drm_crtc_helper.h
 new file mode 100644
-index 0000000..c071915
+index 0000000..a0dd667
 --- /dev/null
 +++ b/include/drm/drm_crtc_helper.h
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,98 @@
 +/*
 + * Copyright © 2006 Keith Packard
 + * Copyright © 2007 Intel Corporation
@@ -42219,6 +43200,8 @@ index 0000000..c071915
 +}
 +
 +extern int drm_helper_resume_force_mode(struct drm_device *dev);
++extern void drm_helper_set_connector_dpms(struct drm_connector *connector,
++					  int dpms_mode);
 +#endif
 diff --git a/include/drm/drm_edid.h b/include/drm/drm_edid.h
 new file mode 100644
@@ -42690,10 +43673,10 @@ index 0000000..678dc23
 +#endif
 diff --git a/include/drm/drm_objects.h b/include/drm/drm_objects.h
 new file mode 100644
-index 0000000..cdd8236
+index 0000000..604c8f8
 --- /dev/null
 +++ b/include/drm/drm_objects.h
-@@ -0,0 +1,900 @@
+@@ -0,0 +1,913 @@
 +/**************************************************************************
 + *
 + * Copyright (c) 2006-2007 Tungsten Graphics, Inc., Cedar Park, TX., USA
@@ -43357,6 +44340,9 @@ index 0000000..cdd8236
 +#define _DRM_FLAG_MEMTYPE_CMA       0x00000010	/* Can't map aperture */
 +#define _DRM_FLAG_MEMTYPE_CSELECT   0x00000020	/* Select caching */
 +
++#define _DRM_BM_ALLOCATOR_CACHED 0x0
++#define _DRM_BM_ALLOCATOR_UNCACHED 0x1
++
 +struct drm_buffer_manager {
 +	struct drm_bo_lock bm_lock;
 +	struct mutex evict_mutex;
@@ -43371,6 +44357,7 @@ index 0000000..cdd8236
 +	unsigned long cur_pages;
 +	atomic_t count;
 +	struct page *dummy_read_page;
++	int allocator_type;
 +};
 +
 +struct drm_bo_driver {
@@ -43586,6 +44573,15 @@ index 0000000..cdd8236
 +			       void **virtual);
 +extern void drm_mem_reg_iounmap(struct drm_device *dev, struct drm_bo_mem_reg * mem,
 +				void *virtual);
++
++/*
++ * drm_uncached.c
++ */
++extern int drm_uncached_init(void);
++extern void drm_uncached_fini(void);
++extern struct page *drm_get_uncached_page(void);
++extern void drm_put_uncached_page(struct page *page);
++
 +#ifdef CONFIG_DEBUG_MUTEXES
 +#define DRM_ASSERT_LOCKED(_mutex)					\
 +	BUG_ON(!mutex_is_locked(_mutex) ||				\

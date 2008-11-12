@@ -1,6 +1,6 @@
 diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_core.c linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_core.c
 --- vanilla-2.6.27/drivers/pci/hotplug/pciehp_core.c	2008-10-09 23:13:53.000000000 +0100
-+++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_core.c	2008-11-04 13:43:48.000000000 +0000
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_core.c	2008-11-04 13:53:53.000000000 +0000
 @@ -41,6 +41,7 @@
  int pciehp_poll_mode;
  int pciehp_poll_time;
@@ -97,7 +97,7 @@ diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_core.c linux-2.6.27.noarch/dr
  		u8 status;
 diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_ctrl.c linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_ctrl.c
 --- vanilla-2.6.27/drivers/pci/hotplug/pciehp_ctrl.c	2008-10-09 23:13:53.000000000 +0100
-+++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_ctrl.c	2008-11-04 13:38:40.000000000 +0000
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_ctrl.c	2008-11-04 15:14:53.000000000 +0000
 @@ -179,7 +179,8 @@
  	 * before taking any action that relies on power having been
  	 * removed from the slot/adapter.
@@ -108,10 +108,53 @@ diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_ctrl.c linux-2.6.27.noarch/dr
  
  	if (PWR_LED(ctrl))
  		pslot->hpc_ops->green_led_off(pslot);
+@@ -219,9 +220,6 @@
+ 	if (PWR_LED(ctrl))
+ 		p_slot->hpc_ops->green_led_blink(p_slot);
+ 
+-	/* Wait for ~1 second */
+-	msleep(1000);
+-
+ 	/* Check link training status */
+ 	retval = p_slot->hpc_ops->check_lnk_status(ctrl);
+ 	if (retval) {
+@@ -284,16 +282,16 @@
+ 		}
+ 	}
+ 
+-	/*
+-	 * After turning power off, we must wait for at least 1 second
+-	 * before taking any action that relies on power having been
+-	 * removed from the slot/adapter.
+-	 */
+-	msleep(1000);
+-
+-	if (PWR_LED(ctrl))
++	if (PWR_LED(ctrl)) {
++		/*
++		 * After turning power off, we must wait for at least 1 second
++		 * before taking any action that relies on power having been
++		 * removed from the slot/adapter.
++		 */
++		msleep(1000);
+ 		/* turn off Green LED */
+ 		p_slot->hpc_ops->green_led_off(p_slot);
++	}
+ 
+ 	return 0;
+ }
 diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp.h linux-2.6.27.noarch/drivers/pci/hotplug/pciehp.h
 --- vanilla-2.6.27/drivers/pci/hotplug/pciehp.h	2008-10-09 23:13:53.000000000 +0100
-+++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp.h	2008-11-04 13:38:40.000000000 +0000
-@@ -206,6 +206,10 @@
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp.h	2008-11-04 15:14:53.000000000 +0000
+@@ -98,6 +98,7 @@
+ 	struct timer_list poll_timer;
+ 	int cmd_busy;
+ 	unsigned int no_cmd_complete:1;
++	unsigned int link_active_reporting:1;
+ };
+ 
+ #define INT_BUTTON_IGNORE		0
+@@ -206,6 +207,10 @@
  {
  	u32 flags = (OSC_PCI_EXPRESS_NATIVE_HP_CONTROL |
  		     OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL);
@@ -122,3 +165,101 @@ diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp.h linux-2.6.27.noarch/drivers
  	return acpi_get_hp_hw_control_from_firmware(dev, flags);
  }
  
+diff -ur vanilla-2.6.27/drivers/pci/hotplug/pciehp_hpc.c linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_hpc.c
+--- vanilla-2.6.27/drivers/pci/hotplug/pciehp_hpc.c	2008-10-09 23:13:53.000000000 +0100
++++ linux-2.6.27.noarch/drivers/pci/hotplug/pciehp_hpc.c	2008-11-04 15:17:48.000000000 +0000
+@@ -125,6 +125,7 @@
+ /* Field definitions in Link Capabilities Register */
+ #define MAX_LNK_SPEED		0x000F
+ #define MAX_LNK_WIDTH		0x03F0
++#define LINK_ACTIVE_REPORTING	0x00100000
+ 
+ /* Link Width Encoding */
+ #define LNK_X1		0x01
+@@ -141,6 +142,7 @@
+ #define LNK_TRN_ERR	0x0400
+ #define	LNK_TRN		0x0800
+ #define SLOT_CLK_CONF	0x1000
++#define LINK_ACTIVE	0x2000
+ 
+ /* Field definitions in Slot Capabilities Register */
+ #define ATTN_BUTTN_PRSN	0x00000001
+@@ -363,11 +365,52 @@
+ 	return retval;
+ }
+ 
++static inline int check_link_active(struct controller *ctrl)
++{
++	u16 link_status;
++
++	if (pciehp_readw(ctrl, LNKSTATUS, &link_status))
++		return 0;
++	return !!(link_status & LINK_ACTIVE);
++}
++
++static void pcie_wait_link_active(struct controller *ctrl)
++{
++	int timeout = 1000;
++
++	if (check_link_active(ctrl))
++		return;
++	while (timeout > 0) {
++		msleep(10);
++		timeout -= 10;
++		if (check_link_active(ctrl))
++			return;
++	}
++	dbg("Data Link Layer Link Active not set in 1000 msec\n");
++}
++
+ static int hpc_check_lnk_status(struct controller *ctrl)
+ {
+ 	u16 lnk_status;
+ 	int retval = 0;
+ 
++        /*
++         * Data Link Layer Link Active Reporting must be capable for
++         * hot-plug capable downstream port. But old controller might
++         * not implement it. In this case, we wait for 1000 ms.
++         */
++        if (ctrl->link_active_reporting){
++                /* Wait for Data Link Layer Link Active bit to be set */
++                pcie_wait_link_active(ctrl);
++                /*
++                 * We must wait for 100 ms after the Data Link Layer
++                 * Link Active bit reads 1b before initiating a
++                 * configuration access to the hot added device.
++                 */
++                msleep(100);
++        } else
++                msleep(1000);
++
+ 	retval = pciehp_readw(ctrl, LNKSTATUS, &lnk_status);
+ 	if (retval) {
+ 		err("%s: Cannot read LNKSTATUS register\n", __func__);
+@@ -1104,7 +1147,7 @@
+ struct controller *pcie_init(struct pcie_device *dev)
+ {
+ 	struct controller *ctrl;
+-	u32 slot_cap;
++	u32 slot_cap, link_cap;
+ 	struct pci_dev *pdev = dev->port;
+ 
+ 	ctrl = kzalloc(sizeof(*ctrl), GFP_KERNEL);
+@@ -1144,6 +1187,16 @@
+ 	    !(POWER_CTRL(ctrl) | ATTN_LED(ctrl) | PWR_LED(ctrl) | EMI(ctrl)))
+ 	    ctrl->no_cmd_complete = 1;
+ 
++        /* Check if Data Link Layer Link Active Reporting is implemented */
++        if (pciehp_readl(ctrl, LNKCAP, &link_cap)) {
++                err("%s: Cannot read LNKCAP register\n", __func__);
++                goto abort_ctrl;
++        }
++        if (link_cap & LINK_ACTIVE_REPORTING) {
++                dbg("Link Active Reporting supported\n");
++                ctrl->link_active_reporting = 1;
++        }
++
+ 	/* Clear all remaining event bits in Slot Status register */
+ 	if (pciehp_writew(ctrl, SLOTSTATUS, 0x1f))
+ 		goto abort_ctrl;
