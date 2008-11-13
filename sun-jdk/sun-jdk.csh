@@ -9,7 +9,7 @@ endif
 
 if ( $JAVA != '' ) then
     if ( "$JAVA" != "%(javaname)s.%(targetarch)s" ) then
-        exit 0
+        goto finish
     endif
 endif
 
@@ -25,12 +25,7 @@ if ( -d "%(jdkhome)s/bin" ) then
         setenv PATH "%(jdkhome)s/bin:$PATH"
     endif
 
-    if ( $?MANPATH ) then
-        if ( `echo "$MANPATH" | fgrep '%(jdkhome)s/man' | wc -l` == "0" ) then
-            setenv MANPATH "%(jdkhome)s/man:$MANPATH"
-        endif
-    else
-        setenv MANPATH "%(jdkhome)s/man"
-    endif
 endif
+
+finish:
 
