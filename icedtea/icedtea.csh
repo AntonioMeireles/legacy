@@ -9,7 +9,7 @@ endif
 
 if ( $JAVA != '' ) then
     if ( "$JAVA" != "%(javaname)s.%(targetarch)s" ) then
-        exit 0
+        goto finish
     endif
 endif
 
@@ -26,4 +26,6 @@ if ( -d "%(jdkhome)s/bin" ) then
     endif
 
 endif
+
+finish:
 
