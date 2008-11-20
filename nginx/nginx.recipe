@@ -7,24 +7,18 @@
 class Nginx(AutoPackageRecipe):
 
     name = 'nginx'
-    version = '0.5.35'
+    version = '0.6.32'
 
-    buildRequires = [ 'chkconfig:runtime', 'zlib:devel', 'pcre:devel', 'openssl:devel', ]
+    buildRequires = [
+        'chkconfig:runtime',
+        'openssl:devel',
+        'pcre:devel',
+        'pkgconfig:devel',
+        'zlib:devel',
+      ]
 
     def unpack(r):
-        # Add the actual tarball release
         r.addArchive('http://sysoev.ru/%(name)s/')
-
-        # Add scripts to aid in system maintenance
-        r.addSource('nginx.conf.in', macros=True)
-        r.addSource('nginx.conf.default.vhost.in', macros=True)
-        r.addSource('nginx.initscript.in', macros=True)
-        r.addSource('nginx.logrotate.in', macros=True)
-        r.addSource('favicon.ico')
-
-        # One day, they'll fix their broken jury-rigged 'autoconf'-ish
-        # mess to be DESTDIR-compliant
-        r.addPatch('nginx-auto-destdir.patch')
 
     def configure(r):
         r.ManualConfigure('--prefix=%(prefix)s '
@@ -37,46 +31,58 @@ class Nginx(AutoPackageRecipe):
               '--http-client-body-temp-path=%(localstatedir)s/cache/%(name)s/client/ '
               '--http-proxy-temp-path=%(localstatedir)s/cache/%(name)s/proxy/ '
               '--http-fastcgi-temp-path=%(localstatedir)s/cache/%(name)s/fastcgi/ '
-              '--with-cc-opt="%(cflags)s" --with-ld-opt="%(ldflags)s" '
-              '--user=nobody --group=nobody', preConfigure='DESTDIR=%(destdir)s')
+
+              '--with-poll_module '
+              '--with-http_ssl_module ',
+              '--with-http_flv_module ',
+              '--with-http_gzip_static_module ',
+
+              '--with-cc-opt="%(cflags)s `pkg-config --cflags openssl`" '
+              '--with-ld-opt="%(ldflags)s" '
+              '--user=nobody --group=nobody')
 
     def makeinstall(r):
         r.MakeInstall()
+
+
         r.MakeDirs('%(localstatedir)s/cache/%(name)s',
                    '%(localstatedir)s/log/%(name)s',
                    '%(localstatedir)s/run/%(name)s',
                    '%(servicedir)s/%(name)s/html/')
-        r.Move('%(prefix)s/html/', '%(servicedir)s/%(name)s/html/')
+        r.ExcludeDirectories(exceptions=(
+            '%(localstatedir)s/cache/%(name)s.*',
+            '%(localstatedir)s/log/%(name)s',
+            '%(localstatedir)s/run/%(name)s',
+            '%(servicedir)s/%(name)s/html',
+          ))
+        r.Move('%(prefix)s/html/*', '%(servicedir)s/%(name)s/html/')
 
         # Replace the default script with something more sane
-        r.Copy('nginx.conf.in', '%(sysconfdir)s/%(name)s/%(name)s.conf')
+        r.addSource('nginx.conf.in', macros=True,
+            dest='%(sysconfdir)s/%(name)s/%(name)s.conf')
 
         # Add default virtual host for serving static content
-        r.Copy('nginx.conf.default.vhost.in',
-                '%(sysconfdir)s/%(name)s/conf.d/00-default.conf')
+        r.addSource('nginx.conf.default.vhost.in', macros=True,
+            dest='%(sysconfdir)s/%(name)s/conf.d/00-default.conf')
 
         # Add default vhost custom stub file
         r.Create('%(sysconfdir)s/%(name)s/conf.d/00-default.custom',
-                contents = '# Extra configuration for default virtual host')
+            contents='# Extra configuration for default virtual host\n')
 
         # Add an initscript
-        r.Install('nginx.initscript.in', '%(initdir)s/%(name)s', mode=0755)
+        r.addSource('nginx.initscript.in', macros=True,
+            dest='%(initdir)s/%(name)s', mode=0755)
 
         # Add a script for logrotate
-        r.Copy('nginx.logrotate.in', '%(sysconfdir)s/logrotate.d/%(name)s')
+        r.addSource('nginx.logrotate.in', macros=True,
+            dest='%(sysconfdir)s/logrotate.d/%(name)s')
+        r.Requires('%(sbindir)s/logrotate', '%(sysconfdir)s/logrotate.d/')
 
         # Add a simple favicon.ico (as initialcontents, so it can be
         # replaced manually).
-        r.Copy('favicon.ico', '%(servicedir)s/%(name)s/html/')
-        r.InitialContents('%(servicedir)s/%(name)s/favicon.ico')
+        r.addSource('favicon.ico', dir='%(servicedir)s/%(name)s/html/')
+        r.InitialContents('%(servicedir)s/%(name)s/html/favicon.ico')
 
     def policy(r):
-        r.ExcludeDirectories(exceptions=\
-                   ('%(localstatedir)s/cache/%(name)s.*',
-                   '%(localstatedir)s/log/%(name)s',
-                   '%(localstatedir)s/run/%(name)s',
-                   '%(servicedir)s/%(name)s/html'))
-
-        r.Requires('%(sbindir)s/logrotate', '%(sysconfdir)s/logrotate.d/')
         r.UtilizeGroup('nobody', '%(sbindir)s/')
         r.UtilizeUser('nobody', '%(sbindir)s/')
