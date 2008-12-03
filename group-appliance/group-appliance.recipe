@@ -8,8 +8,9 @@ class ApplianceGroupRecipe(GroupRecipe):
     name = 'group-appliance'
     version = '2.0'
 
-    def startGroup(r, name, parentGroup, depCheck=False, byDefault=True,
-                   checkPathConflicts=None):
+    def startGroup(r, name, parentGroup, depCheck=False, autoResolve=False,
+                   byDefault=True, checkOnlyByDefaultDeps=None,
+                   imageGroup=False, checkPathConflicts=None):
         # creates group named "name", adds it to the toplevel group,
         # and sets the current group to that name.  calls to r.add()
         # will use the current group by default.
@@ -21,8 +22,11 @@ class ApplianceGroupRecipe(GroupRecipe):
 
         # get all the the default for the new group from its parent group.
         r.setDefaultGroup(parentGroup)
-        r.createGroup(name, autoResolve=False, depCheck=depCheck,
-                      byDefault=True, checkPathConflicts=checkPathConflicts)
+        r.createGroup(name, autoResolve=autoResolve, depCheck=depCheck,
+                      byDefault=byDefault,
+                      checkOnlyByDefaultDeps=checkOnlyByDefaultDeps,
+                      checkPathConflicts=checkPathConflicts,
+                      imageGroup=imageGroup)
         r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
         r.setDefaultGroup(name)
 
@@ -105,7 +109,9 @@ class ApplianceGroupRecipe(GroupRecipe):
 
     initialSearchPath = None
     additionalSearchPath = []
-    rPathGroupSearchPath = 'group-os=' + groupLabel + '[' + groupCoreFlavor +']'
+    # rPathGroupSearchPath and rPathAppliancePlatformAgentSearchPath will
+    # be overridden by the platform definition elements if they exist
+    rPathGroupSearchPath = None
     rPathAppliancePlatformAgentSearchPath = [ rapaLabel ]
     finalSearchPath = []
 
@@ -144,10 +150,26 @@ class ApplianceGroupRecipe(GroupRecipe):
 
     def getAppliancePlatformSearchPath(r):
         """
-        This method provides the elements of the search path that provide
-        the operating system and platform elements of the rPath Appliance
-        Platform.  It should not normally be overridden.
+        This method provides the elements of the search path that
+        provide the operating system and platform elements of the
+        rPath Appliance Platform.  When groups are being built
+        with rBuild and rMake from a product-definition, a macro
+        named "productDefinitionSearchPath" may be defined with a
+        newline-delimited list of resolved troves (exact versions)
+        found via the product definition itself; note that this
+        includes rAPA.  If productDefinitionSearchPath is specified,
+        that search path must be honored.  If not, then fall back
+        to what is specified in the group.
+        This method should not normally be overridden.
         """
+        if r.rPathGroupSearchPath is None:
+            if 'productDefinitionSearchPath' in r.macros:
+                return r.macros.productDefinitionSearchPath.split('\n')
+
+            else:
+                r.rPathGroupSearchPath = [
+                    'group-os=' + r.groupLabel + '[' + r.groupCoreFlavor +']' ]
+
         return r._makeList(r.rPathGroupSearchPath) + r._makeList(
             r.rPathAppliancePlatformAgentSearchPath)
 
@@ -171,7 +193,7 @@ class ApplianceGroupRecipe(GroupRecipe):
 
     def addAppliancePlatform(r):
         r.startGroup('group-core', parentGroup=r.name)
-        r.addAll('group-appliance-platform', r.groupLabel, flavor=r.groupCoreFlavor, flatten=True)
+        r.addAll('group-appliance-platform', flatten=True)
 
     def addrPathAppliancePlatformAgent(r):
         r.addAll('group-rapa')
