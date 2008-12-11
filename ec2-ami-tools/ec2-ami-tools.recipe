@@ -4,33 +4,24 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('binarypackage=conary.rpath.com@rpl:devel')
-class Ec2AmiTools(BinaryPackageRecipe):
+class Ec2AmiTools(PackageRecipe):
 
     name = 'ec2-ami-tools'
+    version = '1.3_30354'
 
-    # Amazon doesn't use "versions" on their download page, so I went head and
-    # dumped the version out of their RPM file (using strings -a | head).
-    # Also, I feel better putting the RPM blob in the :source trove, since
-    # what's out there may change without notice (i.e. an update will simply
-    # replace the binary.
-    version = '1.3_26357'
+    buildRequires = [ 'ruby:runtime', 'unzip:runtime' ]
 
-    buildRequires = [ 'ruby:runtime' ]
+    def setup(r):
+        r.macros.fixed_version = r.macros.version.replace('_','-')
+        r.addArchive('http://ec2-downloads.s3.amazonaws.com/%(name)s-%(fixed_version)s.zip')
+        r.addPatch('workaround-rpl-1066.patch', level=1)
+        r.Move('bin','%(prefix)s')
+        r.Move('lib','%(libdir)s/ruby/site_ruby')
+        r.Move('etc','%(sysconfdir)s')
 
-    def unpack(r):
-        r.addArchive('ec2-ami-tools.noarch.rpm', dir='/')
-#        r.addPatch('workaround-rpl-1066.patch', dir='/', level=1)
-#        r.addPatch('ami-tools--private-method-fix.patch', dir='/', level=1)
-        r.Replace('\/usr\/lib\/site_ruby','%(libdir)s/ruby/site_ruby','%(prefix)s/local/ec2/amitools/*')
-        r.Remove('/usr/lib64', recursive=True) # duplicate copy of the one in /usr/lib
-        r.Move('/usr/local/bin','%(prefix)s')
-        r.Move('/usr/lib/site_ruby','%(libdir)s/ruby/')
-
-    def policy(r):
         # We have to synthesize deps because of the shellouts that are
         # done in all the Ruby scripts that are used to bundle the image.
         for t in [ 'coreutils:runtime', 'curl:runtime', 'e2fsprogs:runtime',
                    'lvm2:runtime', 'openssl:runtime', 'util-linux:runtime',
                    'ruby:runtime', 'MAKEDEV:runtime', 'rsync:runtime' ]:
-            r.Requires(t, '%(libdir)s/ruby/site_ruby/aes/.*')
+            r.Requires(t, '%(libdir)s/ruby/site_ruby/ec2/.*')
