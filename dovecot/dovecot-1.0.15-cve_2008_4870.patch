@@ -1,0 +1,186 @@
+diff -up dovecot-1.0.15/dovecot-example.conf.cve_2008_4870 dovecot-1.0.15/dovecot-example.conf
+--- dovecot-1.0.15/dovecot-example.conf.cve_2008_4870	2008-12-02 18:14:59.881567691 +0100
++++ dovecot-1.0.15/dovecot-example.conf	2008-12-02 18:15:46.796559728 +0100
+@@ -92,7 +92,9 @@
+ #ssl_key_file = /etc/pki/dovecot/private/dovecot.pem
+ 
+ # If key file is password protected, give the password here. Alternatively
+-# give it when starting dovecot with -p parameter.
++# give it when starting dovecot with -p parameter. Since this file is often
++# world-readable, you may want to place this setting instead to a different
++# root owned 0600 file by using !include_try <path>.
+ #ssl_key_password =
+ 
+ # File containing trusted SSL certificate authorities. Set this only if you
+diff -up dovecot-1.0.15/src/deliver/deliver.c.cve_2008_4870 dovecot-1.0.15/src/deliver/deliver.c
+--- dovecot-1.0.15/src/deliver/deliver.c.cve_2008_4870	2008-02-29 10:17:05.000000000 +0100
++++ dovecot-1.0.15/src/deliver/deliver.c	2008-12-02 18:14:59.907564783 +0100
+@@ -261,6 +261,13 @@ static void config_file_init(const char 
+ 			len--;
+ 		line[len] = '\0';
+ 
++		if (strncmp(line, "!include_try ", 13) == 0)
++			continue;
++		if (strncmp(line, "!include ", 9) == 0) {
++			i_fatal_status(EX_CONFIG, "Error in config file %s: "
++				       "deliver doesn't support !include directive", path);
++		}
++
+ 		value = p = strchr(line, '=');
+ 		if (value == NULL) {
+ 			if (strchr(line, '{') != NULL) {
+diff -up dovecot-1.0.15/src/lib-settings/settings.c.cve_2008_4870 dovecot-1.0.15/src/lib-settings/settings.c
+--- dovecot-1.0.15/src/lib-settings/settings.c.cve_2008_4870	2007-12-11 19:52:08.000000000 +0100
++++ dovecot-1.0.15/src/lib-settings/settings.c	2008-12-02 18:17:45.485562650 +0100
+@@ -1,6 +1,7 @@
+ /* Copyright (C) 2002 Timo Sirainen */
+ 
+ #include "lib.h"
++#include "str.h"
+ #include "istream.h"
+ #include "strescape.h"
+ #include "settings.h"
+@@ -8,7 +9,16 @@
+ #include <stdio.h>
+ #include <fcntl.h>
+ 
+-#define SECTION_ERRORMSG "%s (section changed at line %d)"
++#define SECTION_ERRORMSG "%s (section changed in %s at line %d)"
++
++struct input_stack {
++	struct input_stack *prev;
++
++	struct istream *input;
++	const char *path;
++	unsigned int linenum;
++};
++
+ 
+ static const char *get_bool(const char *value, bool *result)
+ {
+@@ -65,11 +75,11 @@ bool settings_read(const char *path, con
+ 		   settings_callback_t *callback,
+ 		   settings_section_callback_t *sect_callback, void *context)
+ {
+-	struct istream *input;
+-	const char *errormsg, *next_section;
+-	char *line, *key, *name, *p, quote;
++	struct input_stack root, *input, *new_input;
++	const char *errormsg, *next_section, *name, *last_section_path = NULL;
++	char *line, *key, *p, quote;
+ 	size_t len;
+-	int fd, linenum, last_section_line = 0, skip, sections, root_section;
++	int fd, last_section_line = 0, skip, sections, root_section;
+ 
+ 	fd = open(path, O_RDONLY);
+ 	if (fd < 0) {
+@@ -87,23 +97,29 @@ bool settings_read(const char *path, con
+ 		next_section = t_strcut(section, '/');
+ 	}
+ 
+-	linenum = 0; sections = 0; root_section = 0; errormsg = NULL;
+-	input = i_stream_create_file(fd, default_pool, 2048, TRUE);
++	memset(&root, 0, sizeof(root));
++	root.path = path;
++	input = &root;
++
++	sections = 0; root_section = 0; errormsg = NULL;
++newfile:
++	input->input = i_stream_create_file(fd, default_pool, 2048, TRUE);
++prevfile:
+ 	for (;;) {
+-		line = i_stream_read_next_line(input);
++		line = i_stream_read_next_line(input->input);
+ 		if (line == NULL) {
+ 			/* EOF. Also handle the last line even if it doesn't
+ 			   contain LF. */
+ 			const unsigned char *data;
+ 			size_t size;
+ 
+-			data = i_stream_get_data(input, &size);
++			data = i_stream_get_data(input->input, &size);
+ 			if (size == 0)
+ 				break;
+ 			line = t_strdup_noconst(t_strndup(data, size));
+-			i_stream_skip(input, size);
++			i_stream_skip(input->input, size);
+ 		}
+-		linenum++;
++		input->linenum++;
+ 
+ 		/* @UNSAFE: line is modified */
+ 
+@@ -148,7 +164,30 @@ bool settings_read(const char *path, con
+ 			while (IS_WHITE(*line)) line++;
+ 		}
+ 
+-		if (*line == '=') {
++		if (strcmp(key, "!include_try") == 0 ||
++		    strcmp(key, "!include") == 0) {
++			struct input_stack *tmp;
++
++			for (tmp = input; tmp != NULL; tmp = tmp->prev) {
++				if (strcmp(tmp->path, line) == 0)
++					break;
++			}
++			if (tmp != NULL) {
++				errormsg = "Recursive include";
++			} else if ((fd = open(line, O_RDONLY)) != -1) {
++				new_input = t_new(struct input_stack, 1);
++				new_input->prev = input;
++				new_input->path = t_strdup(line);
++				input = new_input;
++				goto newfile;
++			} else {
++				/* failed, but ignore failures with include_try. */
++				if (strcmp(key, "!include") == 0) {
++					errormsg = t_strdup_printf(
++						"Couldn't open include file %s: %m", line);
++				}
++			}
++		} else if (*line == '=') {
+ 			/* a) */
+ 			*line++ = '\0';
+ 			while (IS_WHITE(*line)) line++;
+@@ -212,10 +251,12 @@ bool settings_read(const char *path, con
+ 						errormsg = t_strdup_printf(
+ 							SECTION_ERRORMSG,
+ 							errormsg,
++							last_section_path,
+ 							last_section_line);
+ 					}
+ 				}
+-				last_section_line = linenum;
++				last_section_path = input->path;
++				last_section_line = input->linenum;
+ 			}
+ 		} else {
+ 			/* c) */
+@@ -234,19 +275,24 @@ bool settings_read(const char *path, con
+ 						break;
+ 					}
+ 				}
+-				last_section_line = linenum;
++				last_section_path = input->path;
++				last_section_line = input->linenum;
+ 				sections--;
+ 			}
+ 		}
+ 
+ 		if (errormsg != NULL) {
+ 			i_error("Error in configuration file %s line %d: %s",
+-				path, linenum, errormsg);
++				input->path, input->linenum, errormsg);
+ 			break;
+ 		}
+ 	}
+ 
+-	i_stream_destroy(&input);
++	i_stream_destroy(&input->input);
++	input = input->prev;
++	if (line == NULL && input != NULL)
++		goto prevfile;
++
+ 	t_pop();
+ 
+ 	return errormsg == NULL;
