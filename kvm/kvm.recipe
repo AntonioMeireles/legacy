@@ -7,7 +7,7 @@
 class Kvm(AutoPackageRecipe):
 
     name = 'kvm'
-    version = '74'
+    version = '81'
 
     buildRequires = [ 'SDL:devel', 'alsa-lib:devel', 'e2fsprogs:devel',
                       'zlib:devel', 'chkconfig:runtime', 'info-kvm:group',
@@ -17,13 +17,10 @@ class Kvm(AutoPackageRecipe):
 
     def unpack(r):
         r.addArchive('mirror://sourceforge/kvm/kvm-%(version)s.tar.gz')
-        rhPatches = [ 'kvm-bootmenu.patch',
-                      'kvm-62-block-rw-range-check.patch',
-                      'kvm-74-pxe-boot.patch',
-                      'kvm-74-page-find.patch',
+        rhPatches = [ 'kvm-62-block-rw-range-check.patch',
                       ]
         for p in rhPatches:
-            r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/rpms/kvm/devel/' + p + '?view=co')
+            r.addPatch('http://cvs.fedoraproject.org/viewcvs/rpms/kvm/devel/' + p + '?view=co')
 
     def configure(r):
         if Arch.x86:
@@ -35,9 +32,10 @@ class Kvm(AutoPackageRecipe):
 
         r.Replace('datasuffix=\"\/share\/qemu\"','datasuffix=\"/share/kvm\"',
                   'qemu/configure')
-
-        r.ManualConfigure( ' --with-patched-kernel '
+        r.Create('kernel/.kernelrelease', contents = '%(name)s-%(version)s')
+        r.ManualConfigure( ' --disable-blobs '
                            ' --prefix=%(prefix)s'
+                           ' --kerneldir=$(pwd)/kernel '
                            ' --audio-drv-list=oss,alsa '
                           )
 
@@ -49,13 +47,9 @@ class Kvm(AutoPackageRecipe):
         r.Run(""" echo "CFLAGS = %(cflags)s" >> user/config.mak """)
 
     def make(r):
-        #r.Make('WANT_MODULE=""')
-        r.Make('-C libkvm')
-        r.Make('-C user')
-        r.Make('-C qemu')
-        r.Make('-C extboot')
+        r.Make('WANT_MODULE=""')
+        # r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
 
-        r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
         r.Make('bios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
 
         r.Move('extboot/extboot.bin', 'qemu/pc-bios/extboot.bin')
