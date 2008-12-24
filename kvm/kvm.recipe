@@ -1,0 +1,93 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Kvm(AutoPackageRecipe):
+
+    name = 'kvm'
+    version = '74'
+
+    buildRequires = [ 'SDL:devel', 'alsa-lib:devel', 'e2fsprogs:devel',
+                      'zlib:devel', 'chkconfig:runtime', 'info-kvm:group',
+                      'iasl:runtime', 'gnutls:devel', 'kernel:build-tree',
+                      'dev86:runtime', 'pkgconfig:devel', 'ncurses:devel',
+                      'python:devel', 'esound:devel' ]
+
+    def unpack(r):
+        r.addArchive('mirror://sourceforge/kvm/kvm-%(version)s.tar.gz')
+        rhPatches = [ 'kvm-bootmenu.patch',
+                      'kvm-62-block-rw-range-check.patch',
+                      'kvm-74-pxe-boot.patch',
+                      'kvm-74-page-find.patch',
+                      ]
+        for p in rhPatches:
+            r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/rpms/kvm/devel/' + p + '?view=co')
+
+    def configure(r):
+        if Arch.x86:
+            r.Environment('ARCH', 'i386')
+        else:
+            r.Environment('ARCH', 'x86_64')
+
+        r.macros.securityflags = ''
+
+        r.Replace('datasuffix=\"\/share\/qemu\"','datasuffix=\"/share/kvm\"',
+                  'qemu/configure')
+
+        r.ManualConfigure( ' --with-patched-kernel '
+                           ' --prefix=%(prefix)s'
+                           ' --audio-drv-list=oss,alsa '
+                          )
+
+        r.Run(""" echo "DESTDIR=%(destdir)s" >> config.mak """)
+        r.Run(""" echo "PREFIX=%(prefix)s" >> config.mak """)
+        r.Run(""" echo "datadir=%(datadir)s/kvm/" >> config.mak """)
+
+        r.Replace('CFLAGS =', 'CFLAGS +=', 'user/Makefile')
+        r.Run(""" echo "CFLAGS = %(cflags)s" >> user/config.mak """)
+
+    def make(r):
+        #r.Make('WANT_MODULE=""')
+        r.Make('-C libkvm')
+        r.Make('-C user')
+        r.Make('-C qemu')
+        r.Make('-C extboot')
+
+        r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
+        r.Make('bios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
+
+        r.Move('extboot/extboot.bin', 'qemu/pc-bios/extboot.bin')
+
+    def makeinstall(r):
+        r.MakeInstall('WANT_MODULE=""')
+
+        r.Install('scripts/*.rules','%(sysconfdir)s/udev/rules.d/')
+        r.Install('scripts/qemu-ifup', '%(sysconfdir)s/kvm/')
+
+        r.Install('kvm_stat','%(bindir)s/')
+
+        r.addSource('kvm.modules', dest = '%(sysconfdir)s/sysconfig/modules/', mode = 0755)
+
+        r.Remove('%(datadir)s/kvm/openbios-sparc32')
+        r.Remove('%(datadir)s/kvm/openbios-sparc64')
+        r.Remove('%(datadir)s/kvm/video.x')
+
+        # housekeeping
+        # uncomment bellow if we ever ship stock qemu...
+        # r.Remove('%(mandir)s/man1/qemu-img.*')
+        # r.Remove('%(bindir)s/qemu-img')
+
+        # FIXME: breaks rMook
+        #r.Move('%(mandir)s/man1/qemu.1', '%(mandir)s/man1/qemu-kvm.1')
+
+        r.Move('%(bindir)s/qemu-system-x86_64', '%(bindir)s/qemu-kvm')
+        # keep upstream naming too
+        r.Symlink('%(bindir)s/qemu-kvm', '%(bindir)s/qemu-system-x86_64')
+
+        # no shared lib, static libs'
+        r.Remove('%(includedir)s', recursive = True)
+        # r.Remove('%(libdir)s', recursive = True)
+
+        r.Requires('info-kvm:group', '%(bindir)s/qemu-kvm')
