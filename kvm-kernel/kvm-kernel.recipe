@@ -1,0 +1,40 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('kvm=@fl:2-devel')
+class KVMKernel(Kvm,AutoPackageRecipe):
+
+    buildRequires = ['kernel:build-tree', 'mkinitrd:runtime']
+
+    name = 'kvm-kernel'
+    version = Kvm.version
+    #version = '74'
+
+
+    def make(r):
+        r.macros.kver = os.uname()[2]
+        r.Replace('^KERNEL.*','KERNELDIR=/lib/modules/%(kver)s/build', 'config.mak')
+        r.Make('-C kernel')
+
+    def makeinstall(r):
+        r.Install( 'kernel/x86/*.ko', '/lib/modules/%(kver)s/updates/')
+
+        # We want to make sure that the userspace code can require the
+        # matching kernel-space code
+        r.ComponentProvides('%(version)s')
+        r.ComponentSpec('runtime', '/lib/modules/')
+
+        # *if* we are not using the kernel provided kvm (older) *then*
+        # We want the kernel module and userspace versions to match ?
+        # not necessarly...
+
+        r.Requires('kvm:runtime',
+                   '/lib/modules/%(kver)s/updates/kvm.ko')
+
+        r.AutoDoc(exceptions = '.*')
+        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/.*')
+
+
