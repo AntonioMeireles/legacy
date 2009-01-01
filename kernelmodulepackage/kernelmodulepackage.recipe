@@ -1,0 +1,79 @@
+#
+# Copyright (c) 2009 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+from conary.lib import log
+
+class KernelModulePackageRecipe(CPackageRecipe):
+    name = 'kernelmodulepackage'
+    version = '1'
+ 
+    buildRequires = [
+        'kernel:build-tree',
+        'mkinitrd:runtime',
+      ]
+
+    moduleDir = 'misc'
+
+    # Template methods -- override these in your recipe as needed.
+    def setup(r):
+        r.unpack()
+        r.build()
+        r.install()
+
+    def unpack(r):
+        pass
+
+    def build(r):
+        r.setKVer()
+        r.Make("modules -C '/lib/modules/%(kver)s/build' M='%(builddir)s'")
+
+    def install(r):
+        r.macros.moduledir = r.moduleDir
+        r.Install('*.ko', '/lib/modules/%(kver)s/%(moduledir)s/')
+
+    def policy(r):
+        r.requireKVer()
+
+
+    # Helper methods
+    def setKVer(r):
+        """
+        Use bootloader.conf to figure out which kernel to build against.
+        """
+        if 'kver' in r.macros:
+            return
+        elif r._lightInstance:
+            # Not building
+            r.macros.kver = ''
+            return
+
+        conf = open('/etc/bootloader.conf')
+        default = None
+        kernels = []
+        log.info('Parsing /etc/bootloader.conf')
+        for line in conf:
+            if line.startswith('default '):
+                default = line.split()[1]
+                log.info('Default is %s', default)
+            elif line.startswith('linux '):
+                kernel = line.split()[1]
+                log.info('Kernel: %s', kernel)
+                kernels.append(kernel)
+        if not kernels:
+            raise RuntimeError('No kernels installed!')
+        elif not default:
+            r.macros.kver = kernels[0]
+        elif default not in kernels:
+            raise RuntimeError('Default kernel not present')
+        else:
+            r.macros.kver = default
+        log.info('Selected kver %s', r.macros.kver)
+
+    def requireKVer(r):
+        """
+        Require whatever kernel version we picked.
+        """
+        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/%(kver)s/.*')
