@@ -1,33 +1,30 @@
+#
+# Copyright (c) 2008 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
 
-
-class NdiswrapperKernel(AutoPackageRecipe):
+loadSuperClass('kernelmodulepackage')
+class NdiswrapperKernel(KernelModulePackageRecipe):
     name = 'ndiswrapper-kernel'
     version =  '1.53'
 
-    buildRequires = [ 'kernel:build-tree', 'mkinitrd:runtime']
-
-    def setup(r):
-        r.macros.name = r.macros.name.split('-')[0]
-        r.macros.kver = os.uname()[2]
-        r.addArchive('mirror://sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
+    def unpack(r):
+        r.addArchive('mirror://sourceforge/ndiswrapper/ndiswrapper-%(version)s.tar.gz')
         r.addPatch('ndiswrapper-1.53-we_update.patch')
         r.Replace('.*depmod.*', '', 'driver/Makefile')
 
         r.macros.ksrcdir = '/lib/modules/%(kver)s/build'
-        
         r.Environment('KVERS', '%(kver)s')
 
+    def build(r):
         r.Make('-C driver')
+
+    def install(r):
         r.Make('DESTDIR=%(destdir)s -C driver install')
 
+    def policy(r):
         # We want to make sure that the userspace code can require the
         # matching kernel-space code
         r.ComponentProvides('%(version)s')
         r.ComponentSpec('runtime', '/lib/modules/')
-
-        # We need the kernel module and userspace versions to match
-        r.Requires('%(name)s:runtime(%(version)s)', 
-                   '/lib/modules/%(kver)s/kernel/misc/ndiswrapper.ko')
-
-        r.AutoDoc(exceptions = '.*')
-        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/.*')
