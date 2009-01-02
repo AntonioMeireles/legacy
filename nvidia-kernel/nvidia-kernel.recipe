@@ -1,18 +1,27 @@
 #
-# Copyright (c) 2004-2008 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class NvidiaKernel(AutoPackageRecipe):
+loadSuperClass('kernelmodulepackage')
+class NvidiaKernel(KernelModulePackageRecipe):
     name = 'nvidia-kernel'
     version = '177.82'
 
-    buildRequires = ['kernel:build-tree', 'mkinitrd:runtime', 'patch:runtime', 'which:runtime']
+    buildRequires = [
+        'patch:runtime',
+        'which:runtime',
+      ]
 
-    def setup(r):
+    def unpack(r):
+        r.addSource('http://us.download.nvidia.com/XFree86/Linux-x86/'
+                '%(version)s/NVIDIA-Linux-x86-%(version)s-pkg1.run',
+                use=Arch.x86)
+        r.addSource('http://us.download.nvidia.com/XFree86/Linux-x86_64/'
+                '%(version)s/NVIDIA-Linux-x86_64-%(version)s-pkg2.run',
+                use=Arch.x86_64)
 
-        r.macros.kver = os.uname()[2]
         if Arch.x86:
             r.macros.arch = 'x86'
             r.macros.nvVersionSuffix = '1'
@@ -20,25 +29,18 @@ class NvidiaKernel(AutoPackageRecipe):
             r.macros.arch = 'x86_64'
             r.macros.nvVersionSuffix = '2'
 
-        r.macros.url = 'http://us.download.nvidia.com/XFree86/Linux-%(arch)s'
-        r.addSource('%(url)s/%(version)s/NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s.run')
-
         r.addAction('sh NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s.run --extract-only')
 
-        r.Make('SYSSRC=/lib/modules/%(kver)s/build module', 
-               dir='NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s/usr/src/nv')
-        r.Install('NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s/usr/src/nv/nvidia.ko', 
-                  '/lib/modules/%(kver)s/kernel/drivers/video/')
+    def build(r):
+        r.Make('SYSSRC=/lib/modules/%(kver)s/build module',
+                dir='NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s/usr/src/nv')
 
+    def install(r):
+        r.Install('NVIDIA-Linux-*-%(version)s-pkg*/usr/src/nv/nvidia.ko', 
+                '/lib/modules/%(kver)s/kernel/drivers/video/')
+
+    def policy(r):
         # We want to make sure that the userspace code can require the
         # matching kernel-space code
         r.ComponentProvides('%(version)s')
         r.ComponentSpec('runtime', '/lib/modules/')
-
-        # We need the kernel module and userspace versions to match
-        r.Requires('nvidia:lib(%(version)s)', 
-                   '/lib/modules/%(kver)s/kernel/drivers/video/nvidia.ko')
-
-        r.AutoDoc(exceptions = '.*')
-        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/.*')
-
