@@ -4,16 +4,16 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+import glob
 from conary.lib import log
+
 
 class KernelModulePackageRecipe(CPackageRecipe):
     name = 'kernelmodulepackage'
     version = '1'
  
     buildRequires = [
-        'bootman:runtime',
         'kernel:build-tree',
-        'kernel:runtime',
         'mkinitrd:runtime',
       ]
 
@@ -24,6 +24,7 @@ class KernelModulePackageRecipe(CPackageRecipe):
         r.unpack()
         r.build()
         r.install()
+        r.policy()
 
     def unpack(r):
         pass
@@ -38,12 +39,21 @@ class KernelModulePackageRecipe(CPackageRecipe):
 
     def policy(r):
         r.requireKVer()
+        r.skipAutoDocs()
 
 
     # Helper methods
     def setKVer(r):
         """
-        Use bootloader.conf to figure out which kernel to build against.
+        Pick a kernel to build against. The algorithm is as follows:
+
+        * If the kver macro is already set, use that.
+        * If bootloader.conf exists, we are likely building with cvc
+          on an actual system. Use the running kernel, or die if it's
+          not present.
+        * If bootloader.conf does not exist, we are probably chrooted
+          (e.g. building in rMake). If a single kernel is in
+          /lib/modules, use that, otherwise die.
         """
         if 'kver' in r.macros:
             return
@@ -52,30 +62,33 @@ class KernelModulePackageRecipe(CPackageRecipe):
             r.macros.kver = ''
             return
 
-        conf = open('/etc/bootloader.conf')
-        default = None
-        kernels = []
-        log.info('Parsing /etc/bootloader.conf')
-        for line in conf:
-            if line.startswith('default '):
-                default = line.split()[1]
-                log.info('Default is %s', default)
-            elif line.startswith('linux '):
-                kernel = line.split()[1]
-                log.info('Kernel: %s', kernel)
-                kernels.append(kernel)
-        if not kernels:
-            raise RuntimeError('No kernels installed!')
-        elif not default:
-            r.macros.kver = kernels[0]
-        elif default not in kernels:
-            raise RuntimeError('Default kernel not present')
+        testPath = '/lib/modules/%s/build/Makefile'
+        if (os.path.exists('/boot/grub/grub.conf')
+                or os.path.exists('/boot/extlinux/extlinux.conf')):
+            # Local system - use running kernel
+            kver = os.uname()[2]
+            if not os.path.isdir(testPath % kver):
+                raise RuntimeError("No build tree for running kernel %r" % kver)
         else:
-            r.macros.kver = default
-        log.info('Selected kver %s', r.macros.kver)
+            # Chrooted - use the only kernel
+            buildTrees = glob.glob(testPath % '*')
+            if len(buildTrees) == 0:
+                raise RuntimeError("No kernel build tree installed")
+            elif len(buildTrees) > 1:
+                raise RuntimeError("Multiple kernels installed; please set the kver macro")
+            kver = buildTrees[0].split('/')[3]
+        log.info('Selected kver %s', kver)
+        r.macros.kver = kver
 
     def requireKVer(r):
         """
         Require whatever kernel version we picked.
         """
         r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/%(kver)s/.*')
+
+    def skipAutoDocs(r):
+        """
+        Ignore docs so different versions can be installed side-by-side
+        (without pulling in just :lib).
+        """
+        r.AutoDoc(exceptions='.*')
