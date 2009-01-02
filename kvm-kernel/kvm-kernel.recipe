@@ -4,38 +4,30 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+loadSuperClass('kernelmodulepackage')
 loadRecipe('kvm=@fl:2-devel')
-class KVMKernel(Kvm,AutoPackageRecipe):
-
-    buildRequires = ['kernel:build-tree', 'mkinitrd:runtime']
-
+class KVMKernel(KernelModulePackageRecipe, Kvm):
     name = 'kvm-kernel'
     version = Kvm.version
-    
-    def make(r):
+
+    def unpack(r):
+        Kvm.unpack(r)
+
+    def build(r):
+        Kvm.configure(r)
+
         r.Replace('rsync -R', 'rsync -R -L', 'kernel/Makefile')
-        r.macros.kver = os.uname()[2]
         r.Replace('^KERNEL.*','KERNELDIR=/lib/modules/%(kver)s/build', 'config.mak')
 
-        r.Replace('KERNEL\_VERSION\(2\,6\,28\)', 'KERNEL_VERSION(2,6,27)', 'kernel/external-module-compat-comm.h', lines=585)
+        r.Replace('KERNEL\_VERSION\(2\,6\,28\)', 'KERNEL_VERSION(2,6,27)',
+                'kernel/external-module-compat-comm.h', lines=585)
         r.Make('-C kernel')
 
-    def makeinstall(r):
+    def install(r):
         r.Install( 'kernel/x86/*.ko', '/lib/modules/%(kver)s/updates/')
 
+    def policy(r):
         # We want to make sure that the userspace code can require the
         # matching kernel-space code
         r.ComponentProvides('%(version)s')
         r.ComponentSpec('runtime', '/lib/modules/')
-
-        # *if* we are not using the kernel provided kvm (older) *then*
-        # We want the kernel module and userspace versions to match ?
-        # not necessarly...
-
-        r.Requires('kvm:runtime',
-                   '/lib/modules/%(kver)s/updates/kvm.ko')
-
-        r.AutoDoc(exceptions = '.*')
-        r.Requires('kernel:runtime(%(kver)s)', '/lib/modules/.*')
-
-
