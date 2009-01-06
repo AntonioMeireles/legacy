@@ -1,0 +1,76 @@
+#
+# Copyright (c) 2006-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Beagle(CPackageRecipe):
+    name = 'beagle'
+    version = '0.3.8'
+
+    buildRequires = [ 'atk:devel', 'cairo:devel', 'fontconfig:devel',
+                      'desktop-file-utils:runtime', 'freetype:devel',
+                      'glib:devel', 'gnome-vfs:devel', 'libexif:devel',
+                      'libgnome:devel', 'gtk:devel', 'libpng:devel',
+                      'librsvg:devel', 'libxml2:devel', 'pango:devel',
+                      'zlib:devel', 'gmime:devellib', 'gmime:cil',
+                      'gnome-sharp:devellib', 'gnome-sharp:cil',
+                      'galago-sharp:devellib', 'galago-sharp:cil',
+                      'gsf-sharp:devellib', 'gsf-sharp:cil',
+                      'gtk-sharp:devellib', 'gtk-sharp:cil',
+                      'mono:devel', 'mono:cil', 'gawk:runtime',
+                      'gettext:runtime', 'mono:runtime', 'perl:runtime',
+                      'pkgconfig:devel', 'python:devel', 'pygtk:devel',
+                      'zip:runtime', 'evolution-sharp:devellib',
+                      'evolution-sharp:cil', 'epiphany:devel',
+                      'epiphany:devellib', 'libICE:devel', 'libSM:devel',
+                      'libX11:devel', 'libXrender:devel',
+                      'libXScrnSaver:devel', 'sqlite:devel',
+                      'shared-mime-info:devellib', 'expat:devel',
+                      'intltool:runtime', 'kdelibs:devel',
+                      'ndesk-dbus-glib:devellib', 'ndesk-dbus-glib:cil',
+                      'ndesk-dbus:devellib', 'ndesk-dbus:cil',
+                      'avahi-sharp:devellib', 'xdg-utils:runtime',
+                      'libgsf:devel', 'wv:devel', 'pygtk:python',
+                      'automake:runtime', 'autoconf:runtime', 'libtool:runtime',
+                      'gcc-c++:runtime', 'taglib-sharp:cil', 'taglib-sharp:devellib',
+                      ]
+
+    def setup(r):
+        r.addArchive('mirror://gnome/beagle/%(major_version)s/')
+        # FIXME: this will need deeper refactoring
+        # now i just want it to mook with new mono
+        r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/beagle/beagle-0.2.15.1-libdir.patch')
+        r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/beagle/beagle-monodoc.patch')
+        # I don't get how fc9 goes there without this...
+        r.Replace('if test ! -e \`\$PKG_CONFIG --variable=prefix mono\`/lib/mono/2.0/',
+                  'if test ! -e `monodir`/2.0/',
+                  'configure.in')
+        r.Run('autoconf')
+        r.addSource('sysconfig.beagle')
+
+        r.Environment('MONO_PATH', '%(destdir)s/%(libdir)s/%(name)s')
+        r.Environment('MONO_SHARED_DIR', '/tmp')
+
+        r.Configure(' --enable-webservices=yes --enable-sqlite3 --disable-docs')
+        r.Make()
+        r.MakeInstall()
+
+        r.UtilizeUser('beagleindex', '%(libexecdir)s/beagle-crawl-system')
+
+        r.MakeDirs('%(localstatedir)s/cache/beagle/indexes')
+        r.Ownership('beagleindex','beagleindex','%(localstatedir)s/cache/beagle/indexes')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/cache/beagle/indexes')
+
+        r.MakeDevices('/dev/inotify','c',10,63,'root','root',0644)
+
+        r.Requires('/bin/awk', '%(taghandlerdir)s/home-user_xattr-user')
+        r.Requires('e2fsprogs:runtime', '%(taghandlerdir)s/home-user_xattr-user')
+        r.Requires('distro-release:runtime', '%(bindir)s/beagled')
+        r.TagSpec('home-user_xattr-user', '%(bindir)s/beagled')
+        r.ComponentSpec('lib','%(libdir)s/beagle/.*.so')
+
+        # Remove the launcher for the config tool, it is available
+        # in the search tool
+        r.Remove('%(datadir)s/applications/beagle-settings.desktop')
+        r.Remove('%(sysconfdir)s/xdg/autostart/beagle-search-autostart.desktop')
