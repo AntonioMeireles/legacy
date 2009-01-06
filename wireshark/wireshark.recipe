@@ -1,0 +1,90 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('python')
+loadSuperClass('rpmpackage')
+class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
+    name = 'wireshark'
+    version = '1.0.2'
+
+    externalArchive = 'http://www.wireshark.org/download/src/'
+    rpmRelease = '2.fc9'
+    rpmUpVer = '1.0.0'
+    rpmPatches = [
+                   'wireshark-nfsv4-opts.patch',
+                   'wireshark-0.99.7-path.patch', ]
+
+    rpmSources = [ 'wireshark.pam',
+                  'wireshark.console',
+                  'wireshark.desktop'
+                  ]
+
+    buildRequires = [
+        'atk:devel', 'autoconf:runtime', 'automake:runtime',
+        'bison:runtime', 'cairo:devel', 'desktop-file-utils:runtime',
+        'doxygen:runtime', 'e2fsprogs:devel', 'elfutils:devel',
+        'expat:devel', 'flex:runtime', 'fontconfig:devel',
+        'freetype:devel', 'glib:devel', 'gnutls:devel', 'gtk:devel',
+        'krb5:devel', 'libelf:devel', 'libelf:devel', 'libgcrypt:devel',
+        'libgpg-error:devel', 'libpcap:devel', 'libpcap:lib',
+        'libpng:devel', 'libxml2:runtime', 'libxslt:runtime',
+        'net-snmp:devel', 'openssl:devel', 'pango:devel', 'perl:runtime',
+        'pkgconfig:devel', 'portaudio:devel', 'procps:runtime',
+        'tcp_wrappers:devel', 'zlib:devel', 'libcap:devel', 'xdg-utils:runtime',
+        'python:devel'
+    ]
+
+
+
+    def configure(r):
+
+        r.macros.python_version = Python.majversion
+        # --with-pcre= does not work for our pcre installation
+
+        r.macros.ldflags += ' -lm -lcrypto '
+
+        # unlike fedora, we don't put the version in the plugindir; this is
+        # in order to preserve local changes.
+        r.Configure(' --bindir=%(sbindir)s'
+                    ' --enable-zlib'
+                    ' --enable-ipv6'
+                    '  --with-libsmi'
+                    ' --with-gnu-ld'
+                    ' --disable-static'
+                    ' --disable-usr-local'
+                    ' --enable-gtk2'
+                    ' --with-ssl'
+                    ' --with-net-snmp'
+                    ' --with-pic'
+                    ' --disable-warnings-as-errors'
+                    ' --with-plugins=%(libdir)s/%(name)s/plugins/'
+                    # no adns support so...
+                    ' --with-adns=no',
+                    )
+
+    def policy(r):
+        # empty?!
+        # rm -f $RPM_BUILD_ROOT%{_sbindir}/idl2wrs
+        r.Install('wireshark.pam', '%(sysconfdir)s/pam.d/wireshark', mode = 0644)
+        r.Install('wireshark.console', '%(sysconfdir)s/security/console.apps/wireshark', mode = 0644)
+
+        r.ConsoleHelper('%(bindir)s/wireshark', '%(sbindir)s/wireshark',
+                        session=True, fallback=True, timestamp=True)
+        r.Install('*.1', '%(mandir)s/man1/', mode=0644)
+
+        r.Install('tools/wireshark_be.py', 'tools/wireshark_gen.py',
+                  '%(libdir)s/python%(python_version)s/site-packages/',
+                  mode=0644)
+
+        r.Desktopfile('wireshark.desktop')
+        r.Install('image/wsicon48.png',
+                  '%(datadir)s/pixmaps/wireshark.png', mode=0644)
+
+        r.Doc('doc/*', dir='doc')
+
+        r.PackageSpec('wireshark', '(%(sbindir)s|%(bindir)s)/wireshark')
+        r.PackageSpec('tshark', '/')
+        r.Requires('tshark:runtime', '%(sbindir)s/wireshark')
