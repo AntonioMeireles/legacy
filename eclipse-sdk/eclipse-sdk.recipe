@@ -1,0 +1,126 @@
+#
+# Copyright (c) 2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class EclipseSDK(PackageRecipe):
+
+    name = 'eclipse-sdk'
+    version = '3.4.1'
+    timestamp = '200809111700'
+
+    buildRequires = [
+        'fontconfig:devel', 'freetype:devel', 'glib:devel', 'gtk:devel',
+        'icedtea-jre:runtime', 'libXext:devel', 'libXrender:devel', 'perl:perl',
+        'perl:runtime', 'python:devel', 'unzip:runtime', 'xalan-j:java',
+        'desktop-file-utils:runtime', 'ant:runtime', 'ant:java',
+        'elfutils:runtime'
+    ]
+
+    def setup(r):
+
+        r.macros.timestamp = r.timestamp
+        r.macros.site = 'http://download.eclipse.org/eclipse/downloads/drops'
+        r.macros.archive_name = 'eclipse-sourceBuild-srcIncluded'
+
+        r.macros.eclipsedir = '%(libdir)s/eclipse-%(major_version)s/'
+
+        r.addArchive(
+            '%(site)s/R-%(version)s-%(timestamp)s/', dir='%(name)s-%(version)s/'
+        )
+
+        r.addSource('eclipse.desktop', macros=True)
+        r.Desktopfile('eclipse.desktop')
+
+        # No warnings
+        r.Replace(
+            '<property name="compilerArg" value="',
+            '<property name="compilerArg" value="-nowarn  ', 'build.xml'
+        )
+
+        # Build fix
+        r.Replace(
+            ('"javacSource" value="1.3"', '"javacSource" value="1.6"'),
+            ('"javacTarget" value="1.2"', '"javacTarget" value="1.6"'),
+            'plugins/org.eclipse.{jdt.compiler.tool,pde.api.tools,osgi}/build.xml'
+        )
+
+        r.Replace(
+            '.*property name="bundleBootClasspath".*',
+            '<property name="bundleBootClasspath" '
+                'value="osgi/exceptions.jar;osgi/xmlParserAPIs.jar;${CDC-1.0/Foundation-1.0};'
+                '${java.home}/lib/rt.jar;${java.home}/lib/jsse.jar"/>',
+            'plugins/org.eclipse.osgi/build.xml'
+        )
+
+        bootClassPath = [
+            '$JAVA_HOME/jre/lib/rt.jar',
+            '$JAVA_HOME/jre/lib/jsse.jar'
+        ]
+        r.Run('echo "JavaSE-1.6='+':'.join(bootClassPath)+'" > build.properties')
+
+        arch = ('x86', 'x86_64')[Arch.x86_64==True]
+
+        r.Run('./build -os linux -ws gtk -arch '+arch)
+
+        # Generate P2 metadata
+        r.Run(
+            'java -jar eclipse/plugins/org.eclipse.equinox.launcher_*.jar -data workspace '
+                '-application org.eclipse.equinox.p2.metadata.generator.EclipseGenerator -flavor tooling '
+                '-metadataRepositoryName "Foresight Eclipse" -artifactRepositoryName "Foresight Eclipse" '
+                '-metadataRepository "file:eclipse/metadata" -artifactRepository "file:eclipse/metadata" '
+                '-root "Foresight Eclipse SDK" -rootVersion "%(major_version)s" '
+                '-source eclipse -append -publishArtifacts'
+        )
+
+        # Install with P2
+        r.Run(
+            'java -Declipse.p2.data.area="file:%(destdir)s%(eclipsedir)s/p2" '
+                '-jar eclipse/plugins/org.eclipse.equinox.launcher_*.jar -data workspace '
+                '-application org.eclipse.equinox.p2.director.app.application -flavor tooling '
+                '-metadataRepository "file:eclipse/metadata" -artifactRepository "file:eclipse/metadata" '
+                '-installIU "Foresight Eclipse SDK" -version "%(major_version)s" '
+                '-p2.os linux -p2.ws gtk -p2.arch '+arch+' '
+                '-profile SDKProfile -profileProperties org.eclipse.update.install.features=true '
+                '-destination "%(destdir)s%(eclipsedir)s" -bundlepool "%(destdir)s%(eclipsedir)s" '
+                '-roaming'
+        )
+
+        # Remove P2
+        files = [
+            'plugins/org.eclipse.*.p2*',
+            'features/*.p2*',
+            'plugins/org.eclipse.ecf*',
+            'plugins/*frameworkadmin*',
+            'plugins/*sat4j*',
+            'plugins/*simpleconfigurator.manipulator*',
+            'dropins*',
+            'p2*',
+            'configuration',
+        ]
+        for file in files:
+            r.Remove('%(eclipsedir)s/'+file, recursive=True)
+
+        r.Install('eclipse/icon.xpm', '%(eclipsedir)s/')
+
+        r.Install('eclipse/eclipse.ini', '%(sysconfdir)s/eclipse/')
+        r.Install('eclipse/configuration/config.ini', '%(eclipsedir)s/configuration/')
+
+        r.Remove('%(eclipsedir)s/eclipse.ini')
+        r.Symlink('%(sysconfdir)s/eclipse/eclipse.ini', '%(eclipsedir)s/eclipse.ini')
+        r.Symlink('%(eclipsedir)s/eclipse', '%(bindir)s/eclipse')
+
+        r.Doc(
+            'eclipse/about.html',
+            'eclipse/epl-v10.html',
+            'eclipse/notice.html',
+            'eclipse/readme/readme_eclipse.html'
+        )
+
+        r.Replace('-Xmx256m','-Xmx512m', '%(sysconfdir)s/eclipse/eclipse.ini')
+        r.AutoDoc(exceptions='.*')
+
+        r.Requires(exceptDeps='java: org.apache.tools.ant.*')
+        r.Requires(exceptDeps='java: org.apache.naming.factory.*')
+
