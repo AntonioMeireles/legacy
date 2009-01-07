@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2004-2006 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Pciutils(RPMPackageRecipe,CPackageRecipe):
+    name = 'pciutils'
+    version = '3.0.3'
+
+    rpmRelease = '1.fc11'
+    rpmPatches = [ 'pciutils-2.2.4-buf.patch',
+                   'pciutils-2.1.10-scan.patch',
+                   'pciutils-havepread.patch',
+                   'pciutils-2.2.1-idpath.patch',
+                   'pciutils-2.1.99-gcc4.patch',
+                   'pciutils-3.0.2-multilib.patch',
+                   'pciutils-dir-d.patch',
+                   'pciutils-2.2.10-sparc-support.patch',
+                   'pciutils-3.0.1-superh-support.patch',
+                   ]
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.unpack()
+        r.Run(""" sed -i -e 's/^SRC=.*/SRC="http:\/\/pciids.sourceforge.net\/pci.ids"/' update-pciids.sh """)
+
+        r.macros.cflags = ''
+        r.Make('PREFIX=%(prefix)s OPT="%(cflags)s -fPIC" SHARED="no" ZLIB="no" STRIP=""  IDSDIR="/usr/share/hwdata" PCI_IDS="pci.ids"')
+        r.Move('lib/libpci.a', 'lib/libpci.a.toinstall')
+        r.Make('clean')
+        r.Make('PREFIX=%(prefix)s OPT="%(cflags)s" STRIP="" SHARED="yes"  ZLIB="no" STRIP=""  IDSDIR="/usr/share/hwdata" PCI_IDS="pci.ids"')
+
+        #fix lib vs. lib64 in libpci.pc (static Makefile is used)
+        r.Move('lib/libpci.pc', 'lib/libpci.pc.old')
+        r.Run(""" sed <lib/libpci.pc.old >lib/libpci.pc "s|^libdir=.*$|libdir=%(libdir)s|" """)
+
+        for b in ['lspci', 'setpci', 'update-pciids']:
+            r.Install(b, '%(essentialsbindir)s/')
+        for m in ['lspci.8', 'setpci.8', 'update-pciids.8']:
+            r.Install(m, '%(mandir)s/man8/')
+
+        r.Install('lib/libpci.s*', '%(libdir)s/')
+        r.Install('lib/libpci.a.toinstall', '%(libdir)s/libpci.a')
+
+
+        r.Install('lib/{pci,header,config,types}.h', '%(includedir)s/pci/')
+
+        r.Install('lib/libpci.pc', '%(includedir)s/pkgconfig/')
+
