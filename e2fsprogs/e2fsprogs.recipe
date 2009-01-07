@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+loadSuperClass('rpmpackage')
+class E2fsprogs(RPMPackageRecipe,CPackageRecipe):
+    name = 'e2fsprogs'
+    version = '1.41.3'
+    rpmRelease = '2.fc10'
+    rpmPatches = [ 'e2fsprogs-1.38-etcblkid.patch',
+                   'e2fsprogs-1.40.4-sb_feature_check_ignore.patch',
+                   'e2fsprogs-journal-move.patch' ]
+
+    buildRequires = [ 'gettext:runtime', 'install-info:runtime',
+                      'perl:runtime', 'chkconfig:runtime', 'intltool:runtime',
+                      'python:devel']
+
+    def setup(r):
+        r.disableParallelMake()
+
+        r.unpack()
+
+        r.Configure('--enable-elf-shlibs --enable-nls --disable-e2initrd-helper  --enable-blkid-devmapper')
+        r.Make()
+        r.MakeInstall('install-libs root_sbindir=%(essentialsbindir)s'
+                         ' root_libdir=%(essentiallibdir)s')
+        for file in ('libcom_err.so', 'libe2p.so', 'libext2fs.so',
+                     'libss.so', 'libuuid.so'):
+            r.Symlink('%%(essentiallibdir)s/%s.2' %file, file)
+
+        # krb5 needs this to be in system include dirs
+        r.Copy('%(includedir)s/et/com_err.h', '%(includedir)s/')
+
+        r.addSource('uuidd.init', dest='%(initdir)s/uuidd', mode = 0755, rpm = r.srpm)
+        r.MakeDirs('/var/lib/libuuid')
+        r.ExcludeDirectories(exceptions = ['/var/lib/libuuid', '/etc/blkid'])
+        r.UtilizeUser('uuidd', '/var/lib/libuuid')
+
+        # test files
+        if Use.buildtests:
+            r.Make('tst_badblocks tst_iscan tst_byteswap', dir='lib/ext2fs')
+            r.Make('base_device', dir='misc')
+            r.Make('test_script', dir='tests')
+        r.NormalizeCompression(exceptions='%(thistestdir)s/.*')
+        r.TestSuiteFiles('tst_.*', 'misc/base_device.*')
+
+        r.TestSuite('lib/ext2fs', './tst_badblocks')
+        r.TestSuite('lib/ext2fs', './tst_iscan')
+        r.TestSuite('lib/ext2fs', './tst_byteswap')
+        r.TestSuite('misc', './base_device < ./base_device.tst > base_device.out')
+        r.TestSuite('tests', './test_script')
