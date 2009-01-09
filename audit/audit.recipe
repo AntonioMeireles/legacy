@@ -4,37 +4,39 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Audit(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Audit(RPMPackageRecipe,CPackageRecipe):
     name = 'audit'
-    version = '1.2.8'
+    version = '1.7.10'
+    rpmRelease = '2.fc11'
+    rpmPatches = [ 'audit-1.7.11-session.patch' ]
     buildRequires = [ 'autoconf:runtime', 'userspace-kernel-headers:devel',
                       'swig:runtime', 'automake:runtime', 'libtool:runtime',
-                      'python:devel', ]
+                      'python:devel', 'desktop-file-utils:runtime',
+                      'openldap:devel', 'tcp_wrappers:devel', 
+                      'gettext:runtime', 'intltool:runtime', 'pygtk:python', 'python:bin']
 
     loadInstalled('python')
-    
-    def setup(r):
-        r.addArchive('http://people.redhat.com/sgrubb/audit/')
-        r.addPatch('makefile_fixes.patch')
 
+    def setup(r):
+        r.unpack()
         r.macros.pyver = Python.majversion
 
-        r.Replace('/lib/python2.4/site-packages',
-                  '/%(lib)s/python%(pyver)s/site-packages',
-                  'audisp/Makefile')
-        r.Run('autoreconf -fv --install')
+        r.Configure('--sbindir=%(essentialsbindir)s --libdir=%(essentiallibdir)s '
+                    # '--with-prelude'
+                    '--with-libwrap --enable-gssapi-krb5=no')
 
-        r.Configure('--sbindir=%(essentialsbindir)s --libdir=%(essentiallibdir)s')
-
-        # autoconf is getting this wrong.
-        r.Replace('/lib/python%(pyver)s/site-packages',
-                  '/%(lib)s/python%(pyver)s/site-packages',
-                  'Makefile', 'swig/Makefile')
         r.Make()
         r.MakeInstall()
 
         r.Replace('2345', '-', '%(sysconfdir)s/rc.d/init.d/auditd')
         r.MakeDirs('%(localstatedir)s/log/audit')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/log/audit')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/audisp/plugins.d')
 
         r.TagSpec('initscript', '%(initdir)s/')
+        if Arch.x86_64:
+            r.macros.pyver = Python.majversion
+            r.Move('/usr/lib/python%(pyver)s/site-packages/*', '%(libdir)s/python%(pyver)s/site-packages/')
+        # FIXME!!!
+        # system-config-audit make -C system-config-audit DESTDIR=$RPM_BUILD_ROOT install-...
