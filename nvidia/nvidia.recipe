@@ -1,7 +1,7 @@
 class Nvidia(CPackageRecipe):
 
     name = 'nvidia'
-    version = '177.82'
+    version = '180.22'
 
     buildRequires = ['atk:devel', 'chkconfig:runtime', 'glib:devel',
                      'gtk:devel', 'libX11:devel', 'libXext:devel',
@@ -27,33 +27,48 @@ class Nvidia(CPackageRecipe):
         r.addSource('%(url)s/%(version)s/NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s.run')
 
         r.addSource('nvidia.init')
-        r.addSource('nvidia.opts', dest = '%(sysconfdir)s/modprobe.d/nvidia')	
+        r.addSource('nvidia.opts', dest = '%(sysconfdir)s/modprobe.d/nvidia')
 
         r.addAction('sh NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s.run -x') # Extract only
 
         # Copy the files we need
         r.macros.root = 'NVIDIA-Linux-%(arch)s-%(version)s-pkg%(nvVersionSuffix)s/usr'
 
-        r.Install('%(root)s/lib/libnvidia-{cfg,tls}.s*', '%(libdir)s/')
-        r.Install('%(root)s/lib/libcuda.s*', '%(libdir)s/')
+        #
+        r.Install('%(root)s/bin/nvidia-{smi,settings,xconfig,bug-report.sh}',
+                  '%(bindir)s/')
 
-        r.Install('%(root)s/lib/tls/libnvidia-{cfg,tls}.s*', '%(libdir)s/xorg.nvidia.3d/tls/')
+        # headers
+        # moved to  '%(includedir)s/nvidia'
+        # to avoid clashes with Mesa stock GL headers
+        r.Install('%(root)s/include/*', '%(includedir)s/nvidia/')
+
+        # libs
+
+        r.Install('%(root)s/lib/libnvidia*', '%(libdir)s/')
+        r.Install('%(root)s/lib/libcuda.s*', '%(libdir)s/')
+        r.Install('%(root)s/lib/libvdp*', '%(libdir)s/')
+
+        r.Install('%(root)s/lib/tls/lib*', '%(libdir)s/xorg.nvidia.3d/tls/')
 
         if Arch.x86_64:
-            r.Install('%(root)s/lib32/libnvidia-{cfg,tls}.s*', '%(lib32)s/')
-            r.Install('%(root)s/lib32/tls/libnvidia-{cfg,tls}.s*', '%(lib32)s/xorg.nvidia.3d/tls/')
+            r.Install('%(root)s/lib32/libnvidia*', '%(lib32)s/')
+            r.Install('%(root)s/lib32/libcuda*', '%(lib32)s/')
+            r.Install('%(root)s/lib32/libvdp*', '%(lib32)s/')
+            r.Install('%(root)s/lib32/tls/lib*', '%(lib32)s/xorg.nvidia.3d/tls/')
+
+        #
+        r.Install('%(root)s/X11R6/lib/libXvMCNVIDIA.so.*', '%(libdir)s/xorg.nvidia.3d/')
 
         r.Install('%(root)s/X11R6/lib/modules/libnvidia-wfb.s*', '%(libdir)s/xorg/modules/updates/')
+
         r.Install('%(root)s/X11R6/lib/modules/extensions/libglx.s*', '%(libdir)s/xorg/modules/updates/extensions/')
         r.Install('%(root)s/X11R6/lib/modules/drivers/nvidia_drv.s*', '%(libdir)s/xorg/modules/updates/drivers/')
-
-        r.Install('%(root)s/X11R6/lib/libXvMCNVIDIA.so.*', '%(libdir)s/xorg.nvidia.3d/')
 
         r.Install('%(root)s/lib/libGL*.so.*', '%(libdir)s/xorg.nvidia.3d/')
 
         if Arch.x86_64:
             r.Install('%(root)s/lib32/libGL*.so.*', '%(lib32)s/xorg.nvidia.3d/')
-            # r.Install('%(root)s/lib32/libcuda.s*', '%(lib32)s/')
 
         r.Install('%(root)s/share/man/man1/*', '%(datadir)s/man/man1/')
         r.Remove('%(destdir)s/%(datadir)s/man/man1/nvidia-installer*')
@@ -71,12 +86,6 @@ class Nvidia(CPackageRecipe):
         r.Desktopfile('%(root)s/share/applications/nvidia-settings.desktop')
 
         r.Install('%(root)s/share/pixmaps/nvidia-settings.png', '%(datadir)s/pixmaps/')
-
-        r.MakeDirs('%(bindir)s')
-        r.Install('%(root)s/bin/nvidia-{settings,xconfig,bug-report.sh}', 
-                  '%(bindir)s')
-
-        # FIXME: do we ever  want to install headers ? 
 
         r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/')
         r.SharedLibrary(subtrees='%(libdir)s/xorg/modules/updates/extensions/')
@@ -117,7 +126,6 @@ class Nvidia(CPackageRecipe):
         r.ComponentSpec('runtime', '%(datadir)s/pixmaps/.*')
         r.ComponentSpec('runtime', '%(datadir)s/applications/.*')
 
-
         # we want Mesa's libGL to be used for dep resolution, as that one is installed on all user's boxes, 
         # and should be the one that goes into _all_ rMake chroots. 
         r.Provides(exceptions='.*')
@@ -129,5 +137,4 @@ class Nvidia(CPackageRecipe):
 
         r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-tls\.so\.1\(SysV\ x86\)')
         r.Requires(exceptDeps=r'soname\:\ ELF32\/libGLcore\.so\.1\(SysV\ x86\)')
-
 
