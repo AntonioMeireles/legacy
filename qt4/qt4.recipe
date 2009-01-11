@@ -6,7 +6,7 @@
 class Qt4(AutoPackageRecipe):
 
     name = 'qt4'
-    version = '4.4.1+r861610'
+    version = '4.4.3+r909389'
 
     buildRequires = [
         'cups:devel', 'dbus:devel', 'fontconfig:devel', 'freetype:devel',
@@ -28,15 +28,12 @@ class Qt4(AutoPackageRecipe):
             r.macros.platform = 'linux-g++'
 
         r.macros.qt = 'qt4'
+        r.macros.revision = r.version.split('+')[1][1:]
 
-        rev = r.version.split('+')[1][1:]
-        r.addSvnSnapshot(
-            'svn://anonsvn.kde.org/home/kde/trunk/qt-copy', revision=rev
-        )
-        #r.addPatch('assistant-qt4.patch')
-        #r.addPatch('qdbuscpp2xml-moc-qt4.patch')
+        r.addArchive('mirror://kde/snapshots/qt-copy-svn.tar.bz2')
+        r.addAction('svn -q revert -R .')
+        r.addAction('svn update --revision %(revision)s')
 
-        #  under GNOME, default to QGtkStyle if available
         r.addPatch('http://cvs.fedoraproject.org/viewvc/rpms/qt/devel/qt-x11-opensource-src-4.4.0-qgtkstyle.patch?revision=1.1')
 
         r.Replace('"/moc"', '"/moc-qt4"', 'tools/qdbus/qdbuscpp2xml/qdbuscpp2xml.cpp')
@@ -52,10 +49,6 @@ class Qt4(AutoPackageRecipe):
         r.Replace('link_prl', '',
                   'mkspecs/linux-g++{,-32,-64}/qmake.conf')
 
-        # broken patch
-        #r.Run('echo "0212" >> patches/DISABLED')
-
-        r.Replace('test -d .svn &&', '', 'apply_patches')
         r.Run('./apply_patches')
 
     def configure(r):
@@ -70,7 +63,6 @@ class Qt4(AutoPackageRecipe):
                  ' -translationdir %(datadir)s/%(qt)s/translations')
 
         conf += (' -no-rpath'
-                 ' -no-exceptions'
                  ' -reduce-relocations'
                  ' -nomake demos'
                  ' -nomake examples'
@@ -132,12 +124,11 @@ class Qt4(AutoPackageRecipe):
         r.MakePathsInstall('INSTALL_ROOT=%(destdir)s')
 
         # We really need this!
-        r.Replace('/.+/%(maindir)s/lib', '%(libdir)s',
-                  '%(libdir)s/*.la', allowNoChange=True)
-        r.Replace(('/.+/%(maindir)s/lib', '%(libdir)s'),
-                  ('/.+/%(maindir)s/bin/moc', '%(bindir)s/moc-qt4'),
-                  ('/.+/%(maindir)s/bin/uic', '%(bindir)s/uic-qt4'),
-                  '%(libdir)s/pkgconfig/*.{la,pc}', allowNoChange=True)
+        r.Replace(
+            ('%(bindir)s/moc', '%(bindir)s/moc-qt4'),
+            ('%(bindir)s/uic', '%(bindir)s/uic-qt4'),
+            '%(libdir)s/pkgconfig/*.pc', allowNoChange=True
+        )
 
         # Respect CC, CXX, CFLAGS, CXXFLAGS from environment
         r.Replace('rpath.conf', 'environment.conf',
