@@ -1,0 +1,2901 @@
+diff -urpN linux/drivers/media/video/gspca/Kconfig linux/drivers/media/video/gspca/Kconfig
+--- linux/drivers/media/video/gspca/Kconfig	2008-12-09 21:37:33.000000000 +0100
++++ linux/drivers/media/video/gspca/Kconfig	2008-12-25 17:09:06.000000000 +0100
+@@ -18,6 +18,7 @@ menuconfig USB_GSPCA
+ if USB_GSPCA && VIDEO_V4L2
+ 
+ source "drivers/media/video/gspca/m5602/Kconfig"
++source "drivers/media/video/gspca/stv06xx/Kconfig"
+ 
+ config USB_GSPCA_CONEX
+ 	tristate "Conexant Camera Driver"
+diff -urpN linux/drivers/media/video/gspca/Makefile linux/drivers/media/video/gspca/Makefile
+--- linux/drivers/media/video/gspca/Makefile	2008-12-09 21:37:33.000000000 +0100
++++ linux/drivers/media/video/gspca/Makefile	2008-12-25 17:09:06.000000000 +0100
+@@ -47,4 +45,4 @@ gspca_vc032x-objs		:= vc032x.o
+ gspca_zc3xx-objs		:= zc3xx.o
+ 
+ obj-$(CONFIG_USB_M5602)		+= m5602/
+-
++obj-$(CONFIG_USB_STV06XX) 	+= stv06xx/
+diff -urpN linux/drivers/media/video/gspca/gspca.h linux/drivers/media/video/gspca/gspca.h
+--- linux/drivers/media/video/gspca/gspca.h	2008-12-10 19:53:43.000000000 +0100
++++ linux/drivers/media/video/gspca/gspca.h	2008-12-25 20:55:35.000000000 +0100
+@@ -56,7 +56,7 @@ extern int gspca_debug;
+ /* device information - set at probe time */
+ struct cam {
+ 	int bulk_size;		/* buffer size when image transfer by bulk */
+-	struct v4l2_pix_format *cam_mode;	/* size nmodes */
++	const struct v4l2_pix_format *cam_mode;	/* size nmodes */
+ 	char nmodes;
+ 	__u8 bulk_nurbs;	/* number of URBs in bulk mode
+ 				 * - cannot be > MAX_NURBS
+diff -urpN linux/drivers/media/video/gspca/stv06xx/Kconfig linux/drivers/media/video/gspca/stv06xx/Kconfig
+--- linux/drivers/media/video/gspca/stv06xx/Kconfig	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/Kconfig	2008-12-25 17:09:06.000000000 +0100
+@@ -0,0 +1,8 @@
++config USB_STV06XX
++	tristate "ST USB STV06XX Camera Driver"
++	depends on VIDEO_V4L2 && USB_GSPCA
++	help
++	  Say Y here if you want support for cameras based on the ST STV06XX chip.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called gspca_stv06xx.
+diff -urpN linux/drivers/media/video/gspca/stv06xx/Makefile linux/drivers/media/video/gspca/stv06xx/Makefile
+--- linux/drivers/media/video/gspca/stv06xx/Makefile	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/Makefile	2008-12-25 17:09:06.000000000 +0100
+@@ -0,0 +1,8 @@
++obj-$(CONFIG_USB_STV06XX) += gspca_stv06xx.o
++
++gspca_stv06xx-objs := stv06xx.o \
++		      stv06xx_vv6410.o \
++		      stv06xx_hdcs.o \
++		      stv06xx_pb0100.o
++
++EXTRA_CFLAGS += -Idrivers/media/video/gspca
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx.c linux/drivers/media/video/gspca/stv06xx/stv06xx.c
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx.c	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx.c	2008-12-25 21:17:34.000000000 +0100
+@@ -0,0 +1,522 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#include "stv06xx_sensor.h"
++
++MODULE_AUTHOR("Erik Andrén");
++MODULE_DESCRIPTION("STV06XX USB Camera Driver");
++MODULE_LICENSE("GPL");
++
++int dump_bridge;
++int dump_sensor;
++
++int stv06xx_write_bridge(struct sd *sd, u16 address, u16 i2c_data)
++{
++	int err;
++	struct usb_device *udev = sd->gspca_dev.dev;
++	__u8 *buf = sd->gspca_dev.usb_buf;
++	u8 len = (i2c_data > 0xff) ? 2 : 1;
++
++	buf[0] = i2c_data & 0xff;
++	buf[1] = (i2c_data >> 8) & 0xff;
++
++	err = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++			      0x04, 0x40, address, 0, buf, len,
++			      STV06XX_URB_MSG_TIMEOUT);
++
++
++	PDEBUG(D_CONF, "Written 0x%x to address 0x%x, status: %d",
++	       i2c_data, address, err);
++
++	return (err < 0) ? err : 0;
++}
++
++int stv06xx_read_bridge(struct sd *sd, u16 address, u8 *i2c_data)
++{
++	int err;
++	struct usb_device *udev = sd->gspca_dev.dev;
++	__u8 *buf = sd->gspca_dev.usb_buf;
++
++	err = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
++			      0x04, 0xc0, address, 0, buf, 1,
++			      STV06XX_URB_MSG_TIMEOUT);
++
++	*i2c_data = buf[0];
++
++	PDEBUG(D_CONF, "Read 0x%x from address 0x%x, status %d",
++	       *i2c_data, address, err);
++
++	return (err < 0) ? err : 0;
++}
++
++/* Wraps the normal write sensor bytes / words functions for writing a
++   single value */
++int stv06xx_write_sensor(struct sd *sd, u8 address, u16 value)
++{
++	if (sd->sensor->i2c_len == 2) {
++		u16 data[2] = { address, value };
++		return stv06xx_write_sensor_words(sd, data, 1);
++	} else {
++		u8 data[2] = { address, value };
++		return stv06xx_write_sensor_bytes(sd, data, 1);
++	}
++}
++
++static int stv06xx_write_sensor_finish(struct sd *sd)
++{
++	int err = 0;
++
++	if (IS_850(sd)) {
++		struct usb_device *udev = sd->gspca_dev.dev;
++		__u8 *buf = sd->gspca_dev.usb_buf;
++
++		/* Quickam Web needs an extra packet */
++		buf[0] = 0;
++		err = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++				      0x04, 0x40, 0x1704, 0, buf, 1,
++				      STV06XX_URB_MSG_TIMEOUT);
++	}
++
++	return (err < 0) ? err : 0;
++}
++
++int stv06xx_write_sensor_bytes(struct sd *sd, const u8 *data, u8 len)
++{
++	int err, i, j;
++	struct usb_device *udev = sd->gspca_dev.dev;
++	__u8 *buf = sd->gspca_dev.usb_buf;
++
++	PDEBUG(D_USBO, "I2C: Command buffer contains %d entries", len);
++	for (i = 0; i < len;) {
++		/* Build the command buffer */
++		memset(buf, 0, I2C_BUFFER_LENGTH);
++		for (j = 0; j < I2C_MAX_BYTES && i < len; j++, i++) {
++			buf[j] = data[2*i];
++			buf[0x10 + j] = data[2*i+1];
++			PDEBUG(D_USBO, "I2C: Writing 0x%02x to reg 0x%02x",
++			data[2*i+1], data[2*i]);
++		}
++		buf[0x20] = sd->sensor->i2c_addr;
++		buf[0x21] = j - 1; /* Number of commands to send - 1 */
++		buf[0x22] = I2C_WRITE_CMD;
++		err = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++				      0x04, 0x40, 0x0400, 0, buf,
++				      I2C_BUFFER_LENGTH,
++				      STV06XX_URB_MSG_TIMEOUT);
++				      if (err < 0)
++					return err;
++       }
++       return stv06xx_write_sensor_finish(sd);
++}
++
++int stv06xx_write_sensor_words(struct sd *sd, const u16 *data, u8 len)
++{
++	int err, i, j;
++	struct usb_device *udev = sd->gspca_dev.dev;
++	__u8 *buf = sd->gspca_dev.usb_buf;
++
++	PDEBUG(D_USBO, "I2C: Command buffer contains %d entries", len);
++
++	for (i = 0; i < len;) {
++		/* Build the command buffer */
++		memset(buf, 0, I2C_BUFFER_LENGTH);
++		for (j = 0; j < I2C_MAX_WORDS && i < len; j++, i++) {
++			buf[j] = data[2*i];
++			buf[0x10 + j * 2] = data[2*i+1];
++			buf[0x10 + j * 2 + 1] = data[2*i+1] >> 8;
++			PDEBUG(D_USBO, "I2C: Writing 0x%04x to reg 0x%02x",
++				data[2*i+1], data[2*i]);
++		}
++		buf[0x20] = sd->sensor->i2c_addr;
++		buf[0x21] = j - 1; /* Number of commands to send - 1 */
++		buf[0x22] = I2C_WRITE_CMD;
++		err = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++				0x04, 0x40, 0x0400, 0, buf,
++				I2C_BUFFER_LENGTH,
++				STV06XX_URB_MSG_TIMEOUT);
++		if (err < 0)
++			return err;
++	}
++	return stv06xx_write_sensor_finish(sd);
++}
++
++int stv06xx_read_sensor(struct sd *sd, const u8 address, u16 *value)
++{
++	int err;
++	struct usb_device *udev = sd->gspca_dev.dev;
++	__u8 *buf = sd->gspca_dev.usb_buf;
++
++	err = stv06xx_write_bridge(sd, STV_I2C_FLUSH, sd->sensor->i2c_flush);
++	if (err < 0)
++		return err;
++
++	/* Clear mem */
++	memset(buf, 0, I2C_BUFFER_LENGTH);
++
++	buf[0] = address;
++	buf[0x20] = sd->sensor->i2c_addr;
++	buf[0x21] = 0;
++
++	/* Read I2C register */
++	buf[0x22] = I2C_READ_CMD;
++
++	err = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++			      0x04, 0x40, 0x1400, 0, buf, I2C_BUFFER_LENGTH,
++			      STV06XX_URB_MSG_TIMEOUT);
++	if (err < 0) {
++		PDEBUG(D_ERR, "I2C Read: error writing address: %d", err);
++		return err;
++	}
++
++	err = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
++			      0x04, 0xc0, 0x1410, 0, buf, sd->sensor->i2c_len,
++			      STV06XX_URB_MSG_TIMEOUT);
++	if (sd->sensor->i2c_len == 2)
++		*value = buf[0] | (buf[1] << 8);
++	else
++		*value = buf[0];
++
++	PDEBUG(D_USBO, "I2C: Read 0x%x from address 0x%x, status: %d",
++	       *value, address, err);
++
++	return (err < 0) ? err : 0;
++}
++
++/* Dumps all bridge registers */
++static void stv06xx_dump_bridge(struct sd *sd)
++{
++	int i;
++	u8 data, buf;
++
++	info("Dumping all stv06xx bridge registers");
++	for (i = 0x1400; i < 0x160f; i++) {
++		stv06xx_read_bridge(sd, i, &data);
++
++		info("Read 0x%x from address 0x%x", data, i);
++	}
++
++	for (i = 0x1400; i < 0x160f; i++) {
++		stv06xx_read_bridge(sd, i, &data);
++		buf = data;
++
++		stv06xx_write_bridge(sd, i, 0xff);
++		stv06xx_read_bridge(sd, i, &data);
++		if (data == 0xff)
++			info("Register 0x%x is read/write", i);
++		else if (data != buf)
++			info("Register 0x%x is read/write,"
++			     "but only partially", i);
++		else
++			info("Register 0x%x is read-only", i);
++
++		stv06xx_write_bridge(sd, i, buf);
++	}
++}
++
++/* this function is called at probe and resume time */
++static int stv06xx_init(struct gspca_dev *gspca_dev)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	int err;
++
++	PDEBUG(D_PROBE, "Initializing camera");
++
++	/* Let the usb init settle for a bit
++	   before performing the initialization */
++	msleep(250);
++
++	err = sd->sensor->init(sd);
++
++	if (dump_sensor)
++		sd->sensor->dump(sd);
++
++	return (err < 0) ? err : 0;
++}
++
++/* Start the camera */
++static int stv06xx_start(struct gspca_dev *gspca_dev)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	int err;
++
++	/* Prepare the sensor for start */
++	err = sd->sensor->start(sd);
++	if (err < 0)
++		goto out;
++
++	/* Start isochronous streaming */
++	err = stv06xx_write_bridge(sd, STV_ISO_ENABLE, 1);
++
++out:
++	if (err < 0)
++		PDEBUG(D_STREAM, "Starting stream failed");
++	else
++		PDEBUG(D_STREAM, "Started streaming");
++
++	return (err < 0) ? err : 0;
++}
++
++static void stv06xx_stopN(struct gspca_dev *gspca_dev)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++
++	/* stop ISO-streaming */
++	err = stv06xx_write_bridge(sd, STV_ISO_ENABLE, 0);
++	if (err < 0)
++		goto out;
++
++	err = sd->sensor->stop(sd);
++	if (err < 0)
++		goto out;
++
++out:
++	if (err < 0)
++		PDEBUG(D_STREAM, "Failed to stop stream");
++	else
++		PDEBUG(D_STREAM, "Stopped streaming");
++}
++
++/*
++ * Analyse an USB packet of the data stream and store it appropriately.
++ * Each packet contains an integral number of chunks. Each chunk has
++ * 2-bytes identification, followed by 2-bytes that describe the chunk
++ * length. Known/guessed chunk identifications are:
++ * 8001/8005/C001/C005 - Begin new frame
++ * 8002/8006/C002/C006 - End frame
++ * 0200/4200           - Contains actual image data, bayer or compressed
++ * 0005                - 11 bytes of unknown data
++ * 0100                - 2 bytes of unknown data
++ * The 0005 and 0100 chunks seem to appear only in compressed stream.
++ */
++static void stv06xx_pkt_scan(struct gspca_dev *gspca_dev,
++			struct gspca_frame *frame,	/* target */
++			__u8 *data,			/* isoc packet */
++			int len)			/* iso packet length */
++{
++	PDEBUG(D_PACK, "Packet of length %d arrived", len);
++
++	/* A packet may contain several frames
++	   loop until the whole packet is reached */
++	while (len) {
++		int id, chunk_len;
++
++		if (len < 4) {
++			PDEBUG(D_PACK, "Packet is smaller than 4 bytes");
++			return;
++		}
++
++		/* Capture the id */
++		id = (data[0] << 8) | data[1];
++
++		/* Capture the chunk length */
++		chunk_len = (data[2] << 8) | data[3];
++		PDEBUG(D_PACK, "Chunk id: %x, length: %d", id, chunk_len);
++
++		data += 4;
++		len -= 4;
++
++		if (len < chunk_len) {
++			PDEBUG(D_ERR, "URB packet length is smaller"
++				" than the specified chunk length");
++			return;
++		}
++
++		switch (id) {
++		case 0x0200:
++		case 0x4200:
++			PDEBUG(D_PACK, "Frame data packet detected");
++
++			gspca_frame_add(gspca_dev, INTER_PACKET, frame,
++					data, chunk_len);
++			break;
++
++		case 0x8001:
++		case 0x8005:
++		case 0xc001:
++		case 0xc005:
++			PDEBUG(D_PACK, "Starting new frame");
++
++			/* Create a new frame, chunk length should be zero */
++			gspca_frame_add(gspca_dev, FIRST_PACKET,
++					frame, data, 0);
++
++			if (chunk_len)
++				PDEBUG(D_ERR, "Chunk length is "
++					      "non-zero on a SOF");
++			break;
++
++		case 0x8002:
++		case 0x8006:
++		case 0xc002:
++			PDEBUG(D_PACK, "End of frame detected");
++
++			/* Complete the last frame (if any) */
++			gspca_frame_add(gspca_dev, LAST_PACKET, frame, data, 0);
++
++			if (chunk_len)
++				PDEBUG(D_ERR, "Chunk length is "
++					      "non-zero on a EOF");
++			break;
++
++		case 0x0005:
++			PDEBUG(D_PACK, "Chunk 0x005 detected");
++			/* Unknown chunk with 11 bytes of data,
++			   occurs just before end of each frame
++			   in compressed mode */
++			break;
++
++		case 0x0100:
++			PDEBUG(D_PACK, "Chunk 0x0100 detected");
++			/* Unknown chunk with 2 bytes of data,
++			   occurs 2-3 times per USB interrupt */
++			break;
++		default:
++			PDEBUG(D_PACK, "Unknown chunk %d detected", id);
++			/* Unknown chunk */
++		}
++		data    += chunk_len;
++		len     -= chunk_len;
++	}
++}
++
++static int stv06xx_config(struct gspca_dev *gspca_dev,
++			  const struct usb_device_id *id);
++
++/* sub-driver description */
++static const struct sd_desc sd_desc = {
++	.name = MODULE_NAME,
++	.config = stv06xx_config,
++	.init = stv06xx_init,
++	.start = stv06xx_start,
++	.stopN = stv06xx_stopN,
++	.pkt_scan = stv06xx_pkt_scan
++};
++
++/* This function is called at probe time */
++static int stv06xx_config(struct gspca_dev *gspca_dev,
++			  const struct usb_device_id *id)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	struct cam *cam;
++
++	PDEBUG(D_PROBE, "Configuring camera");
++
++	cam = &gspca_dev->cam;
++	cam->epaddr = STV_ISOC_ENDPOINT_ADDR;
++	sd->desc = sd_desc;
++	gspca_dev->sd_desc = &sd->desc;
++
++	if (dump_bridge)
++		stv06xx_dump_bridge(sd);
++
++	sd->sensor = &stv06xx_sensor_vv6410;
++	if (!sd->sensor->probe(sd))
++		return 0;
++
++	sd->sensor = &stv06xx_sensor_hdcs1x00;
++	if (!sd->sensor->probe(sd))
++		return 0;
++
++	sd->sensor = &stv06xx_sensor_hdcs1020;
++	if (!sd->sensor->probe(sd))
++		return 0;
++
++	sd->sensor = &stv06xx_sensor_pb0100;
++	if (!sd->sensor->probe(sd))
++		return 0;
++
++	sd->sensor = NULL;
++	return -ENODEV;
++}
++
++
++
++/* -- module initialisation -- */
++static const __devinitdata struct usb_device_id device_table[] = {
++	{USB_DEVICE(0x046d, 0x0840)}, /* QuickCam Express */
++	{USB_DEVICE(0x046d, 0x0850)}, /* LEGO cam / QuickCam Web */
++	{USB_DEVICE(0x046d, 0x0870)}, /* Dexxa WebCam USB */
++	{}
++};
++MODULE_DEVICE_TABLE(usb, device_table);
++
++/* -- device connect -- */
++static int sd_probe(struct usb_interface *intf,
++			const struct usb_device_id *id)
++{
++	PDEBUG(D_PROBE, "Probing for a stv06xx device");
++	return gspca_dev_probe(intf, id, &sd_desc, sizeof(struct sd),
++			       THIS_MODULE);
++}
++
++void sd_disconnect(struct usb_interface *intf)
++{
++	struct gspca_dev *gspca_dev = usb_get_intfdata(intf);
++	struct sd *sd = (struct sd *) gspca_dev;
++	PDEBUG(D_PROBE, "Disconnecting the stv06xx device");
++
++	if (sd->sensor->disconnect)
++		sd->sensor->disconnect(sd);
++	gspca_disconnect(intf);
++}
++
++static struct usb_driver sd_driver = {
++	.name = MODULE_NAME,
++	.id_table = device_table,
++	.probe = sd_probe,
++	.disconnect = sd_disconnect,
++#ifdef CONFIG_PM
++	.suspend = gspca_suspend,
++	.resume = gspca_resume,
++#endif
++};
++
++/* -- module insert / remove -- */
++static int __init sd_mod_init(void)
++{
++	if (usb_register(&sd_driver) < 0)
++		return -1;
++	PDEBUG(D_PROBE, "registered");
++	return 0;
++}
++static void __exit sd_mod_exit(void)
++{
++	usb_deregister(&sd_driver);
++	PDEBUG(D_PROBE, "deregistered");
++}
++
++module_init(sd_mod_init);
++module_exit(sd_mod_exit);
++
++module_param(dump_bridge, bool, S_IRUGO | S_IWUSR);
++MODULE_PARM_DESC(dump_bridge, "Dumps all usb bridge registers at startup");
++
++module_param(dump_sensor, bool, S_IRUGO | S_IWUSR);
++MODULE_PARM_DESC(dump_sensor, "Dumps all sensor registers at startup");
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx.h linux/drivers/media/video/gspca/stv06xx/stv06xx.h
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx.h	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx.h	2008-12-25 21:13:51.000000000 +0100
+@@ -0,0 +1,107 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#ifndef STV06XX_H_
++#define STV06XX_H_
++
++#include "gspca.h"
++
++#define MODULE_NAME "STV06xx"
++
++#define STV_ISOC_ENDPOINT_ADDR		0x81
++
++#ifndef V4L2_PIX_FMT_SGRBG8
++#define V4L2_PIX_FMT_SGRBG8 v4l2_fourcc('G', 'R', 'B', 'G')
++#endif
++
++#define STV_REG23 			0x0423
++
++/* Control registers of the STV0600 ASIC */
++#define STV_I2C_PARTNER			0x1420
++#define STV_I2C_VAL_REG_VAL_PAIRS_MIN1	0x1421
++#define STV_I2C_READ_WRITE_TOGGLE	0x1422
++#define STV_I2C_FLUSH			0x1423
++#define STV_I2C_SUCC_READ_REG_VALS	0x1424
++
++#define STV_ISO_ENABLE			0x1440
++#define STV_SCAN_RATE			0x1443
++#define STV_LED_CTRL			0x1445
++#define STV_STV0600_EMULATION		0x1446
++#define STV_REG00			0x1500
++#define STV_REG01			0x1501
++#define STV_REG02			0x1502
++#define STV_REG03			0x1503
++#define STV_REG04			0x1504
++
++#define STV_ISO_SIZE_L			0x15c1
++#define STV_ISO_SIZE_H			0x15c2
++
++/* Refers to the CIF 352x288 and QCIF 176x144 */
++/* 1: 288 lines, 2: 144 lines */
++#define STV_Y_CTRL			0x15c3
++
++/* 0xa: 352 columns, 0x6: 176 columns */
++#define STV_X_CTRL			0x1680
++
++#define STV06XX_URB_MSG_TIMEOUT		5000
++
++#define I2C_MAX_BYTES			16
++#define I2C_MAX_WORDS			8
++
++#define I2C_BUFFER_LENGTH		0x23
++#define I2C_READ_CMD			3
++#define I2C_WRITE_CMD			1
++
++#define LED_ON				1
++#define LED_OFF				0
++
++/* STV06xx device descriptor */
++struct sd {
++	struct gspca_dev gspca_dev;
++
++	/* A pointer to the currently connected sensor */
++	const struct stv06xx_sensor *sensor;
++
++	/* A pointer to the sd_desc struct */
++	struct sd_desc desc;
++
++	/* Sensor private data */
++	void *sensor_priv;
++};
++
++int stv06xx_write_bridge(struct sd *sd, u16 address, u16 i2c_data);
++int stv06xx_read_bridge(struct sd *sd, u16 address, u8 *i2c_data);
++
++int stv06xx_write_sensor_bytes(struct sd *sd, const u8 *data, u8 len);
++int stv06xx_write_sensor_words(struct sd *sd, const u16 *data, u8 len);
++
++int stv06xx_read_sensor(struct sd *sd, const u8 address, u16 *value);
++int stv06xx_write_sensor(struct sd *sd, u8 address, u16 value);
++
++#endif
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.c linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.c
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.c	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.c	2008-12-25 21:16:20.000000000 +0100
+@@ -0,0 +1,533 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ * Copyright (c) 2008 Chia-I Wu
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#include "stv06xx_hdcs.h"
++
++enum hdcs_power_state {
++	HDCS_STATE_SLEEP,
++	HDCS_STATE_IDLE,
++	HDCS_STATE_RUN
++};
++
++/* no lock? */
++struct hdcs {
++	enum hdcs_power_state state;
++	int w, h;
++
++	/* visible area of the sensor array */
++	struct {
++		int left, top;
++		int width, height;
++		int border;
++	} array;
++
++	struct {
++		/* Column timing overhead */
++		u8 cto;
++		/* Column processing overhead */
++		u8 cpo;
++		/* Row sample period constant */
++		u16 rs;
++		/* Exposure reset duration */
++		u16 er;
++	} exp;
++
++	int psmp;
++};
++
++static int hdcs_reg_write_seq(struct sd *sd, u8 reg, u8 *vals, u8 len)
++{
++	u8 regs[I2C_MAX_BYTES * 2];
++	int i;
++
++	if (unlikely((len <= 0) || (len >= I2C_MAX_BYTES) ||
++		     (reg + len > 0xff)))
++		return -EINVAL;
++
++	for (i = 0; i < len; i++, reg++) {
++		regs[2*i] = reg;
++		regs[2*i+1] = vals[i];
++	}
++
++	return stv06xx_write_sensor_bytes(sd, regs, len);
++}
++
++static int hdcs_set_state(struct sd *sd, enum hdcs_power_state state)
++{
++	struct hdcs *hdcs = sd->sensor_priv;
++	u8 val;
++	int ret;
++
++	if (hdcs->state == state)
++		return 0;
++
++	/* we need to go idle before running or sleeping */
++	if (hdcs->state != HDCS_STATE_IDLE) {
++		ret = stv06xx_write_sensor(sd, HDCS_REG_CONTROL(sd), 0);
++		if (ret)
++			return ret;
++	}
++
++	hdcs->state = HDCS_STATE_IDLE;
++
++	if (state == HDCS_STATE_IDLE)
++		return 0;
++
++	switch (state) {
++	case HDCS_STATE_SLEEP:
++		val = HDCS_SLEEP_MODE;
++		break;
++
++	case HDCS_STATE_RUN:
++		val = HDCS_RUN_ENABLE;
++		break;
++
++	default:
++		return -EINVAL;
++	}
++
++	ret = stv06xx_write_sensor(sd, HDCS_REG_CONTROL(sd), val);
++	if (ret < 0)
++		hdcs->state = state;
++
++	return ret;
++}
++
++static int hdcs_reset(struct sd *sd)
++{
++	struct hdcs *hdcs = sd->sensor_priv;
++	int err;
++
++	err = stv06xx_write_sensor(sd, HDCS_REG_CONTROL(sd), 1);
++	if (err < 0)
++		return err;
++
++	err = stv06xx_write_sensor(sd, HDCS_REG_CONTROL(sd), 0);
++	if (err < 0)
++		hdcs->state = HDCS_STATE_IDLE;
++
++	return err;
++}
++
++int hdcs_get_exposure(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	struct hdcs *hdcs = sd->sensor_priv;
++
++	/* Column time period */
++	int ct;
++	/* Column processing period */
++	int cp;
++	/* Row processing period */
++	int rp;
++	int cycles;
++	int err;
++	int rowexp;
++	u16 data[2];
++
++	err = stv06xx_read_sensor(sd, HDCS_ROWEXPL, &data[0]);
++	if (err < 0)
++		return err;
++
++	err = stv06xx_read_sensor(sd, HDCS_ROWEXPH, &data[1]);
++	if (err < 0)
++		return err;
++
++	rowexp = (data[1] << 8) | data[0];
++
++	ct = hdcs->exp.cto + hdcs->psmp + (HDCS_ADC_START_SIG_DUR + 2);
++	cp = hdcs->exp.cto + (hdcs->w * ct / 2);
++	rp = hdcs->exp.rs + cp;
++
++	cycles = rp * rowexp;
++	*val = cycles / HDCS_CLK_FREQ_MHZ;
++	PDEBUG(D_V4L2, "Read exposure %d", *val);
++	return 0;
++}
++
++int hdcs_set_exposure(struct gspca_dev *gspca_dev, __s32 val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	struct hdcs *hdcs = sd->sensor_priv;
++	int rowexp, srowexp;
++	int max_srowexp;
++	/* Column time period */
++	int ct;
++	/* Column processing period */
++	int cp;
++	/* Row processing period */
++	int rp;
++	/* Minimum number of column timing periods
++	   within the column processing period */
++	int mnct;
++	int cycles, err;
++	u8 exp[4];
++
++	cycles = val * HDCS_CLK_FREQ_MHZ;
++
++	ct = hdcs->exp.cto + hdcs->psmp + (HDCS_ADC_START_SIG_DUR + 2);
++	cp = hdcs->exp.cto + (hdcs->w * ct / 2);
++
++	/* the cycles one row takes */
++	rp = hdcs->exp.rs + cp;
++
++	rowexp = cycles / rp;
++
++	/* the remaining cycles */
++	cycles -= rowexp * rp;
++
++	/* calculate sub-row exposure */
++	if (IS_1020(sd)) {
++		/* see HDCS-1020 datasheet 3.5.6.4, p. 63 */
++		srowexp = hdcs->w - (cycles + hdcs->exp.er + 13) / ct;
++
++		mnct = (hdcs->exp.er + 12 + ct - 1) / ct;
++		max_srowexp = hdcs->w - mnct;
++	} else {
++		/* see HDCS-1000 datasheet 3.4.5.5, p. 61 */
++		srowexp = cp - hdcs->exp.er - 6 - cycles;
++
++		mnct = (hdcs->exp.er + 5 + ct - 1) / ct;
++		max_srowexp = cp - mnct * ct - 1;
++	}
++
++	if (srowexp < 0)
++		srowexp = 0;
++	else if (srowexp > max_srowexp)
++		srowexp = max_srowexp;
++
++	if (IS_1020(sd)) {
++		exp[0] = rowexp & 0xff;
++		exp[1] = rowexp >> 8;
++		exp[2] = (srowexp >> 2) & 0xff;
++		/* this clears exposure error flag */
++		exp[3] = 0x1;
++		err = hdcs_reg_write_seq(sd, HDCS_ROWEXPL, exp, 4);
++	} else {
++		exp[0] = rowexp & 0xff;
++		exp[1] = rowexp >> 8;
++		exp[2] = srowexp & 0xff;
++		exp[3] = srowexp >> 8;
++		err = hdcs_reg_write_seq(sd, HDCS_ROWEXPL, exp, 4);
++		if (err < 0)
++			return err;
++
++		/* clear exposure error flag */
++		err = stv06xx_write_sensor(sd,
++		     HDCS_STATUS, BIT(4));
++	}
++	PDEBUG(D_V4L2, "Writing exposure %d, rowexp %d, srowexp %d",
++	       val, rowexp, srowexp);
++	return err;
++}
++
++static int hdcs_set_gains(struct sd *sd, u8 r, u8 g, u8 b)
++{
++	u8 gains[4];
++
++	/* the voltage gain Av = (1 + 19 * val / 127) * (1 + bit7) */
++	if (r > 127)
++		r = 0x80 | (r / 2);
++	if (g > 127)
++		g = 0x80 | (g / 2);
++	if (b > 127)
++		b = 0x80 | (b / 2);
++
++	gains[0] = g;
++	gains[1] = r;
++	gains[2] = b;
++	gains[3] = g;
++
++	return hdcs_reg_write_seq(sd, HDCS_ERECPGA, gains, 4);
++}
++
++int hdcs_get_gain(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	int err;
++	u16 data;
++
++	err = stv06xx_read_sensor(sd, HDCS_ERECPGA, &data);
++
++	/* Bit 7 doubles the gain */
++	if (data & 0x80)
++		*val = (data & 0x7f) * 2;
++	else
++		*val = data;
++
++	PDEBUG(D_V4L2, "Read gain %d", *val);
++	return err;
++}
++
++int hdcs_set_gain(struct gspca_dev *gspca_dev, __s32 val)
++{
++	PDEBUG(D_V4L2, "Writing gain %d", val);
++	return hdcs_set_gains((struct sd *) gspca_dev,
++			       val & 0xff, val & 0xff, val & 0xff);
++}
++
++static int hdcs_set_size(struct sd *sd,
++		unsigned int width, unsigned int height)
++{
++	struct hdcs *hdcs = sd->sensor_priv;
++	u8 win[4];
++	unsigned int x, y;
++	int err;
++
++	/* must be multiple of 4 */
++	width = (width + 3) & ~0x3;
++	height = (height + 3) & ~0x3;
++
++	if (width > hdcs->array.width)
++		width = hdcs->array.width;
++
++	if (IS_1020(sd)) {
++		/* the borders are also invalid */
++		if (height + 2 * hdcs->array.border + HDCS_1020_BOTTOM_Y_SKIP
++				  > hdcs->array.height)
++			height = hdcs->array.height - 2 * hdcs->array.border -
++				HDCS_1020_BOTTOM_Y_SKIP;
++
++		y = (hdcs->array.height - HDCS_1020_BOTTOM_Y_SKIP - height) / 2
++				+ hdcs->array.top;
++	} else if (height > hdcs->array.height) {
++		height = hdcs->array.height;
++		y = hdcs->array.top + (hdcs->array.height - height) / 2;
++	}
++
++	x = hdcs->array.left + (hdcs->array.width - width) / 2;
++
++	win[0] = y / 4;
++	win[1] = x / 4;
++	win[2] = (y + height) / 4 - 1;
++	win[3] = (x + width) / 4 - 1;
++
++	err = hdcs_reg_write_seq(sd, HDCS_FWROW, win, 4);
++	if (err < 0)
++		return err;
++
++	/* Update the current width and height */
++	hdcs->w = width;
++	hdcs->h = height;
++	return err;
++}
++
++int hdcs_probe_1x00(struct sd *sd)
++{
++	struct hdcs *hdcs;
++	u16 sensor;
++	int ret;
++
++	ret = stv06xx_read_sensor(sd, HDCS_IDENT, &sensor);
++	if (ret < 0 || sensor != 0x08)
++		return -ENODEV;
++
++	info("HDCS-1000/1100 sensor detected");
++
++	sd->gspca_dev.cam.cam_mode = stv06xx_sensor_hdcs1x00.modes;
++	sd->gspca_dev.cam.nmodes = stv06xx_sensor_hdcs1x00.nmodes;
++	sd->desc.ctrls = stv06xx_sensor_hdcs1x00.ctrls;
++	sd->desc.nctrls = stv06xx_sensor_hdcs1x00.nctrls;
++
++	hdcs = kmalloc(sizeof(struct hdcs), GFP_KERNEL);
++	if (!hdcs)
++		return -ENOMEM;
++
++	hdcs->array.left = 8;
++	hdcs->array.top = 8;
++	hdcs->array.width = HDCS_1X00_DEF_WIDTH;
++	hdcs->array.height = HDCS_1X00_DEF_HEIGHT;
++	hdcs->array.border = 4;
++
++	hdcs->exp.cto = 4;
++	hdcs->exp.cpo = 2;
++	hdcs->exp.rs = 186;
++	hdcs->exp.er = 100;
++
++	/*
++	 * Frame rate on HDCS-1000 0x46D:0x840 depends on PSMP:
++	 *  4 = doesn't work at all
++	 *  5 = 7.8 fps,
++	 *  6 = 6.9 fps,
++	 *  8 = 6.3 fps,
++	 * 10 = 5.5 fps,
++	 * 15 = 4.4 fps,
++	 * 31 = 2.8 fps
++	 *
++	 * Frame rate on HDCS-1000 0x46D:0x870 depends on PSMP:
++	 * 15 = doesn't work at all
++	 * 18 = doesn't work at all
++	 * 19 = 7.3 fps
++	 * 20 = 7.4 fps
++	 * 21 = 7.4 fps
++	 * 22 = 7.4 fps
++	 * 24 = 6.3 fps
++	 * 30 = 5.4 fps
++	 */
++	hdcs->psmp = IS_870(sd) ? 20 : 5;
++
++	sd->sensor_priv = hdcs;
++
++	return 0;
++}
++
++int hdcs_probe_1020(struct sd *sd)
++{
++	struct hdcs *hdcs;
++	u16 sensor;
++	int ret;
++
++	ret = stv06xx_read_sensor(sd, HDCS_IDENT, &sensor);
++	if (ret < 0 || sensor != 0x10)
++		return -ENODEV;
++
++	info("HDCS-1020 sensor detected");
++
++	sd->gspca_dev.cam.cam_mode = stv06xx_sensor_hdcs1020.modes;
++	sd->gspca_dev.cam.nmodes = stv06xx_sensor_hdcs1020.nmodes;
++	sd->desc.ctrls = stv06xx_sensor_hdcs1020.ctrls;
++	sd->desc.nctrls = stv06xx_sensor_hdcs1020.nctrls;
++
++	hdcs = kmalloc(sizeof(struct hdcs), GFP_KERNEL);
++	if (!hdcs)
++		return -ENOMEM;
++
++	/*
++	 * From Andrey's test image: looks like HDCS-1020 upper-left
++	 * visible pixel is at 24,8 (y maybe even smaller?) and lower-right
++	 * visible pixel at 375,299 (x maybe even larger?)
++	 */
++	hdcs->array.left = 24;
++	hdcs->array.top  = 4;
++	hdcs->array.width = HDCS_1020_DEF_WIDTH;
++	hdcs->array.height = 304;
++	hdcs->array.border = 4;
++
++	hdcs->psmp = 6;
++
++	hdcs->exp.cto = 3;
++	hdcs->exp.cpo = 3;
++	hdcs->exp.rs = 155;
++	hdcs->exp.er = 96;
++
++	sd->sensor_priv = hdcs;
++
++	return 0;
++}
++
++int hdcs_start(struct sd *sd)
++{
++	PDEBUG(D_STREAM, "Starting stream");
++
++	return hdcs_set_state(sd, HDCS_STATE_RUN);
++}
++
++int hdcs_stop(struct sd *sd)
++{
++	PDEBUG(D_STREAM, "Halting stream");
++
++	return hdcs_set_state(sd, HDCS_STATE_SLEEP);
++}
++
++void hdcs_disconnect(struct sd *sd)
++{
++	PDEBUG(D_PROBE, "Disconnecting the sensor");
++	kfree(sd->sensor_priv);
++}
++
++int hdcs_init(struct sd *sd)
++{
++	struct hdcs *hdcs = sd->sensor_priv;
++	int i, err = 0;
++
++	/* Set the STV0602AA in STV0600 emulation mode */
++	if (IS_870(sd))
++		stv06xx_write_bridge(sd, STV_STV0600_EMULATION, 1);
++
++	/* Execute the bridge init */
++	for (i = 0; i < ARRAY_SIZE(stv_bridge_init) && !err; i++) {
++		err = stv06xx_write_bridge(sd, stv_bridge_init[i][0],
++					   stv_bridge_init[i][1]);
++	}
++	if (err < 0)
++		return err;
++
++	/* sensor soft reset */
++	hdcs_reset(sd);
++
++	/* Execute the sensor init */
++	for (i = 0; i < ARRAY_SIZE(stv_sensor_init) && !err; i++) {
++		err = stv06xx_write_sensor(sd, stv_sensor_init[i][0],
++					     stv_sensor_init[i][1]);
++	}
++	if (err < 0)
++		return err;
++
++	/* Enable continous frame capture, bit 2: stop when frame complete */
++	err = stv06xx_write_sensor(sd, HDCS_REG_CONFIG(sd), BIT(3));
++	if (err < 0)
++		return err;
++
++	/* Set PGA sample duration
++	(was 0x7E for IS_870, but caused slow framerate with HDCS-1020) */
++	if (IS_1020(sd))
++		err = stv06xx_write_sensor(sd, HDCS_TCTRL,
++				(HDCS_ADC_START_SIG_DUR << 6) | hdcs->psmp);
++	else
++		err = stv06xx_write_sensor(sd, HDCS_TCTRL,
++				(HDCS_ADC_START_SIG_DUR << 5) | hdcs->psmp);
++	if (err < 0)
++		return err;
++
++	err = hdcs_set_gains(sd, HDCS_DEFAULT_GAIN, HDCS_DEFAULT_GAIN,
++			     HDCS_DEFAULT_GAIN);
++	if (err < 0)
++		return err;
++
++	err = hdcs_set_exposure(&sd->gspca_dev, HDCS_DEFAULT_EXPOSURE);
++	if (err < 0)
++		return err;
++
++	err = hdcs_set_size(sd, hdcs->array.width, hdcs->array.height);
++	return err;
++}
++
++int hdcs_dump(struct sd *sd)
++{
++	u16 reg, val;
++
++	info("Dumping sensor registers:");
++
++	for (reg = HDCS_IDENT; reg <= HDCS_ROWEXPH; reg++) {
++		stv06xx_read_sensor(sd, reg, &val);
++		info("reg 0x%02x = 0x%02x", reg, val);
++	}
++	return 0;
++}
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.h linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.h
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.h	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_hdcs.h	2008-12-25 20:02:58.000000000 +0100
+@@ -0,0 +1,263 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ * Copyright (c) 2008 Chia-I Wu
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#ifndef STV06XX_HDCS_H_
++#define STV06XX_HDCS_H_
++
++#include "stv06xx_sensor.h"
++
++#define HDCS_REG_CONFIG(sd)	(IS_1020(sd) ? HDCS20_CONFIG : HDCS00_CONFIG)
++#define HDCS_REG_CONTROL(sd)	(IS_1020(sd) ? HDCS20_CONTROL : HDCS00_CONTROL)
++
++#define HDCS_1X00_DEF_WIDTH	360
++#define HDCS_1X00_DEF_HEIGHT 	296
++
++#define HDCS_1020_DEF_WIDTH	352
++#define HDCS_1020_DEF_HEIGHT	292
++
++#define HDCS_1020_BOTTOM_Y_SKIP	4
++
++#define HDCS_CLK_FREQ_MHZ	25
++
++#define HDCS_ADC_START_SIG_DUR	3
++
++/* LSB bit of I2C or register address signifies write (0) or read (1) */
++/* I2C Registers common for both HDCS-1000/1100 and HDCS-1020 */
++/* Identifications Register */
++#define HDCS_IDENT		(0x00 << 1)
++/* Status Register */
++#define HDCS_STATUS		(0x01 << 1)
++/* Interrupt Mask Register */
++#define HDCS_IMASK		(0x02 << 1)
++/* Pad Control Register */
++#define HDCS_PCTRL		(0x03 << 1)
++/* Pad Drive Control Register */
++#define HDCS_PDRV		(0x04 << 1)
++/* Interface Control Register */
++#define HDCS_ICTRL		(0x05 << 1)
++/* Interface Timing Register */
++#define HDCS_ITMG		(0x06 << 1)
++/* Baud Fraction Register */
++#define HDCS_BFRAC		(0x07 << 1)
++/* Baud Rate Register */
++#define HDCS_BRATE		(0x08 << 1)
++/* ADC Control Register */
++#define HDCS_ADCCTRL		(0x09 << 1)
++/* First Window Row Register */
++#define HDCS_FWROW		(0x0a << 1)
++/* First Window Column Register */
++#define HDCS_FWCOL		(0x0b << 1)
++/* Last Window Row Register */
++#define HDCS_LWROW		(0x0c << 1)
++/* Last Window Column Register */
++#define HDCS_LWCOL		(0x0d << 1)
++/* Timing Control Register */
++#define HDCS_TCTRL		(0x0e << 1)
++/* PGA Gain Register: Even Row, Even Column */
++#define HDCS_ERECPGA		(0x0f << 1)
++/* PGA Gain Register: Even Row, Odd Column */
++#define HDCS_EROCPGA		(0x10 << 1)
++/* PGA Gain Register: Odd Row, Even Column */
++#define HDCS_ORECPGA		(0x11 << 1)
++/* PGA Gain Register: Odd Row, Odd Column */
++#define HDCS_OROCPGA		(0x12 << 1)
++/* Row Exposure Low Register */
++#define HDCS_ROWEXPL		(0x13 << 1)
++/* Row Exposure High Register */
++#define HDCS_ROWEXPH		(0x14 << 1)
++
++/* I2C Registers only for HDCS-1000/1100 */
++/* Sub-Row Exposure Low Register */
++#define HDCS00_SROWEXPL		(0x15 << 1)
++/* Sub-Row Exposure High Register */
++#define HDCS00_SROWEXPH		(0x16 << 1)
++/* Configuration Register */
++#define HDCS00_CONFIG		(0x17 << 1)
++/* Control Register */
++#define HDCS00_CONTROL		(0x18 << 1)
++
++/* I2C Registers only for HDCS-1020 */
++/* Sub-Row Exposure Register */
++#define HDCS20_SROWEXP		(0x15 << 1)
++/* Error Control Register */
++#define HDCS20_ERROR		(0x16 << 1)
++/* Interface Timing 2 Register */
++#define HDCS20_ITMG2		(0x17 << 1)
++/* Interface Control 2 Register	*/
++#define HDCS20_ICTRL2		(0x18 << 1)
++/* Horizontal Blank Register */
++#define HDCS20_HBLANK		(0x19 << 1)
++/* Vertical Blank Register */
++#define HDCS20_VBLANK		(0x1a << 1)
++/* Configuration Register */
++#define HDCS20_CONFIG		(0x1b << 1)
++/* Control Register */
++#define HDCS20_CONTROL		(0x1c << 1)
++
++#define HDCS_RUN_ENABLE		(1 << 2)
++#define HDCS_SLEEP_MODE		(1 << 1)
++
++#define HDCS_DEFAULT_EXPOSURE	5000
++#define HDCS_DEFAULT_GAIN	128
++
++int hdcs_probe_1x00(struct sd *sd);
++int hdcs_probe_1020(struct sd *sd);
++int hdcs_start(struct sd *sd);
++int hdcs_init(struct sd *sd);
++int hdcs_stop(struct sd *sd);
++int hdcs_dump(struct sd *sd);
++void hdcs_disconnect(struct sd *sd);
++
++int hdcs_get_exposure(struct gspca_dev *gspca_dev, __s32 *val);
++int hdcs_set_exposure(struct gspca_dev *gspca_dev, __s32 val);
++int hdcs_set_gain(struct gspca_dev *gspca_dev, __s32 val);
++int hdcs_get_gain(struct gspca_dev *gspca_dev, __s32 *val);
++
++const struct stv06xx_sensor stv06xx_sensor_hdcs1x00 = {
++	.name = "HP HDCS-1000/1100",
++	.i2c_flush = 0,
++	.i2c_addr = (0x55 << 1),
++	.i2c_len = 1,
++
++	.init = hdcs_init,
++	.probe = hdcs_probe_1x00,
++	.start = hdcs_start,
++	.stop = hdcs_stop,
++	.disconnect = hdcs_disconnect,
++	.dump = hdcs_dump,
++
++	.nctrls = 2,
++	.ctrls = {
++	{
++		{
++			.id		= V4L2_CID_EXPOSURE,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "exposure",
++			.minimum	= 0x00,
++			.maximum	= 0xffff,
++			.step		= 0x1,
++			.default_value 	= HDCS_DEFAULT_EXPOSURE,
++			.flags         	= V4L2_CTRL_FLAG_SLIDER
++		},
++		.set = hdcs_set_exposure,
++		.get = hdcs_get_exposure
++	},
++	{
++		{
++			.id		= V4L2_CID_GAIN,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "gain",
++			.minimum	= 0x00,
++			.maximum	= 0xff,
++			.step		= 0x1,
++			.default_value 	= HDCS_DEFAULT_GAIN,
++			.flags         	= V4L2_CTRL_FLAG_SLIDER
++		},
++		.set = hdcs_set_gain,
++		.get = hdcs_get_gain
++	}
++	},
++
++	.nmodes = 1,
++	.modes = {
++	{
++		HDCS_1X00_DEF_WIDTH,
++		HDCS_1X00_DEF_HEIGHT,
++		V4L2_PIX_FMT_SBGGR8,
++		V4L2_FIELD_NONE,
++		.sizeimage =
++			HDCS_1X00_DEF_WIDTH * HDCS_1X00_DEF_HEIGHT,
++		.bytesperline = HDCS_1X00_DEF_WIDTH,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = 1
++	}
++	}
++};
++
++const struct stv06xx_sensor stv06xx_sensor_hdcs1020 = {
++	.name = "HDCS-1020",
++	.i2c_flush = 0,
++	.i2c_addr = (0x55 << 1),
++	.i2c_len = 1,
++
++	.nctrls = 0,
++	.ctrls = {},
++
++	.init = hdcs_init,
++	.probe = hdcs_probe_1020,
++	.start = hdcs_start,
++	.stop = hdcs_stop,
++	.dump = hdcs_dump,
++
++	.nmodes = 1,
++	.modes = {
++	{
++		HDCS_1020_DEF_WIDTH,
++		HDCS_1020_DEF_HEIGHT,
++		V4L2_PIX_FMT_SBGGR8,
++		V4L2_FIELD_NONE,
++		.sizeimage =
++			HDCS_1020_DEF_WIDTH * HDCS_1020_DEF_HEIGHT,
++		.bytesperline = HDCS_1020_DEF_WIDTH,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = 1
++	}
++	}
++};
++
++static const u16 stv_bridge_init[][2] = {
++	{STV_ISO_ENABLE, 0},
++	{STV_REG23, 0},
++	{STV_REG00, 0x1d},
++	{STV_REG01, 0xb5},
++	{STV_REG02, 0xa8},
++	{STV_REG03, 0x95},
++	{STV_REG04, 0x07},
++
++	{STV_SCAN_RATE, 0x20},
++	{STV_ISO_SIZE_L, 847},
++	{STV_Y_CTRL, 0x01},
++	{STV_X_CTRL, 0x0a}
++};
++
++static const u8 stv_sensor_init[][2] = {
++	/* Clear status (writing 1 will clear the corresponding status bit) */
++	{HDCS_STATUS, BIT(6) | BIT(5) | BIT(4) | BIT(3) | BIT(2) | BIT(1)},
++	/* Disable all interrupts */
++	{HDCS_IMASK, 0x00},
++	{HDCS_PCTRL, BIT(6) | BIT(5) | BIT(1) | BIT(0)},
++	{HDCS_PDRV,  0x00},
++	{HDCS_ICTRL, BIT(5)},
++	{HDCS_ITMG,  BIT(4) | BIT(1)},
++	/* ADC output resolution to 10 bits */
++	{HDCS_ADCCTRL, 10}
++};
++
++#endif
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.c linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.c
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.c	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.c	2008-12-25 22:04:37.000000000 +0100
+@@ -0,0 +1,426 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++/*
++ * The spec file for the PB-0100 suggests the following for best quality
++ * images after the sensor has been reset :
++ *
++ * PB_ADCGAINL      = R60 = 0x03 (3 dec)      : sets low reference of ADC to produce good black level
++ * PB_PREADCTRL     = R32 = 0x1400 (5120 dec) : Enables global gain changes through R53
++ * PB_ADCMINGAIN    = R52 = 0x10 (16 dec)     : Sets the minimum gain for auto-exposure
++ * PB_ADCGLOBALGAIN = R53 = 0x10 (16 dec)     : Sets the global gain
++ * PB_EXPGAIN       = R14 = 0x11 (17 dec)     : Sets the auto-exposure value
++ * PB_UPDATEINT     = R23 = 0x02 (2 dec)      : Sets the speed on auto-exposure routine
++ * PB_CFILLIN       = R5  = 0x0E (14 dec)     : Sets the frame rate
++ */
++
++#include "stv06xx_pb0100.h"
++
++int pb0100_probe(struct sd *sd)
++{
++	u16 sensor;
++	int i, err;
++	s32 *sensor_settings;
++
++	err = stv06xx_read_sensor(sd, PB_IDENT, &sensor);
++
++	if (err < 0)
++		return -ENODEV;
++
++	if ((sensor >> 8) == 0x64) {
++		sensor_settings = kmalloc(
++				stv06xx_sensor_pb0100.nctrls * sizeof(s32),
++				GFP_KERNEL);
++		if (!sensor_settings)
++			return -ENOMEM;
++
++		info("Photobit pb0100 sensor detected");
++
++		sd->gspca_dev.cam.cam_mode = stv06xx_sensor_pb0100.modes;
++		sd->gspca_dev.cam.nmodes = stv06xx_sensor_pb0100.nmodes;
++		sd->desc.ctrls = stv06xx_sensor_pb0100.ctrls;
++		sd->desc.nctrls = stv06xx_sensor_pb0100.nctrls;
++		for (i = 0; i < stv06xx_sensor_pb0100.nctrls; i++)
++			sensor_settings[i] = stv06xx_sensor_pb0100.
++					     ctrls[i].qctrl.default_value;
++		sd->sensor_priv = sensor_settings;
++
++		return 0;
++	}
++
++	return -ENODEV;
++}
++
++int pb0100_start(struct sd *sd)
++{
++	int err;
++	struct cam *cam = &sd->gspca_dev.cam;
++	s32 *sensor_settings = sd->sensor_priv;
++	u32 mode = cam->cam_mode[sd->gspca_dev.curr_mode].priv;
++
++	/* Setup sensor window */
++	if (mode & PB0100_CROP_TO_VGA) {
++		stv06xx_write_sensor(sd, PB_RSTART, 30);
++		stv06xx_write_sensor(sd, PB_CSTART, 20);
++		stv06xx_write_sensor(sd, PB_RWSIZE, 240 - 1);
++		stv06xx_write_sensor(sd, PB_CWSIZE, 320 - 1);
++	} else {
++		stv06xx_write_sensor(sd, PB_RSTART, 8);
++		stv06xx_write_sensor(sd, PB_CSTART, 4);
++		stv06xx_write_sensor(sd, PB_RWSIZE, 288 - 1);
++		stv06xx_write_sensor(sd, PB_CWSIZE, 352 - 1);
++	}
++
++	if (mode & PB0100_SUBSAMPLE) {
++		stv06xx_write_bridge(sd, STV_Y_CTRL, 0x02); /* Wrong, FIXME */
++		stv06xx_write_bridge(sd, STV_X_CTRL, 0x06);
++
++		stv06xx_write_bridge(sd, STV_SCAN_RATE, 0x10);
++	} else {
++		stv06xx_write_bridge(sd, STV_Y_CTRL, 0x01);
++		stv06xx_write_bridge(sd, STV_X_CTRL, 0x0a);
++		/* larger -> slower */
++		stv06xx_write_bridge(sd, STV_SCAN_RATE, 0x20);
++	}
++
++	/* set_gain also sets red and blue balance */
++	pb0100_set_gain(&sd->gspca_dev, sensor_settings[GAIN_IDX]);
++	pb0100_set_exposure(&sd->gspca_dev, sensor_settings[EXPOSURE_IDX]);
++	pb0100_set_autogain_target(&sd->gspca_dev,
++				   sensor_settings[AUTOGAIN_TARGET_IDX]);
++	pb0100_set_autogain(&sd->gspca_dev, sensor_settings[AUTOGAIN_IDX]);
++
++	err = stv06xx_write_sensor(sd, PB_CONTROL, BIT(5)|BIT(3)|BIT(1));
++	PDEBUG(D_STREAM, "Started stream, status: %d", err);
++
++	return (err < 0) ? err : 0;
++}
++
++int pb0100_stop(struct sd *sd)
++{
++	int err;
++
++	err = stv06xx_write_sensor(sd, PB_ABORTFRAME, 1);
++
++	if (err < 0)
++		goto out;
++
++	/* Set bit 1 to zero */
++	err = stv06xx_write_sensor(sd, PB_CONTROL, BIT(5)|BIT(3));
++
++	PDEBUG(D_STREAM, "Halting stream");
++out:
++	return (err < 0) ? err : 0;
++}
++
++/* FIXME: Sort the init commands out and put them into tables,
++	  this is only for getting the camera to work */
++/* FIXME: No error handling for now,
++	  add this once the init has been converted to proper tables */
++int pb0100_init(struct sd *sd)
++{
++	stv06xx_write_bridge(sd, STV_REG00, 1);
++	stv06xx_write_bridge(sd, STV_SCAN_RATE, 0);
++
++	/* Reset sensor */
++	stv06xx_write_sensor(sd, PB_RESET, 1);
++	stv06xx_write_sensor(sd, PB_RESET, 0);
++
++	/* Disable chip */
++	stv06xx_write_sensor(sd, PB_CONTROL, BIT(5)|BIT(3));
++
++	/* Gain stuff...*/
++	stv06xx_write_sensor(sd, PB_PREADCTRL, BIT(12)|BIT(10)|BIT(6));
++	stv06xx_write_sensor(sd, PB_ADCGLOBALGAIN, 12);
++
++	/* Set up auto-exposure */
++	/* ADC VREF_HI new setting for a transition
++	  from the Expose1 to the Expose2 setting */
++	stv06xx_write_sensor(sd, PB_R28, 12);
++	/* gain max for autoexposure */
++	stv06xx_write_sensor(sd, PB_ADCMAXGAIN, 180);
++	/* gain min for autoexposure  */
++	stv06xx_write_sensor(sd, PB_ADCMINGAIN, 12);
++	/* Maximum frame integration time (programmed into R8)
++	   allowed for auto-exposure routine */
++	stv06xx_write_sensor(sd, PB_R54, 3);
++	/* Minimum frame integration time (programmed into R8)
++	   allowed for auto-exposure routine */
++	stv06xx_write_sensor(sd, PB_R55, 0);
++	stv06xx_write_sensor(sd, PB_UPDATEINT, 1);
++	/* R15  Expose0 (maximum that auto-exposure may use) */
++	stv06xx_write_sensor(sd, PB_R15, 800);
++	/* R17  Expose2 (minimum that auto-exposure may use) */
++	stv06xx_write_sensor(sd, PB_R17, 10);
++
++	stv06xx_write_sensor(sd, PB_EXPGAIN, 0);
++
++	/* 0x14 */
++	stv06xx_write_sensor(sd, PB_VOFFSET, 0);
++	/* 0x0D */
++	stv06xx_write_sensor(sd, PB_ADCGAINH, 11);
++	/* Set black level (important!) */
++	stv06xx_write_sensor(sd, PB_ADCGAINL, 0);
++
++	/* ??? */
++	stv06xx_write_bridge(sd, STV_REG00, 0x11);
++	stv06xx_write_bridge(sd, STV_REG03, 0x45);
++	stv06xx_write_bridge(sd, STV_REG04, 0x07);
++
++	/* ISO-Size (0x27b: 635... why? - HDCS uses 847) */
++	stv06xx_write_bridge(sd, STV_ISO_SIZE_L, 847);
++
++	/* Scan/timing for the sensor */
++	stv06xx_write_sensor(sd, PB_ROWSPEED, BIT(4)|BIT(3)|BIT(1));
++	stv06xx_write_sensor(sd, PB_CFILLIN, 14);
++	stv06xx_write_sensor(sd, PB_VBL, 0);
++	stv06xx_write_sensor(sd, PB_FINTTIME, 0);
++	stv06xx_write_sensor(sd, PB_RINTTIME, 123);
++
++	stv06xx_write_bridge(sd, STV_REG01, 0xc2);
++	stv06xx_write_bridge(sd, STV_REG02, 0xb0);
++	return 0;
++}
++
++int pb0100_dump(struct sd *sd)
++{
++	return 0;
++}
++
++int pb0100_get_gain(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[GAIN_IDX];
++
++	return 0;
++}
++
++int pb0100_set_gain(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	if (sensor_settings[AUTOGAIN_IDX])
++		return -EBUSY;
++
++	sensor_settings[GAIN_IDX] = val;
++	err = stv06xx_write_sensor(sd, PB_G1GAIN, val);
++	if (!err)
++		err = stv06xx_write_sensor(sd, PB_G2GAIN, val);
++	PDEBUG(D_V4L2, "Set green gain to %d, status: %d", val, err);
++
++	if (!err)
++		err = pb0100_set_red_balance(gspca_dev,
++					     sensor_settings[RED_BALANCE_IDX]);
++	if (!err)
++		err = pb0100_set_blue_balance(gspca_dev,
++					    sensor_settings[BLUE_BALANCE_IDX]);
++
++	return err;
++}
++
++int pb0100_get_red_balance(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[RED_BALANCE_IDX];
++
++	return 0;
++}
++
++int pb0100_set_red_balance(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	if (sensor_settings[AUTOGAIN_IDX])
++		return -EBUSY;
++
++	sensor_settings[RED_BALANCE_IDX] = val;
++	val += sensor_settings[GAIN_IDX];
++	if (val < 0)
++		val = 0;
++	else if (val > 255)
++		val = 255;
++
++	err = stv06xx_write_sensor(sd, PB_RGAIN, val);
++	PDEBUG(D_V4L2, "Set red gain to %d, status: %d", val, err);
++
++	return err;
++}
++
++int pb0100_get_blue_balance(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[BLUE_BALANCE_IDX];
++
++	return 0;
++}
++
++int pb0100_set_blue_balance(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	if (sensor_settings[AUTOGAIN_IDX])
++		return -EBUSY;
++
++	sensor_settings[BLUE_BALANCE_IDX] = val;
++	val += sensor_settings[GAIN_IDX];
++	if (val < 0)
++		val = 0;
++	else if (val > 255)
++		val = 255;
++
++	err = stv06xx_write_sensor(sd, PB_BGAIN, val);
++	PDEBUG(D_V4L2, "Set blue gain to %d, status: %d", val, err);
++
++	return err;
++}
++
++int pb0100_get_exposure(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[EXPOSURE_IDX];
++
++	return 0;
++}
++
++int pb0100_set_exposure(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	if (sensor_settings[AUTOGAIN_IDX])
++		return -EBUSY;
++
++	sensor_settings[EXPOSURE_IDX] = val;
++	err = stv06xx_write_sensor(sd, PB_RINTTIME, val);
++	PDEBUG(D_V4L2, "Set exposure to %d, status: %d", val, err);
++
++	return err;
++}
++
++int pb0100_get_autogain(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[AUTOGAIN_IDX];
++
++	return 0;
++}
++
++int pb0100_set_autogain(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	sensor_settings[AUTOGAIN_IDX] = val;
++	if (sensor_settings[AUTOGAIN_IDX]) {
++		if (sensor_settings[NATURAL_IDX])
++			val = BIT(6)|BIT(4)|BIT(0);
++		else
++			val = BIT(4)|BIT(0);
++	} else
++		val = 0;
++
++	err = stv06xx_write_sensor(sd, PB_EXPGAIN, val);
++	PDEBUG(D_V4L2, "Set autogain to %d (natural: %d), status: %d",
++	       sensor_settings[AUTOGAIN_IDX], sensor_settings[NATURAL_IDX],
++	       err);
++
++	return err;
++}
++
++int pb0100_get_autogain_target(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[AUTOGAIN_TARGET_IDX];
++
++	return 0;
++}
++
++int pb0100_set_autogain_target(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err, totalpixels, brightpixels, darkpixels;
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	sensor_settings[AUTOGAIN_TARGET_IDX] = val;
++
++	/* Number of pixels counted by the sensor when subsampling the pixels.
++	 * Slightly larger than the real value to avoid oscillation */
++	totalpixels = gspca_dev->width * gspca_dev->height;
++	totalpixels = totalpixels/(8*8) + totalpixels/(64*64);
++
++	brightpixels = (totalpixels * val) >> 8;
++	darkpixels   = totalpixels - brightpixels;
++	err = stv06xx_write_sensor(sd, PB_R21, brightpixels);
++	if (!err)
++		err = stv06xx_write_sensor(sd, PB_R22, darkpixels);
++
++	PDEBUG(D_V4L2, "Set autogain target to %d, status: %d", val, err);
++
++	return err;
++}
++
++int pb0100_get_natural(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	*val = sensor_settings[NATURAL_IDX];
++
++	return 0;
++}
++
++int pb0100_set_natural(struct gspca_dev *gspca_dev, __s32 val)
++{
++	struct sd *sd = (struct sd *) gspca_dev;
++	s32 *sensor_settings = sd->sensor_priv;
++
++	sensor_settings[NATURAL_IDX] = val;
++
++	return pb0100_set_autogain(gspca_dev, sensor_settings[AUTOGAIN_IDX]);
++}
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.h linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.h
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.h	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_pb0100.h	2008-12-25 22:05:29.000000000 +0100
+@@ -0,0 +1,297 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#ifndef STV06XX_PB0100_H_
++#define STV06XX_PB0100_H_
++
++#include "stv06xx_sensor.h"
++
++/* mode priv field flags */
++#define PB0100_CROP_TO_VGA	0x01
++#define PB0100_SUBSAMPLE	0x02
++
++/* I2C Registers */
++#define PB_IDENT		0x00	/* Chip Version */
++#define PB_RSTART		0x01	/* Row Window Start */
++#define PB_CSTART		0x02	/* Column Window Start */
++#define PB_RWSIZE		0x03	/* Row Window Size */
++#define PB_CWSIZE		0x04	/* Column  Window Size */
++#define PB_CFILLIN		0x05	/* Column Fill-In */
++#define PB_VBL			0x06	/* Vertical Blank Count */
++#define PB_CONTROL		0x07	/* Control Mode */
++#define PB_FINTTIME		0x08	/* Integration Time/Frame Unit Count */
++#define PB_RINTTIME		0x09	/* Integration Time/Row Unit Count */
++#define PB_ROWSPEED		0x0a	/* Row Speed Control */
++#define PB_ABORTFRAME		0x0b	/* Abort Frame */
++#define PB_R12			0x0c	/* Reserved */
++#define PB_RESET		0x0d	/* Reset */
++#define PB_EXPGAIN		0x0e	/* Exposure Gain Command */
++#define PB_R15			0x0f	/* Expose0 */
++#define PB_R16			0x10	/* Expose1 */
++#define PB_R17			0x11	/* Expose2 */
++#define PB_R18			0x12	/* Low0_DAC */
++#define PB_R19			0x13	/* Low1_DAC */
++#define PB_R20			0x14	/* Low2_DAC */
++#define PB_R21			0x15	/* Threshold11 */
++#define PB_R22			0x16	/* Threshold0x */
++#define PB_UPDATEINT		0x17	/* Update Interval */
++#define PB_R24			0x18	/* High_DAC */
++#define PB_R25			0x19	/* Trans0H */
++#define PB_R26			0x1a	/* Trans1L */
++#define PB_R27			0x1b	/* Trans1H */
++#define PB_R28			0x1c	/* Trans2L */
++#define PB_R29			0x1d	/* Reserved */
++#define PB_R30			0x1e	/* Reserved */
++#define PB_R31			0x1f	/* Wait to Read */
++#define PB_PREADCTRL		0x20	/* Pixel Read Control Mode */
++#define PB_R33			0x21	/* IREF_VLN */
++#define PB_R34			0x22	/* IREF_VLP */
++#define PB_R35			0x23	/* IREF_VLN_INTEG */
++#define PB_R36			0x24	/* IREF_MASTER */
++#define PB_R37			0x25	/* IDACP */
++#define PB_R38			0x26	/* IDACN */
++#define PB_R39			0x27	/* DAC_Control_Reg */
++#define PB_R40			0x28	/* VCL */
++#define PB_R41			0x29	/* IREF_VLN_ADCIN */
++#define PB_R42			0x2a	/* Reserved */
++#define PB_G1GAIN		0x2b	/* Green 1 Gain */
++#define PB_BGAIN		0x2c	/* Blue Gain */
++#define PB_RGAIN		0x2d	/* Red Gain */
++#define PB_G2GAIN		0x2e	/* Green 2 Gain */
++#define PB_R47			0x2f	/* Dark Row Address */
++#define PB_R48			0x30	/* Dark Row Options */
++#define PB_R49			0x31	/* Reserved */
++#define PB_R50			0x32	/* Image Test Data */
++#define PB_ADCMAXGAIN		0x33	/* Maximum Gain */
++#define PB_ADCMINGAIN		0x34	/* Minimum Gain */
++#define PB_ADCGLOBALGAIN	0x35	/* Global Gain */
++#define PB_R54			0x36	/* Maximum Frame */
++#define PB_R55			0x37	/* Minimum Frame */
++#define PB_R56			0x38	/* Reserved */
++#define PB_VOFFSET		0x39	/* VOFFSET */
++#define PB_R58			0x3a	/* Snap-Shot Sequence Trigger */
++#define PB_ADCGAINH		0x3b	/* VREF_HI */
++#define PB_ADCGAINL		0x3c	/* VREF_LO */
++#define PB_R61			0x3d	/* Reserved */
++#define PB_R62			0x3e	/* Reserved */
++#define PB_R63			0x3f	/* Reserved */
++#define PB_R64			0x40	/* Red/Blue Gain */
++#define PB_R65			0x41	/* Green 2/Green 1 Gain */
++#define PB_R66			0x42	/* VREF_HI/LO */
++#define PB_R67			0x43	/* Integration Time/Row Unit Count */
++#define PB_R240			0xf0	/* ADC Test */
++#define PB_R241			0xf1    /* Chip Enable */
++#define PB_R242			0xf2	/* Reserved */
++
++int pb0100_probe(struct sd *sd);
++int pb0100_start(struct sd *sd);
++int pb0100_init(struct sd *sd);
++int pb0100_stop(struct sd *sd);
++int pb0100_dump(struct sd *sd);
++
++/* V4L2 controls supported by the driver */
++int pb0100_get_gain(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_gain(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_red_balance(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_red_balance(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_blue_balance(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_blue_balance(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_exposure(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_exposure(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_autogain(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_autogain(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_autogain_target(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_autogain_target(struct gspca_dev *gspca_dev, __s32 val);
++int pb0100_get_natural(struct gspca_dev *gspca_dev, __s32 *val);
++int pb0100_set_natural(struct gspca_dev *gspca_dev, __s32 val);
++
++const struct stv06xx_sensor stv06xx_sensor_pb0100 = {
++	.name = "PB-0100",
++	.i2c_flush = 1,
++	.i2c_addr = 0xba,
++	.i2c_len = 2,
++
++	.nctrls = 7,
++	.ctrls = {
++#define GAIN_IDX 0
++	{
++		{
++			.id		= V4L2_CID_GAIN,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "Gain",
++			.minimum	= 0,
++			.maximum	= 255,
++			.step		= 1,
++			.default_value  = 128
++		},
++		.set = pb0100_set_gain,
++		.get = pb0100_get_gain
++	},
++#define RED_BALANCE_IDX 1
++	{
++		{
++			.id		= V4L2_CID_RED_BALANCE,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "Red Balance",
++			.minimum	= -255,
++			.maximum	= 255,
++			.step		= 1,
++			.default_value  = 0
++		},
++		.set = pb0100_set_red_balance,
++		.get = pb0100_get_red_balance
++	},
++#define BLUE_BALANCE_IDX 2
++	{
++		{
++			.id		= V4L2_CID_BLUE_BALANCE,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "Blue Balance",
++			.minimum	= -255,
++			.maximum	= 255,
++			.step		= 1,
++			.default_value  = 0
++		},
++		.set = pb0100_set_blue_balance,
++		.get = pb0100_get_blue_balance
++	},
++#define EXPOSURE_IDX 3
++	{
++		{
++			.id		= V4L2_CID_EXPOSURE,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "Exposure",
++			.minimum	= 0,
++			.maximum	= 511,
++			.step		= 1,
++			.default_value  = 12
++		},
++		.set = pb0100_set_exposure,
++		.get = pb0100_get_exposure
++	},
++#define AUTOGAIN_IDX 4
++	{
++		{
++			.id		= V4L2_CID_AUTOGAIN,
++			.type		= V4L2_CTRL_TYPE_BOOLEAN,
++			.name		= "Automatic Gain and Exposure",
++			.minimum	= 0,
++			.maximum	= 1,
++			.step		= 1,
++			.default_value  = 1
++		},
++		.set = pb0100_set_autogain,
++		.get = pb0100_get_autogain
++	},
++#define AUTOGAIN_TARGET_IDX 5
++	{
++		{
++			.id		= V4L2_CTRL_CLASS_USER + 0x1000,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "Automatic Gain Target",
++			.minimum	= 0,
++			.maximum	= 255,
++			.step		= 1,
++			.default_value  = 128
++		},
++		.set = pb0100_set_autogain_target,
++		.get = pb0100_get_autogain_target
++	},
++#define NATURAL_IDX 6
++	{
++		{
++			.id		= V4L2_CTRL_CLASS_USER + 0x1001,
++			.type		= V4L2_CTRL_TYPE_BOOLEAN,
++			.name		= "Natural Light Source",
++			.minimum	= 0,
++			.maximum	= 1,
++			.step		= 1,
++			.default_value  = 1
++		},
++		.set = pb0100_set_natural,
++		.get = pb0100_get_natural
++	},
++	},
++
++	.init = pb0100_init,
++	.probe = pb0100_probe,
++	.start = pb0100_start,
++	.stop = pb0100_stop,
++	.dump = pb0100_dump,
++
++	.nmodes = 2,
++	.modes = {
++/* low res / subsample modes disabled as they are only half res horizontal,
++   halving the vertical resolution does not seem to work */
++#if 0 
++	{
++		160,
++		120,
++		V4L2_PIX_FMT_SGRBG8,
++		V4L2_FIELD_NONE,
++		.sizeimage = 160 * 120 * 2,
++		.bytesperline = 160,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = PB0100_CROP_TO_VGA | PB0100_SUBSAMPLE
++	},
++	{
++		176,
++		144,
++		V4L2_PIX_FMT_SGRBG8,
++		V4L2_FIELD_NONE,
++		.sizeimage = 176 * 144 * 2,
++		.bytesperline = 176,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = PB0100_SUBSAMPLE
++	},
++#endif
++	{
++		320,
++		240,
++		V4L2_PIX_FMT_SGRBG8,
++		V4L2_FIELD_NONE,
++		.sizeimage = 320 * 240,
++		.bytesperline = 320,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = PB0100_CROP_TO_VGA
++	},
++	{
++		352,
++		288,
++		V4L2_PIX_FMT_SGRBG8,
++		V4L2_FIELD_NONE,
++		.sizeimage = 352 * 288,
++		.bytesperline = 352,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = 0
++	},
++	}
++};
++
++#endif
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_sensor.h linux/drivers/media/video/gspca/stv06xx/stv06xx_sensor.h
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_sensor.h	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_sensor.h	2008-12-25 21:04:31.000000000 +0100
+@@ -0,0 +1,92 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#ifndef STV06XX_SENSOR_H_
++#define STV06XX_SENSOR_H_
++
++#include "stv06xx.h"
++
++#define IS_850(sd)	((sd)->gspca_dev.dev->descriptor.idProduct == 0x850)
++#define IS_870(sd)	((sd)->gspca_dev.dev->descriptor.idProduct == 0x870)
++#define IS_1020(sd)	((sd)->sensor == &stv06xx_sensor_hdcs1020)
++
++extern const struct stv06xx_sensor stv06xx_sensor_vv6410;
++extern const struct stv06xx_sensor stv06xx_sensor_hdcs1x00;
++extern const struct stv06xx_sensor stv06xx_sensor_hdcs1020;
++extern const struct stv06xx_sensor stv06xx_sensor_pb0100;
++
++#define STV06XX_MAX_CTRLS		(V4L2_CID_LASTP1 - V4L2_CID_BASE + 10)
++
++struct stv06xx_sensor {
++	/* Defines the name of a sensor */
++	char name[32];
++
++	/* Sensor i2c address */
++	u8 i2c_addr;
++
++	/* Flush value*/
++	u8 i2c_flush;
++
++	/* length of an i2c word */
++	u8 i2c_len;
++
++	/* Probes if the sensor is connected */
++	int (*probe)(struct sd *sd);
++
++	/* Performs a initialization sequence */
++	int (*init)(struct sd *sd);
++
++	/* Executed at device disconnect */
++	void (*disconnect)(struct sd *sd);
++
++	/* Reads a sensor register */
++	int (*read_sensor)(struct sd *sd, const u8 address,
++	      u8 *i2c_data, const u8 len);
++
++	/* Writes to a sensor register */
++	int (*write_sensor)(struct sd *sd, const u8 address,
++	      u8 *i2c_data, const u8 len);
++
++	/* Instructs the sensor to start streaming */
++	int (*start)(struct sd *sd);
++
++	/* Instructs the sensor to stop streaming */
++	int (*stop)(struct sd *sd);
++
++	/* Instructs the sensor to dump all its contents */
++	int (*dump)(struct sd *sd);
++
++	int nctrls;
++	struct ctrl ctrls[STV06XX_MAX_CTRLS];
++
++	char nmodes;
++	struct v4l2_pix_format modes[];
++};
++
++#endif
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.c linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.c
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.c	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.c	2008-12-25 22:12:23.000000000 +0100
+@@ -0,0 +1,254 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#include "stv06xx_vv6410.h"
++
++int vv6410_probe(struct sd *sd)
++{
++	u16 data;
++	int err;
++
++	err = stv06xx_read_sensor(sd, VV6410_DEVICEH, &data);
++
++	if (err < 0)
++		goto out;
++
++	if (data == 0x19) {
++		info("vv6410 sensor detected");
++
++		sd->gspca_dev.cam.cam_mode = stv06xx_sensor_vv6410.modes;
++		sd->gspca_dev.cam.nmodes = stv06xx_sensor_vv6410.nmodes;
++		sd->desc.ctrls = stv06xx_sensor_vv6410.ctrls;
++		sd->desc.nctrls = stv06xx_sensor_vv6410.nctrls;
++		return 0;
++	}
++
++out:
++	return -ENODEV;
++}
++
++int vv6410_init(struct sd *sd)
++{
++	int err = 0, i;
++
++	for (i = 0; i < ARRAY_SIZE(stv_bridge_init); i++) {
++		/* if NULL then len contains single value */
++		if (stv_bridge_init[i].data == NULL) {
++			err = stv06xx_write_bridge(sd,
++				stv_bridge_init[i].start,
++				stv_bridge_init[i].len);
++		} else {
++			int j;
++			for (j = 0; j < stv_bridge_init[i].len; j++)
++				err = stv06xx_write_bridge(sd,
++					stv_bridge_init[i].start + j,
++					stv_bridge_init[i].data[j]);
++		}
++	}
++
++	if (err < 0)
++		goto out;
++
++	err = stv06xx_write_sensor_bytes(sd, (u8 *) vv6410_sensor_init,
++					 ARRAY_SIZE(vv6410_sensor_init));
++
++out:
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_start(struct sd *sd)
++{
++	int err;
++	struct cam *cam = &sd->gspca_dev.cam;
++	u32 priv = cam->cam_mode[sd->gspca_dev.curr_mode].priv;
++
++	if (priv & VV6410_CROP_TO_QVGA) {
++		PDEBUG(D_CONF, "Cropping to QVGA");
++		stv06xx_write_sensor(sd, VV6410_XENDH, 320 - 1);
++		stv06xx_write_sensor(sd, VV6410_YENDH, 240 - 1);
++	} else {
++		stv06xx_write_sensor(sd, VV6410_XENDH, 360 - 1);
++		stv06xx_write_sensor(sd, VV6410_YENDH, 294 - 1);
++	}
++
++	if (priv & VV6410_SUBSAMPLE) {
++		PDEBUG(D_CONF, "Enabling subsampling");
++		stv06xx_write_bridge(sd, STV_Y_CTRL, 0x02);
++		stv06xx_write_bridge(sd, STV_X_CTRL, 0x06);
++
++		stv06xx_write_bridge(sd, STV_SCAN_RATE, 0x10);
++	} else {
++		stv06xx_write_bridge(sd, STV_Y_CTRL, 0x01);
++		stv06xx_write_bridge(sd, STV_X_CTRL, 0x0a);
++
++		stv06xx_write_bridge(sd, STV_SCAN_RATE, 0x20);
++	}
++
++	/* Turn on LED */
++	err = stv06xx_write_bridge(sd, STV_LED_CTRL, LED_ON);
++	if (err < 0)
++		goto out;
++
++	err = stv06xx_write_sensor(sd, VV6410_SETUP0, 0);
++	if (err < 0)
++		goto out;
++
++	PDEBUG(D_STREAM, "Starting stream");
++
++out:
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_stop(struct sd *sd)
++{
++	int err;
++
++	/* Turn off LED */
++	err = stv06xx_write_bridge(sd, STV_LED_CTRL, LED_OFF);
++	if (err < 0)
++		goto out;
++
++	err = stv06xx_write_sensor(sd, VV6410_SETUP0, VV6410_LOW_POWER_MODE);
++	if (err < 0)
++		goto out;
++
++	PDEBUG(D_STREAM, "Halting stream");
++out:
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_dump(struct sd *sd)
++{
++	u8 i;
++	int err = 0;
++
++	info("Dumping all vv6410 sensor registers");
++	for (i = 0; i < 0xff && !err; i++) {
++		u16 data;
++		err = stv06xx_read_sensor(sd, i, &data);
++		info("Register 0x%x contained 0x%x", i, data);
++	}
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_get_hflip(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	int err;
++	u16 i2c_data;
++	struct sd *sd = (struct sd *) gspca_dev;
++
++	err = stv06xx_read_sensor(sd, VV6410_DATAFORMAT, &i2c_data);
++
++	*val = (i2c_data & VV6410_HFLIP) ? 1 : 0;
++
++	PDEBUG(D_V4L2, "Read horizontal flip %d", *val);
++
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_set_hflip(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	u16 i2c_data;
++	struct sd *sd = (struct sd *) gspca_dev;
++	err = stv06xx_read_sensor(sd, VV6410_DATAFORMAT, &i2c_data);
++	if (err < 0)
++		return err;
++
++	if (val)
++		i2c_data |= VV6410_HFLIP;
++	else
++		i2c_data &= ~VV6410_HFLIP;
++
++	PDEBUG(D_V4L2, "Set horizontal flip to %d", val);
++	err = stv06xx_write_sensor(sd, VV6410_DATAFORMAT, i2c_data);
++
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_get_vflip(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	int err;
++	u16 i2c_data;
++	struct sd *sd = (struct sd *) gspca_dev;
++
++	err = stv06xx_read_sensor(sd, VV6410_DATAFORMAT, &i2c_data);
++
++	*val = (i2c_data & VV6410_VFLIP) ? 1 : 0;
++
++	PDEBUG(D_V4L2, "Read vertical flip %d", *val);
++
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_set_vflip(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	u16 i2c_data;
++	struct sd *sd = (struct sd *) gspca_dev;
++	err = stv06xx_read_sensor(sd, VV6410_DATAFORMAT, &i2c_data);
++	if (err < 0)
++		return err;
++
++	if (val)
++		i2c_data |= VV6410_VFLIP;
++	else
++		i2c_data &= ~VV6410_VFLIP;
++
++	PDEBUG(D_V4L2, "Set vertical flip to %d", val);
++	err = stv06xx_write_sensor(sd, VV6410_DATAFORMAT, i2c_data);
++
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_get_analog_gain(struct gspca_dev *gspca_dev, __s32 *val)
++{
++	int err;
++	u16 i2c_data;
++	struct sd *sd = (struct sd *) gspca_dev;
++
++	err = stv06xx_read_sensor(sd, VV6410_ANALOGGAIN, &i2c_data);
++
++	*val = i2c_data & 0xf;
++
++	PDEBUG(D_V4L2, "Read analog gain %d", *val);
++
++	return (err < 0) ? err : 0;
++}
++
++int vv6410_set_analog_gain(struct gspca_dev *gspca_dev, __s32 val)
++{
++	int err;
++	struct sd *sd = (struct sd *) gspca_dev;
++
++	PDEBUG(D_V4L2, "Set analog gain to %d", val);
++	err = stv06xx_write_sensor(sd, VV6410_ANALOGGAIN, 0xf0 | (val & 0xf));
++
++	return (err < 0) ? err : 0;
++}
+diff -urpN linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.h linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.h
+--- linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.h	1970-01-01 01:00:00.000000000 +0100
++++ linux/drivers/media/video/gspca/stv06xx/stv06xx_vv6410.h	2008-12-25 20:02:26.000000000 +0100
+@@ -0,0 +1,315 @@
++/*
++ * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
++ *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
++ * Copyright (c) 2002, 2003 Tuukka Toivonen
++ * Copyright (c) 2008 Erik Andrén
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * P/N 861037:      Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
++ * P/N 861050-0020: Sensor Photobit PB100  ASIC STV0600-1 - QuickCam Express
++ * P/N 861055:      Sensor ST VV6410       ASIC STV0610   - LEGO cam
++ * P/N 861075-0040: Sensor HDCS1000        ASIC
++ * P/N 961179-0700: Sensor ST VV6410       ASIC STV0602   - Dexxa WebCam USB
++ * P/N 861040-0000: Sensor ST VV6410       ASIC STV0610   - QuickCam Web
++ */
++
++#ifndef STV06XX_VV6410_H_
++#define STV06XX_VV6410_H_
++
++#include "stv06xx_sensor.h"
++
++#define VV6410_COLS			416
++#define VV6410_ROWS			320
++
++/* Status registers */
++/* Chip identification number including revision indicator */
++#define VV6410_DEVICEH			0x00
++#define VV6410_DEVICEL			0x01
++
++/* User can determine whether timed I2C data
++   has been consumed by interrogating flag states */
++#define VV6410_STATUS0			0x02
++
++/* Current line counter value */
++#define VV6410_LINECOUNTH		0x03
++#define VV6410_LINECOUNTL		0x04
++
++/* End x coordinate of image size */
++#define VV6410_XENDH			0x05
++#define VV6410_XENDL			0x06
++
++/* End y coordinate of image size */
++#define VV6410_YENDH			0x07
++#define VV6410_YENDL			0x08
++
++/* This is the average pixel value returned from the
++   dark line offset cancellation algorithm */
++#define VV6410_DARKAVGH			0x09
++#define VV6410_DARKAVGL			0x0a
++
++/* This is the average pixel value returned from the
++   black line offset cancellation algorithm  */
++#define VV6410_BLACKAVGH		0x0b
++#define VV6410_BLACKAVGL		0x0c
++
++/* Flags to indicate whether the x or y image coordinates have been clipped */
++#define VV6410_STATUS1			0x0d
++
++/* Setup registers */
++
++/* Low-power/sleep modes & video timing */
++#define VV6410_SETUP0			0x10
++
++/* Various parameters */
++#define VV6410_SETUP1			0x11
++
++/* Contains pixel counter reset value used by external sync */
++#define VV6410_SYNCVALUE		0x12
++
++/* Frame grabbing modes (FST, LST and QCK) */
++#define VV6410_FGMODES			0x14
++
++/* FST and QCK mapping modes. */
++#define VV6410_PINMAPPING		0x15
++
++/* Data resolution */
++#define VV6410_DATAFORMAT		0x16
++
++/* Output coding formats */
++#define VV6410_OPFORMAT			0x17
++
++/* Various mode select bits */
++#define VV6410_MODESELECT		0x18
++
++/* Exposure registers */
++/* Fine exposure. */
++#define VV6410_FINEH			0x20
++#define VV6410_FINEL			0x21
++
++/* Coarse exposure */
++#define VV6410_COARSEH			0x22
++#define VV6410_COARSEL			0x23
++
++/* Analog gain setting */
++#define VV6410_ANALOGGAIN		0x24
++
++/* Clock division */
++#define VV6410_CLKDIV			0x25
++
++/* Dark line offset cancellation value */
++#define VV6410_DARKOFFSETH		0x2c
++#define VV6410_DARKOFFSETL		0x2d
++
++/* Dark line offset cancellation enable */
++#define VV6410_DARKOFFSETSETUP		0x2e
++
++/* Video timing registers */
++/* Line Length (Pixel Clocks) */
++#define VV6410_LINELENGTHH		0x52
++#define VV6410_LINELENGTHL		0x53
++
++/* X-co-ordinate of top left corner of region of interest (x-offset) */
++#define VV6410_XOFFSETH			0x57
++#define VV6410_XOFFSETL			0x58
++
++/* Y-coordinate of top left corner of region of interest (y-offset) */
++#define VV6410_YOFFSETH			0x59
++#define VV6410_YOFFSETL			0x5a
++
++/* Field length (Lines) */
++#define VV6410_FIELDLENGTHH		0x61
++#define VV6410_FIELDLENGTHL		0x62
++
++/* System registers */
++/* Black offset cancellation default value */
++#define VV6410_BLACKOFFSETH		0x70
++#define VV6410_BLACKOFFSETL		0x71
++
++/* Black offset cancellation setup */
++#define VV6410_BLACKOFFSETSETUP		0x72
++
++/* Analog Control Register 0 */
++#define VV6410_CR0			0x75
++
++/* Analog Control Register 1 */
++#define VV6410_CR1			0x76
++
++/* ADC Setup Register */
++#define VV6410_AS0			0x77
++
++/* Analog Test Register */
++#define VV6410_AT0			0x78
++
++/* Audio Amplifier Setup Register */
++#define VV6410_AT1			0x79
++
++#define VV6410_HFLIP 			(1 << 3)
++#define VV6410_VFLIP 			(1 << 4)
++
++#define VV6410_LOW_POWER_MODE		(1 << 0)
++#define VV6410_SOFT_RESET		(1 << 2)
++#define VV6410_PAL_25_FPS		(0 << 3)
++
++#define VV6410_CLK_DIV_2		(1 << 1)
++
++#define VV6410_FINE_EXPOSURE		320
++#define VV6410_COARSE_EXPOSURE		192
++#define VV6410_DEFAULT_GAIN		11
++
++#define VV6410_SUBSAMPLE		0x01
++#define VV6410_CROP_TO_QVGA		0x02
++
++int vv6410_probe(struct sd *sd);
++int vv6410_start(struct sd *sd);
++int vv6410_init(struct sd *sd);
++int vv6410_stop(struct sd *sd);
++int vv6410_dump(struct sd *sd);
++
++/* V4L2 controls supported by the driver */
++int vv6410_get_hflip(struct gspca_dev *gspca_dev, __s32 *val);
++int vv6410_set_hflip(struct gspca_dev *gspca_dev, __s32 val);
++int vv6410_get_vflip(struct gspca_dev *gspca_dev, __s32 *val);
++int vv6410_set_vflip(struct gspca_dev *gspca_dev, __s32 val);
++int vv6410_get_analog_gain(struct gspca_dev *gspca_dev, __s32 *val);
++int vv6410_set_analog_gain(struct gspca_dev *gspca_dev, __s32 val);
++
++const struct stv06xx_sensor stv06xx_sensor_vv6410 = {
++	.name = "ST VV6410",
++	.i2c_flush = 5,
++	.i2c_addr = 0x20,
++	.i2c_len = 1,
++	.init = vv6410_init,
++	.probe = vv6410_probe,
++	.start = vv6410_start,
++	.stop = vv6410_stop,
++	.dump = vv6410_dump,
++
++	.nctrls = 3,
++	.ctrls = {
++	{
++		{
++			.id		= V4L2_CID_HFLIP,
++			.type		= V4L2_CTRL_TYPE_BOOLEAN,
++			.name		= "horizontal flip",
++			.minimum	= 0,
++			.maximum	= 1,
++			.step		= 1,
++			.default_value	= 0
++		},
++		.set = vv6410_set_hflip,
++		.get = vv6410_get_hflip
++	}, {
++		{
++			.id		= V4L2_CID_VFLIP,
++			.type		= V4L2_CTRL_TYPE_BOOLEAN,
++			.name		= "vertical flip",
++			.minimum	= 0,
++			.maximum	= 1,
++			.step		= 1,
++			.default_value 	= 0
++		},
++		.set = vv6410_set_vflip,
++		.get = vv6410_get_vflip
++	}, {
++		{
++			.id		= V4L2_CID_GAIN,
++			.type		= V4L2_CTRL_TYPE_INTEGER,
++			.name		= "analog gain",
++			.minimum	= 0,
++			.maximum	= 15,
++			.step		= 1,
++			.default_value  = 0
++		},
++		.set = vv6410_set_analog_gain,
++		.get = vv6410_get_analog_gain
++	}
++	},
++
++	.nmodes = 1,
++	.modes = {
++	{
++		356,
++		292,
++		V4L2_PIX_FMT_SGRBG8,
++		V4L2_FIELD_NONE,
++		.sizeimage =
++			356 * 292,
++		.bytesperline = 356,
++		.colorspace = V4L2_COLORSPACE_SRGB,
++		.priv = 0
++	}
++	}
++};
++
++/* If NULL, only single value to write, stored in len */
++struct stv_init {
++	const u8 *data;
++	u16 start;
++	u8 len;
++};
++
++static const u8 x1500[] = {	/* 0x1500 - 0x150f */
++	0x0b, 0xa7, 0xb7, 0x00, 0x00
++};
++
++static const u8 x1536[] = {	/* 0x1536 - 0x153b */
++	0x02, 0x00, 0x60, 0x01, 0x20, 0x01
++};
++
++static const u8 x15c1[] = {	/* 0x15c1 - 0x15c2 */
++	0xff, 0x03 /* Output word 0x03ff = 1023 (ISO size) */
++};
++
++static const struct stv_init stv_bridge_init[] = {
++	/* This reg is written twice. Some kind of reset? */
++	{NULL,  0x1620, 0x80},
++	{NULL,  0x1620, 0x00},
++	{NULL,  0x1423, 0x04},
++	{x1500, 0x1500, ARRAY_SIZE(x1500)},
++	{x1536, 0x1536, ARRAY_SIZE(x1536)},
++	{x15c1, 0x15c1, ARRAY_SIZE(x15c1)}
++};
++
++static const u8 vv6410_sensor_init[][2] = {
++	/* Setup registers */
++	{VV6410_SETUP0,		VV6410_SOFT_RESET},
++	{VV6410_SETUP0,		VV6410_LOW_POWER_MODE},
++	/* Use shuffled read-out mode */
++	{VV6410_SETUP1,		BIT(6)},
++	/* All modes to 1 */
++	{VV6410_FGMODES,	BIT(6) | BIT(4) | BIT(2) | BIT(0)},
++	{VV6410_PINMAPPING,	0x00},
++	/* Pre-clock generator divide off */
++	{VV6410_DATAFORMAT,	BIT(7) | BIT(0)},
++
++	/* Exposure registers */
++	{VV6410_FINEH,		VV6410_FINE_EXPOSURE >> 8},
++	{VV6410_FINEL,		VV6410_FINE_EXPOSURE & 0xff},
++	{VV6410_COARSEH,	VV6410_COARSE_EXPOSURE >> 8},
++	{VV6410_COARSEL,	VV6410_COARSE_EXPOSURE & 0xff},
++	{VV6410_ANALOGGAIN,	0xf0 | VV6410_DEFAULT_GAIN},
++	{VV6410_CLKDIV,		VV6410_CLK_DIV_2},
++
++	/* System registers */
++	/* Enable voltage doubler */
++	{VV6410_AS0,		BIT(6) | BIT(4) | BIT(3) | BIT(2) | BIT(1)},
++	{VV6410_AT0,		0x00},
++	/* Power up audio, differential */
++	{VV6410_AT1,		BIT(4)|BIT(0)},
++};
++
++#endif

@@ -1,0 +1,77 @@
+diff -up linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c.orig linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c
+--- linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c.orig	2009-01-15 13:30:23.000000000 -0500
++++ linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-3945-rs.c	2009-01-15 13:39:16.000000000 -0500
+@@ -665,6 +665,12 @@ static void rs_get_rate(void *priv_r, st
+ 	}
+ 
+ 	rate_mask = sta->supp_rates[sband->band];
++
++	if (!rate_mask) {
++		sel->rate_idx = rate_lowest_index(sband, NULL);
++		return;
++	}
++
+ 	index = min(rs_sta->last_txrate_idx & 0xffff, IWL_RATE_COUNT - 1);
+ 
+ 	if (sband->band == IEEE80211_BAND_5GHZ)
+diff -up linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-agn-rs.c.orig linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-agn-rs.c
+--- linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-agn-rs.c.orig	2009-01-15 13:30:23.000000000 -0500
++++ linux-2.6.28.noarch/drivers/net/wireless/iwlwifi/iwl-agn-rs.c	2009-01-15 13:37:37.000000000 -0500
+@@ -775,7 +775,7 @@ static void rs_tx_status(void *priv_r, s
+ 	int status;
+ 	u8 retries;
+ 	int rs_index, index = 0;
+-	struct iwl_lq_sta *lq_sta;
++	struct iwl_lq_sta *lq_sta = priv_sta;
+ 	struct iwl_link_quality_cmd *table;
+ 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
+ 	struct iwl_priv *priv = (struct iwl_priv *)priv_r;
+@@ -792,6 +792,12 @@ static void rs_tx_status(void *priv_r, s
+ 
+ 	IWL_DEBUG_RATE_LIMIT("get frame ack response, update rate scale window\n");
+ 
++	/* user changed channel to different band return lowest rate
++	 * in band
++	 */
++	if (lq_sta && lq_sta->band != priv->band)
++		return;
++
+ 	if (!ieee80211_is_data(fc) || is_multicast_ether_addr(hdr->addr1))
+ 		return;
+ 
+@@ -805,8 +811,6 @@ static void rs_tx_status(void *priv_r, s
+ 	if (retries > 15)
+ 		retries = 15;
+ 
+-	lq_sta = (struct iwl_lq_sta *)priv_sta;
+-
+ 	if ((priv->iw_mode == NL80211_IFTYPE_ADHOC) &&
+ 	    !lq_sta->ibss_sta_added)
+ 		goto out;
+@@ -2113,10 +2117,17 @@ static void rs_get_rate(void *priv_r, st
+ 	struct ieee80211_conf *conf = &priv->hw->conf;
+ 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
+ 	__le16 fc;
+-	struct iwl_lq_sta *lq_sta;
++	struct iwl_lq_sta *lq_sta = priv_sta;
+ 
+ 	IWL_DEBUG_RATE_LIMIT("rate scale calculate new rate for skb\n");
+ 
++	/* user changed channel to different band return lowest rate
++	 * in band
++	 */
++	if (lq_sta && lq_sta->band != priv->band) {
++		sel->rate_idx = rate_lowest_index(sband, NULL);
++		return;
++	}
+ 	/* Send management frames and broadcast/multicast data using lowest
+ 	 * rate. */
+ 	fc = hdr->frame_control;
+@@ -2126,7 +2137,6 @@ static void rs_get_rate(void *priv_r, st
+ 		return;
+ 	}
+ 
+-	lq_sta = (struct iwl_lq_sta *)priv_sta;
+ 	i = lq_sta->last_txrate_idx;
+ 
+ 	if ((priv->iw_mode == NL80211_IFTYPE_ADHOC) &&

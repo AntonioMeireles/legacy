@@ -1,0 +1,79 @@
+diff --git a/kernel/panic.c b/kernel/panic.c
+index 4d50883..f4a6faa 100644
+--- a/kernel/panic.c
++++ b/kernel/panic.c
+@@ -193,6 +193,7 @@ const char *print_tainted(void)
+ 		snprintf(buf, sizeof(buf), "Not tainted");
+ 	return(buf);
+ }
++EXPORT_SYMBOL(print_tainted);
+ 
+ int test_taint(unsigned flag)
+ {
+@@ -328,8 +329,8 @@ void warn_on_slowpath(const char *file, int line)
+ 	sprint_symbol(function, caller);
+ 
+ 	printk(KERN_WARNING "------------[ cut here ]------------\n");
+-	printk(KERN_WARNING "WARNING: at %s:%d %s()\n", file,
+-		line, function);
++	printk(KERN_WARNING "WARNING: at %s:%d %s() (%s)\n", file,
++		line, function, print_tainted());
+ 	print_modules();
+ 	dump_stack();
+ 	print_oops_end_marker();
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index d8ac014..1d035f0 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -224,10 +224,10 @@ static inline int bad_range(struct zone *zone, struct page *page)
+ static void bad_page(struct page *page)
+ {
+ 	printk(KERN_EMERG "Bad page state in process '%s'\n" KERN_EMERG
+-		"page:%p flags:0x%0*lx mapping:%p mapcount:%d count:%d\n",
++		"page:%p flags:0x%0*lx mapping:%p mapcount:%d count:%d (%s)\n",
+ 		current->comm, page, (int)(2*sizeof(unsigned long)),
+ 		(unsigned long)page->flags, page->mapping,
+-		page_mapcount(page), page_count(page));
++		page_mapcount(page), page_count(page), print_tainted());
+ 
+ 	printk(KERN_EMERG "Trying to fix it up, but a reboot is needed\n"
+ 		KERN_EMERG "Backtrace:\n");
+diff --git a/mm/slab.c b/mm/slab.c
+index 0918751..0977a03 100644
+--- a/mm/slab.c
++++ b/mm/slab.c
+@@ -1858,8 +1858,8 @@ static void check_poison_obj(struct kmem_cache *cachep, void *objp)
+ 			/* Print header */
+ 			if (lines == 0) {
+ 				printk(KERN_ERR
+-					"Slab corruption: %s start=%p, len=%d\n",
+-					cachep->name, realobj, size);
++					"Slab corruption (%s): %s start=%p, len=%d\n",
++					print_tainted(), cachep->name, realobj, size);
+ 				print_objinfo(cachep, objp, 0);
+ 			}
+ 			/* Hexdump the affected line */
+@@ -2928,8 +2928,8 @@ static void check_slabp(struct kmem_cache *cachep, struct slab *slabp)
+ 	if (entries != cachep->num - slabp->inuse) {
+ bad:
+ 		printk(KERN_ERR "slab: Internal list corruption detected in "
+-				"cache '%s'(%d), slabp %p(%d). Hexdump:\n",
+-			cachep->name, cachep->num, slabp, slabp->inuse);
++				"cache '%s'(%d), slabp %p(%d). Tainted(%s). Hexdump:\n",
++			cachep->name, cachep->num, slabp, slabp->inuse, print_tainted());
+ 		for (i = 0;
+ 		     i < sizeof(*slabp) + cachep->num * sizeof(kmem_bufctl_t);
+ 		     i++) {
+diff --git a/mm/slub.c b/mm/slub.c
+index 749588a..0ef64f1 100644
+--- a/mm/slub.c
++++ b/mm/slub.c
+@@ -430,7 +430,7 @@ static void slab_bug(struct kmem_cache *s, char *fmt, ...)
+ 	va_end(args);
+ 	printk(KERN_ERR "========================================"
+ 			"=====================================\n");
+-	printk(KERN_ERR "BUG %s: %s\n", s->name, buf);
++	printk(KERN_ERR "BUG %s (%s): %s\n", s->name, print_tainted(), buf);
+ 	printk(KERN_ERR "----------------------------------------"
+ 			"-------------------------------------\n\n");
+ }

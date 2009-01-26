@@ -1,0 +1,120 @@
+From: Eric Paris <eparis@redhat.com>
+Date: Wed, 29 Oct 2008 21:06:46 +0000 (-0400)
+Subject: SELinux: check open perms in dentry_open not inode_permission
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Fjmorris%2Fsecurity-testing-2.6.git;a=commitdiff_plain;h=8b6a5a37f87a414ef8636e36ec75accb27bb7508
+
+SELinux: check open perms in dentry_open not inode_permission
+
+Some operations, like searching a directory path or connecting a unix domain
+socket, make explicit calls into inode_permission.  Our choices are to
+either try to come up with a signature for all of the explicit calls to
+inode_permission and do not check open on those, or to move the open checks to
+dentry_open where we know this is always an open operation.  This patch moves
+the checks to dentry_open.
+
+Signed-off-by: Eric Paris <eparis@redhat.com>
+Acked-by:  Stephen Smalley <sds@tycho.nsa.gov>
+Signed-off-by: James Morris <jmorris@namei.org>
+---
+
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index c679ba6..03ff7db 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -1686,15 +1686,39 @@ static inline u32 file_mask_to_av(int mode, int mask)
+ 	return av;
+ }
+ 
++/* Convert a Linux file to an access vector. */
++static inline u32 file_to_av(struct file *file)
++{
++	u32 av = 0;
++
++	if (file->f_mode & FMODE_READ)
++		av |= FILE__READ;
++	if (file->f_mode & FMODE_WRITE) {
++		if (file->f_flags & O_APPEND)
++			av |= FILE__APPEND;
++		else
++			av |= FILE__WRITE;
++	}
++	if (!av) {
++		/*
++		 * Special file opened with flags 3 for ioctl-only use.
++		 */
++		av = FILE__IOCTL;
++	}
++
++	return av;
++}
++
+ /*
+- * Convert a file mask to an access vector and include the correct open
++ * Convert a file to an access vector and include the correct open
+  * open permission.
+  */
+-static inline u32 open_file_mask_to_av(int mode, int mask)
++static inline u32 open_file_to_av(struct file *file)
+ {
+-	u32 av = file_mask_to_av(mode, mask);
++	u32 av = file_to_av(file);
+ 
+ 	if (selinux_policycap_openperm) {
++		mode_t mode = file->f_path.dentry->d_inode->i_mode;
+ 		/*
+ 		 * lnk files and socks do not really have an 'open'
+ 		 */
+@@ -1710,34 +1734,11 @@ static inline u32 open_file_mask_to_av(int mode, int mask)
+ 			av |= DIR__OPEN;
+ 		else
+ 			printk(KERN_ERR "SELinux: WARNING: inside %s with "
+-				"unknown mode:%x\n", __func__, mode);
++				"unknown mode:%o\n", __func__, mode);
+ 	}
+ 	return av;
+ }
+ 
+-/* Convert a Linux file to an access vector. */
+-static inline u32 file_to_av(struct file *file)
+-{
+-	u32 av = 0;
+-
+-	if (file->f_mode & FMODE_READ)
+-		av |= FILE__READ;
+-	if (file->f_mode & FMODE_WRITE) {
+-		if (file->f_flags & O_APPEND)
+-			av |= FILE__APPEND;
+-		else
+-			av |= FILE__WRITE;
+-	}
+-	if (!av) {
+-		/*
+-		 * Special file opened with flags 3 for ioctl-only use.
+-		 */
+-		av = FILE__IOCTL;
+-	}
+-
+-	return av;
+-}
+-
+ /* Hook functions begin here. */
+ 
+ static int selinux_ptrace_may_access(struct task_struct *child,
+@@ -2654,7 +2655,7 @@ static int selinux_inode_permission(struct inode *inode, int mask)
+ 	}
+ 
+ 	return inode_has_perm(current, inode,
+-			       open_file_mask_to_av(inode->i_mode, mask), NULL);
++			      file_mask_to_av(inode->i_mode, mask), NULL);
+ }
+ 
+ static int selinux_inode_setattr(struct dentry *dentry, struct iattr *iattr)
+@@ -3170,7 +3171,7 @@ static int selinux_dentry_open(struct file *file)
+ 	 * new inode label or new policy.
+ 	 * This check is not redundant - do not remove.
+ 	 */
+-	return inode_has_perm(current, inode, file_to_av(file), NULL);
++	return inode_has_perm(current, inode, open_file_to_av(file), NULL);
+ }
+ 
+ /* task security operations */

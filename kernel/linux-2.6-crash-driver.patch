@@ -1,7 +1,104 @@
-diff -urNp --exclude-from=/home/davej/.exclude linux-1050/arch/ia64/kernel/ia64_ksyms.c linux-1060/arch/ia64/kernel/ia64_ksyms.c
---- linux-1050/arch/ia64/kernel/ia64_ksyms.c
-+++ linux-1060/arch/ia64/kernel/ia64_ksyms.c
-@@ -106,6 +106,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
+diff --git a/arch/ia64/include/asm/crash.h b/arch/ia64/include/asm/crash.h
+new file mode 100644
+index 0000000..541af84
+--- /dev/null
++++ b/arch/ia64/include/asm/crash.h
+@@ -0,0 +1,90 @@
++#ifndef _ASM_IA64_CRASH_H
++#define _ASM_IA64_CRASH_H
++
++/*
++ * linux/include/asm-ia64/crash.h
++ *
++ * Copyright (c) 2004 Red Hat, Inc. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#ifdef __KERNEL__
++
++#include <linux/efi.h>
++#include <linux/mm.h>
++#include <asm/mmzone.h>
++
++static inline void *
++map_virtual(u64 offset, struct page **pp)
++{
++	struct page *page;
++	unsigned long pfn;
++	u32 type;
++
++	if (REGION_NUMBER(offset) == 5) {
++		char byte;
++
++		if (__get_user(byte, (char *)offset) == 0)
++			return (void *)offset;
++		else
++			return NULL;
++	}
++
++	switch (type = efi_mem_type(offset)) 
++	{
++	case EFI_LOADER_CODE:
++	case EFI_LOADER_DATA:
++	case EFI_BOOT_SERVICES_CODE:
++	case EFI_BOOT_SERVICES_DATA:
++	case EFI_CONVENTIONAL_MEMORY:
++		break;
++
++	default:
++		printk(KERN_INFO
++		    "crash memory driver: invalid memory type for %lx: %d\n", 
++			offset, type);
++		return NULL;
++	}
++
++	pfn = offset >> PAGE_SHIFT;
++
++	if (!pfn_valid(pfn)) {
++		printk(KERN_INFO
++			"crash memory driver: invalid pfn: %lx )\n", pfn);
++		return NULL;
++	}
++
++	page = pfn_to_page(pfn);
++
++	if (!page->virtual) {
++		printk(KERN_INFO
++		    "crash memory driver: offset: %lx page: %lx page->virtual: NULL\n", 
++			offset, (unsigned long)page);
++		return NULL;
++	}
++
++	return (page->virtual + (offset & (PAGE_SIZE-1)));
++}
++
++static inline void unmap_virtual(struct page *page) 
++{ 
++	return;
++}
++
++#endif /* __KERNEL__ */
++
++#endif /* _ASM_IA64_CRASH_H */
+diff --git a/arch/ia64/kernel/ia64_ksyms.c b/arch/ia64/kernel/ia64_ksyms.c
+index 6da1f20..2984fb3 100644
+--- a/arch/ia64/kernel/ia64_ksyms.c
++++ b/arch/ia64/kernel/ia64_ksyms.c
+@@ -86,6 +86,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
  #include <asm/unwind.h>
  EXPORT_SYMBOL(unw_init_running);
  
@@ -10,10 +107,50 @@ diff -urNp --exclude-from=/home/davej/.exclude linux-1050/arch/ia64/kernel/ia64_
 +
  #ifdef ASM_SUPPORTED
  # ifdef CONFIG_SMP
- #  if __GNUC__ < 3 || (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
-diff -urNp --exclude-from=/home/davej/.exclude linux-1050/drivers/char/crash.c linux-1060/drivers/char/crash.c
---- linux-1050/drivers/char/crash.c
-+++ linux-1060/drivers/char/crash.c
+ #  if (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
+diff --git a/arch/x86/mm/ioremap.c b/arch/x86/mm/ioremap.c
+index d4c4307..d1c968f 100644
+--- a/arch/x86/mm/ioremap.c
++++ b/arch/x86/mm/ioremap.c
+@@ -133,6 +133,7 @@ int page_is_ram(unsigned long pagenr)
+ 	}
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(page_is_ram);
+ 
+ int pagerange_is_ram(unsigned long start, unsigned long end)
+ {
+diff --git a/drivers/char/Kconfig b/drivers/char/Kconfig
+index 43d6ba8..0d81c9a 100644
+--- a/drivers/char/Kconfig
++++ b/drivers/char/Kconfig
+@@ -460,6 +460,8 @@ config LEGACY_PTYS
+ 	  security.  This option enables these legacy devices; on most
+ 	  systems, it is safe to say N.
+ 
++config CRASH
++        tristate "Crash Utility memory driver"
+ 
+ config LEGACY_PTY_COUNT
+ 	int "Maximum number of legacy PTY in use"
+diff --git a/drivers/char/Makefile b/drivers/char/Makefile
+index 438f713..1b7767b 100644
+--- a/drivers/char/Makefile
++++ b/drivers/char/Makefile
+@@ -109,6 +109,8 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
+ obj-$(CONFIG_JS_RTC)		+= js-rtc.o
+ js-rtc-y = rtc.o
+ 
++obj-$(CONFIG_CRASH)		+= crash.o
++
+ # Files generated that shall be removed upon make clean
+ clean-files := consolemap_deftbl.c defkeymap.c
+ 
+diff --git a/drivers/char/crash.c b/drivers/char/crash.c
+new file mode 100644
+index 0000000..e5437de
+--- /dev/null
++++ b/drivers/char/crash.c
 @@ -0,0 +1,128 @@
 +/*
 + *  linux/drivers/char/crash.c
@@ -143,32 +280,11 @@ diff -urNp --exclude-from=/home/davej/.exclude linux-1050/drivers/char/crash.c l
 +module_exit(crash_cleanup_module);
 +
 +MODULE_LICENSE("GPL");
-diff -urNp --exclude-from=/home/davej/.exclude linux-1050/drivers/char/Kconfig linux-1060/drivers/char/Kconfig
---- linux-1050/drivers/char/Kconfig
-+++ linux-1060/drivers/char/Kconfig
-@@ -441,6 +441,8 @@ config LEGACY_PTYS
- 	  security.  This option enables these legacy devices; on most
- 	  systems, it is safe to say N.
- 
-+config CRASH
-+        tristate "Crash Utility memory driver"
- 
- config LEGACY_PTY_COUNT
- 	int "Maximum number of legacy PTY in use"
---- linux-2.6.16.noarch/drivers/char/Makefile~	2006-03-25 18:50:42.000000000 -0500
-+++ linux-2.6.16.noarch/drivers/char/Makefile	2006-03-25 18:50:59.000000000 -0500
-@@ -95,6 +95,8 @@ obj-$(CONFIG_IPMI_HANDLER)	+= ipmi/
- obj-$(CONFIG_JS_RTC)		+= js-rtc.o
- js-rtc-y = rtc.o
- 
-+obj-$(CONFIG_CRASH)		+= crash.o
-+
- # Files generated that shall be removed upon make clean
- clean-files := consolemap_deftbl.c defkeymap.c
- 
-diff -urNp --exclude-from=/home/davej/.exclude linux-1050/include/asm-i386/crash.h linux-1060/include/asm-i386/crash.h
---- linux-1050/include/asm-x86/crash.h
-+++ linux-1060/include/asm-x86/crash.h
+diff --git a/include/asm-x86/crash.h b/include/asm-x86/crash.h
+new file mode 100644
+index 0000000..dfcc006
+--- /dev/null
++++ b/include/asm-x86/crash.h
 @@ -0,0 +1,75 @@
 +#ifndef _ASM_I386_CRASH_H
 +#define _ASM_I386_CRASH_H
@@ -245,109 +361,3 @@ diff -urNp --exclude-from=/home/davej/.exclude linux-1050/include/asm-i386/crash
 +#endif /* __KERNEL__ */
 +
 +#endif /* _ASM_I386_CRASH_H */
-diff -urNp --exclude-from=/home/davej/.exclude linux-1050/include/asm-ia64/crash.h linux-1060/include/asm-ia64/crash.h
---- linux-1050/include/asm-ia64/crash.h
-+++ linux-1060/include/asm-ia64/crash.h
-@@ -0,0 +1,90 @@
-+#ifndef _ASM_IA64_CRASH_H
-+#define _ASM_IA64_CRASH_H
-+
-+/*
-+ * linux/include/asm-ia64/crash.h
-+ *
-+ * Copyright (c) 2004 Red Hat, Inc. All rights reserved.
-+ *
-+ * This program is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2, or (at your option)
-+ * any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-+ *
-+ */
-+
-+#ifdef __KERNEL__
-+
-+#include <linux/efi.h>
-+#include <linux/mm.h>
-+#include <asm/mmzone.h>
-+
-+static inline void *
-+map_virtual(u64 offset, struct page **pp)
-+{
-+	struct page *page;
-+	unsigned long pfn;
-+	u32 type;
-+
-+	if (REGION_NUMBER(offset) == 5) {
-+		char byte;
-+
-+		if (__get_user(byte, (char *)offset) == 0)
-+			return (void *)offset;
-+		else
-+			return NULL;
-+	}
-+
-+	switch (type = efi_mem_type(offset)) 
-+	{
-+	case EFI_LOADER_CODE:
-+	case EFI_LOADER_DATA:
-+	case EFI_BOOT_SERVICES_CODE:
-+	case EFI_BOOT_SERVICES_DATA:
-+	case EFI_CONVENTIONAL_MEMORY:
-+		break;
-+
-+	default:
-+		printk(KERN_INFO
-+		    "crash memory driver: invalid memory type for %lx: %d\n", 
-+			offset, type);
-+		return NULL;
-+	}
-+
-+	pfn = offset >> PAGE_SHIFT;
-+
-+	if (!pfn_valid(pfn)) {
-+		printk(KERN_INFO
-+			"crash memory driver: invalid pfn: %lx )\n", pfn);
-+		return NULL;
-+	}
-+
-+	page = pfn_to_page(pfn);
-+
-+	if (!page->virtual) {
-+		printk(KERN_INFO
-+		    "crash memory driver: offset: %lx page: %lx page->virtual: NULL\n", 
-+			offset, (unsigned long)page);
-+		return NULL;
-+	}
-+
-+	return (page->virtual + (offset & (PAGE_SIZE-1)));
-+}
-+
-+static inline void unmap_virtual(struct page *page) 
-+{ 
-+	return;
-+}
-+
-+#endif /* __KERNEL__ */
-+
-+#endif /* _ASM_IA64_CRASH_H */
-diff --git a/arch/x86/mm/ioremap.c b/arch/x86/mm/ioremap.c
-index c004d94..13417a2 100644
---- a/arch/x86/mm/ioremap.c
-+++ b/arch/x86/mm/ioremap.c
-@@ -65,6 +65,7 @@ int page_is_ram(unsigned long pagenr)
- 	}
- 	return 0;
- }
-+EXPORT_SYMBOL_GPL(page_is_ram);
- 
- /*
-  * Fix up the linear direct mapping of the kernel to avoid cache attribute
