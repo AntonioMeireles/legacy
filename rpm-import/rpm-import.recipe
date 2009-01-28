@@ -1,5 +1,6 @@
+#!/usr/bin/python
 #
-# Copyright (c) 2008 rPath, Inc.
+# Copyright (c) 2006-2008 rPath, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -15,16 +16,24 @@
 from conary import rpmhelper
 from conary.lib import log
 
+# common arguments for all the policy exceptions
+_args = dict(exceptions='.*', allowUnusedFilters=True)
+
 class RPMImportRecipe(PackageRecipe):
     name = 'rpm-import'
     version = '0.1'
     rpms = None
     rpmNames = None
     rpmFiles = None
+    rpmFileMap = None
     archs = set()
     extraArch =  { 'i686': []}
     abstractBaseClass = True
     rpmUrl = ''
+    importScripts = True
+
+    # variable used for package creator
+    fileArches = None
 
     def __init__(r, *args, **kw):
         r.usedrpms = set()
@@ -39,8 +48,12 @@ class RPMImportRecipe(PackageRecipe):
         dotPos = filename[:-4].rindex('.')
         nvr, a = filename[:dotPos], filename[dotPos + 1:-4]
         arr = nvr.split('-')
-        v, r = arr[-2], arr[-1]
-        n = '-'.join(arr[:-2])
+        n = None
+        v = None
+        r = None
+        if len(arr) > 2:
+            v, r = arr[-2], arr[-1]
+            n = '-'.join(arr[:-2])
         return n, v, r, a
 
     @staticmethod
@@ -54,15 +67,25 @@ class RPMImportRecipe(PackageRecipe):
             ret.append(line)
         return ret
 
-    @staticmethod
-    def extractSources(sources, openSourceFileFn):
-        return [x for x in sources if x.endswith('.rpm')]
+    @classmethod
+    def extractSources(cls, sources, openSourceFileFn):
+        rpms = []
+        for src in sources:
+            if src.endswith('.rpm'):
+                rpms.append(src)
+                continue
+            if src != 'manifest':
+                # No manifest file
+                continue
+            f = openSourceFileFn(src)
+            rpms.extend(cls.parseManifest(f))
+        return rpms
 
-    @staticmethod
-    def computeVersion(rpms):
+    @classmethod
+    def computeVersion(cls, rpms):
         ver = None
         for rpm in rpms:
-            n_, v_, r_, a_ = RPMImportRecipe.parseNVRA(rpm)
+            n_, v_, r_, a_ = cls.parseNVRA(rpm)
             vr = '_'.join([v_, r_])
             if ver is None:
                 ver = vr
@@ -72,121 +95,160 @@ class RPMImportRecipe(PackageRecipe):
 
         return ver
 
-    def unpack(r):
+    def _extractRpmNamesArches(r):
+        # Extract list of rpm names
         r.rpmNames = set()
-        rpmFileMap = {}
+        r.rpmFileMap = {}
         for rpm in r.sourceFiles:
-            n_, v_, r_, a_ = RPMImportRecipe.parseNVRA(rpm)
+            n_, v_, r_, a_ = r.parseNVRA(rpm)
             if a_ in ('src', 'nosrc'):
                 r.addSource(r.rpmUrl + rpm)
                 continue
             nvr_ = '-'.join((n_, v_, r_))
             nv_ = '-'.join((n_, v_))
             r.rpmNames.add((n_, v_))
-            if (nv_, a_) in rpmFileMap:
+            if (nv_, a_) in r.rpmFileMap:
                 raise RPMImportError('multiple rpms of the same name, '
                                      'version, and arch found')
-            rpmFileMap[(nv_, a_)] = rpm
+            r.rpmFileMap[(nv_, a_)] = rpm
             if a_ == 'i686':
                 r.extraArch['i686'].append(n_)
             r.archs.add(a_)
 
+    @staticmethod
+    def _getRpmName(rpm):
+        # if we have a tuple, it's name, version
+        if isinstance(rpm, tuple):
+            rpmname, ver = rpm
+            rpm = rpmname + '-%s' % ver
+        else:
+            rpmname = rpm
+            rpm += '-%(version)s-%(release)s'
+        return rpmname, rpm
+
+    def _getCommonPkgArch(r):
+        scores = {'i386':   0,
+                  'i486':   1,
+                  'i586':   2,
+                  'i686':   3}
+
+        lcd = None
+        for arch in r.archs:
+            if arch not in scores:
+                continue
+            if lcd is None or scores[arch] < scores[lcd]:
+                lcd = arch
+
+        return lcd
+
+    def _computeArch(r, rpm, rpmname, rpmarch):
+        pkgarch = rpmarch
+        if rpmarch.startswith('i') and rpmarch.endswith('86'):
+            arch = Arch.x86
+            if rpmarch != 'i386':
+                arch = arch[rpmarch]
+            if (rpmarch in r.extraArch
+                and rpmname not in r.extraArch[rpmarch]):
+                pkgarch = r._getCommonPkgArch()
+        elif rpmarch == 'x86_64':
+            arch = Arch.x86_64
+        elif rpmarch == 'noarch':
+            arch = True
+        else:
+            raise RPMImportError('unsupported arch: %s' % rpmarch)
+
+        if (rpm, pkgarch) in r.rpmFileMap:
+            rpmfile = r.rpmFileMap[(rpm, pkgarch)]
+        elif (rpm, 'noarch') in r.rpmFileMap:
+            arch = True
+            rpmfile = r.rpmFileMap[(rpm, 'noarch')]
+        elif pkgarch in r.extraArch:
+            return None
+        else:
+            raise RPMImportError('Could not find a %s version of %s'
+                                 % (pkgarch, rpm))
+        rpmfilename = os.path.basename(rpmfile % r.macros)
+
+        if arch:
+            r.usedrpms.add(rpmfilename)
+
+        return arch, rpmfile
+
+    def _collapsePackages(r, rpmname):
+        # follow the packaging splitting from the RPMs we're importing
+        packagename = rpmname
+        # collapse libfoo -> foo when the main package name is foo
+        # but don't collapse libbar -> bar when it's produced by the
+        # foo src rpm.
+        if (not r.name.startswith('lib')
+            and packagename.startswith('lib')
+            and packagename[3:].startswith(r.name)):
+            packagename = packagename[3:]
+        # collapse suffixes
+        for suffix in ('-devel', '-docs', '-doc', '-info',
+                       '-lib', '-libs', '-locale', '-man',
+                       '-i18ndata', '-html'):
+            # collapse foo-devel -> foo
+            if rpmname.endswith(suffix) and r.name != rpmname:
+                packagename = packagename[:-len(suffix)]
+                break
+        return packagename
+
+    def unpack(r):
+        r._extractRpmNamesArches()
         for rpm in r.rpmNames:
-            # if we have a tuple, it's name, version
-            rpmpath = None
-            if isinstance(rpm, tuple):
-                rpmname, ver = rpm
-                rpm = rpmname + '-%s' % ver
-            else:
-                rpmname = rpm
-                rpm += '-%(version)s'
-
+            rpmname, rpm = r._getRpmName(rpm)
             for rpmarch in r.archs:
-                pkgarch = rpmarch
-                if rpmarch == 'noarch':
-                    arch = True
-                elif rpmarch.startswith('i') and rpmarch.endswith('86'):
-                    # this is i586, i686 - most likely
-                    arch = Arch.x86
-                    if (rpmarch in r.extraArch
-                        and rpmname not in r.extraArch[rpmarch]
-                        and rpmarch == 'i686'):
-                        # handle cases like glibc, glibc-devel=i686,
-                        # but the rest are i586
-                        pkgarch = 'i386'
-                elif rpmarch == 'x86_64':
-                    arch = Arch[rpmarch]
-                else:
-                    raise RPMImportError('unsupported arch: %s' %rpmarch)
+                val = r._computeArch(rpm, rpmname, rpmarch)
+                if not val: continue
+                arch, rpmfile = val
 
-                if (rpm, pkgarch) in rpmFileMap:
-                    rpmfile = rpmFileMap[(rpm, pkgarch)]
-                else:
-                    raise RPMImportError('Could not find a %s version of %s'
-                                         % (pkgarch, rpm))
-                rpmfilename = os.path.basename(rpmfile % r.macros)
+                # maintain compatibility with pcreator
+                if r.fileArches:
+                    arch = r.fileMatchesArch(rpmfile)
 
-                if arch:
-                    r.usedrpms.add(rpmfilename)
-
-                # follow the packaging splitting from the RPMs we're importing
-                packagename = rpmname
-                # collapse libfoo -> foo when the main package name is foo
-                # but don't collapse libbar -> bar when it's produced by the
-                # foo src rpm.
-                if (not r.name.startswith('lib')
-                    and packagename.startswith('lib')
-                    and packagename[3:].startswith(r.name)):
-                    packagename = packagename[3:]
-                # collapse suffixes
-                for suffix in ('-devel', '-docs', '-doc', '-info',
-                               '-lib', '-libs', '-locale', '-man',
-                               '-i18ndata', '-html'):
-                # collapse foo-devel -> foo
-                    if rpmname.endswith(suffix):
-                        packagename = packagename[:-len(suffix)]
-                        break
+                packagename = r._collapsePackages(rpmname)
                 fullUrl = os.path.join(r.rpmUrl % { 'arch' : rpmarch },
                                        rpmfile % r.macros)
-                r.addArchive(fullUrl, dir = '/',
-                             package = packagename, preserveOwnership = True,
-                             use = r.fileMatchesArch(rpmfilename))
-
+                r.addArchive(fullUrl, dir='/', use=arch,
+                             package=packagename, preserveOwnership = True)
 
     def disableBuildRequirementsPolicy(r):
-        r.EnforceSonameBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
-        r.EnforceJavaBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
-        r.EnforceCILBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
-        r.EnforceConfigLogBuildRequirements(exceptions = '.*', allowUnusedFilters = True)
+        del r.EnforceSonameBuildRequirements
+        del r.EnforceJavaBuildRequirements
+        del r.EnforceCILBuildRequirements
+        del r.EnforceConfigLogBuildRequirements
         # Note that perl and python runtime requirement CANNOT
         # be discovered without listing them as runtime requirements,
         # so it is important not to disable
         # r.Enforce{Perl,Python}BuildRequirements
 
     def disablePolicy(r):
-        r.BadInterpreterPaths(exceptions = '.*', allowUnusedFilters = True)
-        r.CheckDesktopFiles(exceptions = '.*', allowUnusedFilters = True)
-        r.CheckDestDir(exceptions = '.*', allowUnusedFilters = True)
-        r.CheckSonames(exceptions = '.*', allowUnusedFilters = True)
-        r.DanglingSymlinks(exceptions = '.*', allowUnusedFilters = True)
-        r.ExecutableLibraries(exceptions = '.*', allowUnusedFilters = True)
-        r.FilesForDirectories(exceptions = '.*', allowUnusedFilters = True)
-        r.FilesInMandir(exceptions = '.*', allowUnusedFilters = True)
-        r.FixDirModes(exceptions = '.*', allowUnusedFilters = True)
-        r.FixupMultilibPaths(exceptions = '.*', allowUnusedFilters = True)
-        r.LinkCount(exceptions = '.*', allowUnusedFilters = True)
-        r.IgnoredSetuid(exceptions = '.*', allowUnusedFilters = True)
-        r.ImproperlyShared(exceptions = '.*', allowUnusedFilters = True)
-        r.NonBinariesInBindirs(exceptions = '.*', allowUnusedFilters = True)
-        r.NonMultilibComponent(exceptions = '.*', allowUnusedFilters = True)
-        r.NonMultilibDirectories(exceptions = '.*', allowUnusedFilters = True)
-        r.NormalizeCompression(exceptions = '.*', allowUnusedFilters = True)
-        r.NormalizeInterpreterPaths(exceptions = '.*', allowUnusedFilters = True)
-        r.RemoveNonPackageFiles(exceptions = '.*', allowUnusedFilters = True)
-        r.WarnWriteable(exceptions = '.*', allowUnusedFilters = True)
-        r.WorldWriteableExecutables(exceptions = '.*', allowUnusedFilters = True)
+        del r.BadInterpreterPaths
+        del r.CheckDesktopFiles
+        del r.CheckDestDir
+        r.CheckSonames(**_args)
+        r.DanglingSymlinks(**_args)
+        r.ExecutableLibraries(**_args)
+        del r.FilesForDirectories
+        del r.FilesInMandir
+        del r.FixDirModes
+        del r.FixupMultilibPaths
+        r.LinkCount(**_args)
+        del r.IgnoredSetuid
+        del r.ImproperlyShared
+        del r.NonBinariesInBindirs
+        del r.NonMultilibComponent
+        del r.NonMultilibDirectories
+        del r.NormalizeInfoPages
+        del r.NormalizeCompression
+        del r.NormalizeInterpreterPaths
+        del r.RemoveNonPackageFiles
+        r.WarnWriteable(**_args)
+        del r.WorldWriteableExecutables
         # ObsoletePaths does not honor exceptions
         del r.ObsoletePaths
+        del r.NormalizeManPages
 
     def disableStrip(r):
         """
@@ -194,7 +256,7 @@ class RPMImportRecipe(PackageRecipe):
 
         def disableStrip(r): pass
         """
-        r.Strip(exceptions = '.*', allowUnusedFilters = True)
+        r.Strip(**_args)
 
     def policy(r):
         """
@@ -211,9 +273,10 @@ class RPMImportRecipe(PackageRecipe):
         pass
 
     def readHeaders(r):
-        sourceList = r.fetchAllSources()
-        for rpmname in r.sourceFiles:
-            rpmfiles = [ x for x in sourceList if os.path.basename(x) == rpmname ]
+        sourceList = set(r.fetchAllSources())
+        for rpmname in r.usedrpms:
+            rpmfiles = [ x for x in sourceList
+                         if os.path.basename(x) == rpmname ]
             if len(rpmfiles) != 1:
                 raise RPMImportError('more than one source object matches '
                                       'the "%s" rpm filename' %rpmname)
@@ -285,21 +348,30 @@ class RPMImportRecipe(PackageRecipe):
         # FIXME: implement
         pass
 
-    def recipeClassSetup(r):
+    def setup(r):
         if r.__class__.__name__ == 'RPMImportRecipe':
             return
+
+        r.macros.release = ''
+        if '_' in r.version:
+            r.macros.version, r.macros.release = r.version.rsplit('_', 1)
+
         r.preprocess()
         r.unpack()
         r.policy()
         if r._lightInstance:
             return
         r.readHeaders()
-        r.processScripts()
+        if r.importScripts:
+            r.processScripts()
         r.processFiles()
         r.disableBuildRequirementsPolicy()
         r.disableStrip()
         r.disablePolicy()
         r.postprocess()
+
+    # Compatibility with Package Creator
+    recipeClassSetup = setup
 
     _tagNameMap = {
         rpmhelper.PREIN:    "preinstall",
