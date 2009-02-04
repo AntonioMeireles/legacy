@@ -1,0 +1,61 @@
+From: Stuart Hopkins <stuart@dodgy-geeza.com>
+Date: Sat, 20 Dec 2008 09:12:33 +0000 (-0500)
+Subject: Input: atkbd - Samsung NC10 key repeat fix
+X-Git-Tag: v2.6.29-rc1~221^2~1^2~13
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=4200844bd9dc511088258437d564a187f0ffc94e
+
+Input: atkbd - Samsung NC10 key repeat fix
+
+This patch fixes the key repeat issue with the Fn+F? keys on the new
+Samsung NC10 Netbook, so that the keys can be defined and used within
+ACPID correctly, otherwise the keys repeat indefinately.
+
+This solves part of http://bugzilla.kernel.org/show_bug.cgi?id=12021
+
+Signed-off-by: Stuart Hopkins <stuart@dodgy-geeza.com>
+Signed-off-by: Dmitry Torokhov <dtor@mail.ru>
+---
+
+diff --git a/drivers/input/keyboard/atkbd.c b/drivers/input/keyboard/atkbd.c
+index fa6ed33..97f709f 100644
+--- a/drivers/input/keyboard/atkbd.c
++++ b/drivers/input/keyboard/atkbd.c
+@@ -901,6 +901,22 @@ static void atkbd_hp_zv6100_keymap_fixup(struct atkbd *atkbd)
+ }
+ 
+ /*
++ * Samsung NC10 with Fn+F? key release not working
++ */
++static void atkbd_samsung_keymap_fixup(struct atkbd *atkbd)
++{
++	const unsigned int forced_release_keys[] = {
++		0x82, 0x83, 0x84, 0x86, 0x88, 0x89, 0xb3, 0xf7, 0xf9,
++	};
++	int i;
++
++	if (atkbd->set == 2)
++		for (i = 0; i < ARRAY_SIZE(forced_release_keys); i++)
++			__set_bit(forced_release_keys[i],
++				  atkbd->force_release_mask);
++}
++
++/*
+  * atkbd_set_keycode_table() initializes keyboard's keycode table
+  * according to the selected scancode set
+  */
+@@ -1519,6 +1535,15 @@ static struct dmi_system_id atkbd_dmi_quirk_table[] __initdata = {
+ 		.callback = atkbd_setup_fixup,
+ 		.driver_data = atkbd_inventec_keymap_fixup,
+ 	},
++	{
++		.ident = "Samsung NC10",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "NC10"),
++		},
++		.callback = atkbd_setup_fixup,
++		.driver_data = atkbd_samsung_keymap_fixup,
++	},
+ 	{ }
+ };
+ 

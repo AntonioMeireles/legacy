@@ -1,8 +1,22 @@
+ drivers/media/video/Kconfig               |    2 +
+ drivers/media/video/Makefile              |    2 +
+ drivers/media/video/hdpvr/Kconfig         |   10 +
+ drivers/media/video/hdpvr/Makefile        |    7 +
+ drivers/media/video/hdpvr/hdpvr-control.c |  212 +++++
+ drivers/media/video/hdpvr/hdpvr-core.c    |  455 +++++++++++
+ drivers/media/video/hdpvr/hdpvr-i2c.c     |  145 ++++
+ drivers/media/video/hdpvr/hdpvr-video.c   | 1258 +++++++++++++++++++++++++++++
+ drivers/media/video/hdpvr/hdpvr.h         |  324 ++++++++
+ drivers/media/video/v4l2-common.c         |    4 +
+ include/linux/i2c-id.h                    |    1 +
+ include/linux/videodev2.h                 |    7 +-
+ 12 files changed, 2425 insertions(+), 2 deletions(-)
+
 diff --git a/drivers/media/video/Kconfig b/drivers/media/video/Kconfig
-index 47102c2..0e279dd 100644
+index 3e9e0dc..578402f 100644
 --- a/drivers/media/video/Kconfig
 +++ b/drivers/media/video/Kconfig
-@@ -781,6 +781,8 @@ source "drivers/media/video/gspca/Kconfig"
+@@ -801,6 +801,8 @@ source "drivers/media/video/gspca/Kconfig"
  
  source "drivers/media/video/pvrusb2/Kconfig"
  
@@ -12,10 +26,10 @@ index 47102c2..0e279dd 100644
  
  source "drivers/media/video/usbvision/Kconfig"
 diff --git a/drivers/media/video/Makefile b/drivers/media/video/Makefile
-index 16962f3..4331a50 100644
+index ef7c8d3..449ae8b 100644
 --- a/drivers/media/video/Makefile
 +++ b/drivers/media/video/Makefile
-@@ -115,6 +115,8 @@ obj-$(CONFIG_USB_PWC)           += pwc/
+@@ -121,6 +121,8 @@ obj-$(CONFIG_USB_PWC)           += pwc/
  obj-$(CONFIG_USB_ZC0301)        += zc0301/
  obj-$(CONFIG_USB_GSPCA)         += gspca/
  
@@ -2478,18 +2492,18 @@ index 0000000..ffe3a36
 +void print_bytes(char *string, unsigned char *buf, size_t len);
 +#endif
 diff --git a/drivers/media/video/v4l2-common.c b/drivers/media/video/v4l2-common.c
-index 846763d..34eca15 100644
+index 88ca131..8dfaa7d 100644
 --- a/drivers/media/video/v4l2-common.c
 +++ b/drivers/media/video/v4l2-common.c
-@@ -374,6 +374,7 @@ const char *v4l2_ctrl_get_name(u32 id)
- 	case V4L2_CID_CONTRAST: 	return "Contrast";
- 	case V4L2_CID_SATURATION: 	return "Saturation";
- 	case V4L2_CID_HUE: 		return "Hue";
-+	case V4L2_CID_SHARPNESS: 	return "Sharpness";
+@@ -354,6 +354,7 @@ int v4l2_ctrl_query_fill(struct v4l2_queryctrl *qctrl, s32 min, s32 max, s32 ste
+ 	case V4L2_CID_CONTRAST: 	name = "Contrast"; break;
+ 	case V4L2_CID_SATURATION: 	name = "Saturation"; break;
+ 	case V4L2_CID_HUE: 		name = "Hue"; break;
++	case V4L2_CID_SHARPNESS: 	name = "Sharpness"; break;
  
  	/* MPEG controls */
- 	case V4L2_CID_MPEG_CLASS: 		return "MPEG Encoder Controls";
-@@ -480,6 +481,7 @@ int v4l2_ctrl_query_fill(struct v4l2_queryctrl *qctrl, s32 min, s32 max, s32 ste
+ 	case V4L2_CID_MPEG_CLASS: 		name = "MPEG Encoder Controls"; break;
+@@ -445,6 +446,7 @@ int v4l2_ctrl_query_fill(struct v4l2_queryctrl *qctrl, s32 min, s32 max, s32 ste
  	case V4L2_CID_CONTRAST:
  	case V4L2_CID_SATURATION:
  	case V4L2_CID_HUE:
@@ -2497,7 +2511,7 @@ index 846763d..34eca15 100644
  		qctrl->flags |= V4L2_CTRL_FLAG_SLIDER;
  		break;
  	}
-@@ -518,6 +520,8 @@ int v4l2_ctrl_query_fill_std(struct v4l2_queryctrl *qctrl)
+@@ -483,6 +485,8 @@ int v4l2_ctrl_query_fill_std(struct v4l2_queryctrl *qctrl)
  		return v4l2_ctrl_query_fill(qctrl, 0, 127, 1, 64);
  	case V4L2_CID_HUE:
  		return v4l2_ctrl_query_fill(qctrl, -128, 127, 1, 0);
@@ -2507,10 +2521,10 @@ index 846763d..34eca15 100644
  	/* MPEG controls */
  	case V4L2_CID_MPEG_AUDIO_SAMPLING_FREQ:
 diff --git a/include/linux/i2c-id.h b/include/linux/i2c-id.h
-index 01d67ba..1a08b81 100644
+index bf34c5f..d0ec672 100644
 --- a/include/linux/i2c-id.h
 +++ b/include/linux/i2c-id.h
-@@ -110,6 +110,7 @@
+@@ -111,6 +111,7 @@
  #define I2C_HW_B_INTELFB	0x010021 /* intel framebuffer driver */
  #define I2C_HW_B_CX23885	0x010022 /* conexant 23885 based tv cards (bus1) */
  #define I2C_HW_B_AU0828		0x010023 /* auvitek au0828 usb bridge */
@@ -2518,3 +2532,28 @@ index 01d67ba..1a08b81 100644
  
  /* --- PCF 8584 based algorithms					*/
  #define I2C_HW_P_ELEK		0x020002 /* Elektor ISA Bus inteface card */
+diff --git a/include/linux/videodev2.h b/include/linux/videodev2.h
+index 303d93f..f7b6bbc 100644
+--- a/include/linux/videodev2.h
++++ b/include/linux/videodev2.h
+@@ -910,6 +910,8 @@ enum v4l2_mpeg_audio_encoding {
+ 	V4L2_MPEG_AUDIO_ENCODING_LAYER_1 = 0,
+ 	V4L2_MPEG_AUDIO_ENCODING_LAYER_2 = 1,
+ 	V4L2_MPEG_AUDIO_ENCODING_LAYER_3 = 2,
++	V4L2_MPEG_AUDIO_ENCODING_AAC     = 3,
++	V4L2_MPEG_AUDIO_ENCODING_AC3     = 4,
+ };
+ #define V4L2_CID_MPEG_AUDIO_L1_BITRATE 		(V4L2_CID_MPEG_BASE+102)
+ enum v4l2_mpeg_audio_l1_bitrate {
+@@ -992,8 +994,9 @@ enum v4l2_mpeg_audio_crc {
+ /*  MPEG video */
+ #define V4L2_CID_MPEG_VIDEO_ENCODING 		(V4L2_CID_MPEG_BASE+200)
+ enum v4l2_mpeg_video_encoding {
+-	V4L2_MPEG_VIDEO_ENCODING_MPEG_1 = 0,
+-	V4L2_MPEG_VIDEO_ENCODING_MPEG_2 = 1,
++	V4L2_MPEG_VIDEO_ENCODING_MPEG_1     = 0,
++	V4L2_MPEG_VIDEO_ENCODING_MPEG_2     = 1,
++	V4L2_MPEG_VIDEO_ENCODING_MPEG_4_AVC = 2,
+ };
+ #define V4L2_CID_MPEG_VIDEO_ASPECT 		(V4L2_CID_MPEG_BASE+201)
+ enum v4l2_mpeg_video_aspect {
