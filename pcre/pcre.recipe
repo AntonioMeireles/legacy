@@ -13,6 +13,8 @@ class Pcre(CPackageRecipe):
         keepBuildReqs = True
         buildRequires.extend(['binutils[!cross]', 'gcc[!cross]'])
         crossRequires = [ 'glibc:devel', 'userspace-kernel-headers:devel' ]
+    else:
+        buildRequires += [ 'libstdc++:devel' ]
 
     def setup(r):
         r.disableParallelMake()
@@ -23,10 +25,10 @@ class Pcre(CPackageRecipe):
         # we will be installing in system library directory
         r.Replace(r'-L@libdir@\$libR ', '', 'pcre-config.in')
 
-        # Disabling cpp reduces deps for minimal appliance installations.
-        config = '--includedir=%(includedir)s/pcre --enable-utf8 --enable-unicode-properties --disable-cpp'
+        config = '--includedir=%(includedir)s/pcre --enable-utf8 --enable-unicode-properties'
 
         if Use.bootstrap:
+            config += ' --disable-cpp'
             r.Configure(config, preConfigure='CC_FOR_BUILD=%(buildcc)s')
         else:
             r.Configure(config)
@@ -40,3 +42,11 @@ class Pcre(CPackageRecipe):
         r.Move('%(libdir)s/libpcre.so.*', '/%(lib)s/')
         r.Symlink('%(essentiallibdir)s/libpcre.so.0',
                   '%(libdir)s/libpcre.so')
+
+        # Split C++ bindings into separate package to cut down on
+        # runtime deps.
+        r.PackageSpec('%(name)s-c++', '%(libdir)s/libpcrecpp.*',
+                '%(prefix)s/include/pcre/pcre(cpp|cpparg|_scanner|_stringpiece).h',
+                '%(libdir)s/pkgconfig/libpcrecpp.pc',
+                '%(mandir)s/man3/pcrecpp.3.gz',
+                '%(docdir)s/pcre/html/pcrecpp.html')
