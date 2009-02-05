@@ -7,17 +7,17 @@
 loadSuperClass('rpmpackage=conary.rpath.com@rpl:devel')
 class Squid(RPMPackageRecipe, CPackageRecipe):
     name = 'squid'
-    version = '3.0.STABLE8'
+    version = '3.0.STABLE13'
 
     firstver = version.split('.')[0]
     externalArchive = 'http://www.squid-cache.org/Versions/v'+firstver+'/%(major_version)s/'
 
-    rpmUpVer = '3.0.STABLE7'
-    rpmRelease = '1.fc10'
+    rpmUpVer = '3.0.STABLE12'
+    rpmRelease = '1.fc11'
     rpmPatches = [ 'squid-3.0.STABLE1-config.patch',
         'squid-3.0.STABLE1-smb-path.patch',
         'squid-3.0.STABLE1-location.patch', 'squid-3.0.STABLE1-perlpath.patch',
-        'squid-3.0.STABLE1-build.patch', ]
+        'squid-3.0.STABLE1-build.patch', 'squid-3.0.STABLE7-from_manpg.patch']
     rpmSources = [ 'squid.init', 'squid.logrotate', 'squid.pam', 'squid.spec',
         'squid.sysconfig', ]
 
@@ -28,7 +28,16 @@ class Squid(RPMPackageRecipe, CPackageRecipe):
         'libstdc++:devel', 'perl:devel', 'w3c-libwww:devel', ]
 
     def setup(r):
+        r.macros.cflags += " -fPIE"
+        r.macros.cxxflags += " -fPIE"
         r.unpack()
+
+        # Forcing the inclusion of linux/types.h to define __le32 (error
+        # compiling tools.cc)
+        r.Replace(r"#define _LINUX_TYPES_H", r"#undef _LINUX_TYPES_H",
+            "src/tools.cc")
+        r.Replace(r"typedef uint32_t __u32;", r"#include <linux/types.h>",
+            "src/tools.cc")
 
         r.Configure('--exec_prefix=%(prefix)s'
                     ' --bindir=%(sbindir)s'
@@ -36,30 +45,34 @@ class Squid(RPMPackageRecipe, CPackageRecipe):
                     ' --localstatedir=/var'
                     ' --datadir=%(datadir)s'
                     ' --sysconfdir=%(sysconfdir)s/squid'
-                    ' --enable-poll'
+                    ' --enable-arp-acl'
+                    ' --enable-epoll'
                     ' --enable-snmp'
+                    ' --enable-icap-client'
+                    ' --enable-wccpv2'
                     ' --enable-removal-policies="heap,lru"'
-                    ' --enable-storeio="aufs,coss,diskd,null,ufs"'
+                    ' --enable-storeio="aufs,diskd,null,ufs"'
                     ' --enable-ssl'
                     ' --with-openssl=%(prefix)s/kerberos'
                     ' --enable-delay-pools'
                     ' --enable-linux-netfilter'
                     ' --with-pthreads'
                     ' --enable-ntlm-auth-helpers="SMB,fakeauth"'
+                    ' --enable-negotiate-auth-helpers="squid_kerb_auth"'
                     ' --enable-external-acl-helpers="ip_user,ldap_group,unix_group,wbinfo_group"'
-                    ' --enable-auth="basic,digest,ntlm"'
+                    ' --enable-auth="basic,digest,ntlm,negotiate"'
                     ' --enable-digest-auth-helpers="password"'
                     ' --enable-useragent-log'
                     ' --enable-referer-log'
                     ' --disable-dependency-tracking'
                     ' --enable-cachemgr-hostname=localhost'
-                    ' --enable-underscores'
                     ' --enable-basic-auth-helpers="LDAP,MSNT,NCSA,PAM,SMB,YP,getpwnam,multi-domain-NTLM,SASL"'
                     ' --enable-cache-digests'
                     ' --enable-ident-lookups'
                     ' --with-large-files'
-                    ' --enable-fd-config'
-                    ' --enable-follow-x-forwarded-for')
+                    ' --with-filedescriptors=16384'
+                    ' --with-dl')
+
 
         r.Make()
         r.MakeInstall()
