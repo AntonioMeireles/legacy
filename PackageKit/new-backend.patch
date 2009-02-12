@@ -1,37 +1,41 @@
-diff -r c2b7f89facbe backends/conary/Makefile.am
---- a/backends/conary/Makefile.am	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/Makefile.am	Tue Feb 10 09:16:06 2009 -0500
-@@ -5,6 +5,8 @@
- 	conaryCallback.py	\
- 	conaryInit.py		\
- 	Cache.py		\
-+	XMLCache.py		\
-+	conarypk.py		\
- 	pkConaryLog.py
- 
- plugindir = $(PK_PLUGIN_DIR)
-diff -r c2b7f89facbe backends/conary/Makefile.in
---- a/backends/conary/Makefile.in	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/Makefile.in	Tue Feb 10 09:16:06 2009 -0500
-@@ -319,6 +319,8 @@
- 	conaryCallback.py	\
- 	conaryInit.py		\
- 	Cache.py		\
-+	XMLCache.py		\
-+	conarypk.py		\
- 	pkConaryLog.py
- 
- plugindir = $(PK_PLUGIN_DIR)
-diff -r c2b7f89facbe backends/conary/XMLCache.py
---- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/XMLCache.py	Tue Feb 10 09:16:06 2009 -0500
-@@ -0,0 +1,181 @@
-+import os
+diff -r c2b7f89facbe backends/conary/Cache.py
+--- a/backends/conary/Cache.py	Tue Feb 10 08:39:14 2009 -0500
++++ b/backends/conary/Cache.py	Thu Feb 12 16:21:34 2009 -0500
+@@ -1,86 +1,162 @@
+-#!/usr/bin/python
+-# Licensed under the GNU General Public License Version 2
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License as published by
+-# the Free Software Foundation; either version 2 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+-#
+-# Copyright (C) 2007 Ken VanDine <ken@vandine.org>
+-# Copyright (C) 2008 Richard Hughes <richard@hughsie.com>
+-
+ import os
+-from conary import errors
+-from conary.deps import deps
+-from conary import conarycfg, conaryclient
+-from conary import dbstore, queryrep, versions, updatecmd
+-from conary.local import database
+-from conary import trove
+-
+-
 +import sys
 +from xml.dom.minidom import parse
 +import urllib as url
-+
-+from pkConaryLog import log
+ 
+ from pkConaryLog import log
 +from conarypk import ConaryPk
 +class XMLRepo:
 +    xml_path = ""
@@ -39,7 +43,15 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +    def __init__(self, repo, path ):
 +        self.xml_path = path
 +        self._setRepo(repo)
-+
+ 
+-class Cache(object):
+-    # Database name and path
+-    dbName = 'cache.db'
+-    # Someday we might want to make this writable by users
+-    #if 'HOME' in os.environ:
+-    #    dbPath = '%s/.conary/cache/data/' % os.environ['HOME']
+-    #else:
+-    #    dbPath = '/var/cache/conary/'
 +    def resolve(self, search_trove):
 +        """ resolve its a search with name """
 +        trove =  self._getPackage(search_trove)
@@ -48,8 +60,15 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +        else:
 +            return None
 +        
-+    def search(self, search):
-+        return self._searchPackage(search)
++    def search(self, search, where ):
++        if where == "name":
++            return self._searchNamePackage(search)
++        elif where == "details":
++            return self._searchDetailsPackage(search)
++        elif where == "group":
++            return self._searchGroupPackage(search)
++        else:
++            return self._searchPackage(search)
 +
 +    def _setRepo(self,repo):  
 +        self.repo = repo
@@ -68,11 +87,11 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +        pkg = {}
 +        cat = []
 +        for node in package_node.childNodes:
-+            if pkg.has_key('categorie'):
++            if pkg.has_key('category'):
 +                cat.append(str(node.childNodes[0].nodeValue))
 +            else:
 +                pkg[str(node.nodeName)] = str(node.childNodes[0].nodeValue)
-+        pkg["categorie"] = cat
++        pkg["category"] = cat
 +        return pkg
 +
 +    def _getPackage(self, name):
@@ -85,7 +104,46 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +                if name == pkg["name"]:
 +                    return pkg
 +        return None
-+                    
++
++    def _searchNamePackage(self, name):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                if name.lower() in pkg["name"]:
++                    results.append(pkg)
++        return results
++
++    def _searchGroupPackage(self, name):
++        doc = self._open()
++        results_name = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                if not pkg.has_key("category"):
++                    continue
++                for j in pkg["category"]:
++                    if name.lower() in j.lower():
++                        results_name.append(pkg['name'])
++        return [ self._getPackage(i) for i in set(results_name) ]
++
++    def _searchDetailsPackage(self, name):
++        doc = self._open()
++        results_name = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                for i in pkg.keys():
++                    if i  == "label" or i == "name" or i == 'category':
++                        continue
++                    if name.lower() in pkg[i]:
++                        results_name.append(pkg['name'])
++        return [ self._getPackage(i) for i in set(results_name) ]
++
 +    def _searchPackage(self, name):
 +        doc = self._open()
 +        results = []
@@ -96,15 +154,640 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +                for i in pkg.keys():
 +                    if i  == "label":
 +                        continue
-+                    if i =='categorie':
++                    if i =='category':
 +                        for j in pkg[i]:
 +                            if name.lower() in j.lower():
 +                                results.append(pkg)
 +                    if name.lower() in pkg[i]:
 +                        results.append(pkg)
 +        return results
++    def _getAllPackages(self):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                results.append(pkg)
++        return results
 +
++
++class XMLCache:
++    #xml_files = ["foresight.rpath.org@fl:2"]
++    xml_files = []
++    server = "http://packages.foresightlinux.org/cache/"
++    repos = []
+     dbPath = '/var/cache/conary/'
+     jobPath = dbPath + 'jobs'
++    xml_path =  dbPath + "xmlrepo/"
+ 
+     def __init__(self):
+-        """ Class to retrieve and cache package information from label. """
++        con = ConaryPk()
++        labels = con.get_labels_from_config()
+ 
+-        self.is_populate_database = False
+         if not os.path.isdir(self.dbPath):
+             os.makedirs(self.dbPath)
+         if not os.path.isdir(self.jobPath):
+             os.mkdir(self.jobPath)
+-
+-        self.conn = dbstore.connect(os.path.join(self.dbPath, self.dbName))
+-        self.cursor = self.conn.cursor()
+-        self.cursor.execute("PRAGMA count_changes=0", start_transaction=False)
+-
+-        if os.path.isfile(os.path.join(self.dbPath, self.dbName)):
+-            self._validate_tables()
+-
+-    def _validate_tables(self):
+-        """ Validates that all tables are up to date. """
+-        #backend = PackageKitBaseBackend(self)
+-        stmt = ("select tbl_name from sqlite_master "
+-                "where type = 'table' and tbl_name like 'conary_%'")
+-        self.cursor.execute(stmt)
+-        # List of all tables with names that start with "conary_"
+-        tbllist = self.cursor.fetchall()
+-        if tbllist == [('conary_packages',)]:
+-            self.cursor.execute('DROP TABLE conary_packages')
+-            self.conn.commit()
+-            tbllist = []
+-        if tbllist != []:
+-            return True
+-            #print "Verified packages table"
+-        else:
+-            log.info("Creando tablas")
+-            # Create all tables if database is empty
+-            if len(tbllist) == 0:
+-                self._create_database()
+-                #ackend.status(STATUS_WAIT)
+-                self.is_populate_database = True
+-                self.populate_database()
+-                return True
++        if not os.path.isdir( self.xml_path ):
++            os.makedirs(self.xml_path )
++ 
++        for xml_file in labels:
++           if not os.path.exists( self.xml_path + xml_file + ".xml"  ):
++                self._fetchXML()
++        for xml_file in labels :
++            self.repos.append(XMLRepo( xml_file + ".xml", self.xml_path ))
+ 
+     def _getJobCachePath(self, applyList):
+         from conary.lib import sha1helper
+@@ -91,7 +167,7 @@
+         jobPath = self._getJobCachePath(applyList)
+         if os.path.exists(jobPath):
+             return jobPath
+-
++    
+     def cacheUpdateJob(self, applyList, updJob):
+         jobPath = self._getJobCachePath(applyList)
+         if os.path.exists(jobPath):
+@@ -100,247 +176,87 @@
+         os.mkdir(jobPath)
+         updJob.freeze(jobPath)
+ 
+-    def conaryquery(self):
+-        self.cfg = conarycfg.ConaryConfiguration()
+-        self.client = conaryclient.ConaryClient(self.cfg)
+-        self.cfg.readFiles()
+-        self.cfg.initializeFlavors()
+-        self.repos = self.client.getRepos()
+-        self.db = conaryclient.ConaryClient(self.cfg).db
+-
+-        troves = queryrep.getTrovesToDisplay(self.repos, None, None, None,
+-            queryrep.VERSION_FILTER_LEAVES, queryrep.FLAVOR_FILTER_BEST,
+-            self.cfg.installLabelPath, self.cfg.flavor, None)
+-
+-        packages = []
+-
+-        for troveTuple in troves:
+-            # troveTuple is probably what we want to store in the cachedb
+-            # Then use the below methods to present them in a nicer fashion
+-            if troveTuple[0].endswith(':source'):
+-                continue
+-            if ":" in troveTuple[0]:
+-                fragments = troveTuple[0].split(":")
+-                trove = fragments[0]
+-                component = fragments[1]
+-            else:
+-                trove = troveTuple[0]
+-                component = ""
+-
+-            installed = 0
+-            flavor = troveTuple[2].freeze()
+-            fullVersion = troveTuple[1].freeze()
+-            label = str(troveTuple[1].branch().label())
+-            description = ""
+-            category = ""
+-            packagegroup = ""
+-            size = ""
+-            packages.append([trove, component, fullVersion, label, flavor,
+-                             description, category, packagegroup, size])
+-
+-        return packages
+-
+-    def connect_memory(self):
+-        return sqlite.connect(':memory:')
+-
+-    def cursor(self, connection):
+-        return connection.cursor()
+-
+-    def _create_database(self):
+-        #FIXME: delete the category column. it's not useful
+-        """ Creates a blank database. """
+-        sql = '''CREATE TABLE conary_packages (
+-            packageId INTEGER,
+-            trove text,
+-            component text,
+-            version text,
+-            label text,
+-            flavor text,
+-            description text,
+-            category text,
+-            packagegroup text,
+-            size text)'''
+-
+-        self.cursor.execute(sql)
+-
+-        sql = '''CREATE TABLE conary_categories (
+-            categoryId INTEGER,
+-            categoryName text)'''
+-
+-        self.cursor.execute(sql)
+-
+-        sql = '''CREATE TABLE conary_category_package_map (
+-            categoryId INTEGER,
+-            packageId INTEGER)'''
+-
+-        self.cursor.execute(sql)
+-
+-        sql = '''CREATE TABLE conary_licenses (
+-            licenseId INTEGER,
+-            licenseName text)'''
+-
+-        self.cursor.execute(sql)
+-
+-        sql = '''CREATE TABLE conary_license_package_map (
+-            licenseId INTEGER,
+-            packageId INTEGER)'''
+-
+-        self.cursor.execute(sql)
+-
+-        #self.conn.createIndex('conary_catagories', 'conary_category_name_idx', ['categoryName'])
+-        #self.conn.createIndex('conary_catagories', 'conary_category_id_idx', ['categoryId'])
+-        self.conn.commit()
+-
+-
+-
+-    def commit(self):
+-        self.cursor.commit()
+-
+-    def getTroves(self, label=None):
+-        """
+-        Returns all troves for now.  Add filtering capability.
+-        """
+-        stmt = ("select distinct trove, version, flavor, description, "
+-                "category, packagegroup, size from conary_packages")
+-
+-        self.cursor.execute(stmt)
+-        return self.cursor.fetchall()
+-
+-    def search(self, package, fullVersion=None):
+-        """
+-        Returns all troves for now.  Add filtering capability.
+-        """
+-        #log.debug(package)
+-        stmt = ("select distinct trove, version, flavor, description, "
+-                "category, packagegroup, size from conary_packages")
+-
+-        if package and fullVersion:
+-            stmt = ("select distinct trove, version, flavor from "
+-                    "conary_packages where trove ='%s' and version = '%s'"
+-                    % (package, fullVersion))
+-        elif package:
+-            stmt += (" where trove like '%%%s%%' and component = '' order by "
+-                     "version desc" % package)
+-
+-        try:
+-            self.cursor.execute(stmt)
+-            results = self.cursor.fetchall()
+-            log.debug(results)
+-            return results
+-        except Exception, e:
+-            print str(e)
++    def getTroves(self):
++        pass
++    def searchByGroups(self, groups):
++        pass
++    def refresh(self):
++        self._fetchXML()
++    def resolve(self, name ):
++        for repo in self.repos:
++            r =  repo.resolve(name)
++            if r:
++                return r
++        else:
+             return None
+ 
+-    def searchByGroups(self, groups):
++    def search(self, search, where = "name" ):
++        """ 
++            @where (string) values = name | details | group |
+         """
+-        Returns all troves for given groups. (trove, version, flavor)
+-        Needs filtering capability.
+-        ['all'] means all packages
+-        FIXME: No filtering done on group text - SQL injection
+-        """
+-        if not groups:
+-            groups = ["all"]
++        repositories_result = []
++        for repo in self.repos:
++            results = repo.search(search , where )
++            for i in results:
++                repositories_result.append(i)
++        return repositories_result
+ 
+-        if "all" in groups:
+-            stmt = ("SELECT DISTINCT CP.trove, CP.version, CP.flavor, CC.categoryName"
+-                    "           FROM conary_packages CP, conary_categories CC, conary_category_package_map CCMap"
+-                    "          WHERE CCMap.packageId = CP.packageId"
+-                    "            AND CCMap.categoryId = CC.categoryId"
+-                    "       GROUP BY CP.trove, CP.version, CP.flavor"
+-                    "       ORDER BY CP.trove, CP.version DESC, CP.flavor")
+-        else:
+-            group_string = ", ".join(groups)
+-            stmt = ("SELECT DISTINCT CP.trove, CP.version, CP.flavor, CC.categoryName"
+-                    "           FROM conary_packages CP, conary_categories CC, conary_category_package_map CCMap"
+-                    "          WHERE CC.categoryName IN (%s)"
+-                    "            AND CCMap.packageId = CP.packageId"
+-                    "            AND CCMap.categoryId = CC.categoryId"
+-                    "       GROUP BY CP.trove, CP.version, CP.flavor"
+-                    "       ORDER BY CP.trove, CP.version DESC, CP.flavor" % group_string)
+-
+-        try:
+-            self.cursor.execute(stmt)
+-            return self.cursor.fetchall()
+-        except Exception, e:
+-            print str(e)
++    def _fetchXML(self ):
++        con = ConaryPk()
++        labels = con.get_labels_from_config()
++        for i in labels:
++            label = i + '.xml'
++            filename = self.xml_path + label
++            wwwfile = self.server + label
++            wget = url.urlopen( wwwfile )
++            openfile = open( filename ,'w')
++            openfile.writelines(wget.readlines())
++            openfile.close()
++    def _getCategorieBase(self, mapDict, categorieList ):
++        if not categorieList:
+             return None
+ 
+-    def _insert(self, trove):
+-        """
+-        Insert trove into database.
+-        """
+-        res = self.cursor.execute("SELECT COALESCE(max(packageId), 0) + 1 FROM conary_packages")
+-        pkgId = res.fetchone()[0] + 1
+-        trove = [pkgId] + trove[:]
++        tempDict = {}
++        for cat in categorieList:
+ 
+-        values = [str(field) for field in trove]
+-        cols = ", ".join("?" * len(trove))
+-        sql = "INSERT INTO conary_packages VALUES (%s)" % cols
++            if mapDict.has_key(cat):
++                map = mapDict[cat]
++            else:
++                continue
+ 
+-        try:
+-            self.cursor.execute(sql, values)
+-            #self.conn.commit()
+-        except Exception, e:
+-            print str(e)
++            if tempDict.has_key(map):
++                tempDict[map] = tempDict[map] + 1
++            else:
++                tempDict[map] = 1
++        tmp = 0
++        t_key = ""
++        for key, value in tempDict.items():
++            if value > tmp:
++                t_key =  key
++                tmp  = value
++        return t_key
++    def _getAllCategories(self):
++        categories = []
++        for i in self.repos:
++            pkgs = i._getAllPackages()
++            for pkg in pkgs:
++                if pkg.has_key('category'):
++                    for cat in pkg["category"]:
++                        categories.append(cat)
++        categories.sort()
++        return set( categories )
 +        
+ 
+-    def _clear_table(self, tableName='conary_packages'):
+-        """
+-        Deletes * records from table.
+-        """
+-        stmt = "DELETE FROM %s" % tableName
+-        try:
+-            self.cursor.execute(stmt)
+-        except dbstore.sqlerrors.InvalidTable:
+-            pass
++if __name__ == '__main__':
++    from conaryBackend import groupMap
++  #  print ">>> name"
++   # print XMLCache().search('music', 'name' )
++   # print ">> details"
++   # l= XMLCache().search('GTK', 'group' )
++   # for v,p in enumerate(l):
++   #     print v,p["name"]
++    print "{",
++    for i in XMLCache()._getAllCategories():
++        print "'%s':" % i
++    print "}",
+ 
+-    def populate_database(self):
+-        packages = self.conaryquery()
+-        # Clear table first
+-        for tblName in ('conary_packages', 'conary_category_package_map',
+-                'conary_categories'):
+-            self._clear_table(tblName)
+-        log.info("Insertando datos")
+-        for package in packages:
+-            self._insert(package)
+-        self.conn.commit()
+-        log.info("Datos insertados")
+-
+-    def _addPackageCategory(self, trv, category):
+-        res = self.cursor.execute( \
+-                'SELECT packageId FROM conary_packages WHERE trove=? and version=? and flavor = ?', trv.getName(), trv.getVersion().freeze(), trv.getFlavor().freeze())
+-        res = res.fetchone()
+-        if res:
+-            # we have a packageID
+-            pkgId = res[0]
+-        else:
+-            # we really should have had this data
+-            raise RuntimeError
+-
+-        # now look up/make the categoryId
+-        res = self.cursor.execute('SELECT categoryId FROM conary_categories WHERE categoryName=?', category)
+-        res = res.fetchone()
+-        if not res:
+-            res = self.cursor.execute('SELECT COALESCE(MAX(categoryId), 0) + 1 FROM conary_categories')
+-            catId = res.fetchone()[0]
+-            self.cursor.execute('INSERT INTO conary_categories VALUES(?, ?)',
+-                    catId, category)
+-        else:
+-            catId = category
+-
+-        self.cursor.execute("INSERT INTO conary_category_package_map VALUES(?, ?)", catId, pkgId)
+-        self.conn.commit()
+-
+-    def populate_metadata(self, csList):
+-        for cs in csList:
+-            for troveCS in cs.iterNewTroveList():
+-                trv = trove.Trove(troveCS)
+-                if ':' in trv.getName():
+-                    # components aren't tracked at the moment
+-                    continue
+-                metadata = trv.getMetadata()
+-                categories = metadata.get('categories', [])
+-                for category in categories:
+-                    self._addPackageCategory(trv, category)
+-                #licenses = metadata.get('licenses', [])
+-                #for license in licenses:
+-                #    self._addPackageLicense(trv, license)
+diff -r c2b7f89facbe backends/conary/Makefile.am
+--- a/backends/conary/Makefile.am	Tue Feb 10 08:39:14 2009 -0500
++++ b/backends/conary/Makefile.am	Thu Feb 12 16:21:34 2009 -0500
+@@ -4,15 +4,17 @@
+ 	conaryFilter.py		\
+ 	conaryCallback.py	\
+ 	conaryInit.py		\
+-	Cache.py		\
+-	pkConaryLog.py
++	XMLCache.py		\
++	pkConaryLog.py \
++    conarypk.py \
++    conaryEnums.py 
+ 
+ plugindir = $(PK_PLUGIN_DIR)
+ plugin_LTLIBRARIES = libpk_backend_conary.la
+ libpk_backend_conary_la_SOURCES = pk-backend-conary.c
+ libpk_backend_conary_la_LIBADD = $(PK_PLUGIN_LIBS)
+ libpk_backend_conary_la_LDFLAGS = -module -avoid-version
+-libpk_backend_conary_la_CFLAGS = $(PK_PLUGIN_CFLAGS)
++libpk_backend_conary_la_CFLAGS = $(PK_PLUGIN_CFLAGS) $(WARNINGFLAGS_C)
+ 
+ install-data-hook:
+ 	chmod a+rx $(DESTDIR)$(helperdir)/*.py
+diff -r c2b7f89facbe backends/conary/Makefile.in
+--- a/backends/conary/Makefile.in	Tue Feb 10 08:39:14 2009 -0500
++++ b/backends/conary/Makefile.in	Thu Feb 12 16:21:34 2009 -0500
+@@ -140,8 +140,6 @@
+ GMOFILES = @GMOFILES@
+ GMSGFMT = @GMSGFMT@
+ GREP = @GREP@
+-GTKDOC_CHECK = @GTKDOC_CHECK@
+-HTML_DIR = @HTML_DIR@
+ INSTALL = @INSTALL@
+ INSTALL_DATA = @INSTALL_DATA@
+ INSTALL_PROGRAM = @INSTALL_PROGRAM@
+@@ -212,6 +210,8 @@
+ PK_DB_DIR = @PK_DB_DIR@
+ PK_GSTREAMER_PLUGIN_CFLAGS = @PK_GSTREAMER_PLUGIN_CFLAGS@
+ PK_GSTREAMER_PLUGIN_LIBS = @PK_GSTREAMER_PLUGIN_LIBS@
++PK_GTK_MODULE_CFLAGS = @PK_GTK_MODULE_CFLAGS@
++PK_GTK_MODULE_LIBS = @PK_GTK_MODULE_LIBS@
+ PK_LOG_DIR = @PK_LOG_DIR@
+ PK_PLUGIN_CFLAGS = @PK_PLUGIN_CFLAGS@
+ PK_PLUGIN_DIR = @PK_PLUGIN_DIR@
+@@ -251,6 +251,8 @@
+ SYSCONFDIR = @SYSCONFDIR@
+ USE_NLS = @USE_NLS@
+ VERSION = @VERSION@
++WARNINGFLAGS_C = @WARNINGFLAGS_C@
++WARNINGFLAGS_CPP = @WARNINGFLAGS_CPP@
+ XGETTEXT = @XGETTEXT@
+ XMLTO = @XMLTO@
+ XSLTPROC = @XSLTPROC@
+@@ -326,7 +328,7 @@
+ libpk_backend_conary_la_SOURCES = pk-backend-conary.c
+ libpk_backend_conary_la_LIBADD = $(PK_PLUGIN_LIBS)
+ libpk_backend_conary_la_LDFLAGS = -module -avoid-version
+-libpk_backend_conary_la_CFLAGS = $(PK_PLUGIN_CFLAGS)
++libpk_backend_conary_la_CFLAGS = $(PK_PLUGIN_CFLAGS) $(WARNINGFLAGS_C)
+ all: all-am
+ 
+ .SUFFIXES:
+diff -r c2b7f89facbe backends/conary/XMLCache.py
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/backends/conary/XMLCache.py	Thu Feb 12 16:21:34 2009 -0500
+@@ -0,0 +1,286 @@
++import os
++import sys
++from xml.dom.minidom import parse
++import urllib as url
++
++
++from conary.lib import sha1helper
++from conary.lib import util
++
++from packagekit.backend import PackageKitBaseBackend
++from packagekit.enums import ERROR_NO_CACHE
++
++
++from pkConaryLog import log
++from conarypk import ConaryPk
++from conaryEnums import groupMap
++
++def getGroup( categorieList):
++    where = {}
++    for cat in categorieList:
++        for group,categories in groupMap.items():
++            if cat in categories:
++                if where.has_key(group):
++                    where[group] = where[group] +1
++                else:
++                    where[group] = 1
++
++    tmp = 0
++    t_key = ""
++    for key, value in where.items():
++        if value > tmp:
++            t_key =  key
++            tmp  = value
++    return t_key
++
++
++class XMLRepo:
++    xml_path = ""
++    repository = ""
++    def __init__(self, repo, path ):
++        self.xml_path = path
++        self._setRepo(repo)
++
++    def resolve(self, search_trove):
++        """ resolve its a search with name """
++        trove =  self._getPackage(search_trove)
++        if trove:
++            return trove
++        else:
++            return None
++        
++    def search(self, search, where ):
++        if where == "name":
++            return self._searchNamePackage(search)
++        elif where == "details":
++            return self._searchDetailsPackage(search)
++        elif where == "group":
++            return self._searchGroupPackage(search)
++        else:
++            return self._searchPackage(search)
++
++    def _setRepo(self,repo):  
++        self.repo = repo
++        doc = self._open()
++        self.label = str( doc.childNodes[0].getAttribute("label") )
++
++    def _open(self):
++        try:
++            return self._repo
++        except AttributeError:
++            self._repo =   parse( open( self.xml_path + self.repo) )
++            return self._repo
++
++    def _generatePackage(self, package_node ): 
++        """ convert from package_node to dictionary """
++        pkg = {}
++        cat = []
++        for node in package_node.childNodes:
++            if pkg.has_key('category'):
++                cat.append(str(node.childNodes[0].nodeValue))
++            else:
++                pkg[str(node.nodeName)] = str(node.childNodes[0].nodeValue)
++        pkg["category"] = cat
++        return pkg
++
++    def _getPackage(self, name):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                if name == pkg["name"]:
++                    return pkg
++        return None
++
++    def _searchNamePackage(self, name):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                if name.lower() in pkg["name"]:
++                    results.append(pkg['name'])
++        return  [ self._getPackage(i) for i in set(results) ]
++
++    def _searchGroupPackage(self, name):
++        doc = self._open()
++        results_name = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                """
++                if not pkg.has_key("category"):
++                    continue
++                for j in pkg["category"]:
++                    if name.lower() in j.lower():
++                        results_name.append(pkg['name'])
++                """
++                if pkg.has_key("category"):
++                    group = getGroup(pkg["category"])
++                    if name.lower() == group:
++                        results_name.append(pkg["name"])
++        return [ self._getPackage(i) for i in set(results_name) ]
++
++    def _searchDetailsPackage(self, name):
++        return self._searchPackage(name)
++    def _searchPackage(self, name):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                for i in pkg.keys():
++                    if i  == "label":
++                        continue
++                    if i =='category':
++                        for j in pkg[i]:
++                            if name.lower() in j.lower():
++                                results.append(pkg['name'])
++                    if name.lower() in pkg[i]:
++                        results.append(pkg['name'])
++        return  [ self._getPackage(i) for i in set(results) ]
++    def _getAllPackages(self):
++        doc = self._open()
++        results = []
++        for packages in doc.childNodes:
++            for package in packages.childNodes:
++                pkg = self._generatePackage(package)
++                pkg["label"] = self.label
++                results.append(pkg)
++        return results
++
 +
 +class XMLCache:
 +    #xml_files = ["foresight.rpath.org@fl:2"]
@@ -133,7 +816,6 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +            self.repos.append(XMLRepo( xml_file + ".xml", self.xml_path ))
 +
 +    def _getJobCachePath(self, applyList):
-+        from conary.lib import sha1helper
 +        applyStr = '\0'.join(['%s=%s[%s]--%s[%s]%s' % (x[0], x[1][0], x[1][1], x[2][0], x[2][1], x[3]) for x in applyList])
 +        return self.jobPath + '/' + sha1helper.sha1ToString(sha1helper.sha1String(applyStr))
 +
@@ -145,7 +827,6 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +    def cacheUpdateJob(self, applyList, updJob):
 +        jobPath = self._getJobCachePath(applyList)
 +        if os.path.exists(jobPath):
-+            from conary.lib import util
 +            util.rmtree(jobPath)
 +        os.mkdir(jobPath)
 +        updJob.freeze(jobPath)
@@ -164,10 +845,13 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +        else:
 +            return None
 +
-+    def search(self, search ):
++    def search(self, search, where = "name" ):
++        """ 
++            @where (string) values = name | details | group |
++        """
 +        repositories_result = []
 +        for repo in self.repos:
-+            results = repo.search(search)
++            results = repo.search(search , where )
 +            for i in results:
 +                repositories_result.append(i)
 +        return repositories_result
@@ -179,17 +863,29 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +            label = i + '.xml'
 +            filename = self.xml_path + label
 +            wwwfile = self.server + label
-+            wget = url.urlopen( wwwfile )
++            try:
++                wget = url.urlopen( wwwfile )
++            except:
++                Pk = PackageKitBaseBackend("")
++                Pk.error(ERROR_NO_CACHE," %s can not open" % wwwfile)
 +            openfile = open( filename ,'w')
 +            openfile.writelines(wget.readlines())
 +            openfile.close()
++    def getGroup(self,categorieList):
++        return getGroup(categorieList)
++                
 +    def _getCategorieBase(self, mapDict, categorieList ):
 +        if not categorieList:
 +            return None
 +
 +        tempDict = {}
 +        for cat in categorieList:
-+            map = mapDict[cat]
++
++            if mapDict.has_key(cat):
++                map = mapDict[cat]
++            else:
++                continue
++
 +            if tempDict.has_key(map):
 +                tempDict[map] = tempDict[map] + 1
 +            else:
@@ -202,15 +898,30 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +                tmp  = value
 +        return t_key
 +
++    def _getAllCategories(self):
++        categories = []
++        for i in self.repos:
++            pkgs = i._getAllPackages()
++            for pkg in pkgs:
++                if pkg.has_key('category'):
++                    for cat in pkg["category"]:
++                        categories.append(cat)
++        categories.sort()
++        return set( categories )
++        
 +
 +if __name__ == '__main__':
-+    from conaryBackend import groupMap
-+    XMLCache()._getCategorieBase( groupMap,  ['GTK', 'Graphics', 'Photography', 'Viewer'])
-+
++  #  print ">>> name"
++   # print XMLCache().search('music', 'name' )
++   # print ">> details"
++    l= XMLCache().search('Internet', 'group' )
++    for v,p in enumerate(l):
++        print v,p["name"]
++  # print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
 diff -r c2b7f89facbe backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/conaryBackend.py	Tue Feb 10 09:16:06 2009 -0500
-@@ -28,17 +28,20 @@
++++ b/backends/conary/conaryBackend.py	Thu Feb 12 16:21:34 2009 -0500
+@@ -28,96 +28,32 @@
  from conary import dbstore, queryrep, versions, updatecmd
  from conary.local import database
  from conary import trove
@@ -218,6 +929,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
  from packagekit.backend import *
  from packagekit.package import *
++from packagekit.progress import PackagekitProgress
  from conaryCallback import UpdateCallback
  from conaryFilter import *
 -#from XMLCache import XMLCache as Cache
@@ -226,14 +938,101 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
  # zodman fix
 -from Cache import Cache
-+#from Cache import Cache
  from conaryInit import init_conary_config, init_conary_client
  from conary import conarycfg, conaryclient
 +from conarypk import ConaryPk
  
  pkpackage = PackagekitPackage()
  
-@@ -171,8 +174,7 @@
+ from pkConaryLog import log, pdb
+ 
+-groupMap = {
+-    '2DGraphics'          : GROUP_GRAPHICS,
+-    'Accessibility'       : GROUP_ACCESSIBILITY,
+-    'AdvancedSettings'    : GROUP_ADMIN_TOOLS,
+-    'Application'         : GROUP_OTHER,
+-    'ArcadeGame'          : GROUP_GAMES,
+-    'Audio'               : GROUP_MULTIMEDIA,
+-    'AudioVideo'          : GROUP_MULTIMEDIA,
+-    'BlocksGame'          : GROUP_GAMES,
+-    'BoardGame'           : GROUP_GAMES,
+-    'Calculator'          : GROUP_ACCESSORIES,
+-    'Calendar'            : GROUP_ACCESSORIES,
+-    'CardGame'            : GROUP_GAMES,
+-    'Compiz'              : GROUP_SYSTEM,
+-    'ContactManagement'   : GROUP_ACCESSORIES,
+-    'Core'                : GROUP_SYSTEM,
+-    'Database'            : GROUP_SERVERS,
+-    'DesktopSettings'     : GROUP_ADMIN_TOOLS,
+-    'Development'         : GROUP_PROGRAMMING,
+-    'Email'               : GROUP_INTERNET,
+-    'FileTransfer'        : GROUP_INTERNET,
+-    'Filesystem'          : GROUP_SYSTEM,
+-    'GNOME'               : GROUP_DESKTOP_GNOME,
+-    'GTK'                 : GROUP_DESKTOP_GNOME,
+-    'GUIDesigner'         : GROUP_PROGRAMMING,
+-    'Game'                : GROUP_GAMES,
+-    'Graphics'            : GROUP_GRAPHICS,
+-    'HardwareSettings'    : GROUP_ADMIN_TOOLS,
+-    'IRCClient'           : GROUP_INTERNET,
+-    'InstantMessaging'    : GROUP_INTERNET,
+-    'LogicGame'           : GROUP_GAMES,
+-    'Monitor'             : GROUP_ADMIN_TOOLS,
+-    'Music'               : GROUP_MULTIMEDIA,
+-    'Network'             : GROUP_INTERNET,
+-    'News'                : GROUP_INTERNET,
+-    'Office'              : GROUP_OFFICE,
+-    'P2P'                 : GROUP_INTERNET,
+-    'PackageManager'      : GROUP_ADMIN_TOOLS,
+-    'Photography'         : GROUP_MULTIMEDIA,
+-    'Player'              : GROUP_MULTIMEDIA,
+-    'Presentation'        : GROUP_OFFICE,
+-    'Publishing'          : GROUP_OFFICE,
+-    'RasterGraphics'      : GROUP_GRAPHICS,
+-    'Security'            : GROUP_SECURITY,
+-    'Settings'            : GROUP_ADMIN_TOOLS,
+-    'Spreadsheet'         : GROUP_OFFICE,
+-    'System'              : GROUP_SYSTEM,
+-    'Telephony'           : GROUP_COMMUNICATION,
+-    'TerminalEmulator'    : GROUP_ACCESSORIES,
+-    'TextEditor'          : GROUP_ACCESSORIES,
+-    'Utility'             : GROUP_ACCESSORIES,
+-    'VectorGraphics'      : GROUP_GRAPHICS,
+-    'Video'               : GROUP_MULTIMEDIA,
+-    'Viewer'              : GROUP_MULTIMEDIA,
+-    'WebBrowser'          : GROUP_INTERNET,
+-    'WebDevelopment'      : GROUP_PROGRAMMING,
+-    'WordProcessor'       : GROUP_OFFICE
+-}
+-
+-revGroupMap = {}
+-
+-for (con_cat, pk_group) in groupMap.items():
+-    if revGroupMap.has_key(pk_group):
+-        revGroupMap[pk_group].append(con_cat)
+-    else:
+-        revGroupMap[pk_group] = [con_cat]
+ 
+ #from conary.lib import util
+ #sys.excepthook = util.genExcepthook()
+-
+ def ExceptionHandler(func):
++    return func
+     def display(error):
+         return str(error).replace('\n', ' ')
+-
+     def wrapper(self, *args, **kwargs):
+         try:
+             return func(self, *args, **kwargs)
+@@ -133,7 +69,6 @@
+         except Exception, e:
+             self.error(ERROR_UNKNOWN, display(e), exit=True)
+     return wrapper
+-
+ def _format_str(str):
+     """
+     Convert a multi line string to a list separated by ';'
+@@ -171,8 +106,7 @@
          frzFlavor = flavor.freeze()
          return ','.join([frzVersion, frzFlavor])
  
@@ -243,7 +1042,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
          version = versions.ThawVersion(frzVersion)
          flavor = deps.ThawFlavor(frzFlavor)
          return version, flavor
-@@ -185,80 +187,69 @@
+@@ -185,80 +119,70 @@
          return ','.join(arches)
  
      @ExceptionHandler
@@ -280,7 +1079,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
      def get_package_from_id(self, package_id):
          """ package_id(string) =
 -        "pastebinit;0.7-1-1;x86;/foresight.rpath.org@fl:2-qa/1222042924.172:0.7-1-1,1#x86"
-+        "dpaster;0.1-3-1;x86;/foresight.rpath.org@fl:2-qa/0.1-3-1#{'version': '0.1-3-1', 'categorie': [], 'name': 'dpaster', 'label': 'foresight.rpath.org@fl:2-qa'}"
++        "dpaster;0.1-3-1;x86;/foresight.rpath.org@fl:2-qa/0.1-3-1#{'version': '0.1-3-1', 'category': [], 'name': 'dpaster', 'label': 'foresight.rpath.org@fl:2-qa'}"
          """
          log.info("=========== get package from package_id ======================")
 -        log.info(package_id)
@@ -295,7 +1094,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +        return  cli.request_query(name)
  
 -    def _do_search(self, searchlist, filters):
-+    def _do_search(self,filters, searchlist):
++    def _do_search(self, filters, searchlist, where = "name"):
          """
 -        searchlist(str)ist as the package for search like
 -        filters(str) as the filter
@@ -305,10 +1104,13 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
          fltlist = filters.split(';')
 -        pkgfilter = ConaryFilter(fltlist)
 -        #pkgfilter = ConaryFilter()
- 
+-
 -        troveSpecs = [ updatecmd.parseTroveSpec(searchlist,
 -                                                allowEmptyName=False) ]
 -        # get a hold of cached data
++        if where != "name" and where != "details" and where != "group":
++            log.info("where %s" % where)
++            self.error(ERROR_UNKNOWN, "DORK---- search where not found")
          cache = Cache()
          log.debug((searchlist, fltlist))
  
@@ -317,7 +1119,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 -            log.info("FOUND!!!!!! %s"% str(troveTupleList))
 -        finally:
 -            pass
-+        troveTupleList = cache.search(searchlist)
++        troveTupleList = cache.search(searchlist, where )
  
 -        # Remove dupes
 -        tempDict = {}
@@ -326,20 +1128,19 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 -                tempDict[element] = None
 -        except TypeError:
 -            del tempDict  # move on to the next method
-+        if troveTupleList:
-+            log.info("FOUND!!!!!! %s " % troveTupleList )
++        if len(troveTupleList) > 0 :
++            for i in troveTupleList:
++                log.info("FOUND!!!!!! %s " % i["name"] )
++            log.info("FOUND (%s) elements " % len(troveTupleList) )
          else:
 -            troveTupleList = tempDict.keys()
 +            log.info("NOT FOUND %s " % searchlist )
++            self.error(ERROR_PACKAGE_NOT_FOUND, "Not Found %s " % searchlist )
  
 -        # Get the latest first
 -        troveTupleList.sort()
 -        troveTupleList.reverse()
-+        for troveDict in troveTupleList:
-+            log.info(" doing resolve ")
-+            log.info(troveDict)
-+            self.resolve( fltlist[0] , [ troveDict['name'] ] )
- 
+-
 -        for troveTuple in troveTupleList:
 -            troveTuple = tuple([item.encode('UTF-8') for item in troveTuple])
 -            name = troveTuple[0]
@@ -361,26 +1162,50 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 -        package_list = pkgfilter.post_process()
 -        log.info("package_list %s" %package_list)
 -        self._show_package_list(package_list)
++        self._resolve_list( fltlist, troveTupleList  )
  
      def _get_update(self, applyList, cache=True):
          updJob = self.client.newUpdateJob()
-@@ -295,38 +286,51 @@
+@@ -295,111 +219,129 @@
              applyList = [(name, (None, None), (version, flavor), True)]
          return self._do_update(applyList)
  
-+    def _convertPackage(self, pkg ):
-+       #version = versions.ThawVersion(pkg['version'])
-+       pass
++    def _resolve_list(self, filters, pkgsList ):
++        log.info("======= _resolve_list =====")
++        specList = []
++        cli = ConaryPk()
++        for pkg in pkgsList:
++            name = pkg["name"]
++            repo = pkg["label"]
++            version = pkg["version"]
++            trove = name, None , cli.flavor
++            specList.append( trove  )
++        trovesList = cli.repos.findTroves(cli.default_label, specList )
++
++        pkgFilter = ConaryFilter(filters)
++        troves = trovesList.values()
++        for trovelst in troves:
++            t = trovelst[0]
++            installed = pkgFilter._pkg_is_installed( t[0] )
++            if installed:
++                pkgFilter.add_installed( trovelst )
++            else:
++                pkgFilter.add_available( trovelst )
++
++       
++        package_list = pkgFilter.post_process()
++        self._show_package_list(package_list)
++ 
      @ExceptionHandler
 -    def resolve(self, filters, packages):
+-        self.allow_cancel(True)
+-        self.percentage(None)
+-        self.status(STATUS_INFO)
 +    def resolve(self, filters, package ):
 +        """ 
 +            @filters  (list)  list of filters
 +            @package (list ) list with packages name for resolve
 +        """
-         self.allow_cancel(True)
-         self.percentage(None)
-         self.status(STATUS_INFO)
          log.info("======== resolve =========")
 -        log.info("filters: %s package:%s " % (filters, packages))
 -        if len(packages):
@@ -396,7 +1221,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +
 +        filter = ConaryFilter(filters)
 +
-+        installed = filter._pkg_is_installed( pkg_dict )
++        installed = filter._pkg_is_installed( pkg_dict["name"] )
 +        
 +        conary_cli = ConaryPk()
 +
@@ -423,28 +1248,54 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 -            installed = INFO_AVAILABLE
 -        log.info(installed)
 -        return installed
-+        package_list = filter.post_process()
-+        log.info("package_list %s" % package_list)
-+        self._show_package_list(package_list)
- 
+-
 -    def _pkg_is_installed(self, pkg):
 -        '''
 -        Return if the package is installed.
 -        '''
 -        return self.check_installed(pkg)
-+        #if len(packages):
-+        #    for i in packages:
-+        #        self._do_search(i, filters)
-+        #else:
-+        #    self._do_search(packages, filters)
- 
-     @ExceptionHandler
-     def search_group(self, filters, key):
-@@ -368,23 +372,35 @@
- 
-         # we couldn't do this when generating the list
-         package_list = pkgfilter.post_process()
-+        log.info(package_list)
+-
+-    @ExceptionHandler
+-    def search_group(self, filters, key):
+-        '''
+-        Implement the {backend}-search-name functionality
+-        FIXME: Ignoring filters for now.
+-        '''
+-        self.allow_cancel(True)
+-        self.percentage(None)
+-        self.status(STATUS_QUERY)
+-
+-        fltlist = filters.split(';')
+-        pkgfilter = ConaryFilter(fltlist)
+-        pkgfilter = ConaryFilter(fltlist)
+-        cache = Cache()
+-
+-        try:
+-            troveTupleList = cache.searchByGroups(revGroupMap[key])
+-        finally:
+-            # FIXME: Really need to send an error here
+-            pass
+-
+-        troveTupleList.sort()
+-        troveTupleList.reverse()
+-
+-        for troveTuple in troveTupleList:
+-            troveTuple = tuple([item.encode('UTF-8') for item in troveTuple[0:2]])
+-            name = troveTuple[0]
+-            version = versions.ThawVersion(troveTuple[1])
+-            flavor = deps.ThawFlavor(troveTuple[2])
+-            category = troveTuple[3][0]
+-            category = category.encode('UTF-8')
+-            troveTuple = tuple([name, version, flavor])
+-            installed = self.check_installed(troveTuple)
+-            if installed:
+-                pkgfilter.add_installed([troveTuple])
+-            else:
+-                pkgfilter.add_available([troveTuple])
+-
+-        # we couldn't do this when generating the list
+-        package_list = pkgfilter.post_process()
++        package_list = filter.post_process()
          log.info("package_list %s" % package_list)
          self._show_package_list(package_list)
  
@@ -481,19 +1332,52 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +            else:
 +                meta = " "
 +            self.package(package_id, status, meta )
++
++    @ExceptionHandler
++    def search_group(self, options, searchlist):
++        '''
++        Implement the {backend}-search-group functionality
++        '''
++        log.info("============= search_group ========")
++        self.allow_cancel(True)
++        self.percentage(None)
++        self.status(STATUS_QUERY)
++        log.info("options: %s searchlist:%s "%(options, searchlist))
++        self._do_search(options, searchlist, 'group')
++
  
      @ExceptionHandler
      def search_name(self, options, searchlist):
-@@ -396,7 +412,7 @@
+         '''
+         Implement the {backend}-search-name functionality
+         '''
++        log.info("============= search_name ========")
+         self.allow_cancel(True)
+         self.percentage(None)
          self.status(STATUS_QUERY)
-         log.info("============= search_name ========")
+-        log.info("============= search_name ========")
          log.info("options: %s searchlist:%s "%(options, searchlist))
 -        self._do_search(searchlist, options)
-+        self._do_search(options, searchlist)
++        self._do_search(options, searchlist, 'name')
  
-     def search_details(self, opt, key):
+-    def search_details(self, opt, key):
+-        pass
++    @ExceptionHandler
++    def search_details(self, options, search):
++        '''
++        Implement the {backend}-search-details functionality
++        '''
++        log.info("============= search_details ========")
++        self.allow_cancel(True)
++        #self.percentage(None)
++        self.status(STATUS_QUERY)
++        log.info("options: %s searchlist:%s "%(options, search))
++        self._do_search(options, search, 'details' )
++       
+ 
+     def get_requires(self, filters, package_ids, recursive_text):
          pass
-@@ -460,15 +476,16 @@
+@@ -460,15 +402,13 @@
          applyList = [ (x[0], (None, None), x[1:], True) for x in updateItems ]
          updJob, suggMap = self._do_update(applyList)
  
@@ -508,13 +1392,10 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 -            self.status(STATUS_WAIT)
 -            cache.populate_database()
 +        cache.refresh()
-+        #if not cache.is_populate_database:
-+        #    self.status(STATUS_WAIT)
-+        #    cache.populate_database()
  
      @ExceptionHandler
      def update(self, package_ids):
-@@ -478,11 +495,13 @@
+@@ -478,11 +418,13 @@
          self.allow_cancel(True)
          self.percentage(0)
          self.status(STATUS_RUNNING)
@@ -530,7 +1411,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'No available updates')
  
-@@ -497,12 +516,10 @@
+@@ -497,12 +439,10 @@
          '''
          Implement the {backend}-{install, update}-packages functionality
          '''
@@ -545,7 +1426,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
              self.allow_cancel(True)
              self.percentage(0)
-@@ -514,7 +531,10 @@
+@@ -514,7 +454,10 @@
                          'Package already installed')
  
                  self.status(INFO_INSTALLING)
@@ -556,7 +1437,12 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
                  self._do_package_update(name, version, flavor)
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'Package was not found')
-@@ -629,7 +649,7 @@
+@@ -625,11 +568,11 @@
+         #vendor_url = _format_list(urls['vendor'])
+         vendor_url = ""
+         reboot = "none"
+-        desc = self._get_metadata(package_id, 'longDesc') or " "
++        desc = " "
          self.update_detail(package_id, update, obsolete, vendor_url, bz_url, cve_url,
                  reboot, desc, changelog="", state="", issued="", updated="")
  
@@ -565,7 +1451,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
      def get_details(self, package_ids):
          '''
          Print a detailed description for a given package
-@@ -642,26 +662,52 @@
+@@ -642,26 +585,52 @@
          log.info(package_ids[0])
          package_id = package_ids[0]
          name, version, flavor, installed = self._findPackage(package_id)
@@ -602,8 +1488,8 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +            url = "http://www.foresightlinux.org/packages/%s.html" % name
 +
 +            categories  = ""
-+            if metadata.has_key("categorie"):
-+                categories =  Cache()._getCategorieBase( groupMap, metadata['categorie'])
++            if metadata.has_key("category"):
++                categories =  Cache().getGroup( metadata['category'])
 +            else:
 +                categories = None
              # Package size goes here, but I don't know how to find that for conary packages.
@@ -627,7 +1513,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def _get_status(self, notice):
          # We need to figure out how to get this info, this is a place holder
-@@ -680,14 +726,19 @@
+@@ -680,14 +649,19 @@
          self.status(STATUS_INFO)
          log.info("============== get_updates ========================")
          updateItems = self.client.fullUpdateItemList()
@@ -647,7 +1533,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
              name = job[0][0]
  
              # On an erase display the old version/flavor information.
-@@ -711,12 +762,16 @@
+@@ -711,12 +685,16 @@
          '''
          log.info("========== _findPackage ==========")
          log.info(package_id)
@@ -661,7 +1547,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +        for troveTuple in troveTuples:
 +            log.info("======== trove ")
 +            log.info(troveTuple)
-+            installed =self.check_installed(troveTuple)
++            installed = self.check_installed(troveTuple)
 +            log.info(installed)
 +            name, version, flavor = troveTuple
 +            return name, version, flavor, installed
@@ -670,9 +1556,23 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def repo_set_data(self, repoid, parameter, value):
          '''
+@@ -736,10 +714,12 @@
+         '''
+         pass
+ 
++from pkConaryLog import pdb
++
+ def main():
+     backend = PackageKitConaryBackend('')
+     log.info("======== argv =========== ")
+-    log.info(sys.argv)
++    log.info(sys.argv[1:])
+     backend.dispatcher(sys.argv[1:])
+ 
+ if __name__ == "__main__":
 diff -r c2b7f89facbe backends/conary/conaryFilter.py
 --- a/backends/conary/conaryFilter.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/conaryFilter.py	Tue Feb 10 09:16:06 2009 -0500
++++ b/backends/conary/conaryFilter.py	Thu Feb 12 16:21:34 2009 -0500
 @@ -24,7 +24,8 @@
  
  import re
@@ -683,7 +1583,7 @@ diff -r c2b7f89facbe backends/conary/conaryFilter.py
  class ConaryFilter(PackagekitFilter):
  
      def _pkg_get_unique(self, pkg):
-@@ -44,18 +45,11 @@
+@@ -44,18 +45,12 @@
          '''
          Return if the packages are installed
          '''
@@ -701,7 +1601,8 @@ diff -r c2b7f89facbe backends/conary/conaryFilter.py
 -        log.info(installed)
 -        return installed
 +        conary_cli = ConaryPk()
-+        result = conary_cli.query(pkg['name'])
++        result = conary_cli.query(pkg)
++            
 +        if result:
 +            return True
 +        else:
@@ -710,8 +1611,8 @@ diff -r c2b7f89facbe backends/conary/conaryFilter.py
  
 diff -r c2b7f89facbe backends/conary/conarypk.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conarypk.py	Tue Feb 10 09:16:06 2009 -0500
-@@ -0,0 +1,117 @@
++++ b/backends/conary/conarypk.py	Thu Feb 12 16:21:34 2009 -0500
+@@ -0,0 +1,118 @@
 +#!/usr/bin/python
 +### compatible with conary 2.0.35
 +###  greets mkj
@@ -765,6 +1666,7 @@ diff -r c2b7f89facbe backends/conary/conarypk.py
 +            if "foresight.rpath.org" in i.asString():
 +                labels.append(i.asString())
 +        return labels
++
 +    def query(self, name):
 +        """ do a conary query """
 +        if name is None or name == "":
@@ -829,9 +1731,57 @@ diff -r c2b7f89facbe backends/conary/conarypk.py
 +    #print conary.update("amsn")
 +    #print conary.remove("amsn")
 +
+diff -r c2b7f89facbe backends/conary/pk-backend-conary.c
+--- a/backends/conary/pk-backend-conary.c	Tue Feb 10 08:39:14 2009 -0500
++++ b/backends/conary/pk-backend-conary.c	Thu Feb 12 16:21:34 2009 -0500
+@@ -239,6 +239,32 @@
+ }
+ 
+ /**
++    pk_backend_search_groups
++*/
++static void
++backend_search_group (PkBackend *backend, PkBitfield filters, const gchar *search)
++{
++	gchar *filters_text;
++	filters_text = pk_filter_bitfield_to_text (filters);
++	pk_backend_spawn_helper (spawn, "conaryBackend.py", "search-group", filters_text, search, NULL);
++	g_free (filters_text);
++}
++
++
++
++/**
++    pk_backend_search_details
++*/
++static void
++backend_search_details (PkBackend *backend, PkBitfield filters, const gchar *search)
++{
++	gchar *filters_text;
++	filters_text = pk_filter_bitfield_to_text (filters);
++	pk_backend_spawn_helper (spawn, "conaryBackend.py", "search-details", filters_text, search, NULL);
++	g_free (filters_text);
++}
++
++/**
+  * pk_backend_update_packages:
+  */
+ static void
+@@ -324,9 +350,9 @@
+ 	NULL,					/* repo_set_data */
+ 	backend_resolve,			/* resolve */
+ 	NULL,					/* rollback */
+-	NULL,					/* search_details */
++	backend_search_details,					/* search_details */
+ 	NULL,					/* search_file */
+-	NULL,					/* search_group */
++	backend_search_group,					/* search_group */
+ 	backend_search_name,			/* search_name */
+ 	backend_update_packages,		/* update_packages */
+ 	backend_update_system,			/* update_system */
 diff -r c2b7f89facbe backends/conary/test.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/test.py	Tue Feb 10 09:16:06 2009 -0500
++++ b/backends/conary/test.py	Thu Feb 12 16:21:34 2009 -0500
 @@ -0,0 +1,5 @@
 +
 +
