@@ -1,0 +1,28 @@
+Add missing pieces to the below patch in the 2.6.27 ext4 patchset.
+http://git.kernel.org/?p=linux/kernel/git/tytso/ext4.git;a=commitdiff;h=fd3bd090d7cc93292d3fa361b9c323752417bd7b
+"ext4: Don't allow new groups to be added during block allocation"
+
+Index: linux-2.6.27.noarch/fs/ext4/mballoc.c
+===================================================================
+--- linux-2.6.27.noarch.orig/fs/ext4/mballoc.c
++++ linux-2.6.27.noarch/fs/ext4/mballoc.c
+@@ -1055,7 +1055,8 @@ static void ext4_mb_release_desc(struct 
+ 	if (e4b->bd_buddy_page)
+ 		page_cache_release(e4b->bd_buddy_page);
+ 	/* Done with the buddy cache */
+-	up_read(e4b->alloc_semp);
++	if (e4b->alloc_semp)
++		up_read(e4b->alloc_semp);
+ }
+ 
+ 
+@@ -1375,6 +1376,9 @@ static void ext4_mb_use_best_found(struc
+ 	get_page(ac->ac_bitmap_page);
+ 	ac->ac_buddy_page = e4b->bd_buddy_page;
+ 	get_page(ac->ac_buddy_page);
++	/* on allocation we use ac to track the held semaphore */
++	ac->alloc_semp =  e4b->alloc_semp;
++	e4b->alloc_semp = NULL;
+ 	/* store last allocated for subsequent stream allocation */
+ 	if ((ac->ac_flags & EXT4_MB_HINT_DATA)) {
+ 		spin_lock(&sbi->s_md_lock);

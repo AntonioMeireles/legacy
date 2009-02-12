@@ -36,6 +36,8 @@ class Kernel(KernelPackageRecipe):
         r.addPatch('linux-2.6.27.9-ext4-cap-check-delay.patch')
         r.addPatch('linux-2.6.27.14-ext4-patch-queue.patch')
         r.addPatch('linux-2.6.27.14-ext4-fix-cache-init.patch')
+        r.addPatch('linux-2.6.27.14-ext4-fix-dont-allow-new-groups.patch')
+        r.addPatch('linux-2.6-apple-wireless-keyboard-fix.patch')
         r.addPatch('linux-2.6-usb-ehci-hcd-respect-nousb.patch')
         r.addPatch('linux-2.6-usb-option-increase-outgoing-buffers.patch')
         r.addPatch('linux-2.6-usb-option-add-pantech-cards-R.patch', extraArgs='-R')
@@ -121,10 +123,38 @@ class Kernel(KernelPackageRecipe):
         r.addPatch('linux-2.6-pciehp-kill-annoying-messages.patch')
         r.addPatch('linux-2.6-selinux-empty-tty-files.patch')
         r.addPatch('disable-p4-cpufreq-ui.patch')
+        #VMware support
+        # r.addPatch('vmware_mptbase_workaround.patch')
+        r.macros.ovmtoolsver = '2009.01.21-142982'
+        r.addArchive('mirror://sourceforge/open-vm-tools/'
+                     'open-vm-tools-%(ovmtoolsver)s.tar.gz',
+                     dir='linux-%(version)s')
 
-        # FIXME: to be a stock external module pkg when we move to .29
-        r.addPatch('linux-2.6-open-vm-tools.patch')
         # r.addPatch('0001-superreadahead-patch.patch')
+
+    def build(r):
+        # find libata modules
+        # r.Run('for i in $(find %(destdir)s | grep drivers\/ata); '
+        #      'do if [ $(nm $i |grep --count ata_pci_remove_one) -ne 0 ]; '
+        #      'then basename `echo $i` ;fi ; done | grep -v sata | '
+        #      'grep -v pdc_adma | sort >> modules.libata')
+        # r.Install('modules.libata', '/lib/modules/%(kver)s/modules.libata')
+
+        # Build VMware kernel modules
+        r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
+        for m in ('drivers/misc/vmci',
+                  'drivers/misc/vmmemctl',
+                  'drivers/misc/vmsync',
+                  'drivers/net/vmxnet',
+                  'drivers/net/vmxnet3',
+                  'drivers/scsi/pvscsi',
+                      'fs/vmblock',
+                  'fs/vmhgfs'):
+            module = os.path.basename(m)
+            modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
+            r.Make('HEADER_DIR=%(builddir)s/include', dir=modsrc)
+            kmod = module + '.ko'
+            r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod)
 
     def policy(r):
         # we don't want spurious deps on py24 in :build-tree as it will create odd
