@@ -1,23 +1,33 @@
-diff -r c2b7f89facbe backends/conary/Makefile.am
---- a/backends/conary/Makefile.am	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/Makefile.am	Sun Feb 15 07:57:41 2009 -0500
-@@ -5,7 +5,11 @@
+diff -r 32f7b4b1c90c backends/conary/Makefile.am
+--- a/backends/conary/Makefile.am	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/Makefile.am	Sun Feb 15 15:15:26 2009 -0500
+@@ -5,6 +5,9 @@
  	conaryCallback.py	\
  	conaryInit.py		\
  	Cache.py		\
--	pkConaryLog.py
-+	pkConaryLog.py		\
 +	XMLCache.py             \
 +	conarypk.py		\
 +	conaryEnums.py 
-+
+ 	pkConaryLog.py
  
  plugindir = $(PK_PLUGIN_DIR)
- plugin_LTLIBRARIES = libpk_backend_conary.la
-diff -r c2b7f89facbe backends/conary/XMLCache.py
+diff -r 32f7b4b1c90c backends/conary/Makefile.in
+--- a/backends/conary/Makefile.in	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/Makefile.in	Sun Feb 15 15:15:26 2009 -0500
+@@ -322,6 +322,9 @@
+ 	conaryCallback.py	\
+ 	conaryInit.py		\
+ 	Cache.py		\
++	XMLCache.py             \
++	conarypk.py             \
++	conaryEnums.py		\
+ 	pkConaryLog.py
+ 
+ plugindir = $(PK_PLUGIN_DIR)
+diff -r 32f7b4b1c90c backends/conary/XMLCache.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/XMLCache.py	Sun Feb 15 07:57:41 2009 -0500
-@@ -0,0 +1,292 @@
++++ b/backends/conary/XMLCache.py	Sun Feb 15 15:15:26 2009 -0500
+@@ -0,0 +1,293 @@
 +import os
 +from xml.dom.minidom import parse
 +import urllib as url
@@ -36,8 +46,9 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +
 +def getGroup(categorieList):
 +    where = {}
-+    if categorieList:
++    if  not categorieList:
 +        return None
++    log.info(categorieList)
 +    for cat in categorieList:
 +        for group,categories in groupMap.items():
 +            if cat in categories:
@@ -310,9 +321,9 @@ diff -r c2b7f89facbe backends/conary/XMLCache.py
 +    for v,p in enumerate(l):
 +        print v,p["name"]
 +  # print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
-diff -r c2b7f89facbe backends/conary/conaryBackend.py
---- a/backends/conary/conaryBackend.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/conaryBackend.py	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c backends/conary/conaryBackend.py
+--- a/backends/conary/conaryBackend.py	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/conaryBackend.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -28,96 +28,31 @@
  from conary import dbstore, queryrep, versions, updatecmd
  from conary.local import database
@@ -437,7 +448,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
          version = versions.ThawVersion(frzVersion)
          flavor = deps.ThawFlavor(frzFlavor)
          return version, flavor
-@@ -185,90 +118,104 @@
+@@ -185,90 +118,106 @@
          return ','.join(arches)
  
      @ExceptionHandler
@@ -507,36 +518,31 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
          fltlist = filters.split(';')
 -        pkgfilter = ConaryFilter(fltlist)
 -        #pkgfilter = ConaryFilter()
--
--        troveSpecs = [ updatecmd.parseTroveSpec(searchlist,
--                                                allowEmptyName=False) ]
--        # get a hold of cached data
 +        if where != "name" and where != "details" and where != "group":
 +            log.info("where %s" % where)
 +            self.error(ERROR_UNKNOWN, "DORK---- search where not found")
-         cache = Cache()
-         log.debug((searchlist, fltlist))
++        cache = Cache()
++        log.debug((searchlist, where))
+ 
+-        troveSpecs = [ updatecmd.parseTroveSpec(searchlist,
+-                                                allowEmptyName=False) ]
+-        # get a hold of cached data
+-        cache = Cache()
+-        log.debug((searchlist, fltlist))
++        troveTupleList = cache.search(searchlist, where )
++        log.info("XMLCACHE results:")
++        log.info(troveTupleList)
  
 -        try:
 -            troveTupleList = cache.search(searchlist)
 -            log.info("FOUND!!!!!! %s"% str(troveTupleList))
 -        finally:
 -            pass
-+        troveTupleList = cache.search(searchlist, where )
- 
--        # Remove dupes
--        tempDict = {}
--        try:
--            for element in troveTupleList:
--                tempDict[element] = None
--        except TypeError:
--            del tempDict  # move on to the next method
 +        if len(troveTupleList) > 0 :
 +            for i in troveTupleList:
 +                log.info("FOUND!!!!!! %s " % i["name"] )
 +            log.info("FOUND (%s) elements " % len(troveTupleList) )
-         else:
--            troveTupleList = tempDict.keys()
++        else:
 +            log.info("NOT FOUND %s " % searchlist )
 +            pk = ConaryPk()
 +            troveTupleList = pk.query( searchlist)
@@ -548,6 +554,16 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
 +                log.info("convert")
 +                log.info(troveTupleList)
  
+-        # Remove dupes
+-        tempDict = {}
+-        try:
+-            for element in troveTupleList:
+-                tempDict[element] = None
+-        except TypeError:
+-            del tempDict  # move on to the next method
+-        else:
+-            troveTupleList = tempDict.keys()
+-
 -        # Get the latest first
 -        troveTupleList.sort()
 -        troveTupleList.reverse()
@@ -596,7 +612,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
          if jobPath:
              updJob = self.client.newUpdateJob()
              try:
-@@ -295,111 +242,148 @@
+@@ -295,111 +244,148 @@
              applyList = [(name, (None, None), (version, flavor), True)]
          return self._do_update(applyList)
  
@@ -823,7 +839,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def get_requires(self, filters, package_ids, recursive_text):
          pass
-@@ -443,32 +427,35 @@
+@@ -443,32 +429,35 @@
                                                   withFiles = True):
                      files.append(path)
              return files
@@ -870,7 +886,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def update(self, package_ids):
-@@ -478,11 +465,13 @@
+@@ -478,11 +467,13 @@
          self.allow_cancel(True)
          self.percentage(0)
          self.status(STATUS_RUNNING)
@@ -886,7 +902,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'No available updates')
  
-@@ -497,12 +486,10 @@
+@@ -497,12 +488,10 @@
          '''
          Implement the {backend}-{install, update}-packages functionality
          '''
@@ -901,7 +917,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
              self.allow_cancel(True)
              self.percentage(0)
-@@ -514,7 +501,9 @@
+@@ -514,7 +503,9 @@
                          'Package already installed')
  
                  self.status(INFO_INSTALLING)
@@ -911,7 +927,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
                  self._do_package_update(name, version, flavor)
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'Package was not found')
-@@ -528,10 +517,10 @@
+@@ -528,10 +519,10 @@
          self.percentage(0)
          self.status(STATUS_RUNNING)
          log.info("========== Remove Packages ============ ")
@@ -923,7 +939,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
              if name:
                  if not installed == INFO_INSTALLED:
                      self.error(ERROR_PACKAGE_NOT_INSTALLED, 'The package %s is not installed' % name)
-@@ -625,11 +614,11 @@
+@@ -625,11 +616,11 @@
          #vendor_url = _format_list(urls['vendor'])
          vendor_url = ""
          reboot = "none"
@@ -937,7 +953,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
      def get_details(self, package_ids):
          '''
          Print a detailed description for a given package
-@@ -642,26 +631,58 @@
+@@ -642,26 +633,58 @@
          log.info(package_ids[0])
          package_id = package_ids[0]
          name, version, flavor, installed = self._findPackage(package_id)
@@ -1005,7 +1021,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def _get_status(self, notice):
          # We need to figure out how to get this info, this is a place holder
-@@ -679,15 +700,24 @@
+@@ -679,15 +702,24 @@
          self.percentage(None)
          self.status(STATUS_INFO)
          log.info("============== get_updates ========================")
@@ -1031,7 +1047,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
              name = job[0][0]
  
              # On an erase display the old version/flavor information.
-@@ -704,6 +734,7 @@
+@@ -704,6 +736,7 @@
              troveTuple.append(version)
              installed = self.check_installed(troveTuple)
              self._show_package(name, version, flavor, INFO_NORMAL)
@@ -1039,7 +1055,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def _findPackage(self, package_id):
          '''
-@@ -711,12 +742,17 @@
+@@ -711,12 +744,17 @@
          '''
          log.info("========== _findPackage ==========")
          log.info(package_id)
@@ -1063,7 +1079,7 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
  
      def repo_set_data(self, repoid, parameter, value):
          '''
-@@ -736,10 +772,12 @@
+@@ -736,10 +774,12 @@
          '''
          pass
  
@@ -1077,9 +1093,9 @@ diff -r c2b7f89facbe backends/conary/conaryBackend.py
      backend.dispatcher(sys.argv[1:])
  
  if __name__ == "__main__":
-diff -r c2b7f89facbe backends/conary/conaryCallback.py
---- a/backends/conary/conaryCallback.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/conaryCallback.py	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c backends/conary/conaryCallback.py
+--- a/backends/conary/conaryCallback.py	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/conaryCallback.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -20,63 +20,83 @@
  
  from conary import callbacks
@@ -1256,9 +1272,9 @@ diff -r c2b7f89facbe backends/conary/conaryCallback.py
 +        self.error = []
 +        self.progress = PackagekitProgress()
 +        self.progress.set_steps( range( 1, 100, 9) )
-diff -r c2b7f89facbe backends/conary/conaryEnums.py
+diff -r 32f7b4b1c90c backends/conary/conaryEnums.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryEnums.py	Sun Feb 15 07:57:41 2009 -0500
++++ b/backends/conary/conaryEnums.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -0,0 +1,68 @@
 +from packagekit.enums import GROUP_ACCESSIBILITY, GROUP_ACCESSORIES, GROUP_EDUCATION, GROUP_GAMES, GROUP_GRAPHICS, GROUP_INTERNET, GROUP_MULTIMEDIA, GROUP_OFFICE, GROUP_OTHER,  GROUP_PROGRAMMING,  GROUP_SYSTEM
 +
@@ -1328,9 +1344,9 @@ diff -r c2b7f89facbe backends/conary/conaryEnums.py
 +
 +if __name__ == "__main__":
 +    print groupMap
-diff -r c2b7f89facbe backends/conary/conaryFilter.py
---- a/backends/conary/conaryFilter.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/conaryFilter.py	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c backends/conary/conaryFilter.py
+--- a/backends/conary/conaryFilter.py	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/conaryFilter.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -24,7 +24,8 @@
  
  import re
@@ -1367,9 +1383,9 @@ diff -r c2b7f89facbe backends/conary/conaryFilter.py
 +            return False
  
  
-diff -r c2b7f89facbe backends/conary/conarypk.py
+diff -r 32f7b4b1c90c backends/conary/conarypk.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conarypk.py	Sun Feb 15 07:57:41 2009 -0500
++++ b/backends/conary/conarypk.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -0,0 +1,118 @@
 +#!/usr/bin/python
 +### compatible with conary 2.0.35
@@ -1489,9 +1505,9 @@ diff -r c2b7f89facbe backends/conary/conarypk.py
 +    #print conary.update("amsn")
 +    #print conary.remove("amsn")
 +
-diff -r c2b7f89facbe backends/conary/pk-backend-conary.c
---- a/backends/conary/pk-backend-conary.c	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/pk-backend-conary.c	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c backends/conary/pk-backend-conary.c
+--- a/backends/conary/pk-backend-conary.c	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/pk-backend-conary.c	Sun Feb 15 15:15:26 2009 -0500
 @@ -239,6 +239,32 @@
  }
  
@@ -1537,9 +1553,9 @@ diff -r c2b7f89facbe backends/conary/pk-backend-conary.c
  	backend_search_name,			/* search_name */
  	backend_update_packages,		/* update_packages */
  	backend_update_system,			/* update_system */
-diff -r c2b7f89facbe backends/conary/pkConaryLog.py
---- a/backends/conary/pkConaryLog.py	Tue Feb 10 08:39:14 2009 -0500
-+++ b/backends/conary/pkConaryLog.py	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c backends/conary/pkConaryLog.py
+--- a/backends/conary/pkConaryLog.py	Sun Feb 15 15:03:00 2009 -0500
++++ b/backends/conary/pkConaryLog.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -1,5 +1,5 @@
  #!/usr/bin/python
 -
@@ -1556,18 +1572,18 @@ diff -r c2b7f89facbe backends/conary/pkConaryLog.py
 +def pprint(str):
 +    log.info(str)
 +#    log.info( p.pprint( str, width= 10) )
-diff -r c2b7f89facbe backends/conary/test.py
+diff -r 32f7b4b1c90c backends/conary/test.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/test.py	Sun Feb 15 07:57:41 2009 -0500
++++ b/backends/conary/test.py	Sun Feb 15 15:15:26 2009 -0500
 @@ -0,0 +1,5 @@
 +
 +
 +a = ['desktop-gnome', 'graphics', 'multimedia', 'multimedia']
 +
 +
-diff -r c2b7f89facbe configure.ac
---- a/configure.ac	Tue Feb 10 08:39:14 2009 -0500
-+++ b/configure.ac	Sun Feb 15 07:57:41 2009 -0500
+diff -r 32f7b4b1c90c configure.ac
+--- a/configure.ac	Sun Feb 15 15:03:00 2009 -0500
++++ b/configure.ac	Sun Feb 15 15:15:26 2009 -0500
 @@ -57,7 +57,7 @@
  	CPPFLAGS="$CPPFLAGS -Wcast-align -Wno-uninitialized"
  	CPPFLAGS="$CPPFLAGS -Wall -Wreturn-type"
