@@ -113,6 +113,8 @@ class KernelPackageRecipe(CPackageRecipe):
             return
         r.setMacros()
         r.unpackBase()
+        r.fixPermissions()
+        r.addNonInteractiveConfig()
         r.setCompileInfo()
         r.unpack() # patches go here
         r.distCleanup()
@@ -124,8 +126,9 @@ class KernelPackageRecipe(CPackageRecipe):
         r.policy() # extra policy goes here
 
     def setMacros(r):
+        r.macros.archive_version = '-'.join(r.version.split('_'))
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
-        r.macros.sublevel = r.version.split('.')[2]
+        r.macros.sublevel = r.version.split('.')[2].split('_')[0]
         if 'serial' in r.__dict__:
             r.macros.serial = r.serial
         else:
@@ -160,16 +163,29 @@ class KernelPackageRecipe(CPackageRecipe):
         if not r.Flags.debugdata:
             r.Strip(debuginfo=False)
 
+        if 'archive_dir' in r.__dict__:
+            r.macros.archive_dir = r.archive_dir + '/'
+        else:
+            if '-rc' in r.macros.archive_version:
+                r.macros.archive_dir = 'testing/'
+            else:
+                r.macros.archive_dir = ''
+
     def unpackBase(r):
         r.addArchive(
             'ftp://ftp2.kernel.org/pub/linux/kernel/v%(majorversion)s/'
-            'linux-%(version)s.tar.bz2',
+            '%(archive_dir)s'
+            'linux-%(archive_version)s.tar.bz2',
             keyid='517D0F0E'
         )
+
+    def fixPermissions(r):
         # Conary preserves world-write/execute permissions in the tarball,
         # which we do not want to preserve on the installed system or in
         # the build
         r.addAction('chmod -R go-w .')
+
+    def addNonInteractiveConfig(r):
         # avoid requests for interactive response
         r.addPatch('linux-2.4.0-nonintconfig.patch')
 
@@ -201,8 +217,9 @@ class KernelPackageRecipe(CPackageRecipe):
     def configure(r):
         r.extraSource(addConfigs(r))
         r.Make('nonint_oldconfig 2>oc.err ||'
-               ' { cat oc.err; diff -u .config.old .config > config.changes;'
-               '   echo "missing config items:"; cat config.changes ;'
+               ' { diff -u .config.old .config > config.changes;'
+               '   cat config.changes ;'
+               '   echo "missing config items:"; cat oc.err ;'
                '   exit 1; }')
         # if we get here, this file is empty, remove it
         r.Remove('oc.err')
@@ -243,11 +260,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Make('INSTALL_FW_PATH=%(destdir)s/lib/firmware firmware_install')
         r.PackageSpec('userspace-kernel-firmware', '/lib/firmware/.*')
 
-        # Place open-vm-tools modules into a seperate component.  This
-        # allows easy removal for people who wish to run a vmware host.
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/fs/vm.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/misc/v.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/net/vm.*')
+        r.vmwareComponent()
 
         r.ComponentSpec('configs', '/lib/modules/[^/]*/configs/')
         r.ComponentSpec('build-tree', '/lib/modules/[^/]*/build/')
@@ -266,6 +279,13 @@ class KernelPackageRecipe(CPackageRecipe):
         Add any special build actions here
         """
         pass
+
+    def vmwareComponent(r):
+        # Place open-vm-tools modules into a seperate component.  This
+        # allows easy removal for people who wish to run a vmware host.
+        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/fs/vm.*')
+        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/misc/v.*')
+        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/net/vm.*')
 
     def policyBase(r):
         # Disable Autodoc. Users tend to have more than 1 kernel installed
