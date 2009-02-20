@@ -1,30 +1,47 @@
 #
-# Copyright (c) 2005-2008 rPath, Inc.
+# Copyright (c) 2005-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('kernelpackage.recipe')
+loadSuperClass('kernelpackage')
 class Kernel(KernelPackageRecipe):
 
     name = 'kernel'
-    version = '2.6.26.8'
+    version = '2.6.27.18'
 
     def unpack(r):
+        # VMware support
         r.addPatch('vmware_mptbase_workaround.patch')
-        r.addPatch('linux-2.6-open-vm-tools.patch')
-        r.addPatch('no-generic-nopls-2.6.24.7.patch')
-        r.addPatch('acpi-cope-with-pnpacpi-tables-missing-an-rtc-entry-fix.patch')
-        # CVE-2008-5300
-        r.addPatch('net-fix-soft-lockups-oom-issues-w-unix-garbage-collector.patch')
-        # CVE-2008-5079
-        r.addPatch('CVE-2008-5079_atm_duplicate_listen_DoS.patch')
-        # CVE-2008-5182
-        r.addPatch('fix_inotify_watch_removal_umount_races.patch')
+        r.macros.ovmtoolsver = '2009.01.21-142982'
+        r.buildvmmodules = not Use.xen
+        r.addArchive('mirror://sourceforge/open-vm-tools/'
+                     'open-vm-tools-%(ovmtoolsver)s.tar.gz',
+                     dir='linux-%(version)s',
+                     use=r.buildvmmodules)
+
 
     def build(r):
+        # find libata modules
         r.Run('for i in $(find %(destdir)s | grep drivers\/ata); '
               'do if [ $(nm $i |grep --count ata_pci_remove_one) -ne 0 ]; '
               'then basename `echo $i` ;fi ; done | grep -v sata | '
               'grep -v pdc_adma | sort >> modules.libata')
         r.Install('modules.libata', '/lib/modules/%(kver)s/modules.libata')
+
+        # Build VMware kernel modules
+        if r.buildvmmodules:
+            r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
+            for m in ('drivers/misc/vmci',
+                      'drivers/misc/vmmemctl',
+                      'drivers/misc/vmsync',
+                      'drivers/net/vmxnet',
+                      'drivers/net/vmxnet3',
+                      'drivers/scsi/pvscsi',
+                      'fs/vmblock',
+                      'fs/vmhgfs'):
+                module = os.path.basename(m)
+                modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
+                r.Make('HEADER_DIR=%(builddir)s/include', dir=modsrc)
+                kmod = module + '.ko'
+                r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod)
