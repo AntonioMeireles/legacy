@@ -1,6 +1,6 @@
 diff -r 4c5c579015af backends/conary/Makefile.am
 --- a/backends/conary/Makefile.am	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/Makefile.am	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/Makefile.am	Sat Feb 21 21:20:15 2009 -0600
 @@ -1,18 +1,21 @@
  helperdir = $(datadir)/PackageKit/helpers/conary
  dist_helper_DATA = 			\
@@ -31,7 +31,7 @@ diff -r 4c5c579015af backends/conary/Makefile.am
  	chmod a+rx $(DESTDIR)$(helperdir)/*.py
 diff -r 4c5c579015af backends/conary/XMLCache.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/XMLCache.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/XMLCache.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -0,0 +1,300 @@
 +import os
 +from xml.dom.minidom import parse
@@ -335,7 +335,7 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +    print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
 diff -r 4c5c579015af backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryBackend.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/conaryBackend.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -28,96 +28,31 @@
  from conary import dbstore, queryrep, versions, updatecmd
  from conary.local import database
@@ -627,15 +627,19 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
          if jobPath:
              updJob = self.client.newUpdateJob()
              try:
-@@ -278,6 +229,7 @@
+@@ -278,7 +229,10 @@
          else:
              updJob = self._get_update(applyList, cache=False)
          self.allow_cancel(False)
-+
-         restartDir = self.client.applyUpdateJob(updJob)
+-        restartDir = self.client.applyUpdateJob(updJob)
++        try:
++            restartDir = self.client.applyUpdateJob(updJob)
++        except errors.InternalConaryError:
++            self.error(ERROR_NO_PACKAGES_TO_UPDATE,"get-updates first and then update sytem")
          return updJob
  
-@@ -295,111 +247,149 @@
+     def _get_package_update(self, name, version, flavor):
+@@ -295,111 +249,149 @@
              applyList = [(name, (None, None), (version, flavor), True)]
          return self._do_update(applyList)
  
@@ -863,7 +867,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def get_requires(self, filters, package_ids, recursive_text):
          pass
-@@ -443,32 +433,41 @@
+@@ -443,32 +435,41 @@
                                                   withFiles = True):
                      files.append(path)
              return files
@@ -898,7 +902,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
 -    @ExceptionHandler
 +        log.info(">>>>>>>>>> get update >>>>>>>>>>>>")
-+        self._get_update(applyList)
++        #self._get_update(applyList)
 +        log.info(">>>>>>>>>> DO Update >>>>>>>>>>>>")
 +        self._do_update(applyList)
 +        log.info(">>>>>>>>>>END DO Update >>>>>>>>>>>>")
@@ -917,7 +921,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def update(self, package_ids):
-@@ -478,11 +477,13 @@
+@@ -478,11 +479,13 @@
          self.allow_cancel(True)
          self.percentage(0)
          self.status(STATUS_RUNNING)
@@ -933,7 +937,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'No available updates')
  
-@@ -497,12 +498,10 @@
+@@ -497,12 +500,10 @@
          '''
          Implement the {backend}-{install, update}-packages functionality
          '''
@@ -948,7 +952,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
              self.allow_cancel(True)
              self.percentage(0)
-@@ -513,8 +512,10 @@
+@@ -513,8 +514,10 @@
                      self.error(ERROR_PACKAGE_ALREADY_INSTALLED,
                          'Package already installed')
  
@@ -960,7 +964,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
                  self._do_package_update(name, version, flavor)
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'Package was not found')
-@@ -528,20 +529,27 @@
+@@ -528,20 +531,27 @@
          self.percentage(0)
          self.status(STATUS_RUNNING)
          log.info("========== Remove Packages ============ ")
@@ -990,7 +994,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _get_metadata(self, package_id, field):
          '''
-@@ -625,11 +633,11 @@
+@@ -625,11 +635,11 @@
          #vendor_url = _format_list(urls['vendor'])
          vendor_url = ""
          reboot = "none"
@@ -1004,7 +1008,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
      def get_details(self, package_ids):
          '''
          Print a detailed description for a given package
-@@ -642,26 +650,58 @@
+@@ -642,26 +652,58 @@
          log.info(package_ids[0])
          package_id = package_ids[0]
          name, version, flavor, installed = self._findPackage(package_id)
@@ -1072,7 +1076,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _get_status(self, notice):
          # We need to figure out how to get this info, this is a place holder
-@@ -676,18 +716,29 @@
+@@ -676,18 +718,29 @@
      @ExceptionHandler
      def get_updates(self, filters):
          self.allow_cancel(True)
@@ -1104,7 +1108,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
              name = job[0][0]
  
              # On an erase display the old version/flavor information.
-@@ -704,6 +755,8 @@
+@@ -704,6 +757,8 @@
              troveTuple.append(version)
              installed = self.check_installed(troveTuple)
              self._show_package(name, version, flavor, INFO_NORMAL)
@@ -1113,7 +1117,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _findPackage(self, package_id):
          '''
-@@ -711,12 +764,17 @@
+@@ -711,12 +766,17 @@
          '''
          log.info("========== _findPackage ==========")
          log.info(package_id)
@@ -1137,7 +1141,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def repo_set_data(self, repoid, parameter, value):
          '''
-@@ -736,6 +794,8 @@
+@@ -736,6 +796,8 @@
          '''
          pass
  
@@ -1148,8 +1152,8 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
      log.info("======== argv =========== ")
 diff -r 4c5c579015af backends/conary/conaryCallback.py
 --- a/backends/conary/conaryCallback.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryCallback.py	Fri Feb 20 00:51:31 2009 -0600
-@@ -17,110 +17,383 @@
++++ b/backends/conary/conaryCallback.py	Sat Feb 21 21:20:15 2009 -0600
+@@ -17,110 +17,379 @@
  #
  # Copyright (C) 2007 Elliot Peele <elliot@bentlogic.net>
  # Copyright (C) 2008 Richard Hughes <richard@hughsie.com>
@@ -1174,7 +1178,9 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 +        self.smallUpdate = False
 +        self.error = []
 +        self.progress = PackagekitProgress()
-+        self.progress.set_steps([ 30,60,65 ]  )
++        self.progress.set_steps([ 50 ]  )
++        self.disablepercent = False
++        self.dostep = True
 +    #1
 +    #3
 +    def requestingChangeSet(self):
@@ -1182,29 +1188,238 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 +        self.backend.status(STATUS_DOWNLOAD)
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
++        if not self.disablepercent:
++            self.progress.step()
 +    #2
 +    def downloadingChangeSet(self, got, need):
 +        log.info("Callback UpdateSystem........ STATUS_DOWNLOAD  Changeset %.2f percent %.2f/%.2f Mbytes" % ( got*100/float(need), got/MEGA,need/MEGA) )
-+        self.progress.set_subpercent( got*100 / float(need) )
++        if not self.disablepercent:
++            self.progress.set_subpercent( got*100 / float(need) )
 +        self.backend.percentage( self.progress.percent )
 +        log.info( "%s percent" % self.progress.percent)
 +
 +    #4
-     def resolvingDependencies(self):
--        #self.backend.status('Resolving Dependencies')
++    def resolvingDependencies(self):
 +        log.info("Callback UpdateSystem........ STATUS_DEP_RESOLVE ")
 +        self.backend.percentage(self.progress.percent)
-         self.backend.status(STATUS_DEP_RESOLVE)
++        self.backend.status(STATUS_DEP_RESOLVE)
 +        self.progress.step()
++    #5  >> request> download
++    def setChangesetHunk(self, num, total):
++        log.info("callback. .......... set Changeset HUnk %s/%s" % (num, total ) )
++        if total > 0:
++            p = num*100/float(total)
++        else:
++            p = 0
++        self.progress.set_subpercent(p)
++        self.disablepercent = True
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++        if num == total:
++            self.dostep =True
++    #6 
++    def setUpdateHunk(self, hunk, hunkCount):
++        log.info("callback. .......... set update HUnk %s/%s" % ( hunk, hunkCount))
++        if self.dostep:
++            self.progress.step()
++            self.disablepercent = True
++            self.dostep = False
++
++
++        if hunk < hunkCount:
++            p = hunk*100/float(hunkCount)
++            self.progress.set_subpercent( p )
++        else:
++            self.smallUpdate = True
++
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
 +
++    def setUpdateJob(self, job):
++        self.currentJob = job
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++
++    def creatingRollback(self):
++        #self.backend.status('Creating Rollback')
++        self.backend.status(STATUS_ROLLBACK)
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++
++
++    def preparingUpdate(self, troveNum, troveCount, add=0):
++        #self.progress.step()
++        if not self.currentJob or len(self.currentJob) == 0 or troveNum > troveCount:
++            return
++
++
++        self.backend.percentage(self.progress.percent)
++        if troveNum > 0:
++            troveNum -= 1
++        job = self.currentJob[troveNum]
++        name = job[0]
++        oldVersion, oldFlavor = job[1]
++        newVersion, newFlavor = job[2]
++        #log.info("JOB>>>>>>>> %s " % str(job) )
++        if oldVersion and newVersion:
++            self.backend.status(STATUS_UPDATE)
++            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
++            self.backend.package(package_id, INFO_UPDATING, '')
++        elif oldVersion and not newVersion:
++            self.backend.status(STATUS_REMOVE)
++            package_id = self.backend.get_package_id(name, oldVersion, oldFlavor)
++            self.backend.package(package_id, INFO_REMOVING, '')
++        elif not oldVersion and newVersion:
++            self.backend.status(STATUS_INSTALL)
++            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
++            self.backend.package(package_id, INFO_INSTALLING, '')
++        log.info(self.progress.percent)
++
++    def creatingDatabaseTransaction(self, troveNum, troveCount):
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++        self.preparingUpdate(troveNum, troveCount, add=troveCount)
++
++    def committingTransaction(self):
++        #self.backend.status('Committing Transaction')
++
++        self.backend.status(STATUS_COMMIT)
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++
++    def updateDone(self):
++        log.info("callback. ..........  update done")
++        self.backend.percentage(self.progress.percent)
++        self.currentJob = None
++        log.info(self.progress.percent)
++
++    def downloadingFileContents(self, got, need):
++        #self.backend.status('Downloading files for changeset')
++        log.info("Callback ........ STATUS_DOWNLOAD  FIle Contents %s " %  str( got*100/need  ))
++        self.backend.status(STATUS_DOWNLOAD)
++        #self.backend.sub_percentage(got*100/need)
++
++    def requestingFileContents(self):
++        #self.backend.status('Requesting File Contents')
++        log.info("Callback ........ STATUS_REQUEST request File contents ")
++        self.backend.status(STATUS_REQUEST)
++
++    def removeFiles(self, filenum, total):
++        log.info("Callback ........ STATUS_REMOVE %s/%sfiles" %( filenum, total) )
++        self.backend.status(STATUS_REMOVE)
++        self.preparingUpdate(filenum, total, add=total)
++    
++    def done(self):
++        #self.backend.status('Done')
++    #    self.progress.step()
++        log.info("DONEEEEEEEEEEEE")
++ 
++    def warning(self, msg, *args, **kwargs):
++        e = msg %args
++        log.error("<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
++        log.error(e)
++        self.backend.error(ERROR_DEP_RESOLUTION_FAILED, e, False )
++        
++    def tagHandlerOutput(self, tag, msg, stderr = False):
++        pass
++
++    def troveScriptOutput(self, typ, msg):
++        pass
++
++class GetUpdateCallback(callbacks.UpdateCallback):
++    def __init__(self, backend, cfg=None):
++        callbacks.UpdateCallback.__init__(self)
++        log.info("==== callback ==== ")
++        if cfg:
++            self.setTrustThreshold(cfg.trustThreshold)
++
++        self.backend = backend
++        self.currentJob = None
++        self.smallUpdate = False
++        self.error = []
++        self.progress = PackagekitProgress()
++        self.progress.set_steps([1,50, 100 ]  )
++    # 1 >> downloadingChangeSet
++    # 2 >> downloadingChangeSet
++    def requestingChangeSet(self):
++        log.info("Callback getUpdates ........ STATUS_REQUEST changeset ")
++        self.backend.status(STATUS_REQUEST)
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++        self.progress.step()
++
++    def downloadingChangeSet(self, got, need):
++        log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
++        self.backend.status(STATUS_DOWNLOAD)
++        self.progress.set_subpercent( got*100 / float(need) )
++        self.backend.percentage( self.progress.percent )
++        log.info( "%s percent" % self.progress.percent)
++    # 3
+     def resolvingDependencies(self):
+         #self.backend.status('Resolving Dependencies')
+         self.backend.status(STATUS_DEP_RESOLVE)
++        self.progress.step()
++        log.info("Callback getUpdates........ STATUS_DEP_RESOLVE ")
++        self.backend.percentage(self.progress.percent)
++        log.info("do a step>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+ 
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++  
++class UpdateCallback(callbacks.UpdateCallback):
++    def __init__(self, backend, cfg=None):
++        callbacks.UpdateCallback.__init__(self)
++        log.info("==== callback ==== ")
++        if cfg:
++            self.setTrustThreshold(cfg.trustThreshold)
++
++        self.backend = backend
++        self.currentJob = None
++        self.smallUpdate = False
++        self.error = []
++        self.progress = PackagekitProgress()
++        self.progress.set_steps([ 
++            1, # requestingChangeSet 1
++            50, # resolveDeps2
++            51, # SetChangesetHunk3
++            52, # requestingChangeSet4
++            80,# setUpdateHUnk5
++            81,# setUpdateJob6
++            ]  )
++    # 1 >> download
++    # 4 >> download
++    def requestingChangeSet(self):
++        log.info("Callback ........ STATUS_REQUEST changeset ")
++        self.backend.status(STATUS_DOWNLOAD)
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++        self.progress.step()
++
++    def downloadingChangeSet(self, got, need):
++        log.info("Callback ........ STATUS_DOWNLOAD  Changeset %s percent %.2f/%.2f bytes" % ( got*100/float(need), got/MEGA,need/MEGA) )
++        self.progress.set_subpercent( got*100 / float(need) )
++        self.backend.percentage( self.progress.percent )
++        log.info( "%s percent" % self.progress.percent)
++
++
++
++    # 2  
++    def resolvingDependencies(self):
++        #self.backend.status('Resolving Dependencies')
++        log.info("Callback ........ STATUS_DEP_RESOLVE ")
++        self.backend.percentage(self.progress.percent)
++        self.backend.status(STATUS_DEP_RESOLVE)
++        self.progress.step()
++        self.backend.percentage(self.progress.percent)
++        log.info(self.progress.percent)
++    # 3 
 +    def setChangesetHunk(self, num, total):
 +        log.info("callback. .......... set Changeset HUnk %s/%s" % (num, total ) )
 +        self.progress.step()
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
 +
++   # 5
 +    def setUpdateHunk(self, hunk, hunkCount):
 +        log.info("callback. .......... set update HUnk %s/%s" % ( hunk, hunkCount))
 +        self.progress.step()
@@ -1217,20 +1432,19 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 +
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
-+
++    # 6
 +    def setUpdateJob(self, job):
 +        log.info("callback. .......... set update Job")
 +        self.currentJob = job
-+        self.progress.step()
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
- 
++
++    #7 >> preparing update
      def creatingRollback(self):
          #self.backend.status('Creating Rollback')
 -        log.info("Callback ........ STATUS_ROLLBACK ")
 +        log.info("Callback ........ STATUS_ROLLBACK  ")
          self.backend.status(STATUS_ROLLBACK)
-+        self.progress.step()
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
  
@@ -1302,258 +1516,56 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
              self.backend.status(STATUS_UPDATE)
              package_id = self.backend.get_package_id(name, newVersion, newFlavor)
              self.backend.package(package_id, INFO_UPDATING, '')
-         elif oldVersion and not newVersion:
+-        elif oldVersion and not newVersion:
 -            log.info("Callback ........ STATUS_REMOVE ")
-+            log.info("Callback ........ STATUS_REMOVE preparing Update ")
-             self.backend.status(STATUS_REMOVE)
-             package_id = self.backend.get_package_id(name, oldVersion, oldFlavor)
-             self.backend.package(package_id, INFO_REMOVING, '')
+-            self.backend.status(STATUS_REMOVE)
+-            package_id = self.backend.get_package_id(name, oldVersion, oldFlavor)
+-            self.backend.package(package_id, INFO_REMOVING, '')
          elif not oldVersion and newVersion:
 -            log.info("Callback ........ STATUS_INSTALL ")
 +            log.info("Callback ........ STATUS_INSTALL preparing Update")
              self.backend.status(STATUS_INSTALL)
              package_id = self.backend.get_package_id(name, newVersion, newFlavor)
              self.backend.package(package_id, INFO_INSTALLING, '')
+-
 +        log.info(self.progress.percent)
- 
++    #8
      def creatingDatabaseTransaction(self, troveNum, troveCount):
 +        log.info("callback. .......... creating Database Transactions")
-+        self.progress.step()
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
          self.preparingUpdate(troveNum, troveCount, add=troveCount)
  
 -    def setChangesetHunk(self, num, total):
-+    def committingTransaction(self):
-+        #self.backend.status('Committing Transaction')
-+        log.info("Callback ........ STATUS_COMMIT  transactions ")
-+
-+        self.backend.status(STATUS_COMMIT)
-+        self.progress.step()
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+
-+    def updateDone(self):
-+        log.info("callback. ..........  update done")
-+        self.progress.step()
-+        self.backend.percentage(self.progress.percent)
-+        self.currentJob = None
-+        log.info(self.progress.percent)
-+
-+    def downloadingFileContents(self, got, need):
-+        #self.backend.status('Downloading files for changeset')
-+        log.info("Callback ........ STATUS_DOWNLOAD  FIle Contents %s " %  str( got*100/need  ))
-+        self.backend.status(STATUS_DOWNLOAD)
-+        #self.backend.sub_percentage(got*100/need)
-+
-+    def requestingFileContents(self):
-+        #self.backend.status('Requesting File Contents')
-+        log.info("Callback ........ STATUS_REQUEST request File contents ")
-+        self.backend.status(STATUS_REQUEST)
-+
-+    def removeFiles(self, filenum, total):
-+        log.info("Callback ........ STATUS_REMOVE %s/%sfiles" %( filenum, total) )
-+        self.backend.status(STATUS_REMOVE)
-+        self.preparingUpdate(filenum, total, add=total)
-+    
-+    def done(self):
-+        #self.backend.status('Done')
-+    #    self.progress.step()
-+        log.info("DONEEEEEEEEEEEE")
-+ 
-+    def warning(self, msg, *args, **kwargs):
-+        e = msg %args
-+        log.error("<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-+        log.error(e)
-+        self.backend.error(ERROR_DEP_RESOLUTION_FAILED, e, False )
-+        
-+    def tagHandlerOutput(self, tag, msg, stderr = False):
-         pass
- 
-+    def troveScriptOutput(self, typ, msg):
-+        pass
-+
-+class GetUpdateCallback(callbacks.UpdateCallback):
-+    def __init__(self, backend, cfg=None):
-+        callbacks.UpdateCallback.__init__(self)
-+        log.info("==== callback ==== ")
-+        if cfg:
-+            self.setTrustThreshold(cfg.trustThreshold)
-+
-+        self.backend = backend
-+        self.currentJob = None
-+        self.smallUpdate = False
-+        self.error = []
-+        self.progress = PackagekitProgress()
-+        self.progress.set_steps([1,50, 100 ]  )
-+    # 1 >> downloadingChangeSet
-+    # 2 >> downloadingChangeSet
-+    def requestingChangeSet(self):
-+        log.info("Callback getUpdates ........ STATUS_REQUEST changeset ")
-+        self.backend.status(STATUS_REQUEST)
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+        self.progress.step()
-+
-+    def downloadingChangeSet(self, got, need):
-+        log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
-+        self.backend.status(STATUS_DOWNLOAD)
-+        self.progress.set_subpercent( got*100 / float(need) )
-+        self.backend.percentage( self.progress.percent )
-+        log.info( "%s percent" % self.progress.percent)
-+    # 3
-+    def resolvingDependencies(self):
-+        #self.backend.status('Resolving Dependencies')
-+        self.backend.status(STATUS_DEP_RESOLVE)
-+        self.progress.step()
-+        log.info("Callback getUpdates........ STATUS_DEP_RESOLVE ")
-+        self.backend.percentage(self.progress.percent)
-+        log.info("do a step>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
-+
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+  
-+class UpdateCallback(callbacks.UpdateCallback):
-+    def __init__(self, backend, cfg=None):
-+        callbacks.UpdateCallback.__init__(self)
-+        log.info("==== callback ==== ")
-+        if cfg:
-+            self.setTrustThreshold(cfg.trustThreshold)
-+
-+        self.backend = backend
-+        self.currentJob = None
-+        self.smallUpdate = False
-+        self.error = []
-+        self.progress = PackagekitProgress()
-+        self.progress.set_steps([ 
-+            1, # requestingChangeSet 1
-+            50, # resolveDeps2
-+            51, # SetChangesetHunk3
-+            52, # requestingChangeSet4
-+            80,# setUpdateHUnk5
-+            81,# setUpdateJob6
-+            ]  )
-+    # 1 >> download
-+    # 4 >> download
-+    def requestingChangeSet(self):
-+        log.info("Callback ........ STATUS_REQUEST changeset ")
-+        self.backend.status(STATUS_DOWNLOAD)
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+        self.progress.step()
-+
-+    def downloadingChangeSet(self, got, need):
-+        log.info("Callback ........ STATUS_DOWNLOAD  Changeset %s percent %.2f/%.2f bytes" % ( got*100/float(need), got/MEGA,need/MEGA) )
-+        self.progress.set_subpercent( got*100 / float(need) )
-+        self.backend.percentage( self.progress.percent )
-+        log.info( "%s percent" % self.progress.percent)
-+
-+
-+
-+    # 2  
-+    def resolvingDependencies(self):
-+        #self.backend.status('Resolving Dependencies')
-+        log.info("Callback ........ STATUS_DEP_RESOLVE ")
-+        self.backend.percentage(self.progress.percent)
-+        self.backend.status(STATUS_DEP_RESOLVE)
-+        self.progress.step()
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+    # 3 
-+    def setChangesetHunk(self, num, total):
-+        log.info("callback. .......... set Changeset HUnk %s/%s" % (num, total ) )
-+        self.progress.step()
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+
-+   # 5
-     def setUpdateHunk(self, hunk, hunkCount):
--        if hunk > 0 and hunkCount > 0:
--            percentage = hunk / float(hunkCount) * 100.0
--            self.backend.percentage(percentage)
-+        log.info("callback. .......... set update HUnk %s/%s" % ( hunk, hunkCount))
-+        self.progress.step()
-+
-+        if hunk < hunkCount:
-+            p = hunk / float(hunkCount) * 100.0
-+            self.progress.set_subpercent(p)
-         else:
-             self.smallUpdate = True
- 
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+    # 6
-     def setUpdateJob(self, job):
-+        log.info("callback. .......... set update Job")
-         self.currentJob = job
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
- 
-+    #7 >> preparing update
-+    def creatingRollback(self):
-+        #self.backend.status('Creating Rollback')
-+        log.info("Callback ........ STATUS_ROLLBACK  ")
-+        self.backend.status(STATUS_ROLLBACK)
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+
-+
-+    def preparingUpdate(self, troveNum, troveCount, add=0):
-+        log.info("callback ....... preparing Update  trove %s/%s" % (troveNum, troveCount) )
-+        #self.progress.step()
-+        if not self.currentJob or len(self.currentJob) == 0 or troveNum > troveCount:
-+            return
-+
-+        if troveNum > 0 and troveCount > 0:
-+            sub_percent = (add + troveNum) / (2 * float(troveCount)) * 100
-+            self.progress.set_subpercent(sub_percent)
-+
-+        self.backend.percentage(self.progress.percent)
-+        if troveNum > 0:
-+            troveNum -= 1
-+        log.info("currentJob")
-+        log.info(self.currentJob[troveNum])
-+        job = self.currentJob[troveNum]
-+        name = job[0]
-+        oldVersion, oldFlavor = job[1]
-+        newVersion, newFlavor = job[2]
-+        #log.info("JOB>>>>>>>> %s " % str(job) )
-+        if oldVersion and newVersion:
-+            log.info("Callback ........ STATUS_UPDATE preparing Update ")
-+            self.backend.status(STATUS_UPDATE)
-+            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
-+            self.backend.package(package_id, INFO_UPDATING, '')
-+        elif not oldVersion and newVersion:
-+            log.info("Callback ........ STATUS_INSTALL preparing Update")
-+            self.backend.status(STATUS_INSTALL)
-+            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
-+            self.backend.package(package_id, INFO_INSTALLING, '')
-+        log.info(self.progress.percent)
-+    #8
-+    def creatingDatabaseTransaction(self, troveNum, troveCount):
-+        log.info("callback. .......... creating Database Transactions")
-+        self.backend.percentage(self.progress.percent)
-+        log.info(self.progress.percent)
-+        self.preparingUpdate(troveNum, troveCount, add=troveCount)
-+
+-        pass
 +    # 9
 +    def committingTransaction(self):
 +        #self.backend.status('Committing Transaction')
 +        log.info("Callback ........ STATUS_COMMIT  transactions ")
-+
+ 
+-    def setUpdateHunk(self, hunk, hunkCount):
+-        if hunk > 0 and hunkCount > 0:
+-            percentage = hunk / float(hunkCount) * 100.0
+-            self.backend.percentage(percentage)
+-        else:
+-            self.smallUpdate = True
 +        self.backend.status(STATUS_COMMIT)
 +        self.progress.step()
 +        self.backend.percentage(self.progress.percent)
 +        log.info(self.progress.percent)
-+
+ 
+-    def setUpdateJob(self, job):
+-        self.currentJob = job
 +    #10
-     def updateDone(self):
++    def updateDone(self):
 +        log.info("callback. ..........  update done")
 +        self.backend.percentage(self.progress.percent)
-         self.currentJob = None
++        self.currentJob = None
 +        log.info(self.progress.percent)
  
-+
+-    def updateDone(self):
+-        self.currentJob = None
+ 
 +
 +    def downloadingFileContents(self, got, need):
 +        #self.backend.status('Downloading files for changeset')
@@ -1585,7 +1597,7 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
      def tagHandlerOutput(self, tag, msg, stderr = False):
          pass
  
-@@ -130,6 +403,7 @@
+@@ -130,6 +399,7 @@
      def troveScriptFailure(self, typ, errcode):
          pass
  
@@ -1593,7 +1605,7 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
      def __init__(self, backend, cfg=None):
          callbacks.UpdateCallback.__init__(self)
          log.info("==== callback ==== ")
-@@ -139,3 +413,118 @@
+@@ -139,3 +409,118 @@
          self.backend = backend
          self.currentJob = None
          self.smallUpdate = False
@@ -1714,7 +1726,7 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 + 
 diff -r 4c5c579015af backends/conary/conaryEnums.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryEnums.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/conaryEnums.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -0,0 +1,68 @@
 +from packagekit.enums import GROUP_ACCESSIBILITY, GROUP_ACCESSORIES, GROUP_EDUCATION, GROUP_GAMES, GROUP_GRAPHICS, GROUP_INTERNET, GROUP_MULTIMEDIA, GROUP_OFFICE, GROUP_OTHER,  GROUP_PROGRAMMING,  GROUP_SYSTEM
 +
@@ -1786,7 +1798,7 @@ diff -r 4c5c579015af backends/conary/conaryEnums.py
 +    print groupMap
 diff -r 4c5c579015af backends/conary/conaryFilter.py
 --- a/backends/conary/conaryFilter.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryFilter.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/conaryFilter.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -24,7 +24,8 @@
  
  import re
@@ -1825,7 +1837,7 @@ diff -r 4c5c579015af backends/conary/conaryFilter.py
  
 diff -r 4c5c579015af backends/conary/conaryProgress.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryProgress.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/conaryProgress.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -0,0 +1,105 @@
 +# Licensed under the GNU General Public License Version 2
 +#
@@ -1934,7 +1946,7 @@ diff -r 4c5c579015af backends/conary/conaryProgress.py
 +
 diff -r 4c5c579015af backends/conary/conarypk.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conarypk.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/conarypk.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -0,0 +1,118 @@
 +#!/usr/bin/python
 +### compatible with conary 2.0.35
@@ -2056,7 +2068,7 @@ diff -r 4c5c579015af backends/conary/conarypk.py
 +
 diff -r 4c5c579015af backends/conary/pk-backend-conary.c
 --- a/backends/conary/pk-backend-conary.c	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pk-backend-conary.c	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Sat Feb 21 21:20:15 2009 -0600
 @@ -239,6 +239,32 @@
  }
  
@@ -2104,7 +2116,7 @@ diff -r 4c5c579015af backends/conary/pk-backend-conary.c
  	backend_update_system,			/* update_system */
 diff -r 4c5c579015af backends/conary/pkConaryLog.py
 --- a/backends/conary/pkConaryLog.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pkConaryLog.py	Fri Feb 20 00:51:31 2009 -0600
++++ b/backends/conary/pkConaryLog.py	Sat Feb 21 21:20:15 2009 -0600
 @@ -1,5 +1,5 @@
  #!/usr/bin/python
 -
