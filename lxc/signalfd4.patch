@@ -1,0 +1,29 @@
+diff -r 15e1b711e45a src/lxc/start.c
+--- a/src/lxc/start.c	Mon Feb 23 17:54:32 2009 -0500
++++ b/src/lxc/start.c	Mon Feb 23 18:22:48 2009 -0500
+@@ -48,7 +48,24 @@
+ #ifdef HAVE_SYS_SIGNALFD_H 
+ #include <sys/signalfd.h>
+ #else
+-extern int signalfd (int fd, const sigset_t *mask, int flags);
++/* If sys/signalfd.h does not exist, it is more likely than not
++ * that glibc doesn't implement signalfd().  Gasp.  Horror.  Shock.
++ * This is a cheap hack that is easier to maintain than a proper
++ * patch.  Sorry.  Also assumes that signalfd4 exists, which it
++ * will on 2.6.27 or later (anything with containers worth supporting).
++ */
++int signalfd (int fd, const sigset_t *mask, int flags)
++{
++#ifndef __NR_signalfd4
++/* assume kernel headers are too old */
++#  if __i386__
++#  define __NR_signalfd4 327
++#  elif __x86_64__
++#  define __NR_signalfd4 289
++#  endif
++#endif
++  return syscall (__NR_signalfd4, fd, mask, _NSIG / 8, flags);
++}
+ #endif
+ 
+ #include "error.h"
