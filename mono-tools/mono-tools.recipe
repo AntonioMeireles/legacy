@@ -3,26 +3,34 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
-class MonoTools(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class MonoTools(RPMPackageRecipe,AutoPackageRecipe):
     buildRequires = [ 'mono:devel','mono:runtime','mono:cil',
-                      'gnome-sharp:devellib', 'gnome-sharp:cil',
-                      'gnome-desktop-sharp:devellib', 'gnome-desktop-sharp:cil',
-                      'gtk-sharp:devellib', 'gtk-sharp:cil', 
+                      'gnome-sharp:devellib', 'gnome-sharp:cil', 'gnome-sharp:runtime',
+                      'gnome-desktop-sharp:devellib', 'gnome-desktop-sharp:cil' , 
+                      'gtk-sharp:devellib', 'gtk-sharp:cil', 'gtk-sharp:runtime',
                       'gecko-sharp:devellib', 'gecko-sharp:cil',
+                      'libgdiplus:devellib', 
                       'desktop-file-utils:runtime', 'pkgconfig:devel',
                       'automake:runtime', 'autoconf:runtime', 'libtool:runtime',
-                      'monodoc:cil', 'monodoc:devellib', 'monodoc:runtime',
+                      'gettext:runtime', 'intltool:runtime'
                       ]
 
     name = 'mono-tools'
-    version = '1.9'
+    version = '2.0'
+    rpmRelease = '8.fc10'
+    rpmPatches =[ 'monotools-2.0-gendarme.patch',
+                  'monotools-2.0-gendarmepc.patch',
+                  'monotools-2.0-infiles.patch',
+                  'monotools-2.0-makefiles.patch',]
 
     def unpack(r):
         r.addArchive('http://go-mono.com/sources/%(name)s/')
-        r.addSource('http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/mono-tools/mono-tools.patch')
-        #        r.Replace('@lib@', '%(lib)s', 'mono-tools.patch')
-        r.addAction("sed -i -e 's,@lib@,%(lib)s,' mono-tools.patch")
-        r.addAction('patch -p1 < mono-tools.patch')
+        for p in r.rpmPatches:
+            r.addPatch(p, filter = """ sed  -e 's!@libdir@!%(libdir)s!' """, rpm=r.srpm)
+
         r.Environment('MONO_SHARED_DIR', '/tmp')
         r.Run('autoreconf -f -i -s')
+        r.Environment('MONO_CAIRO_LIBS',"-r:%(libdir)s/mono/1.0/Mono.Cairo.dll")
+        # no smp flags - breaks the build
+        r.disableParallelMake()
