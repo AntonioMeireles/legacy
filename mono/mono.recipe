@@ -30,42 +30,38 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
     def unpack(r):
         RPMPackageRecipe.unpack(r)
         r.addSource('http://mono.ximian.com/daily/monolite-20080615.tar.gz')
-        r.addAction(""" sed -i -e 's!@@LIBDIR@@!%(libdir)s!' configure.in  """)
-
+        r.addAction(""" sed -i -e 's!@libdir@!%(libdir)s!' configure.in  """)
+        r.addAction(""" sed -i -e 's!$(prefix)/lib/!%(libdir)s/!' docs/Makefile.{am,in} """)
 
         r.Run(' autoreconf -f -i -s ')
         # Add undeclared Arg
         r.Run(""" sed -i "61a #define ARG_MAX_POSIX_ARG_MAX" mono/io-layer/wapi_glob.h """)
         # Remove prebuilt binaries
-        r.Remove('mcs/class/lib/monolite/*', recursive = True)
+        # r.Remove('mcs/class/lib/monolite/*', recursive = True)
 
 
     def configure(r):
         r.Environment('MONO_SHARED_DIR', '/tmp')
-        r.Run('gcc -o monodir  monodir.c -DMONODIR=\\"%(libdir)s/mono\\"')
+        r.macros.cflags += ' -fno-strict-aliasing '
+
+        r.Run('%(cc)s -o monodir  monodir.c -DMONODIR=\\"%(libdir)s/mono\\"')
         r.Install('monodir', '%(bindir)s/')
 
         extraConfig = ' --with-ikvm=yes --with-jit=yes --with-xen_opt=no '
-
-        # Enable the 2.0 FX and 2.1 moonlight
+        extraConfig += ' --disable-static '
+        extraConfig += ' --with-moonlight=no '
         extraConfig += ' --with-preview=yes '
-        extraConfig += ' --with-moonlight=yes '
-        # we need this, otherwise won't cook
-        extraConfig += ' --with-tls=pthread '
+        extraConfig += ' --with-libgdiplus=installed '
 
+        # we need this, otherwise won't cook
+        # extraConfig += ' --with-tls=pthread '
 
         r.Configure(extraConfig)
 
         # do not add spurious builddir RPATH entry
-        r.Replace(('^runpath_var=.*', 'runpath_var=""'),
-                  ('^hardcode_libdir_flag_spec=.*',
-                   'hardcode_libdir_flag_spec=""'), 'libtool')
-
-    def make(r):
-        r.Replace('\(wget \-O\- \$\(monolite_url\) \|\| curl \$\(monolite_url\)\)', '(cat ../../../monolite-20080615.tar.gz )', 'Makefile')
-#        r.Replace('monolite-latest.tar', 'monolite-20080615.tar', 'Makefile')
-        r.Make('get-monolite-latest')
-        r.Make(preMake='EXTERNAL_MCS=false EXTERNAL_RUNTIME=false')
+        #r.Replace(('^runpath_var=.*', 'runpath_var=""'),
+        #          ('^hardcode_libdir_flag_spec=.*',
+        #           'hardcode_libdir_flag_spec=""'), 'libtool')
 
     def makeinstall(r):
         r.MakeInstall()
@@ -73,19 +69,17 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
         # RPM scripts are not necessary
         r.Remove('%(bindir)s/mono-find-{provides,requires}')
 
-        # libtool wrappers currently get installed instead of the real things
-        r.Install('mono/dis/.libs/monodis', '%(bindir)s/')
-        r.Install('mono/monograph/.libs/monograph', '%(bindir)s/')
-
         # This was removed upstream... 
         r.Remove('%(libdir)s/gac/Mono.Security.Win32/[12]*', allowNoMatch=True)
         r.Remove('%(libdir)s/1.0/Mono.Security.Win32.dll', allowNoMatch=True)
         r.Remove('%(libdir)s//2.0/Mono.Security.Win32.dll', allowNoMatch=True)
-        r.Remove('%(bindir)s/jay', allowNoMatch=True)
-        r.Remove('%(datadir)s/jay', recursive = True, allowNoMatch=True)
         r.Remove('%(datadir)s/libgc-mono', recursive = True, allowNoMatch=True)
-        r.Remove('%(mandir)s/man1/{jay,monostyle,oldmono,mint}.1', allowNoMatch=True)
-        r.Remove('%(libdir)s/mono/1.0/{CorCompare.exe,browsercaps-updater.exe*,mono-api-diff.exe}', allowNoMatch=True)
+        r.Remove('%(bindir)s/jay', allowNoMatch=True)
+        r.Remove('%(bindir)s/smcs', allowNoMatch=True)
+        r.Remove('%(libdir)s/pkgconfig/smcs.pc', allowNoMatch=True)
+        r.Remove('%(datadir)s/jay', recursive = True, allowNoMatch=True)
+        r.Remove('%(mandir)s/man1/{jay,monostyle,oldmono,mint}*', allowNoMatch=True)
+        r.Remove('%(libdir)s/mono/1.0/browsercaps-updater.exe*', allowNoMatch=True)
         r.Remove('%(libdir)s/mono/*/mono-api-info.exe', recursive = True, allowNoMatch=True)
 
 
