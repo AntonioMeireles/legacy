@@ -5,24 +5,36 @@
 #
 
 loadSuperClass('gnomepackage')
-class GtkSharp(GnomePackageRecipe):
+loadSuperClass('rpmpackage')
+class GtkSharp(RPMPackageRecipe,GnomePackageRecipe):
     name = 'gtk-sharp'
-    version = '2.12.4'
+    version = '2.12.7'
+    rpmRelease = '1.fc10.1'
+    rpmName = 'gtk-sharp2'
+    rpmPatches = [ 'gtk-sharp2-2.10.3-libdir.patch',
+                   'gtk-sharp-2.8.2-docfix.patch']
+
+    makeInstallArgs = """  DESTDIR=%(destdir)s GACUTIL_FLAGS="/package gtk-sharp-2.0 /gacdir %(libdir)s /root %(destdir)s/%(libdir)s" """
 
     buildRequires = [ 'atk:devel', 'cairo:devel', 'fontconfig:devel',
-        'freetype:devel', 'glib:devel', 'libglade:devel',
-        'libpng:devel', 'libxml2:devel', 'mono:cil', 'mono:devel', 'mono:runtime',
-        'perl-XML-LibXML:perl', 'perl:lib', 'pango:devel', 'monodoc:runtime', 'perl:devel']
-
-    patches = [ 'http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/gtk-sharp2/gtk-sharp2-2.10.3-libdir.patch',
-                'http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/gtk-sharp2/gtk-sharp-2.8.2-docfix.patch',
-                'http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/gtk-sharp2/gtk-sharp2-2.10.3-assemblydir.patch']
+                      'freetype:devel', 'glib:devel', 'libglade:devel',
+                      'libpng:devel', 'libxml2:devel', 'mono:cil', 'mono:devel', 'mono:runtime',
+                      'perl-XML-LibXML:perl', 'perl:lib', 'pango:devel', 'perl:devel']
 
     def unpack(r):
-        GnomePackageRecipe.unpack(r)
-        r.Environment('MONO_SHARED_DIR', '/tmp')
-        r.Replace('/gacdir \$\(DESTDIR\)\$\(prefix\)/lib','/gacdir $(DESTDIR)%(libdir)s', 'configure')
+        RPMPackageRecipe.unpack(r)
+        # Fix assembly libdir
+        r.Run(""" sed -i 's|$(prefix)/lib|%(libdir)s|g' parser/Makefile.in \
+                                      generator/Makefile.in \
+                                      doc/Makefile.* \
+                                      configure.in """)
 
+        r.Environment('MONO_SHARED_DIR', '/tmp')
+        r.Environment('MONO_CAIRO_LIBS', "-r:%(libdir)s/mono/1.0/Mono.Cairo.dll")
 
     def policy(r):
-        r.Remove('/usr/lib/monodoc/sources/', recursive = True)
+        r.MakeDirs('%(libdir)s/monodoc/sources/')
+        r.Install('doc/gtk-sharp-docs.source', '%(libdir)s/monodoc/sources/', mode = 0755)
+        r.Move('doc/en', '%(libdir)s/monodoc/sources/gtk-sharp-docs')
+
+        r.ComponentSpec('devel', '%(libdir)s/monodoc/.*')
