@@ -4,30 +4,42 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class MonoDevelop(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class MonoDevelop(RPMPackageRecipe,AutoPackageRecipe):
     name = 'monodevelop'
-    version = '1.0'
-    buildRequires = [ 'desktop-file-utils:runtime', 'gecko-sharp:devellib', 'gecko-sharp:cil', 'gettext:runtime', 'gnome-sharp:devellib', 'gnome-sharp:lib', 'gtk-sharp:devellib', 'gtk-sharp:lib', 'gtksourceview-sharp:devellib', 'gtksourceview-sharp:cil', 'intltool:runtime', 'mono:devel', 'mono:lib', 'mono:runtime', 'monodoc:devellib', 'monodoc:cil', 'monodoc:lib', 'perl:runtime', 'pkgconfig:devel', 'shared-mime-info:runtime', 'libgdiplus:lib', 'gnome-sharp:cil', 'gtk-sharp:cil', 'gtksourceview-sharp:cil', 'mono-addins:devellib', 'mono-addins:cil', 'mono:cil', 'automake:runtime', 'autoconf:runtime', 'libtool:runtime', ]
+    version = '1.9'
+    rpmRelease = '6.fc10'
+    buildRequires = [ 'desktop-file-utils:runtime', 'gecko-sharp:devellib', 'gecko-sharp:cil', 'gettext:runtime', 'gnome-sharp:devellib', 'gnome-sharp:lib', 'gtk-sharp:devellib', 'gtk-sharp:lib', 'gtksourceview-sharp:devellib', 'gtksourceview-sharp:cil', 'intltool:runtime', 'mono:devel', 'mono:lib', 'mono:runtime', 'perl:runtime', 'pkgconfig:devel', 'shared-mime-info:runtime', 'libgdiplus:lib', 'gnome-sharp:cil', 'gtk-sharp:cil', 'gtksourceview-sharp:cil', 'mono-addins:devellib', 'mono-addins:cil', 'mono:cil', 'automake:runtime', 'autoconf:runtime', 'libtool:runtime', ]
 
+    rpmPatches = [ 'monodevelop-1.9-libdir.patch',
+#                   'monodevelop-1.9-use-system-cecil.patch',
+#                   'monodevelop-1.9-use-system-nunit.patch',
+                   'monodevelop-1.9-headbuild.patch',
+                   ]
     def unpack(r):
+        RPMPackageRecipe.unpack(r)
         r.Environment('MONO_SHARED_DIR', '/tmp')
-        r.addArchive('http://go-mono.com/sources/%(name)s/')
-        r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/monodevelop/monodevelop-config.patch')
-        r.addPatch('http://cvs.fedoraproject.org/viewcvs/*checkout*/devel/monodevelop/monodevelop-libdir.patch')
-	r.Replace('@prefix@/lib/monodevelop\/bin', '%(libdir)s/monodevelop/bin', 'mdtool.in')
         r.Run('autoreconf -f -i -s')
-
+        r.Run(""" sed -i src/addins/NUnit/MonoDevelopNUnit.addin.xml -e 's|LIBDIR|%(libdir)s|' """)
+        r.macros.cecilver = '$(gacutil -l Mono.Cecil |grep Mono.Cecil | cut -d "=" -f 2 | cut -d "," -f 1)) '
+        r.macros.ceciltoken = '$( gacutil -l Mono.Cecil |grep Mono.Cecil | cut -d "=" -f 4))'
+        r.macros.cecilmdbver = '$(gacutil -l Mono.Cecil.Mdb |grep Mono.Cecil.Mdb | cut -d "=" -f 2 | cut -d "," -f 1))'
+        r.macros.cecilmdbtoken = '$(gacutil -l Mono.Cecil.Mdb |grep Mono.Cecil.Mdb | cut -d "=" -f 4))'
+        # Here is where we replace the LONGCECILSTRING and LONGCECILMDBSTRING
+        # placeholders with the actual values for the Mono.Cecil and Mono.Cecil.Mdb
+        # ver__token
+        # get this right ... 
 
     def configure(r):
         r.disableParallelMake()
-        r.Configure(' --disable-update-mimedb --disable-update-desktopdb '
-                    ' --enable-subversion --enable-boo --enable-java '
-                    ' --enable-nemerle --enable-versioncontrol ' 
-                    ' --prefix=%(prefix)s --libdir=%(libdir)s '
-                    '--enable-gnomeplatform --enable-c')
+        r.Configure(' --disable-update-mimedb '
+                    ' --disable-update-desktopdb '
+                    ' --enable-gtksourceview2 --enable-tests ')
+
+    def makeinstall(r):
+        r.MakeInstall("""GACUTIL_FLAGS="/package monodevelop /root %(destdir)s%(libdir)s" """)
 
     def policy(r):
         r.Requires('libgdiplus:lib','%(bindir)s/%(name)s')
-        #        r.Requires(exceptDeps=r'CIL\:\ monodoc\(1\.0\.0\.0\)')
-        r.Requires('monodoc:cil','%(bindir)s/%(name)s')
+
 
