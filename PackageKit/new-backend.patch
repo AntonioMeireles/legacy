@@ -1,6 +1,6 @@
 diff -r 4c5c579015af backends/conary/Makefile.am
 --- a/backends/conary/Makefile.am	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/Makefile.am	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/Makefile.am	Wed Feb 25 22:12:33 2009 -0600
 @@ -1,18 +1,21 @@
  helperdir = $(datadir)/PackageKit/helpers/conary
  dist_helper_DATA = 			\
@@ -31,8 +31,8 @@ diff -r 4c5c579015af backends/conary/Makefile.am
  	chmod a+rx $(DESTDIR)$(helperdir)/*.py
 diff -r 4c5c579015af backends/conary/XMLCache.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/XMLCache.py	Wed Feb 25 21:14:45 2009 -0600
-@@ -0,0 +1,306 @@
++++ b/backends/conary/XMLCache.py	Wed Feb 25 22:12:33 2009 -0600
+@@ -0,0 +1,314 @@
 +import os
 +from xml.dom.minidom import parse, parseString
 +from xml.parsers.expat import ExpatError
@@ -112,7 +112,7 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +                return self._repo
 +            except ExpatError:
 +                Pk = PackageKitBaseBackend("")
-+                Pk.error(ERROR_REPO_CONFIGURATION_ERROR," The file %s not generate good submit a issue " % ( self.xml_path + self.repo, ) )
++                Pk.error(ERROR_REPO_CONFIGURATION_ERROR," The file %s not parsed submit a issue " % ( self.xml_path + self.repo, ) )
 +       
 +
 +    def _generatePackage(self, package_node ): 
@@ -145,7 +145,7 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +            for package in packages.childNodes:
 +                pkg = self._generatePackage(package)
 +                pkg["label"] = self.label
-+                if name.lower() in pkg["name"]:
++                if name.lower() in pkg["name"].lower():
 +                    results.append(pkg['name'])
 +        return  [ self._getPackage(i) for i in set(results) ]
 +
@@ -186,8 +186,15 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +                        for j in pkg[i]:
 +                            if name.lower() in j.lower():
 +                                results.append(pkg['name'])
-+                    if name.lower() in pkg[i]:
++                    
++                    if type(pkg[i]) == str:
++                        check = pkg[i].lower()
++                    else:
++                        check = pkg[i]
++                    if name.lower() in check:
 +                        results.append(pkg['name'])
++            
++
 +        return  [ self._getPackage(i) for i in set(results) ]
 +    def _getAllPackages(self):
 +        doc = self._open()
@@ -332,16 +339,17 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +
 +if __name__ == '__main__':
 +  #  print ">>> name"
-+   # print XMLCache().search('music', 'name' )
++    import sys
++    l= XMLCache().search(sys.argv[1],sys.argv[2] )
 +   # print ">> details"
 +   # l= XMLCache().search('Internet', 'group' )
 +
-+    #for v,p in enumerate(l):
-+    #    print v,p["name"]
-+    print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
++    for v,p in enumerate(l):
++        print v,p["name"]
++    #print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
 diff -r 4c5c579015af backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryBackend.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conaryBackend.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -22,102 +22,35 @@
  import sys
  import os
@@ -1160,7 +1168,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
      log.info("======== argv =========== ")
 diff -r 4c5c579015af backends/conary/conaryCallback.py
 --- a/backends/conary/conaryCallback.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryCallback.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conaryCallback.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -17,110 +17,379 @@
  #
  # Copyright (C) 2007 Elliot Peele <elliot@bentlogic.net>
@@ -1734,7 +1742,7 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 + 
 diff -r 4c5c579015af backends/conary/conaryEnums.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryEnums.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conaryEnums.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -0,0 +1,189 @@
 +from packagekit.enums import GROUP_ACCESSIBILITY, GROUP_ACCESSORIES, GROUP_EDUCATION, GROUP_GAMES, GROUP_GRAPHICS, GROUP_INTERNET, GROUP_MULTIMEDIA, GROUP_OFFICE, GROUP_OTHER,  GROUP_PROGRAMMING,  GROUP_SYSTEM
 +
@@ -1927,7 +1935,7 @@ diff -r 4c5c579015af backends/conary/conaryEnums.py
 +    print groupMap
 diff -r 4c5c579015af backends/conary/conaryFilter.py
 --- a/backends/conary/conaryFilter.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryFilter.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conaryFilter.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -24,7 +24,8 @@
  
  import re
@@ -1967,7 +1975,7 @@ diff -r 4c5c579015af backends/conary/conaryFilter.py
  
 diff -r 4c5c579015af backends/conary/conaryProgress.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryProgress.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conaryProgress.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -0,0 +1,105 @@
 +# Licensed under the GNU General Public License Version 2
 +#
@@ -2076,7 +2084,7 @@ diff -r 4c5c579015af backends/conary/conaryProgress.py
 +
 diff -r 4c5c579015af backends/conary/conarypk.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conarypk.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/conarypk.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -0,0 +1,119 @@
 +#!/usr/bin/python
 +### compatible with conary 2.0.35
@@ -2199,7 +2207,7 @@ diff -r 4c5c579015af backends/conary/conarypk.py
 +
 diff -r 4c5c579015af backends/conary/pk-backend-conary.c
 --- a/backends/conary/pk-backend-conary.c	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pk-backend-conary.c	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Wed Feb 25 22:12:33 2009 -0600
 @@ -239,6 +239,32 @@
  }
  
@@ -2247,7 +2255,7 @@ diff -r 4c5c579015af backends/conary/pk-backend-conary.c
  	backend_update_system,			/* update_system */
 diff -r 4c5c579015af backends/conary/pkConaryLog.py
 --- a/backends/conary/pkConaryLog.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pkConaryLog.py	Wed Feb 25 21:14:45 2009 -0600
++++ b/backends/conary/pkConaryLog.py	Wed Feb 25 22:12:33 2009 -0600
 @@ -1,5 +1,5 @@
  #!/usr/bin/python
 -
