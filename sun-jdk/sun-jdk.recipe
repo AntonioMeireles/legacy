@@ -4,36 +4,26 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('javapackage')
-class SunJava(JavaPackageRecipe, CPackageRecipe):
+loadSuperClass('jvmpackage')
+loadSuperClass('binarypackage')
+class SunJava(JVMPackageRecipe, BinaryPackageRecipe):
+
     name = 'sun-jdk'
     version = '6u12'
 
-    clearBuildRequires()
+    vendor = 'sun'
+    release = '1.6.0'
 
-    javaname = 'sun-java-%s' % version
-    jdkhome = '%%(jvmdir)s/%s' % javaname
-    javahome = '%s/jre' % jdkhome
+    def unpack(r):
 
-    def upstreamUnpack(r):
+        r.JVMInit()
+        r.JVMProfile()
 
-        r.macros.jrename = 'sun-jre'
-        r.macros.jdkhome = r.jdkhome
-        r.macros.javaname = r.javaname
-
-        upver = r.version.replace('.', '_')
-        site = 'http://download.java.net/dlj/binaries/'+'jdk-'+upver+'-dlj-linux-'
-        arch32 = 'i586.bin'
-        arch64 = 'amd64.bin'
-
-        r.addSource(site+arch32, use=(Arch.x86))
-        r.addSource(site+arch64, use=(Arch.x86_64))
-
-        r.addSource('%(name)s.sh', macros=True)
+        site = 'http://download.java.net/dlj/binaries'
+        for (jarch, arch) in (('i586', Arch.x86), ('amd64', Arch.x86_64)):
+            r.addSource(site+'/jdk-%(version)s-dlj-linux-'+jarch+'.bin', use=arch)
 
         r.Run('sh *.bin --accept-license --unpack')
-
-    def upstreamSetup(r):
 
         r.Install('jdk*/*', '%(jdkhome)s/')
 
@@ -52,30 +42,23 @@ class SunJava(JavaPackageRecipe, CPackageRecipe):
         r.Install(desktopIcon, '%(datadir)s/pixmaps/sun-jcontrol.png')
 
         # Create symlink for firefox plugin
-        r.macros.javaplugin = '%%(javahome)s/lib/%s/libnpjp2.so' % ('amd64', 'i386')[Arch.x86==True]
-        r.Symlink('%(javaplugin)s', '%(libdir)s/mozilla/plugins/libjavaplugin_oji.so')
+        r.pluginFile = '%(jrelibdir)s/libnpjp2.so'
+        r.pluginLink = '%(libdir)s/mozilla/plugins/libjavaplugin_oji.so'
+        r.Symlink(r.pluginFile, r.pluginLink)
+        r.Provides('file', r.pluginFile)
+        r.Requires('file: '+r.pluginFile, r.pluginLink)
 
-        r.PackageSpec('%(jrename)s', '%(libdir)s/mozilla/plugins/')
+    def policy(r):
 
-        r.macros.jsuffix = ('-64','')[Arch.x86==True]
-        r.Install(
-            '%(name)s.sh',
-            '%(sysconfdir)s/profile.d/%(name)s%(jsuffix)s.sh',
-            package='%(jrename)s', mode=0755
-        )
+        r.ComponentSpec('%(jvmvendor)s-java-webplugin:runtime', '%(libdir)s/mozilla/')
+        #r.DanglingSymlinks(exceptions='%(libdir)s/mozilla/plugins/')
 
-        r.ComponentSpec('locale', '%(javahome)s/lib/locale/')
-        r.ComponentSpec('runtime', '/')
-        r.PackageSpec('%(jrename)s', '%(javahome)s/')
+        r.JVMPolicy()
 
         # RPL-1534
-        r.Requires(exceptDeps='java.*')
+        #r.Requires(exceptDeps='java.*')
 
         # RPL-1558
         r.Requires('%(jrename)s:runtime', '%(jdkhome)s/.*')
 
-        r.TagSpec('desktop-file', '%(datadir)s/applications/')
-
-        del(r.AutoDoc)
-        del(r.RemoveNonPackageFiles)
 
