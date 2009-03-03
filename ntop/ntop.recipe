@@ -1,0 +1,57 @@
+#
+# Copyright (c) 2009 John Anderson
+# Copyright (c) 2009 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Ntop(AutoPackageRecipe):
+    name = 'ntop'
+    version = '3.3.9'
+
+    buildRequires = [ 
+        'autoconf:runtime',
+        'automake:runtime',
+        'chkconfig:runtime',
+        'gcc-c++:runtime',
+        'gdbm:devel',
+        'GeoIP:devel',
+        'gzip:runtime',
+        'libpcap:devel',
+        'libtool:runtime',
+        'openssl:devel', 
+        'pam:devel',
+        'patch:runtime',
+        'pcre:devel', 
+        'perl:devel',
+        'rrdtool:devel',
+        'tcp_wrappers:devel',
+        'wget:runtime',
+        'which:runtime',
+    ]
+
+    def unpack(r):
+        r.addArchive('http://downloads.sourceforge.net/ntop/'
+                     '%(name)s-%(version)s.tar.gz')
+        # ntop 3.3.9 includes a corrupt etter.finger.os.gz
+        # use "cvc refresh" to get a new copy
+        r.addSource('http://ettercap.cvs.sourceforge.net/ettercap/ettercap_ng/'
+                    'share/etter.finger.os?rev=HEAD', dest='etter.finger.os',
+                    apply='gzip -9f etter.finger.os')
+
+        r.addPatch('use-system-geoip.patch')
+        r.addPatch('search-system-geoip-database.patch')
+        r.addSource('ntop.conf', dir='%(sysconfdir)s') # modified from Fedora
+        r.addSource('http://cvs.fedoraproject.org/viewvc/rpms/ntop/devel/'
+                    'ntop.init?view=co', dest='%(initdir)s/ntop',
+                    mode=0755)
+
+    def configure(r):
+        r.Configure(configureName='./autogen.sh')
+        r.Replace('/usr/local/etc/ntop',
+                  '%(datadir)s/ntop',
+                  'globals-defines.h')
+
+    def policy(r):
+        r.Move('/etc/ntop/*gz', '%(datadir)s/ntop/')
+        r.Requires('GeoIP:data', '/usr/bin/ntop')
