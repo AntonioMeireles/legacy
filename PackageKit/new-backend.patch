@@ -1,6 +1,6 @@
 diff -r 4c5c579015af backends/conary/Makefile.am
 --- a/backends/conary/Makefile.am	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/Makefile.am	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/Makefile.am	Mon Mar 02 23:49:09 2009 -0600
 @@ -1,18 +1,21 @@
  helperdir = $(datadir)/PackageKit/helpers/conary
  dist_helper_DATA = 			\
@@ -31,7 +31,7 @@ diff -r 4c5c579015af backends/conary/Makefile.am
  	chmod a+rx $(DESTDIR)$(helperdir)/*.py
 diff -r 4c5c579015af backends/conary/XMLCache.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/XMLCache.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/XMLCache.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -0,0 +1,314 @@
 +import os
 +from xml.dom.minidom import parse, parseString
@@ -121,9 +121,9 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +        cat = []
 +        for node in package_node.childNodes:
 +            if pkg.has_key('category'):
-+                cat.append(str(node.childNodes[0].nodeValue))
++                cat.append(str(node.childNodes[0].nodeValue).replace(";","").replace("#",""))
 +            else:
-+                pkg[node.nodeName.encode("UTF-8")] = str(node.childNodes[0].nodeValue.encode("UTF-8"))
++                pkg[node.nodeName.encode("UTF-8")] = str(node.childNodes[0].nodeValue.encode("UTF-8")).replace(";",' ').replace("#","")
 +        pkg["category"] = cat
 +        return pkg
 +
@@ -349,7 +349,7 @@ diff -r 4c5c579015af backends/conary/XMLCache.py
 +    #print  XMLCache().getGroup(['GTK', 'Graphics', 'Photography', 'Viewer'])
 diff -r 4c5c579015af backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryBackend.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conaryBackend.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -22,102 +22,35 @@
  import sys
  import os
@@ -659,7 +659,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
          return updJob
  
      def _get_package_update(self, name, version, flavor):
-@@ -295,111 +246,146 @@
+@@ -295,111 +246,147 @@
              applyList = [(name, (None, None), (version, flavor), True)]
          return self._do_update(applyList)
  
@@ -829,6 +829,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
 +            summary = package_id.split(";")
 +            data = summary[3].split("#")
 +            if data[1]:
++                log.info(summary[3].split("#")[1])
 +                metadata = eval(summary[3].split("#")[1])
 +            else:
 +                metadata = {}
@@ -884,7 +885,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def get_requires(self, filters, package_ids, recursive_text):
          pass
-@@ -443,32 +429,41 @@
+@@ -443,32 +430,41 @@
                                                   withFiles = True):
                      files.append(path)
              return files
@@ -938,7 +939,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def update(self, package_ids):
-@@ -478,11 +473,12 @@
+@@ -478,11 +474,12 @@
          self.allow_cancel(True)
          self.percentage(0)
          self.status(STATUS_RUNNING)
@@ -953,7 +954,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'No available updates')
  
-@@ -497,12 +493,10 @@
+@@ -497,12 +494,10 @@
          '''
          Implement the {backend}-{install, update}-packages functionality
          '''
@@ -968,7 +969,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
              self.allow_cancel(True)
              self.percentage(0)
-@@ -513,8 +507,10 @@
+@@ -513,8 +508,10 @@
                      self.error(ERROR_PACKAGE_ALREADY_INSTALLED,
                          'Package already installed')
  
@@ -980,7 +981,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
                  self._do_package_update(name, version, flavor)
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'Package was not found')
-@@ -528,20 +524,27 @@
+@@ -528,20 +525,27 @@
          self.percentage(0)
          self.status(STATUS_RUNNING)
          log.info("========== Remove Packages ============ ")
@@ -1010,7 +1011,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _get_metadata(self, package_id, field):
          '''
-@@ -625,11 +628,11 @@
+@@ -625,11 +629,11 @@
          #vendor_url = _format_list(urls['vendor'])
          vendor_url = ""
          reboot = "none"
@@ -1024,7 +1025,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
      def get_details(self, package_ids):
          '''
          Print a detailed description for a given package
-@@ -642,26 +645,58 @@
+@@ -642,26 +646,58 @@
          log.info(package_ids[0])
          package_id = package_ids[0]
          name, version, flavor, installed = self._findPackage(package_id)
@@ -1092,7 +1093,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _get_status(self, notice):
          # We need to figure out how to get this info, this is a place holder
-@@ -676,18 +711,29 @@
+@@ -676,18 +712,29 @@
      @ExceptionHandler
      def get_updates(self, filters):
          self.allow_cancel(True)
@@ -1124,7 +1125,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
              name = job[0][0]
  
              # On an erase display the old version/flavor information.
-@@ -704,6 +750,8 @@
+@@ -704,6 +751,8 @@
              troveTuple.append(version)
              installed = self.check_installed(troveTuple)
              self._show_package(name, version, flavor, INFO_NORMAL)
@@ -1133,7 +1134,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def _findPackage(self, package_id):
          '''
-@@ -711,12 +759,17 @@
+@@ -711,12 +760,17 @@
          '''
          log.info("========== _findPackage ==========")
          log.info(package_id)
@@ -1157,7 +1158,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
  
      def repo_set_data(self, repoid, parameter, value):
          '''
-@@ -736,6 +789,8 @@
+@@ -736,6 +790,8 @@
          '''
          pass
  
@@ -1168,7 +1169,7 @@ diff -r 4c5c579015af backends/conary/conaryBackend.py
      log.info("======== argv =========== ")
 diff -r 4c5c579015af backends/conary/conaryCallback.py
 --- a/backends/conary/conaryCallback.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryCallback.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conaryCallback.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -17,110 +17,379 @@
  #
  # Copyright (C) 2007 Elliot Peele <elliot@bentlogic.net>
@@ -1742,7 +1743,7 @@ diff -r 4c5c579015af backends/conary/conaryCallback.py
 + 
 diff -r 4c5c579015af backends/conary/conaryEnums.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryEnums.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conaryEnums.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -0,0 +1,189 @@
 +from packagekit.enums import GROUP_ACCESSIBILITY, GROUP_ACCESSORIES, GROUP_EDUCATION, GROUP_GAMES, GROUP_GRAPHICS, GROUP_INTERNET, GROUP_MULTIMEDIA, GROUP_OFFICE, GROUP_OTHER,  GROUP_PROGRAMMING,  GROUP_SYSTEM
 +
@@ -1935,7 +1936,7 @@ diff -r 4c5c579015af backends/conary/conaryEnums.py
 +    print groupMap
 diff -r 4c5c579015af backends/conary/conaryFilter.py
 --- a/backends/conary/conaryFilter.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/conaryFilter.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conaryFilter.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -24,7 +24,8 @@
  
  import re
@@ -1975,7 +1976,7 @@ diff -r 4c5c579015af backends/conary/conaryFilter.py
  
 diff -r 4c5c579015af backends/conary/conaryProgress.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conaryProgress.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conaryProgress.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -0,0 +1,105 @@
 +# Licensed under the GNU General Public License Version 2
 +#
@@ -2084,7 +2085,7 @@ diff -r 4c5c579015af backends/conary/conaryProgress.py
 +
 diff -r 4c5c579015af backends/conary/conarypk.py
 --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-+++ b/backends/conary/conarypk.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/conarypk.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -0,0 +1,119 @@
 +#!/usr/bin/python
 +### compatible with conary 2.0.35
@@ -2207,7 +2208,7 @@ diff -r 4c5c579015af backends/conary/conarypk.py
 +
 diff -r 4c5c579015af backends/conary/pk-backend-conary.c
 --- a/backends/conary/pk-backend-conary.c	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pk-backend-conary.c	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Mon Mar 02 23:49:09 2009 -0600
 @@ -239,6 +239,32 @@
  }
  
@@ -2255,7 +2256,7 @@ diff -r 4c5c579015af backends/conary/pk-backend-conary.c
  	backend_update_system,			/* update_system */
 diff -r 4c5c579015af backends/conary/pkConaryLog.py
 --- a/backends/conary/pkConaryLog.py	Tue Feb 17 02:00:05 2009 -0600
-+++ b/backends/conary/pkConaryLog.py	Mon Mar 02 16:34:12 2009 -0600
++++ b/backends/conary/pkConaryLog.py	Mon Mar 02 23:49:09 2009 -0600
 @@ -1,5 +1,5 @@
  #!/usr/bin/python
 -
