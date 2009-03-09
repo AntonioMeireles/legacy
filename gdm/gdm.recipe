@@ -9,24 +9,25 @@ loadRecipe('gnomepackage')
 class Gdm(RPMPackageRecipe,GnomePackageRecipe):
 
     name = 'gdm'
-    version = '2.24.1'
-    rpmRelease = '1.fc10'
+    version = '2.25.2'
+    rpmRelease = '11.fc11'
 
-    buildRequires = [ 'libglade:devel', 'pango:devel', 'gtk:devel', 'libgnomeui:devel', 'libgnomecanvas:devel', 'librsvg:devel', 'libxml2:devel', 'fontconfig:devel', 'libgsf:devel', 'libcroco:devel', 'attr:devel', 'rarian:runtime', 'desktop-file-utils:runtime', 'GConf:devel', 'ORBit2:devel', 'atk:devel', 'cairo:devel', 'freetype:devel', 'glib:devel', 'gnome-keyring:devel', 'gnome-vfs:devel', 'libart_lgpl:devel', 'libbonobo:devel', 'libbonoboui:devel', 'libgnome:devel', 'libpng:devel', 'popt:devel', 'tcp_wrappers:devel', 'gettext:runtime', 'gtk:runtime', 'perl:runtime', 'usermode:runtime', 'zenity:runtime', 'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXi:devellib', 'libXinerama:devel', 'libXrender:devel','libdmx:devellib', 'gnome-doc-utils:devel', 'gnome-doc-utils:runtime', 'audit:devel', 'shadow:runtime', 'automake:runtime', 'autoconf:runtime', 'libtool:devel',  'pkgconfig:devel' , 'm4:runtime', 'expat:devel', 'pam:devel', 'dbus-glib:runtime', 'GConf:runtime', 'xorg-server:runtime', 'PolicyKit-gnome:devel', 'PolicyKit:devel', 'gnome-panel:devel', 'iso-codes:devellib', 'libxklavier:devel', 'xdm:runtime' ]
+    buildRequires = [ 'libglade:devel', 'pango:devel', 'gtk:devel', 'libgnomeui:devel', 'libgnomecanvas:devel', 'librsvg:devel', 'libxml2:devel', 'fontconfig:devel', 'libgsf:devel', 'libcroco:devel', 'attr:devel', 'rarian:runtime', 'desktop-file-utils:runtime', 'GConf:devel', 'ORBit2:devel', 'atk:devel', 'cairo:devel', 'freetype:devel', 'glib:devel', 'gnome-keyring:devel', 'gnome-vfs:devel', 'libart_lgpl:devel', 'libbonobo:devel', 'libbonoboui:devel', 'libgnome:devel', 'libpng:devel', 'popt:devel', 'tcp_wrappers:devel', 'gettext:runtime', 'gtk:runtime', 'perl:runtime', 'usermode:runtime', 'zenity:runtime', 'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXi:devellib', 'libXinerama:devel', 'libXrender:devel','libdmx:devellib', 'gnome-doc-utils:devel', 'gnome-doc-utils:runtime', 'audit:devel', 'shadow:runtime', 'automake:runtime', 'autoconf:runtime', 'libtool:devel',  'pkgconfig:devel' , 'm4:runtime', 'expat:devel', 'pam:devel', 'dbus-glib:runtime', 'GConf:runtime', 'xorg-server:runtime', 'PolicyKit-gnome:devel', 'PolicyKit:devel', 'gnome-panel:devel', 'iso-codes:devellib', 'libxklavier:devel', 'xdm:runtime', 'hal:devel', 'nss:devel' ]
 
     extraConfig = ' --with-pam-prefix=%(sysconfdir)s'
     extraConfig += ' --enable-console-helper  --without-selinux --with-console-kit'
     extraConfig += ' --disable-scrollkeeper --enable-profiling '
 
-    rpmPatches = [  'xkb-groups.patch',
-                    'gdm-2.24.0-force-active-vt.patch',
-                    'gdm-2.23.92-save-root-window.patch',
-                    # uses /etc/sysconfig/keyboard and is thus not directly upstreamable
-                    # should probably be changed to get the system layout from the X server
-                    'gdm-system-keyboard.patch', 
-
+    rpmPatches = [ 'gdm-2.24.0-force-active-vt.patch',
+                   'gdm-2.23.92-save-root-window.patch',
+                   'gdm-2.25.2-append-logs.patch',
+                   # uses /etc/sysconfig/keyboard and is thus not directly upstreamable
+                   # should probably be changed to get the system layout from the X server
+                   'gdm-system-keyboard.patch',
+                   'gdm-2.25.2-multistack-but-boring.patch',
+                   'gdm-2.25.2-start-faster.patch',
                     ]
-
+    rpmSources = ['gdm-pam', 'gdm-autologin-pam', 'gdmsetup-pam' ]
     def setup(r):
         RPMPackageRecipe.unpack(r)
         r.addPatch('logo.patch')
@@ -35,6 +36,16 @@ class Gdm(RPMPackageRecipe,GnomePackageRecipe):
         r.extraConfig = r.extraConfig % r.macros
         #r.macros.sysconfdir= '%(sysconfdir)s/X11'
 
+        r.Replace(['session    required    pam_selinux.so close', ''],
+                  ['session    required    pam_selinux.so open', ''],
+                  'gdm-autologin-pam')
+        r.Replace(['auth     [success=done ignore=ignore default=bad] pam_selinux_permit.so', ''],
+                  ['session    required    pam_selinux.so close', ''],
+                  ['session    required    pam_selinux.so open', ''],
+                  'gdm-pam')
+        r.Copy('gdm-pam', 'data/gdm')
+        r.Copy('gdm-autologin-pam', 'data/gdm-autologin')
+        r.Copy('gdmsetup-pam', 'utils/gdmsetup=pam')
         GnomePackageRecipe.build(r)
 
         r.MakeDirs('%(sysconfdir)s/gdm/{Init,PreSession,PostSession}')
