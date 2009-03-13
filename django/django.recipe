@@ -1,70 +1,85 @@
 #
-# Copyright (c) 2006-2008 rPath, Inc.
+# Copyright (c) 2006-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadInstalled('python=foresight.rpath.org@fl:2-devel')
+loadInstalled('python')
 class Django(PackageRecipe):
+
+    buildRequires = [ 'python-setuptools:python', 'MySQL-python:python',
+                      'PIL:python', 'coreutils:runtime', 'mx:python',
+                      'python-sqlite:python', 'mod_python:python',
+                      'python-markdown:python', 
+                      'PyYAML:python',
+                      'python-ctypes:python',
+                      'python:devel',
+                      'simplejson:python',
+                      'cmemcache:python',
+                      'psycopg2:python',
+                    ]
 
     name = 'django'
     version = '1.0.2'
 
-    buildRequires = ['python:bin', 'python:devel']
     def setup(r):
-	r.macros.upstreamTarName = r.macros.name.capitalize()
+        r.macros.archive_name = 'Django'
         r.macros.pyver = Python.majversion
         r.macros.sitepkgs = '%(libdir)s/python%(pyver)s/site-packages'
 
-        r.addArchive('http://media.djangoproject.com/releases/'
-                     '%(version)s/%(upstreamTarName)s-%(version)s-final.tar.gz')
-        r.Run('python setup.py install --root=%(destdir)s ')
+        r.addArchive('http://media.djangoproject.com/releases/%(version)s/'
+                     '%(archive_name)s-%(version)s-final.tar.gz')
+        r.Run('python setup.py build')
+        r.Run('python setup.py install --root=%(destdir)s')
 
-        # hack to deal with locales in non-libdir on x86_64
         if Arch.x86_64:
-            r.Move('%(prefix)s/lib/python%(pyver)s/site-packages/django/conf/locale/*', '%(destdir)s%(sitepkgs)s/django/conf/locale/')
+            # Hack to deal with locales in non-libdir on x86_64 -- do
+            # not move only conf/locale, because that leads to mixed
+            # pure/impure python
+            r.Move('%(prefix)s/lib/python%(pyver)s/site-packages/django',
+                   '%(sitepkgs)s/')
 
-	# Deal with locale directory which happens to be in :python
+        # Deal with locale directory which happens to be in :python
         r.MakeDirs('%(datadir)s/locale')
-        r.Run('mv %(destdir)s%(sitepkgs)s/django/conf/locale/* %(destdir)s%(datadir)s/locale/ && rmdir %(destdir)s%(sitepkgs)s/django/conf/locale')
+        r.Move('%(sitepkgs)s/django/conf/locale/*',
+               '%(datadir)s/locale/')
+        r.Remove('%(sitepkgs)s/django/conf/locale', recursive=True)
         
         r.Symlink('%(datadir)s/locale/', '%(sitepkgs)s/django/conf/locale')
-	r.Requires('django:locale',
+        r.Requires('django:locale',
             '%(sitepkgs)s/django/contrib/localflavor/.*',
             '%(sitepkgs)s/django/middleware/locale/.*')
         
 
-	# Break out cache backends
+        # Break out cache backends
         # Memcache
-	r.PackageSpec('django-cache-memcached',
-            '%(sitepkgs)s/django/core/cache/backends/memcached.py')
-	r.Requires('cmemcache:python',
-            '%(sitepkgs)s/django/core/cache/backends/memcached.py')
+        r.PackageSpec('django-cache-memcached',
+            '%(sitepkgs)s/django/core/cache/backends/memcached.py.*')
 
 
-	# Break out database backends
-	# SQLite 3
-	r.PackageSpec('django-db-sqlite3',
+        # Break out database backends
+        # SQLite 3
+        r.PackageSpec('django-db-sqlite3',
             '%(sitepkgs)s/django/db/backends/sqlite3/.*')
-	r.Requires('sqlite:runtime',
+        r.Requires('sqlite:runtime',
             '%(sitepkgs)s/django/db/backends/sqlite3/client.py')
-	r.Requires('python-sqlite:python',
-            '%(sitepkgs)s/django/db/backends/sqlite3/*.py')
 
-	# MySQL
-	r.PackageSpec('django-db-mysql',
+        # MySQL
+        r.PackageSpec('django-db-mysql',
             '%(sitepkgs)s/django/db/backends/mysql/.*')
-	r.Requires('mysql:runtime',
+        r.Requires('mysql:runtime',
             '%(sitepkgs)s/django/db/backends/mysql/client.py')
-	r.Requires('MySQL-python:python',
-            '%(sitepkgs)s/django/db/backends/mysql/*.py')
 
-	# PostgreSQL - PsycoPG v2
-	r.PackageSpec('django-db-postgres',
+        # PostgreSQL - PsycoPG v2
+        r.PackageSpec('django-db-postgres',
             '%(sitepkgs)s/django/db/backends/postgresql/.*',
-            '%(sitepkgs)s/django/db/backends/postgresql_psycopg2/.*')
-	r.Requires('postgresql:runtime',
+            '%(sitepkgs)s/django/db/backends/postgresql_psycopg2/.*',
+            '%(sitepkgs)s/django/contrib/gis/db/backend/postgis/.*')
+        r.Requires('postgresql:runtime',
             '%(sitepkgs)s/django/db/backends/postgresql/client.py')
-	r.Requires('psycopg2:python',
-            '%(sitepkgs)s/django/db/backends/postgresql/*.py',
-            '%(sitepkgs)s/django/db/backends/postgresql_psycopg2/*.py')
+
+        # disable deps that break packagespec; they will work out
+        # for real use cases due to the inverse deps
+        r.Requires(exceptions='%(sitepkgs)s/django/contrib/gis/db/backend/__init__.*')
+        r.Requires(exceptDeps=('%(sitepkgs)s/django/contrib/gis/models.py.*',
+                               '.*postgis.*'))
