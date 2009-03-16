@@ -1,0 +1,79 @@
+#!/bin/bash
+# chkconfig: 345 70 30
+# description: Lightweight connection pooler for PostgreSQL.
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+CONFIG_PATH=/etc/pgbouncer.ini
+OPTIONS="-q"
+[ -f /etc/sysconfig/pgbouncer ] && . /etc/sysconfig/pgbouncer
+
+# Check that networking is up.
+[ ${NETWORKING} = "no" ] && exit 0
+
+start() {
+    echo -n $"Starting pgbouncer: "
+    pgbouncer -d "$CONFIG_PATH" "$OPTIONS"
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ]
+    then
+        success
+        touch /var/lock/subsys/pgbouncer
+    else
+        failure
+    fi
+    echo
+    return $RETVAL
+}
+
+stop() {
+    echo -n $"Shutting down pgbouncer: "
+    killproc pgbouncer
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/pgbouncer
+    return $RETVAL
+}
+
+reload() {
+    echo -n $"Reloading pgbouncer: "
+    pgbouncer -R "$CONFIG_PATH" && success || failure
+}
+
+case "$1" in
+  start)
+    start
+	;;
+  stop)
+    stop
+	;;
+  status)
+    status pgbouncer
+    RETVAL=$?
+    ;;
+  restart)
+    stop
+    start
+    RETVAL=$?
+    ;;
+  reload)
+    reload
+    RETVAL=$?
+    ;;
+  condrestart)
+    if [ -f /var/lock/subsys/pgbouncer ]; then
+	stop
+	start
+	RETVAL=$?
+    fi
+    ;;
+  *)
+    echo $"Usage: $0 {start|stop|restart|condrestart|status}"
+    exit 1
+esac
+
+exit $RETVAL
