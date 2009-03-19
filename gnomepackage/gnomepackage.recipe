@@ -1,6 +1,6 @@
 #
 # Copyright (c) 2004-2007 rPath, Inc.
-#               2006-2008 The Foresight Linux Project
+#               2006-2009 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -23,7 +23,7 @@ class GnomePackageRecipe(CPackageRecipe):
         ]
 
     name = 'gnomepackage'
-    version = '3.1'
+    version = '2.26'
     extraConfig = ''
     preConfigure = ''
     preMake = ''
@@ -68,8 +68,11 @@ class GnomePackageRecipe(CPackageRecipe):
 
         r.unpack()
         r.build()
+        r.preInstall()
         r.install()
+        r.postInstall()
         r.policy()
+
 
     def unpack(r):
         r.macros.majversion = '.'.join(r.version.split('.')[0:2])
@@ -124,6 +127,54 @@ class GnomePackageRecipe(CPackageRecipe):
 
         # GConf schemas should be in :data so that :lib depends on them
         r.ComponentSpec('data', '%(sysconfdir)s/gconf/schemas/')
+        
+        #  Don't ship icon caches
+        r.Remove('%(datadir)s/icons/*/icon-theme.cache', allowNoMatch = True)
 
     def policy(r):
         pass
+
+    def preInstall(r):
+        # save space
+        # strip unneeded translations from .mo files
+        # http://bugzilla.gnome.org/show_bug.cgi?id=474987
+        r.Run("""
+if [ -d po ] ; then 
+cd po
+grep -v ".*[.]desktop[.]in[.]in$\|.*[.]server[.]in[.]in$\|.*[.]schemas[.]in$" POTFILES.in > POTFILES.keep
+mv POTFILES.keep POTFILES.in
+intltool-update --pot
+for p in *.po; do
+  echo msgmerge $p %(name)s.pot 
+  msgmerge $p %(name)s.pot > $p.out
+  msgfmt -o `basename $p .po`.gmo $p.out
+done
+
+fi
+""")
+
+
+
+    def postInstall(r):
+        # save some space
+        r.Run("""
+if [ -d %(destdir)s/%(datadir)s/gnome/help/ ]; then
+   cd %(destdir)s%(datadir)s/gnome/help/;
+   for helpdir in $(ls); do 
+       for f in $helpdir/C/figures/*.{png,jpg}; do
+           b="$(basename $f)"
+           echo $b
+           for d in $helpdir/*; do
+               if [ -d "$d" -a "$d" != "$helpdir/C" ]; then
+                  g="$d/figures/$b"
+                  if [ -f "$g" ]; then
+                     if cmp -s $f $g; then
+                        rm "$g"; ln -s "../../C/figures/$b" "$g"
+                     fi
+                  fi
+               fi
+           done
+       done
+    done
+fi 
+""", dir = '%(destdir)s')
