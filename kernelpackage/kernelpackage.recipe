@@ -1,5 +1,6 @@
 #
-# Copyright (c) 2004-2008 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
+#               2008-2009 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -120,6 +121,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.distCleanup()
         r.createLocalVersion()
         r.configure() # manually generated .config's go here
+        r.buildAtaModuleMap() # may be overridden if modules.libata not needed
         r.buildBase()
         r.build() # extra build actions go here
         r.policyBase()
@@ -261,7 +263,6 @@ class KernelPackageRecipe(CPackageRecipe):
         r.PackageSpec('userspace-kernel-firmware', '/lib/firmware/.*')
 
         r.vmwareComponent()
-
         r.ComponentSpec('configs', '/lib/modules/[^/]*/configs/')
         r.ComponentSpec('build-tree', '/lib/modules/[^/]*/build/')
         r.ComponentSpec('debuginfo', '%(debugsrcdir)s/', '%(debuglibdir)s/')
@@ -273,6 +274,14 @@ class KernelPackageRecipe(CPackageRecipe):
         if Arch.x86_64:
             r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
             r.Provides('abi: ELF64(SysV x86_64)', '/boot/vmlinu.*')
+
+    def buildAtaModuleMap(r):
+        # find libata modules
+        r.Run('for i in $(find %(destdir)s | grep drivers\/ata); '
+              'do if [ $(nm $i |grep --count ata_pci_remove_one) -ne 0 ]; '
+              'then basename `echo $i` ;fi ; done | grep -v sata | '
+              'grep -v pdc_adma | sort >> modules.libata')
+        r.Install('modules.libata', '/lib/modules/%(kver)s/modules.libata')
 
     def build(r):
         """
@@ -353,6 +362,9 @@ class CreateBuildTree(build.BuildAction):
                 srcpath = util.joinPaths(bldincdir, entry)
                 util.copytree(srcpath, destincdir)
         os.symlink(asmarch, destincdir+'/asm')
+        if os.path.isdir('arch/%s/include' % arch):
+            util.copytree('arch/%s/include' % arch,
+                    util.joinPaths(destdir, 'arch/%s' % arch))
         if Arch.x86_64:
             srcpath = util.joinPaths(bldincdir, 'asm-i386')
             if os.path.exists(srcpath):
@@ -371,9 +383,9 @@ class CreateBuildTree(build.BuildAction):
         if topdir in ('arch',):
             if nextdir != arch:
                 return
-        util.mkdirChain(util.joinPaths(destdir, subpath))
         for name in names:
             if regex.match(name):
+                util.mkdirChain(util.joinPaths(destdir, subpath))
                 srcpath = util.joinPaths(dirname, name)
                 if not os.path.isdir(srcpath):
                     destpath = util.joinPaths(destdir, subpath, name)
