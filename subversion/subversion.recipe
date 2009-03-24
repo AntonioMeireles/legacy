@@ -9,7 +9,7 @@ loadInstalled('python')
 
 class Subversion(CPackageRecipe):
     name = 'subversion'
-    version = '1.5.6'
+    version = '1.6.0'
 
     buildRequires = [ 'autoconf:runtime', 'libtool:runtime', 'python:devel',
                       'python:runtime', 'db:devel', 'apr:devel',
@@ -17,8 +17,10 @@ class Subversion(CPackageRecipe):
                       'swig:runtime', 'which:runtime', 'krb5:devellib',
                       'expat:devel', 'libxml2:devel', 'zlib:devel',
                       'gettext:runtime', 'krb5:devel', 'httpd:runtime',
-                      'e2fsprogs:devel', 'openldap:devel', 'perl:runtime',
-                      'openssl:devel', 'sqlite:devel', 'cyrus-sasl:devel']
+                      'e2fsprogs:devel', 'openldap:devel', 'perl:devel',
+                      'perl:runtime',
+                      'openssl:devel', 'sqlite:devel', 'cyrus-sasl:devel',
+                      'pkgconfig:devel', 'ruby:runtime', ]
 
     if Use.builddocs:
         buildRequires.extend(['texinfo:runtime', 'docbook-xsl:data'])
@@ -49,10 +51,24 @@ class Subversion(CPackageRecipe):
                     '--with-berkeley-db '
                     '--disable-mod-activation '
                     '--with-sasl=%(prefix)s')
-        r.Make('LIBTOOL=%(bindir)s/libtool')
-        r.MakeInstall()
-        r.Make('swig-py %(swigdirs)s')
+        # For some annoying reason, LDFLAGS will contain /usr/lib even on
+        # 64-bit systems
+        r.Make('LIBTOOL=%(bindir)s/libtool LDFLAGS=')
+        r.MakeInstall('LDFLAGS=')
+        r.Make('swig-py %(swigdirs)s LDFLAGS=')
         r.Make('install-swig-py %(swigdirs)s', preMake='DESTDIR=%(destdir)s')
+        r.Make('swig-pl-lib LDFLAGS=')
+        r.Make('install-swig-pl-lib LDFLAGS=', preMake='DESTDIR=%(destdir)s')
+        r.Run('perl', 'Makefile.PL', 'INSTALLDIRS=vendor',
+                'DESTDIR=%(destdir)s',
+                dir='subversion/bindings/swig/perl/native')
+        r.Replace('LD_RUN_PATH', '#LD_RUN_PATH',
+                'subversion/bindings/swig/perl/native/Makefile.[a-z]*',
+                'subversion/bindings/swig/perl/native/Makefile',
+                lines='^LD_RUN_PATH.*')
+        r.Make(dir='subversion/bindings/swig/perl/native')
+        r.MakeInstall(dir='subversion/bindings/swig/perl/native')
+
         r.MakeDirs('%(svnparentpath)s')
 
         r.PackageSpec('mod_dav_svn',
