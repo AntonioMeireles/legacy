@@ -1,0 +1,102 @@
+diff -r 7ab9ea910e73 src/gajim.py
+--- a/src/gajim.py	Mon Mar 23 21:42:03 2009 -0400
++++ b/src/gajim.py	Tue Mar 24 00:11:53 2009 -0400
+@@ -422,6 +422,20 @@
+ import profile_window
+ import config
+ 
++USER_HAS_INDICATOR = True
++try:
++        import indicate
++except ImportError:
++        USER_HAS_INDICATOR = False
++
++def setup_indicator_server():
++    server = indicate.indicate_server_ref_default()
++    server.set_type("message.im")
++    server.set_desktop_file("/usr/share/applications/gajim.desktop")
++    server.connect("server-display", server_display)
++    indicator = indicate.IndicatorMessage()
++    indicator.show()
++
+ class GlibIdleQueue(idlequeue.IdleQueue):
+ 	'''
+ 	Extends IdleQueue to use glib io_add_wath, instead of select/poll
+@@ -3308,6 +3322,10 @@
+ 		gobject.timeout_add_seconds(gajim.config.get(
+ 			'check_idle_every_foo_seconds'), self.read_sleepy)
+ 
++                # setup the indicator
++                if USER_HAS_INDICATOR:
++                        show_in_indicator = notify.setup_indicator_server()
++
+ 		def remote_init():
+ 			if gajim.config.get('remote_control'):
+ 				try:
+diff -r 7ab9ea910e73 src/notify.py
+--- a/src/notify.py	Mon Mar 23 21:42:03 2009 -0400
++++ b/src/notify.py	Tue Mar 24 00:11:53 2009 -0400
+@@ -32,6 +32,7 @@
+ import dialogs
+ import gobject
+ import gtkgui_helpers
++import gtk
+ 
+ from common import gajim
+ from common import helpers
+@@ -56,6 +57,28 @@
+ except Exception:
+ 	USER_HAS_GROWL = False
+ 
++USER_HAS_INDICATOR = True
++try:
++        import indicate
++except ImportError:
++        USER_HAS_INDICATOR = False
++
++def setup_indicator_server():
++    server = indicate.indicate_server_ref_default()
++    server.set_type("message.im")
++    server.set_desktop_file("/usr/share/applications/gajim.desktop")
++    server.connect("server-display", server_display)
++    indicator = indicate.IndicatorMessage()
++    indicator.show()
++
++def display(indicator, account, jid, msg_type):
++    gajim.interface.handle_event(account, jid, msg_type)
++    indicator.hide()
++
++def server_display(server):
++    win = gajim.interface.roster.window
++    win.present()
++
+ def get_show_in_roster(event, account, contact, session=None):
+ 	'''Return True if this event must be shown in roster, else False'''
+ 	if event == 'gc_message_received':
+@@ -315,6 +338,7 @@
+ 		except Exception:
+ 			pass
+ 
++
+ def popup(event_type, jid, account, msg_type='', path_to_image=None,
+ 	title=None, text=None):
+ 	'''Notifies a user of an event. It first tries to a valid implementation of
+@@ -327,6 +351,18 @@
+ 			os.path.join(gajim.DATA_DIR, 'pixmaps', 'events',
+ 				'chat_msg_recv.png')) # img to display
+ 
++        if USER_HAS_INDICATOR and event_type in (_('New Message'),
++            _('New Single Message'), _('New Private Message')):
++                indicator = indicate.IndicatorMessage()
++                indicator.set_property("subtype", "im")
++                indicator.set_property("sender", jid)
++                indicator.set_property("body", text)
++                indicator.set_property_time("time", time.time())
++                pixbuf = gtk.gdk.pixbuf_new_from_file(path_to_image)
++                indicator.set_property_icon("icon", pixbuf)
++                indicator.connect("user-display", display, account, jid, msg_type)
++                indicator.show()
++
+ 	# Try Growl first, as we might have D-Bus and notification daemon running
+ 	# on OS X for some reason.
+ 	if USER_HAS_GROWL:
