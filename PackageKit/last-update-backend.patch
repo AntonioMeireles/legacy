@@ -1,7 +1,7 @@
 diff -r 124541567e84 backends/conary/XMLCache.py
 --- a/backends/conary/XMLCache.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/XMLCache.py	Wed Mar 18 12:13:10 2009 -0600
-@@ -204,11 +204,13 @@
++++ b/backends/conary/XMLCache.py	Wed Mar 25 16:24:46 2009 -0600
+@@ -204,14 +204,20 @@
  
      def checkCachedUpdateJob(self, applyList):
          jobPath = self._getJobCachePath(applyList)
@@ -13,11 +13,18 @@ diff -r 124541567e84 backends/conary/XMLCache.py
          jobPath = self._getJobCachePath(applyList)
 +        log.info("jobPath %s" % jobPath)
          if os.path.exists(jobPath):
++            log.info("deleting the JobPath %s "% jobPath)
              util.rmtree(jobPath)
++            log.info("end deleting the JobPath %s "% jobPath)
++        log.info("making the logPath ")
          os.mkdir(jobPath)
++        log.info("freeze JobPath")
+         updJob.freeze(jobPath)
+ 
+     def convertTroveToDict(self, troveTupleList):
 diff -r 124541567e84 backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conaryBackend.py	Wed Mar 18 12:13:10 2009 -0600
++++ b/backends/conary/conaryBackend.py	Wed Mar 25 16:24:46 2009 -0600
 @@ -192,7 +192,7 @@
                  error["group"] = ERROR_GROUP_NOT_FOUND
                  error["details"] = ERROR_PACKAGE_NOT_FOUND
@@ -27,19 +34,17 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
              else:
                  troveTupleList = cache.convertTroveToDict( troveTupleList ) 
                  log.info("convert")
-@@ -203,8 +203,11 @@
-     def _get_update(self, applyList, cache=True):
+@@ -204,7 +204,9 @@
          from conary.conaryclient.update import NoNewTrovesError
          updJob = self.client.newUpdateJob()
-+        log.info("get_ Job")
          try:
-+            log.info("prepare updateJOb")
++            log.info("prepare updateJOb...............")
              suggMap = self.client.prepareUpdateJob(updJob, applyList)
-+            log.info("end prepare updateJOB")
++            log.info("end prepare updateJOB..............")
          except NoNewTrovesError:
              self.error(ERROR_NO_PACKAGES_TO_UPDATE, "No new apps were found")
          if cache:
-@@ -222,7 +225,7 @@
+@@ -222,7 +224,7 @@
              except IOError, err:
                  updJob = None
          else:
@@ -48,7 +53,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          self.allow_cancel(False)
          try:
              restartDir = self.client.applyUpdateJob(updJob)
-@@ -280,8 +283,6 @@
+@@ -280,8 +282,6 @@
          self.allow_cancel(True)
          self.percentage(None)
          self.status(STATUS_INFO)
@@ -57,7 +62,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          log.info("filters: %s package:%s " % (filters, package))
  
          cache = Cache()
-@@ -448,20 +449,22 @@
+@@ -448,20 +448,22 @@
          self.status(STATUS_UPDATE)
          self.client.setUpdateCallback( UpdateSystemCallback(self, self.cfg) )
          updateItems = self.client.fullUpdateItemList()
@@ -83,7 +88,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          self.status(STATUS_REFRESH_CACHE)
          cache = Cache()
          cache.refresh()
-@@ -672,8 +675,10 @@
+@@ -672,8 +674,10 @@
                  longDesc = metadata["longDesc"] 
              else:
                  longDesc = ""
@@ -96,18 +101,49 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
              categories  = ""
              if metadata.has_key("category"):
-@@ -725,6 +730,7 @@
-             log.info(i[0])
+@@ -687,6 +691,7 @@
+ 
+     def _show_package(self, name, version, flavor, status):
+         '''  Show info about package'''
++        log.info(name)
+         package_id = self.get_package_id(name, version, flavor)
+         summary = package_id.split(";")
+         if summary[3].split("#")[1]:
+@@ -719,22 +724,19 @@
+         log.info("callback changed")
+         log.info("============== get_updates ========================")
+         cli = ConaryPk()
++        log.info("get fullUpdateItemList")
+         updateItems =cli.cli.fullUpdateItemList()
+ #        updateItems = cli.cli.getUpdateItemList()
+-        for i in updateItems:
+-            log.info(i[0])
          applyList = [ (x[0], (None, None), x[1:], True) for x in updateItems ]
          log.info("_get_update ....")
 +        self.status(STATUS_RUNNING)
          updJob, suggMap = self._get_update(applyList)
          log.info("_get_update ....end.")
  
-@@ -750,7 +756,11 @@
-             troveTuple.append(name)
-             troveTuple.append(version)
-             installed = self.check_installed(troveTuple)
+         jobLists = updJob.getJobs()
+-        log.info("get Jobs")
++        log.info("getting JobLists...........")
+ 
+-        totalJobs = len(jobLists)
+         for num, job in enumerate(jobLists):
+-            status = '2'
+-            log.info( (num, job)  )
+             name = job[0][0]
+ 
+             # On an erase display the old version/flavor information.
+@@ -745,12 +747,11 @@
+             flavor = job[0][2][1]
+             if flavor is None:
+                 flavor = job[0][1][1]
+-
+-            troveTuple = []
+-            troveTuple.append(name)
+-            troveTuple.append(version)
+-            installed = self.check_installed(troveTuple)
 -            self._show_package(name, version, flavor, INFO_NORMAL)
 +            if name in self.rebootpkgs:
 +                info = INFO_SECURITY
@@ -119,7 +155,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
 diff -r 124541567e84 backends/conary/conaryCallback.py
 --- a/backends/conary/conaryCallback.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conaryCallback.py	Wed Mar 18 12:13:10 2009 -0600
++++ b/backends/conary/conaryCallback.py	Wed Mar 25 16:24:46 2009 -0600
 @@ -36,32 +36,33 @@
          self.smallUpdate = False
          self.error = []
@@ -186,17 +222,45 @@ diff -r 124541567e84 backends/conary/conaryCallback.py
              self.progress.set_subpercent( p )
          else:
              self.smallUpdate = True
-@@ -136,7 +138,8 @@
+@@ -96,17 +98,22 @@
+     def setUpdateJob(self, job):
+         self.currentJob = job
+         self.backend.percentage(self.progress.percent)
++        log.info("callback UpdateSystem. setUpdateJob")
+         log.info(self.progress.percent)
++        
+ 
+     def creatingRollback(self):
+         #self.backend.status('Creating Rollback')
+         self.backend.status(STATUS_ROLLBACK)
+         self.backend.percentage(self.progress.percent)
++        log.info("callback updateSystem. creatingRollback")
++        log.info(self.progress.percent)
+         log.info(self.progress.percent)
+ 
+ 
+     def preparingUpdate(self, troveNum, troveCount, add=0):
+         #self.progress.step()
++        log.info("callback updateSystem. preparingUpdate")
+         if not self.currentJob or len(self.currentJob) == 0 or troveNum > troveCount:
+             return
+ 
+@@ -136,10 +143,12 @@
      def creatingDatabaseTransaction(self, troveNum, troveCount):
          self.backend.percentage(self.progress.percent)
          log.info(self.progress.percent)
 -        self.preparingUpdate(troveNum, troveCount, add=troveCount)
 +        self.backend.status(STATUS_COMMIT)
 +        #self.preparingUpdate(troveNum, troveCount, add=troveCount)
++        log.info("callback UpdateSystem........creatingDatabaseTransactions")
  
      def committingTransaction(self):
-         #self.backend.status('Committing Transaction')
-@@ -327,13 +330,18 @@
+-        #self.backend.status('Committing Transaction')
++        log.info('callback UpdateSystem......Committing Transaction')
+ 
+         self.backend.status(STATUS_COMMIT)
+         self.backend.percentage(self.progress.percent)
+@@ -327,13 +336,18 @@
          newVersion, newFlavor = job[2]
          #log.info("JOB>>>>>>>> %s " % str(job) )
          if oldVersion and newVersion:
@@ -218,7 +282,7 @@ diff -r 124541567e84 backends/conary/conaryCallback.py
              package_id = self.backend.get_package_id(name, newVersion, newFlavor)
              self.backend.package(package_id, INFO_INSTALLING, '')
          log.info(self.progress.percent)
-@@ -342,7 +350,8 @@
+@@ -342,7 +356,8 @@
          log.info("callback. .......... creating Database Transactions")
          self.backend.percentage(self.progress.percent)
          log.info(self.progress.percent)
@@ -230,7 +294,7 @@ diff -r 124541567e84 backends/conary/conaryCallback.py
      def committingTransaction(self):
 diff -r 124541567e84 backends/conary/pk-backend-conary.c
 --- a/backends/conary/pk-backend-conary.c	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/pk-backend-conary.c	Wed Mar 18 12:13:10 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Wed Mar 25 16:24:46 2009 -0600
 @@ -321,8 +321,8 @@
  }
  
@@ -244,7 +308,7 @@ diff -r 124541567e84 backends/conary/pk-backend-conary.c
  	backend_destroy,			/* destroy */
 diff -r 124541567e84 configure.ac
 --- a/configure.ac	Wed Mar 18 12:12:10 2009 -0600
-+++ b/configure.ac	Wed Mar 18 12:13:10 2009 -0600
++++ b/configure.ac	Wed Mar 25 16:24:46 2009 -0600
 @@ -1,6 +1,6 @@
  AC_PREREQ(2.52)
  
