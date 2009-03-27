@@ -1,0 +1,52 @@
+#
+# Copyright (c) 2006-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Ruby(CPackageRecipe):
+    name = 'ruby'
+    version = '1.8.6_p287'
+
+    buildRequires = [ 'db:devel', 'ncurses:devel', 'openssl:devel',
+        'readline:devel', 'zlib:devel', ]
+
+    def setup(r):
+        r.macros.myver = r.version.replace('_', '-')
+        r.addArchive('ftp://ftp.ruby-lang.org/pub/ruby/%(major_version)s/%(name)s-%(myver)s.tar.bz2')
+
+        # Fix for ruby's broken configure script, which hardcodes '/usr/lib'
+        # into the LOAD_PATH (this breaks 64-bit builds of Ruby on x86-64).
+        r.addPatch('ruby-libdir-configure.patch')
+
+        # Fix mkconfig.rb to set TOPDIR correctly on x86_64
+        r.addPatch('ruby-mkconfig-topdir.patch')
+
+        configOpts = '--enable-shared --enable-install-doc'
+        r.macros.cppflags += ' -I%(krbprefix)s/include'
+        r.macros.ldflags  += ' -L%(krbprefix)s/lib'
+
+        # If we are on a x86-64 machine, make sure to include the
+        # default 'non-flavored' directories to ruby's LOAD_PATH.
+        # Note: we don't actually create these directories, we just want
+        # to search them if they exist.
+        if Arch.x86_64:
+            extraLoadPath = ':'.join([ '/usr/lib/ruby/site_ruby/%(major_version)s', '/usr/lib/ruby/site_ruby'])
+            configOpts += ' --with-search-path="%s"' % extraLoadPath
+
+        r.Configure(configOpts)
+
+        r.Make()
+        r.Make('test')
+        r.MakeInstall()
+
+        # Don't whack the site_ruby directories
+        r.ExcludeDirectories(exceptions='site_ruby/')
+        r.ComponentSpec('runtime', 'site_ruby/')
+
+        # Make sure all docs are put in the right component
+        r.ComponentSpec('doc', '%(datadir)s/ri/')
+
+        # Attempting to calculate ruby dependencies on some files is
+        # problematic
+        r.Requires(exceptions='.*/(debug|rdoc2latex|cgi_runner).rb')
