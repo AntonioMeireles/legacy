@@ -1,102 +1,99 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('qtpackage')
-class kdePackageRecipe(QtPackageRecipe):
+import datetime
+loadSuperClass('cmakepackage')
+class kdePackageRecipe(CMakePackageRecipe):
 
     name = 'kdepackage'
-    version = '20070212'
+    version = datetime.date.today().strftime("%Y%m%d")
 
     buildRequires = [
-        'acl:devel', 'alsa-lib:devel', 'arts:devel', 'attr:devel',
-        'audiofile:devel', 'desktop-file-utils:runtime', 'esound:devel',
-        'gamin:devel', 'glib:devel', 'jack:devel', 'kdelibs:devel',
-        'libart_lgpl:devel', 'libfontenc:devel', 'libICE:devel', 'libidn:devel',
-        'libmad:devel', 'libogg:devel', 'libSM:devel', 'libvorbis:devel',
-        'libX11:devel', 'libXau:devel', 'libXcomposite:devel',
-        'libXcursor:devel', 'libXdamage:devel', 'libXdmcp:devel',
-        'libXext:devel', 'libXfixes:devel', 'libXft:devel', 'libXi:devel',
-        'libXinerama:devel', 'libxml2:runtime', 'libXmu:devel',
-        'libXrandr:devel', 'libXrender:devel', 'libXScrnSaver:devel',
-        'libXt:devel', 'libXtst:devel', 'libXxf86misc:devel',
-        'libXxf86vm:devel', 'Mesa:devel'
+        'automoc:runtime', 'kdelibs:devel', 'kdepimlibs:devel',
+        'libstdc++:devel', 'libxml2:runtime', 'phonon:devel', 'pkgconfig:devel',
+        'qt4:devel', 'shared-mime-info:runtime'
     ]
-
-    enableFinal = True
 
     abstractBaseClass = True
 
-    def __init__(r, *args, **kwargs):
-
-        QtPackageRecipe.__init__(r, *args, **kwargs)
-
-        r.macros.kdehtmldir = '%(datadir)s/kde3-doc'
+    enableFinal = False
 
     def setup(r):
 
-        r.Environment('QTDOCDIR', '%(datadir)s/qt3/doc')
-        r.Environment('kde_htmldir', '%(kdehtmldir)s')
-        r.Environment('kde_confdir', '%(sysconfdir)s/kde3')
-
         if r.macros.lib == 'lib64':
-            r.extraConf += ' --enable-libsuffix=64 '
+            r.cmakeArgs += ' -DLIB_SUFFIX=64 '
 
-        r.extraConf += ' --enable-new-ldflags '
         if r.enableFinal:
-            r.extraConf += ' --enable-final '
+            r.cmakeArgs += ' -DKDE4_ENABLE_FINAL=true '
+
+        # http://www.cmake.org/Wiki/CMake_RPATH_handling
+        # No_relinking_and_full_RPATH_for_the_install_tree
+        r.cmakeArgs += (
+                ' -DCMAKE_SKIP_BUILD_RPATH=TRUE '
+                ' -DCMAKE_BUILD_WITH_INSTALL_RPATH=TRUE '
+                ' -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=TRUE '
+        )
+
+        r.cmakeArgs += (
+            ' -DKDE4_BUILD_TESTS=false '
+            ' -DCMAKE_BUILD_TYPE=release '
+            ' -DKDE_DEFAULT_HOME=.kde4 '
+            ' -DKDE_DISTRIBUTION_TEXT="Foresight packages" '
+            ' -DCONFIG_INSTALL_DIR=%(sysconfdir)s/kde4 '
+            ' -DSYSCONF_INSTALL_DIR=%(sysconfdir)s '
+            ' -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-undefined -Wl,--as-needed" '
+            ' -DCMAKE_MODULE_LINKER_FLAGS="-Wl,--no-undefined -Wl,--as-needed" '
+            ' -DCMAKE_EXE_LINKER_FLAGS="-Wl,--no-undefined -Wl,--as-needed" '
+        )
+
+        r.macros.mflags = '-j1'
+
+        r.macros.cflags += ' -DNDEBUG '
+        r.macros.cxxflags += ' -DNDEBUG '
+
+        # TODO: We should use something better than hardcoding paths
+        #r.cmakeArgs += ' -DPCRE_INCLUDE_DIR=/usr/include/pcre '
+
+        #r.Environment('PKG_CONFIG_PATH', '%(libdir)s/pkgconfig')
 
         r.unpack()
-
-        # Build fix for old sources (there is no admin/doxygen.sh)
-        r.addAction('mkdir -p admin; touch admin/doxygen.sh')
-
-        r.Replace(
-            'if test -n "\$PREFIX" && test ! -d "\$PREFIX" ; then',
-            'if test -n "$PREFIX" && test ! -d "%(destdir)s/$PREFIX" ; then',
-            'admin/doxygen.sh', allowNoChange=True
-        )
-        r.MakeDirs('%(kdehtmldir)s/en')
-
-        if hasattr(r, 'postUnpack'):
-            r.postUnpack()
-
+        r.postUnpack()
         r.build()
-
-        if hasattr(r, 'postInstall'):
-            r.postInstall()
-
-        if hasattr(r, 'policy'):
-            r.policy()
-
+        r.postInstall()
+        r.policy()
         r.postPolicy()
 
-    def unpack(r):
+    def addUbuntuPatches(r, path, *patches):
+        path = path.strip('/')
+        if len(path.split('/')) == 2:
+            url = 'http://patches.ubuntu.com/%s/extracted/' % path
+        else:
+            url = 'http://patches.ubuntu.com/by-release/extracted/ubuntu/%s/' % path
+        for p in patches:
+            r.addPatch(url+p)
 
+    def unpack(r):
+        pass
+
+    def postUnpack(r):
         pass
 
     def build(r):
-
-        r.configure()
+        r.cmake()
         r.make()
         r.makeinstall()
 
-    def make(r):
-
-        r.Make()
-
-    def makeinstall(r):
-
-        r.MakeInstall()
+    def postInstall(r):
+        pass
 
     def postPolicy(r):
-
+        r.ComponentSpec('data', '%(docdir)s/HTML/')
+        r.ComponentSpec('devel', '%(datadir)s/apps/cmake/')
+        r.TagSpec('desktop-file', '%(datadir)s/applications/')
         r.TagSpec('gtk-update-icon-cache', '%(datadir)s/icons/')
-        r.TagSpec('desktop-file', '%(datadir)s/applications/kde/')
-
-        r.CheckSonames(exceptions='%(libdir)s/libkdeinit_.*')
-        r.RemoveNonPackageFiles(exceptions='.*\.la')
-        r.DanglingSymlinks(exceptions='%(kdehtmldir)s/.*/.*/common')
+        r.TagSpec('sound-themes', '%(datadir)s/sounds/')
+        r.DanglingSymlinks(exceptions='%(docdir)s/HTML/.*/common')
 
