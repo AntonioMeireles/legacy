@@ -1,75 +1,77 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+import datetime
 loadSuperClass('kdepackage')
 class kdeCorePackageRecipe(kdePackageRecipe):
 
     name = 'kdecorepackage'
-    version = '20070212'
+    version = datetime.date.today().strftime("%Y%m%d")
 
-    kversion = ''
+    module = None
+    modules = None
 
-    modules = []
-
-    verify = False
-
-    buildAPIDox = False
+    enableFinal = False
 
     abstractBaseClass = True
 
-    def setup(r):
-
-        r.macros.site = 'mirror://kde/stable'
-
-        if r.kversion:
-            kversion = r.kversion
-        else:
-            kversion = r.version.split('+')[0]
-        r.macros.kversion = kversion
-
-        if r.buildAPIDox:
-            r.buildRequires.extend([ 'doxygen:runtime', 'qt:apidox' ])
-            if not r.name == 'kdelibs':
-                r.buildRequires.append('kdelibs:apidox')
-
-        kdePackageRecipe.setup(r)
-
     def unpack(r):
 
-        r.addArchive('%(site)s/%(kversion)s/src/%(name)s-%(version)s.tar.bz2')
+        if r.module is None:
+            r.module = r.name
 
-    def build(r):
+        r.macros.module = r.module
 
-        r.Configure(r.extraConf)
+        r.macros.repository = 'svn://anonsvn.kde.org/home/kde'
+        if '+' in r.version:
+            r.macros.release = r.version.split('+', 1)[0]
+            r.macros.revision = r.version.rsplit('+', 1)[1].lstrip('r')
+            r.addSvnSnapshot('%(repository)s/branches/KDE/%(major_version)s/%(module)s', revision='%(revision)s')
+            r.addSource('%(name)s-changelog.svn', dir='%(thisdocdir)s/ChangeLog.svn')
+        else:
+            #r.addArchive('mirror://kde//stable/%(version)s/src/')
+            r.addSvnSnapshot('%(repository)s/tags/KDE/%(version)s/%(module)s')
 
-        r.Make()
-        if r.buildAPIDox:
-            r.Make('apidox')
-            r.MakeInstall(installtarget='install-apidox')
-            r.ComponentSpec('%(name)s:apidox', '%(kdehtmldir)s/en/%(name)s-apidocs/')
+        cmd = 'macro_ensure_out_of_source_build'
+        r.Replace((cmd, '# '+cmd), (cmd.upper(), '# '+cmd), 'CMakeLists.txt', allowNoChange=True)
+
+    def makeinstall(r):
+
         if r.modules:
+
             for module in r.modules:
                 if type(module) == type(""):
                     moduleName = module
-                    moduleSubDir = module
+                    moduleSubDirs = (module, )
                 else:
-                    moduleName, moduleSubDir = module
+                    moduleName, moduleSubDirs = module[0], module[1:]
 
-                r.MakeInstall(dir=moduleSubDir, package=moduleName)
-                r.MakeInstall(dir='doc/'+moduleSubDir, skipMissingDir=True,
-                              package=moduleName)
+                for moduleSubDir in moduleSubDirs:
+                    r.MakeInstall(dir=moduleSubDir, package=moduleName)
+
+                    # deal with kdebase/apps/{konsole,doc/konsole}
+                    docs = 'doc/' + moduleSubDir
+                    if '/' in moduleSubDir:
+                        t = moduleSubDir.rfind('/')
+                        docs = moduleSubDir[:t] + '/doc/' + moduleSubDir[t+1:]
+                    r.MakeInstall(
+                        dir=docs, skipMissingDir=True, package=moduleName
+                    )
+
+            r.MakeInstall(package='%s-orphans' % r.name)
+            r.Run('cat %(builddir)s/../_MANIFESTS_/%(name)s-orphans.0.manifest')
+            r.Run('[ "$(cat %(builddir)s/../_MANIFESTS_/%(name)s-orphans.0.manifest | grep -v ".bak\$" | wc -l)" -eq 0 ]')
+
         else:
             r.MakeInstall()
 
     def postPolicy(r):
 
+        r.AutoDoc(exceptions='/\.svn/')
+        r.RemoveNonPackageFiles('.*\.bak')
+
         kdePackageRecipe.postPolicy(r)
-
-        r.AutoDoc(exceptions='/')
-
-        if r.verify:
-            r.MakeInstall(package='%s-orphans' % r.name)
 
