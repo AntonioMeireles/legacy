@@ -1,6 +1,6 @@
 diff -r 124541567e84 backends/conary/XMLCache.py
 --- a/backends/conary/XMLCache.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/XMLCache.py	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/XMLCache.py	Mon Mar 30 03:55:56 2009 -0600
 @@ -1,5 +1,6 @@
  import os
 -from xml.dom.minidom import parse, parseString
@@ -73,7 +73,7 @@ diff -r 124541567e84 backends/conary/XMLCache.py
                  return self._repo
              except ExpatError:
                  Pk = PackageKitBaseBackend("")
-@@ -82,93 +90,84 @@
+@@ -82,93 +90,85 @@
  
      def _generatePackage(self, package_node ): 
          """ convert from package_node to dictionary """
@@ -93,7 +93,8 @@ diff -r 124541567e84 backends/conary/XMLCache.py
 +            shortDesc = getattr( package_node.find("shortDesc"), "text", ""),
 +            longDesc = getattr(package_node.find("longDesc"),"text",""),
 +            url = getattr( package_node.find("url"),"text","") ,
-+            category = [ i.text for i in cat ]
++            category = [ i.text for i in cat ],
++            licenses = eval( getattr( package_node.find("licenses"),"text", "str('')") )
 +        ) 
          return pkg
  
@@ -223,7 +224,7 @@ diff -r 124541567e84 backends/conary/XMLCache.py
          return results
  
  
-@@ -204,14 +203,20 @@
+@@ -204,15 +204,22 @@
  
      def checkCachedUpdateJob(self, applyList):
          jobPath = self._getJobCachePath(applyList)
@@ -242,9 +243,11 @@ diff -r 124541567e84 backends/conary/XMLCache.py
          os.mkdir(jobPath)
 +        log.info("freeze JobPath")
          updJob.freeze(jobPath)
++        log.info("end freeze JobPath")
  
      def convertTroveToDict(self, troveTupleList):
-@@ -245,11 +250,33 @@
+         mList = []
+@@ -245,11 +252,33 @@
              results = repo.search(search , where )
              for i in results:
                  repositories_result.append(i)
@@ -279,7 +282,7 @@ diff -r 124541567e84 backends/conary/XMLCache.py
          for i in labels:
              label = i + '.xml'
              filename = self.xml_path + label
-@@ -300,12 +327,12 @@
+@@ -300,12 +329,12 @@
          categories.sort()
          return set( categories )
          
@@ -296,7 +299,7 @@ diff -r 124541567e84 backends/conary/XMLCache.py
  
 diff -r 124541567e84 backends/conary/conaryBackend.py
 --- a/backends/conary/conaryBackend.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conaryBackend.py	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/conaryBackend.py	Mon Mar 30 03:55:56 2009 -0600
 @@ -1,5 +1,5 @@
  #!/usr/bin/python
 -# Licensed under the GNU General Public License Version 2
@@ -314,7 +317,15 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  import sys
  import os
  import re
-@@ -39,18 +40,17 @@
+@@ -32,6 +33,7 @@
+ 
+ from packagekit.backend import *
+ from packagekit.package import *
++from packagekit.enums import PackageKitEnum
+ from packagekit.progress import PackagekitProgress
+ from conaryCallback import UpdateCallback, GetUpdateCallback
+ from conaryCallback import RemoveCallback, UpdateSystemCallback
+@@ -39,18 +41,17 @@
  from XMLCache import XMLCache as Cache
  from conaryInit import *
  
@@ -336,7 +347,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
      def wrapper(self, *args, **kwargs):
          try:
              return func(self, *args, **kwargs)
-@@ -66,6 +66,18 @@
+@@ -66,6 +67,18 @@
          except Exception, e:
              self.error(ERROR_UNKNOWN, display(e), exit=True)
      return wrapper
@@ -355,7 +366,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  def _format_str(str):
      """
      Convert a multi line string to a list separated by ';'
-@@ -84,17 +96,33 @@
+@@ -84,17 +97,33 @@
          return ";".join(lst)
      else:
          return ""
@@ -392,7 +403,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          self.callback = UpdateCallback(self, self.cfg)
          self.client.setUpdateCallback(self.callback)
  
-@@ -109,104 +137,132 @@
+@@ -109,104 +138,133 @@
          return version, flavor
  
      def _get_arch(self, flavor):
@@ -550,6 +561,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 -                troveTupleList = cache.convertTroveToDict( troveTupleList ) 
 -                log.info("convert")
 -                log.info(troveTupleList)
++            self.message(MESSAGE_COULD_NOT_FIND_PACKAGE,"search not found")
 +            #self.error(ERROR_INTERNAL_ERROR, "packagenotfound")
  
 -        self._resolve_list( fltlist, troveTupleList  )
@@ -576,7 +588,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          if cache:
              Cache().cacheUpdateJob(applyList, updJob)
          return updJob, suggMap
-@@ -222,7 +278,7 @@
+@@ -222,7 +280,7 @@
              except IOError, err:
                  updJob = None
          else:
@@ -585,7 +597,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          self.allow_cancel(False)
          try:
              restartDir = self.client.applyUpdateJob(updJob)
-@@ -246,28 +302,53 @@
+@@ -246,28 +304,53 @@
              applyList = [(name, (None, None), (version, flavor), True)]
          return self._do_update(applyList)
  
@@ -657,7 +669,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          package_list = pkgFilter.post_process()
          self._show_package_list(package_list)
   
-@@ -280,42 +361,25 @@
+@@ -280,42 +363,25 @@
          self.allow_cancel(True)
          self.percentage(None)
          self.status(STATUS_INFO)
@@ -712,7 +724,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
          package_list = filter.post_process()
          log.info("package_list %s" % package_list)
-@@ -326,29 +390,23 @@
+@@ -326,29 +392,23 @@
              HOW its showed on packageKit
              @lst(list(tuple) = [ ( troveTuple, status ) ]
          """
@@ -753,7 +765,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def search_group(self, options, searchlist):
-@@ -387,6 +445,14 @@
+@@ -387,6 +447,14 @@
          log.info("options: %s searchlist:%s "%(options, search))
          self._do_search(options, search, 'details' )
         
@@ -768,7 +780,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
      def get_requires(self, filters, package_ids, recursive_text):
          pass
-@@ -448,24 +514,27 @@
+@@ -448,24 +516,27 @@
          self.status(STATUS_UPDATE)
          self.client.setUpdateCallback( UpdateSystemCallback(self, self.cfg) )
          updateItems = self.client.fullUpdateItemList()
@@ -800,7 +812,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
      @ExceptionHandler
      def update(self, package_ids):
          '''
-@@ -482,6 +551,7 @@
+@@ -482,6 +553,7 @@
                  cli.update(name)
              else:
                  self.error(ERROR_PACKAGE_ALREADY_INSTALLED, 'No available updates')
@@ -808,7 +820,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
      def install_packages(self, package_ids):
          """
-@@ -504,17 +574,16 @@
+@@ -504,17 +576,16 @@
              self.status(STATUS_RUNNING)
  
              if name:
@@ -828,7 +840,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def remove_packages(self, allowDeps, package_ids):
-@@ -617,7 +686,10 @@
+@@ -617,21 +688,30 @@
          self.percentage(None)
          self.status(STATUS_INFO)
          package_id = package_ids[0]
@@ -840,10 +852,12 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          #update = self._get_updated(pkg)
          update = ""
          obsolete = ""
-@@ -627,11 +699,23 @@
-         #bz_url = _format_list(urls['jira'])
-         bz_url = ""
-         #vendor_url = _format_list(urls['vendor'])
+-        #desc, urls, reboot = self._get_update_extras(package_id)
+-        #cve_url = _format_list(urls['cve'])
+         cve_url = ""
+-        #bz_url = _format_list(urls['jira'])
+-        bz_url = ""
+-        #vendor_url = _format_list(urls['vendor'])
 -        vendor_url = ""
 -        reboot = "none"
 -        desc = " "
@@ -854,22 +868,21 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +                vendor_url = pkgDict["url"]
 +            else:
 +                vendor_url = ""
-+            if  name in self.rebootpkgs:
-+                reboot = RESTART_SYSTEM
-+            else:
-+                reboot = RESTART_NONE
 +            if "longDesc" in pkgDict:
 +                desc = pkgDict["longDesc"]
 +            else:
 +                desc = ""
++            reboot = self._get_restart(pkgDict.get("name"))
++            state = self._get_branch( pkgDict.get("label"))
++            bz_url = self._get_fits(pkgDict.get("label"), pkgDict.get("name"))
 +            #
 +            #def update_detail(self, package_id, updates, obsoletes, vendor_url, bugzilla_url, cve_url, restart, update_text, changelog, state, issued, updated):
 +            self.update_detail(package_id, update, obsolete, vendor_url, bz_url, cve_url,
-+                    reboot, desc, changelog="", state="", issued="", updated = "")
++                    reboot, desc, changelog="", state= state, issued="", updated = "")
  
     # @ExceptionHandler
      def get_details(self, package_ids):
-@@ -645,59 +729,62 @@
+@@ -645,96 +725,123 @@
          log.info("========== get_details =============")
          log.info(package_ids[0])
          package_id = package_ids[0]
@@ -887,8 +900,9 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +        if name and pkgDict:
 +            shortDesc = ""
 +            longDesc = ""
-+            url = "http://www.foresightlinux.org/packages/%s.html" % name
++            url = ""
 +            categories  = None
++            license = ""
  
 -        repo = summary[3].split("#")[0]
 -        if summary[3].split("#")[1]:
@@ -924,9 +938,12 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +            if "longDesc" in pkgDict:
 +                longDesc = pkgDict["longDesc"]
 +            if "url" in pkgDict:
-+                url = pkgDict["url"]
++                url = pkgDict["url"] #+ ";%s" % pkgDict["url"].replace("http://","")
 +            if "category" in pkgDict:
 +                categories =  Cache().getGroup( pkgDict['category'])
++            if "licenses" in pkgDict:
++                license = self._get_license(pkgDict["licenses"])
++                log.info(license)
              # Package size goes here, but I don't know how to find that for conary packages.
 -            self.details(short_package_id, None, categories, longDesc, url, 0)
 -        else:
@@ -936,7 +953,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +            pkg_id = package_id.split(";")
 +            pkg_id[3] = pkgDict["label"]
 +            package_id = ";".join(pkg_id)
-+            self.details(package_id, LICENSE_UNKNOWN, categories, longDesc, url, 0)
++            self.details(package_id, license, categories, longDesc, url, 0)
  
      def _show_package(self, name, version, flavor, status):
          '''  Show info about package'''
@@ -945,19 +962,22 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          summary = package_id.split(";")
 -        if summary[3].split("#")[1]:
 -            metadata = eval(summary[3].split("#")[1])
+-        else:
+-            metadata = {}
+-        if metadata.has_key("shortDesc"):
+-            meta = metadata["shortDesc"]
+-        else:
+-            meta = " "
 +        meta = summary[3]
 +
-+        self.package(package_id, status, meta)
-+
+         self.package(package_id, status, meta)
+ 
 +    def _get_restart(self, name):
 +        if name in self.rebootpkgs:
 +            return RESTART_SYSTEM
 +        elif name in self.restartpkgs:
 +            return RESTART_APPLICATION
-         else:
--            metadata = {}
--        if metadata.has_key("shortDesc"):
--            meta = metadata["shortDesc"]
++        else:
 +            return RESTART_NONE
 +
 +    def _get_info(self, name):
@@ -965,18 +985,18 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +            return INFO_SECURITY
 +        elif name in self.restartpkgs:
 +            return INFO_SECURITY
-         else:
--            meta = " "
--        self.package(package_id, status, meta)
++        else:
 +            return INFO_NORMAL
 +
- 
++
      def _get_status(self, notice):
-         # We need to figure out how to get this info, this is a place holder
-@@ -707,34 +794,38 @@
-         #    return INFO_SECURITY
-         #else:
-         #    return INFO_NORMAL
+-        # We need to figure out how to get this info, this is a place holder
+-        #ut = notice['type']
+-        # TODO : Add more types to check
+-        #if ut == 'security':
+-        #    return INFO_SECURITY
+-        #else:
+-        #    return INFO_NORMAL
 -        return INFO_NORMAL
 +        if name in self.rebootpkgs:
 +            return INFO_SECURITY
@@ -984,7 +1004,31 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +            return INFO_INSTALLED
 +        else:
 +            return INFO_NORMAL
++    def _get_fits(self, branch, pkg_name):
++        if "conary.rpath.com" in branch:
++            return "http://issues.rpath.com;rPath Issues Tracker"
++        elif "foresight.rpath.org" in branch:
++            return "http://issues.foresightlinux.org; Foresight Issues Tracker"
++        else:
++            return ""
++    def _get_license(self, license_list ):
++        if license_list == "":
++           return ""
++        for i in license_list:
++            lic = i.split("/")
++            for j in PackageKitEnum.free_licenses:
++                if lic[1:][0].lower() == j.lower():
++                    return j
++        return ""
  
++    def _get_branch(self, branch ):
++        branchList = branch.split("@")
++        if "2-qa" in branchList[1]:
++            return UPDATE_STATE_TESTING
++        elif "2-devel" in branchList[1]:
++            return UPDATE_STATE_UNSTABLE
++        else:
++            return UPDATE_STATE_STABLE
      @ExceptionHandler
      def get_updates(self, filters):
          self.allow_cancel(True)
@@ -998,7 +1042,6 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          log.info("============== get_updates ========================")
 -        cli = ConaryPk()
 -        updateItems =cli.cli.fullUpdateItemList()
-+
 +        log.info("get fullUpdateItemList")
 +        updateItems =self.client.fullUpdateItemList()
  #        updateItems = cli.cli.getUpdateItemList()
@@ -1023,7 +1066,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
              name = job[0][0]
  
              # On an erase display the old version/flavor information.
-@@ -745,18 +836,28 @@
+@@ -745,18 +852,32 @@
              flavor = job[0][2][1]
              if flavor is None:
                  flavor = job[0][1][1]
@@ -1034,19 +1077,23 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
 +            #self._show_package(name, version, flavor, info)
 +        
 +        pkg_list = Cache().resolve_list([ name for (  ( name,version,flavor), info )  in r ])
++        log.info("generate the pkgs ")
 +        new_res = []
 +        for pkg in pkg_list:
 +            for ( trove, info ) in r:
-+                if trove[0] == pkg["name"]:
-+                    pkg = self._convert_package( trove, pkg)
-+                    new_res.append( ( pkg, info ) )
-+        log.info(new_res)
++                #log.info( ( pkg, trove) ) 
++                name,version,flav = trove
++                if name == pkg["name"]:
++                    npkg = self._convert_package( trove, pkg)
++                    new_res.append( ( npkg, info ) )
  
 -            troveTuple = []
 -            troveTuple.append(name)
 -            troveTuple.append(version)
 -            installed = self.check_installed(troveTuple)
 -            self._show_package(name, version, flavor, INFO_NORMAL)
++        log.info(new_res)
++
 +        self._show_package_list(new_res)
          log.info("============== end get_updates ========================")
          self.client.setUpdateCallback(self.callback)
@@ -1060,7 +1107,7 @@ diff -r 124541567e84 backends/conary/conaryBackend.py
          log.info(package_id)
 diff -r 124541567e84 backends/conary/conaryCallback.py
 --- a/backends/conary/conaryCallback.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conaryCallback.py	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/conaryCallback.py	Mon Mar 30 03:55:56 2009 -0600
 @@ -36,32 +36,33 @@
          self.smallUpdate = False
          self.error = []
@@ -1166,6 +1213,20 @@ diff -r 124541567e84 backends/conary/conaryCallback.py
  
          self.backend.status(STATUS_COMMIT)
          self.backend.percentage(self.progress.percent)
+@@ -207,11 +217,11 @@
+         self.progress.step()
+ 
+     def downloadingChangeSet(self, got, need):
+-        log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
++       # log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
+         self.backend.status(STATUS_DOWNLOAD)
+         self.progress.set_subpercent( got*100 / float(need) )
+         self.backend.percentage( self.progress.percent )
+-        log.info( "%s percent" % self.progress.percent)
++       # log.info( "%s percent" % self.progress.percent)
+     # 3
+     def resolvingDependencies(self):
+         #self.backend.status('Resolving Dependencies')
 @@ -327,13 +337,18 @@
          newVersion, newFlavor = job[2]
          #log.info("JOB>>>>>>>> %s " % str(job) )
@@ -1200,7 +1261,7 @@ diff -r 124541567e84 backends/conary/conaryCallback.py
      def committingTransaction(self):
 diff -r 124541567e84 backends/conary/conaryFilter.py
 --- a/backends/conary/conaryFilter.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conaryFilter.py	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/conaryFilter.py	Mon Mar 30 03:55:56 2009 -0600
 @@ -25,33 +25,39 @@
  import re
  from pkConaryLog import log
@@ -1257,7 +1318,7 @@ diff -r 124541567e84 backends/conary/conaryFilter.py
 -
 diff -r 124541567e84 backends/conary/conarypk.py
 --- a/backends/conary/conarypk.py	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/conarypk.py	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/conarypk.py	Mon Mar 30 03:55:56 2009 -0600
 @@ -49,7 +49,7 @@
      def get_labels_from_config(self):
          labels = []
@@ -1269,7 +1330,7 @@ diff -r 124541567e84 backends/conary/conarypk.py
  
 diff -r 124541567e84 backends/conary/pk-backend-conary.c
 --- a/backends/conary/pk-backend-conary.c	Wed Mar 18 12:12:10 2009 -0600
-+++ b/backends/conary/pk-backend-conary.c	Sat Mar 28 16:19:04 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Mon Mar 30 03:55:56 2009 -0600
 @@ -148,15 +148,10 @@
  	pk_backend_spawn_helper (spawn, "conaryBackend.py", "get-update-detail", package_ids_temp, NULL);
  	g_free (package_ids_temp);
@@ -1325,7 +1386,7 @@ diff -r 124541567e84 backends/conary/pk-backend-conary.c
  	backend_get_update_detail,              /* get_update_detail */
 diff -r 124541567e84 configure.ac
 --- a/configure.ac	Wed Mar 18 12:12:10 2009 -0600
-+++ b/configure.ac	Sat Mar 28 16:19:04 2009 -0600
++++ b/configure.ac	Mon Mar 30 03:55:56 2009 -0600
 @@ -1,6 +1,6 @@
  AC_PREREQ(2.52)
  
