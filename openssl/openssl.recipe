@@ -4,10 +4,22 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class OpenSSL(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class OpenSSL(RPMPackageRecipe, CPackageRecipe):
     name = 'openssl'
     version = '0.9.8g'
     certsdir = '%(sysconfdir)s/ssl/certs'
+
+    isUpdate = True
+    distroVersion = '10'
+    rpmRelease = '12.fc10'
+
+    rpmPatches = [
+        'openssl-0.9.8a-link-krb5.patch',
+        'openssl-0.9.8g-ipv6-apps.patch',
+        'openssl-0.9.8g-shlib-version.patch',
+        'openssl-0.9.8g-soversion.patch',
+    ]
 
     buildRequires = [ 'perl:runtime',
                       'sed:runtime', 'mktemp:runtime', 'zlib:devel' ]
@@ -23,8 +35,10 @@ class OpenSSL(CPackageRecipe):
 
         # Add back signature verification if CNY-2420 is fixed
         r.addArchive('http://www.openssl.org/source/') #, keyid='9C58A66D')
-        r.addPatch('openssl-0.9.8b-soversion.patch')
-        r.addPatch('openssl-0.9.8a-link-krb5.patch')
+
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
+
         # RPL-2519
         r.addPatch('openssl-0.9.8g-Configure-libresolv.patch')
         r.addPatch('CVE-2008-5077.patch') # RPL-2942
@@ -38,7 +52,6 @@ class OpenSSL(CPackageRecipe):
         r.addSource('InstantSSL.pem', dest='%(certsdir)s/')
         r.addSource('AddTrustExternalCARoot.pem',
                     dest='%(certsdir)s/')
-
 
         # RPL-2569
         r.addPatch('openssl-CVE-2008-0891.patch')
@@ -88,8 +101,16 @@ class OpenSSL(CPackageRecipe):
         r.Move('/usr/lib/*', '%(libdir)s/')
         r.Install('lib{ssl,crypto}.so.*', '%(essentiallibdir)s/')
         for x in ('crypto', 'ssl'):
-            r.Move('%%(libdir)s/lib%s.so'%x, '%(essentiallibdir)s/')
-            r.Symlink('/%%(lib)s/lib%s.so.5'%x, '%%(libdir)s/lib%s.so'%x)
+            r.Move('%%(libdir)s/lib%s.so' % x, '%(essentiallibdir)s/')
+            r.Symlink('%%(essentiallibdir)s/lib%s.so.7' % x,
+                      '%%(libdir)s/lib%s.so' % x)
+
+            # RPL-2994 must always provide lib{ssl,crypto}.so.5 since that is
+            # what rpl 2 originally shipped with.
+            r.Symlink('lib%s.so.7' % x,
+                      '%%(essentiallibdir)s/lib%s.so.5' % x)
+            r.ComponentSpec('lib', '%%(essentiallibdir)s/lib%s.so.5' % x)
+
         r.Move('%(sysconfdir)s/ssl/man/*', '%(mandir)s/')
         r.Remove('%(sysconfdir)s/ssl/man', recursive=True)
         r.Move('%(sysconfdir)s/ssl/misc/*', '%(datadir)s/ssl/misc/')
@@ -149,3 +170,4 @@ class OpenSSL(CPackageRecipe):
         # a $PATH search for it.
         r.Requires('openssl:runtime', '%(bindir)s/c_rehash')
         r.ComponentProvides('%(version)s')
+
