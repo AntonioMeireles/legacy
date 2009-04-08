@@ -1,0 +1,95 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Bash(CPackageRecipe):
+    name = 'bash'
+    baseversion = '3.2'
+    patchlevel = '10'
+    version = ".".join((baseversion, patchlevel))
+
+    # autoconf needed by bash-2.05a-interpreter.patch's change to configure.in
+    keepBuildReqs = ['glibc:devel']
+    buildRequires = ['autoconf:runtime', 'byacc:runtime',
+                     'install-info:runtime' ]
+
+    if Use.bootstrap:
+        buildRequires += [ 'gcc[!cross]', 'binutils[!cross]',
+                           'binutils[cross]' ]
+        crossRequires = [ 'glibc:devel' ]
+    else:
+        buildRequires += [ 'libtermcap:devel', 'readline:devel',
+                           'texinfo:runtime', ]
+
+    def setup(r):
+        r.macros.update({ 'baseversion' : r.baseversion,
+                          'patchlevel'  : r.patchlevel,
+                          'bash_shortversion': r.baseversion.replace('.', '')
+                        })
+
+        r.disableParallelMake()
+
+        r.mainDir('bash-%(baseversion)s')
+        r.addArchive('http://ftp.gnu.org/gnu/bash/bash-%(baseversion)s.tar.gz')
+
+        skelFiles = ('dot-bash_logout', 'dot-bashrc', 'dot-bash_profile')
+        for f in skelFiles:
+            r.addSource(f, dest='%(sysconfdir)s/skel/.' + f[4:])
+
+        r.addPatch('bash-2.02-security.patch')
+        r.addPatch('bash-2.03-paths.patch', macros=True)
+        r.addPatch('bash-2.03-profile.patch')
+        r.addPatch('bash-2.05a-loadables.patch')
+        r.addPatch('bash-2.05a-requires.patch')
+        r.addPatch('bash-2.05a-shellfunc.patch')
+        r.addPatch('bash-2.05b-debuginfo.patch')
+        r.addPatch('bash-2.05b-manso.patch')
+        r.addPatch('bash-2.05b-mbinc.patch')
+        r.addPatch('bash-2.05b-pgrp_sync.patch')
+        r.addPatch('bash-2.05b-readline-oom.patch')
+        r.addPatch('bash-tty-tests.patch')
+
+        # upstream patches
+        if r.patchlevel != '0':
+            for p in range(1, int(r.patchlevel)+1):
+                r.addPatch(
+                       'mirror://gnu/bash/bash-%%(baseversion)s-patches/bash%%(bash_shortversion)s-%03d'%p)#, keyid='64EA74AB')
+                        # key downloading seems to hang atm
+
+        # gentoo claims this is upstream, but i can't find it. in any case, it
+        # fixes issues with cursor position with non-ascii and color prompts.
+        # see http://bugs.gentoo.org/show_bug.cgi?id=155369 for a fuller
+        # description
+        r.addPatch('http://viewcvs.gentoo.org/viewcvs.py/*checkout*/gentoo-x86/app-shells/bash/files/bash-3.2-redisplay-cursor.patch?rev=1.1')
+
+        # RPL-3003
+        r.addPatch('https://svn.pardus.org.tr/pardus/devel/system/base/bash/files/command-not-found.patch')
+
+        r.Configure(preConfigure='EMACS=emacs')
+        r.Make('version.h')
+        r.Make()
+        r.MakeInstall()
+
+        r.MakeDirs('%(essentialbindir)s')
+        r.Move('%(bindir)s/bash', '%(essentialbindir)s/bash')
+        r.Symlink('bash', '%(essentialbindir)s/sh')
+        r.TagSpec('shell', '%(essentialbindir)s/(ba)?sh')
+
+        r.Doc('examples/')
+
+        if not Use.bootstrap and Use.buildtests:
+            r.Replace('#!../bash', '#%(essentialbindir)s/bash',
+                      'tests/run-set-x',
+                      'tests/dbg-support.tests',
+                      'tests/run-dbg-support2',
+                      'tests/dbg-support2.tests',
+                      'tests/run-dbg-support',
+                      'tests/set-x.tests')
+            testprogs = 'recho zecho printenv mksyntax'
+            r.Make(testprogs)
+            r.Run('cp %s tests/' % testprogs)
+            r.TestSuiteFiles('recho', 'zecho', 'printenv', 'mksyntax')
+            r.TestSuite('tests/', 'PATH=$PATH:. THIS_SH=%(name)s /bin/sh run-all')
+            r.EnforceConfigLogBuildRequirements(exceptions=['bison:runtime', 'emacs:runtime'])
