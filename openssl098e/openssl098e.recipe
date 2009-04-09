@@ -1,0 +1,112 @@
+#
+# Copyright (c) 2009 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Openssl098e(RPMPackageRecipe, CPackageRecipe):
+    name = 'openssl098e'
+    version = '0.9.8e'
+    rpmName = 'openssl'
+    rpmRelease = '7.el5'
+
+    isRHEL = True
+    distroVersion = '5Server'
+    tarballName = '%(rpmName)s-fips-%(version)s-usa.tar.bz2'
+
+    rpmSources = [
+        'openssl-fips-%(version)s-usa.tar.bz2',
+        'hobble-openssl',
+        #'Makefile.certificate',
+        #'ca-bundle.crt',
+        #'https://rhn.redhat.com/help/RHNS-CA-CERT',
+        #'https://rhn.redhat.com/help/RHNS-CA-CERT.asc'
+        #'make-dummy-cert',
+        #'openssl-thread-test.c',
+        #'opensslconf-new.h',
+        #'opensslconf-new-warning.h',
+    ]
+
+    rpmPatches = [
+        'openssl-fips-0.9.8e-redhat.patch',
+        'openssl-0.9.8a-defaults.patch',
+        'openssl-0.9.8a-link-krb5.patch',
+        'openssl-0.9.8b-soversion.patch',
+        'openssl-0.9.8a-enginesdir.patch',
+        'openssl-0.9.8a-no-rpath.patch',
+        'openssl-0.9.7-beta6-ia64.patch',
+        #'openssl-0.9.7f-ca-dir.patch',
+        'openssl-0.9.6-x509.patch',
+        'openssl-0.9.7-beta5-version-add-engines.patch',
+        'openssl-0.9.8a-reuse-cipher-change.patch',
+        'openssl-0.9.8b-ipv6-apps.patch',
+        'openssl-0.9.8b-aliasing-bug.patch',
+        'openssl-0.9.8b-x509-name-cmp.patch',
+        'openssl-fips-0.9.8e-dtls-fixes.patch',
+        'openssl-0.9.8b-cve-2007-5135.patch',
+        'openssl-fips-0.9.8e-aescfb.patch',
+        'openssl-fips-0.9.8e-abi.patch',
+        'openssl-fips-0.9.8e-fipsmode.patch',
+        'openssl-fips-0.9.8e-bn-fixes.patch',
+        'openssl-fips-0.9.8e-use-fipscheck.patch',
+        'openssl-fips-0.9.8e-env-nozlib.patch',
+        'openssl-fips-0.9.8e-default-paths.patch',
+        'openssl-fips-0.9.8e-evp-nonfips.patch',
+        'openssl-fips-0.9.8e-cve-2008-5077.patch',
+    ]
+
+    buildRequires = [ 'perl:runtime', 'perl:devel', 'e2fsprogs:devel',
+        'krb5:devel', 'sed:runtime', 'mktemp:runtime', 'zlib:devel' ]
+
+    def setup(r):
+        r.unpack()
+
+        r.macros.sslflags = ''
+        if Arch.x86:
+            r.macros.basearch = 'i386'
+            r.macros.sslarch = 'linux-elf'
+            if not Arch.x86.i686:
+                r.macros.sslflags = 'no-asm 386'
+        elif Arch.x86_64:
+            r.macros.basearch = 'x86_64'
+            r.macros.sslarch = 'linux-x86_64'
+
+        r.Run('./hobble-openssl')
+
+        r.macros.cppflags += ' -DOPENSSL_USE_NEW_FUNCTIONS'
+        r.macros.enginesdir = '%(libdir)s/%(name)s/engines'
+
+        r.ManualConfigure(
+            ' --prefix=%(prefix)s'
+            ' --openssldir=%(sysconfdir)s/ssl'
+            ' --with-krb5-flavor=MIT'
+            ' zlib no-idea no-mdc2 no-rc5 no-ec no-ecdh no-ecdsa shared'
+            ' --enginesdir=%(enginesdir)s'
+            ' %(sslarch)s %(sslflags)s fipscanisterbuild',
+            preConfigure=(' CFLAGS="%(cflags)s" CXXFLAGS="%(cflags)s"'
+                          ' LDFLAGS="%(ldflags)s" CC=%(cc)s'),
+            configureName='Configure')
+
+        r.Make('depend')
+        r.Make()
+        r.Make('rehash')
+
+        r.MakeInstall(rootVar='INSTALL_PREFIX')
+        r.Move('/usr/lib/*', '%(libdir)s/')
+        r.Move('%(libdir)s/engines', '%(enginesdir)s')
+        r.Move('%(libdir)s/lib{ssl,crypto}.so.*', '%(essentiallibdir)s/')
+
+        r.Replace(('^libdir=\${exec_prefix}/lib',
+                  'libdir=%(essentiallibdir)s'),
+                  '%(libdir)s/pkgconfig/*.pc')
+
+        # Remove files that are not required for compat.
+        r.Remove('%(sysconfdir)s/*', recursive=True)
+        r.Remove('%(bindir)s/*', recursive=True)
+
+        # Remove symlinks to avoid both openssl and openssl098e having the
+        # same provides.
+        r.Remove('%(libdir)s/lib{crypto,ssl}.so')
+
+        r.Requires('openssl:config', '%(libdir)s/.*')
