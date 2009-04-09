@@ -1,10 +1,11 @@
 #
-# Copyright (c) 2004-2008 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 loadInstalled('db')
+loadInstalled('glibc')
 class Nss_ldap(CPackageRecipe):
     name = 'nss_ldap'
     version = '260'
@@ -14,25 +15,51 @@ class Nss_ldap(CPackageRecipe):
             'autoconf:runtime', 'automake:runtime',
             'libtool:runtime', 'krb5:devel', 'openssl:devel',
             'cyrus-sasl:devel', 'openldap:devel',
-            'db:devel', 'zlib:devel' ]
+            'db:devel', 'zlib:devel', 'pam:devel', ]
 
     def setup(r):
         if not Use.ldap:
             return
 
+        r.macros.libcver = Glibc.version
         r.macros.libsasllibs = '-lsasl2'
         r.macros.cflags += ' -fPIC'
         r.macros.db_soversion = '4'
+        r.macros.pam_ldap_ver = '184'
+        r.macros.pamdir = 'pam_ldap-%(pam_ldap_ver)s'
 
         r.addArchive('http://www.padl.com/download/nss_ldap-%(version)s.tar.gz')
+        r.addArchive('http://www.padl.com/download/pam_ldap-%(pam_ldap_ver)s.tar.gz',
+                     dir='nss_ldap-%(version)s')
 
         r.addSource('nss_ldap.versions')
+        r.addSource('pam_ldap.versions')
         r.addSource('README.TLS')
         r.addSource('version.c')
 
+        # These patches were extracted from the F11 srpm for nss_ldap
+        r.addPatch('pam_ldap-184-dnsconfig.patch', dir='%(pamdir)s')
+        r.addPatch('pam_ldap-176-exop-modify.patch', dir='%(pamdir)s')
+        r.addPatch('pam_ldap-184-referral-passwd2.patch', dir='%(pamdir)s')
+        r.addPatch('pam_ldap-184-broken-sasl-rebind.patch', dir='%(pamdir)s')
+        r.addPatch('pam_ldap-184-nsrole.patch', dir='%(pamdir)s')
+
         r.addAction('cp %(datadir)s/libtool/config.{sub,guess} .')
+        r.addAction('cp %(datadir)s/libtool/config.{sub,guess} %(pamdir)s')
         r.Replace(r'-o \$\(INST_UID\) -g \$\(INST_GID\)', '', 'Makefile.am')
         r.Run('autoreconf')
+        r.Run('cd %(pamdir)s/; autoreconf')
+
+        # Now for pam_ldap
+        for file in ('resolve', 'snprintf'):
+            r.Run('cp %s.h %s.c %%(pamdir)s' % (file, file))
+        r.Configure('--libdir=%(essentiallibdir)s', dir='%(pamdir)s')
+        r.Make(dir='%(pamdir)s')
+
+        # Make again using the version script
+        r.Run('rm %(pamdir)s/pam_ldap.so')
+        ldflags = '-shared -Wl,--version-script=%(builddir)s/pam_ldap.versions'
+        r.Make('pam_ldap_so_LDFLAGS="%s"' % ldflags, dir='%(pamdir)s')
 
         # Finally nss_ldap
         r.macros.ldaplibs = ('-lldap -llber %(libsasllibs)s -lssl -lcrypto'
@@ -61,16 +88,20 @@ class Nss_ldap(CPackageRecipe):
                    '%(sysconfdir)s')
         r.MakeInstall()
 
+        r.Install('nss_ldap.so',
+                  '%(essentiallibdir)s/libnss_ldap-%(libcver)s.so')
+
         # Remove referenece to padl.com to avoid overloading server
         r.Run("sed -i -e 's|dc=padl|dc=example|g' ldap.conf")
         r.Install('ldap.conf', '%(sysconfdir)s/ldap.conf', mode=0644)
         r.InitialContents('%(sysconfdir)s/ldap.conf')
+        r.Install('%(pamdir)s/pam_ldap.so', '%(essentiallibdir)s/security')
 
         r.Symlink('%(essentiallibdir)s/libnss_ldap.so.2',
                   '%(libdir)s/libnss_ldap.so')
         r.Remove('%(libdir)s/libnss_ldap.so.2')
 
         # handle the docs
-        r.Doc('nsswitch.ldap', 'README.TLS')
+        r.Doc('nsswitch.ldap', 'README.TLS', '%(pamdir)s/pam.d')
 
         r.Remove('%(sysconfdir)s/nsswitch.ldap')
