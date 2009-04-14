@@ -1,0 +1,37 @@
+See thread at http://lkml.org/lkml/2008/10/15/240 for gory details
+of oops in uvcvideo stress-test.
+
+Not upstream, because 2.6.28 reworked this code considerably. Might
+be a good candidate for the 2.6.27.x stable tree though.
+
+From: Laurent Pinchart
+
+---
+
+ drivers/media/video/v4l2-dev.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/v4l2-dev.c b/drivers/media/video/v4l2-dev.c
+index 155fdec..7a3c1ed 100644
+--- a/drivers/media/video/v4l2-dev.c
++++ b/drivers/media/video/v4l2-dev.c
+@@ -132,6 +132,11 @@ static int video_open(struct inode *inode, struct file *file)
+ 	}
+ 	old_fops = file->f_op;
+ 	file->f_op = fops_get(vfl->fops);
++	if (file->f_op == NULL) {
++		file->f_op = old_fops;
++		err = -ENODEV;
++		goto out;
++	}
+ 	if (file->f_op->open)
+ 		err = file->f_op->open(inode, file);
+ 	if (err) {
+@@ -139,6 +144,7 @@ static int video_open(struct inode *inode, struct file *file)
+ 		file->f_op = fops_get(old_fops);
+ 	}
+ 	fops_put(old_fops);
++out:
+ 	mutex_unlock(&videodev_lock);
+ 	unlock_kernel();
+ 	return err;

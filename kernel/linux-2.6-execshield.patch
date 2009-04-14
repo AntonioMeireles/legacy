@@ -289,7 +289,7 @@ index 03df8e4..0fd091b 100644
  		return;
  
 diff --git a/arch/x86/mm/init_32.c b/arch/x86/mm/init_32.c
-index 60ec1d0..66d1a78 100644
+index 62dc07c..f7ae377 100644
 --- a/arch/x86/mm/init_32.c
 +++ b/arch/x86/mm/init_32.c
 @@ -514,7 +514,7 @@ static int disable_nx __initdata;
@@ -322,7 +322,7 @@ index 60ec1d0..66d1a78 100644
  
  	return 0;
  }
-@@ -779,7 +777,11 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
+@@ -789,7 +787,11 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
  	set_nx();
  	if (nx_enabled)
  		printk(KERN_INFO "NX (Execute Disable) protection: active\n");
@@ -335,10 +335,10 @@ index 60ec1d0..66d1a78 100644
  	/* Enable PSE if available */
  	if (cpu_has_pse)
 diff --git a/arch/x86/mm/mmap.c b/arch/x86/mm/mmap.c
-index 56fe712..ec932ae 100644
+index 56fe712..d8338f3 100644
 --- a/arch/x86/mm/mmap.c
 +++ b/arch/x86/mm/mmap.c
-@@ -111,13 +111,15 @@ static unsigned long mmap_legacy_base(void)
+@@ -111,13 +111,16 @@ static unsigned long mmap_legacy_base(void)
   */
  void arch_pick_mmap_layout(struct mm_struct *mm)
  {
@@ -350,7 +350,8 @@ index 56fe712..ec932ae 100644
  	} else {
  		mm->mmap_base = mmap_base();
  		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-+		if (!(current->personality & READ_IMPLIES_EXEC))
++		if (!(current->personality & READ_IMPLIES_EXEC)
++		    && mmap_is_ia32())
 +			mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
  		mm->unmap_area = arch_unmap_area_topdown;
  	}
@@ -369,7 +370,7 @@ index 513f330..2fb420a 100644
  			ret = addr;
  			goto up_fail;
 diff --git a/arch/x86/xen/enlighten.c b/arch/x86/xen/enlighten.c
-index a4e201b..3b01589 100644
+index 6bbcf8a..b724be2 100644
 --- a/arch/x86/xen/enlighten.c
 +++ b/arch/x86/xen/enlighten.c
 @@ -340,6 +340,24 @@ static void xen_set_ldt(const void *addr, unsigned entries)
@@ -408,7 +409,7 @@ index a4e201b..3b01589 100644
  	.load_idt = xen_load_idt,
  	.load_tls = xen_load_tls,
 diff --git a/fs/binfmt_elf.c b/fs/binfmt_elf.c
-index 655ed8d..09da3e5 100644
+index e57df48..af92a88 100644
 --- a/fs/binfmt_elf.c
 +++ b/fs/binfmt_elf.c
 @@ -80,7 +80,7 @@ static struct linux_binfmt elf_format = {
@@ -606,10 +607,10 @@ index 4df3e2f..a64e1e3 100644
  
  extern void early_cpu_init(void);
 diff --git a/include/linux/mm.h b/include/linux/mm.h
-index 72a15dc..f7f5411 100644
+index 856d52a..27c53cc 100644
 --- a/include/linux/mm.h
 +++ b/include/linux/mm.h
-@@ -1105,7 +1105,13 @@ extern int install_special_mapping(struct mm_struct *mm,
+@@ -1104,7 +1104,13 @@ extern int install_special_mapping(struct mm_struct *mm,
  				   unsigned long addr, unsigned long len,
  				   unsigned long flags, struct page **pages);
  
@@ -656,7 +657,7 @@ index aaa423a..07a1e51 100644
  /*
   * GPG wants 32kB of mlocked memory, to make sure pass phrases
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 3d9120c..16f3911 100644
+index 03e0902..834e6bb 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -97,6 +97,9 @@ struct futex_pi_state;
@@ -681,7 +682,7 @@ index 3d9120c..16f3911 100644
  arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
  			  unsigned long len, unsigned long pgoff,
 diff --git a/kernel/sysctl.c b/kernel/sysctl.c
-index 50ec088..112a419 100644
+index 6816e6d..17f7745 100644
 --- a/kernel/sysctl.c
 +++ b/kernel/sysctl.c
 @@ -83,6 +83,26 @@ extern int compat_log;
@@ -711,7 +712,7 @@ index 50ec088..112a419 100644
  #ifdef CONFIG_RCU_TORTURE_TEST
  extern int rcutorture_runnable;
  #endif /* #ifdef CONFIG_RCU_TORTURE_TEST */
-@@ -363,6 +383,14 @@ static struct ctl_table kern_table[] = {
+@@ -366,6 +386,14 @@ static struct ctl_table kern_table[] = {
  		.proc_handler	= &proc_dointvec,
  	},
  	{
@@ -727,7 +728,7 @@ index 50ec088..112a419 100644
  		.procname	= "core_uses_pid",
  		.data		= &core_uses_pid,
 diff --git a/mm/mmap.c b/mm/mmap.c
-index e7a5a68..fa7b4c5 100644
+index ca12a93..631c220 100644
 --- a/mm/mmap.c
 +++ b/mm/mmap.c
 @@ -27,6 +27,7 @@
@@ -943,7 +944,7 @@ index e7a5a68..fa7b4c5 100644
  	/*
  	 * Walk the list again, actually closing and freeing it,
 diff --git a/mm/mprotect.c b/mm/mprotect.c
-index fded06f..a2cf942 100644
+index 2623e29..b134613 100644
 --- a/mm/mprotect.c
 +++ b/mm/mprotect.c
 @@ -24,9 +24,14 @@
@@ -981,7 +982,7 @@ index fded06f..a2cf942 100644
  	if (is_vm_hugetlb_page(vma))
  		hugetlb_change_protection(vma, start, end, vma->vm_page_prot);
 diff --git a/mm/mremap.c b/mm/mremap.c
-index 1a77439..5bc2b6e 100644
+index cfdeed9..b4526b1 100644
 --- a/mm/mremap.c
 +++ b/mm/mremap.c
 @@ -398,8 +398,8 @@ unsigned long do_mremap(unsigned long addr,
