@@ -7,16 +7,17 @@
 loadSuperClass('rpmpackage')
 class Mono(RPMPackageRecipe,AutoPackageRecipe):
     name = 'mono'
-    version = '2.2'
-    rpmRelease = '1.fc10'
-    rpmPatches = [ 'mono-libdir-126.patch',
+    version = '2.4'
+    rpmRelease = '17.fc11'
+    rpmPatches = [ 'mono-2.2-ppc-threading.patch',
+                   'mono-libdir-126.patch',
                    'mono-1.2.3-use-monodir.patch',
+                   'mono-2.2-uselibdir.patch',
                    'mono-2.0-monoservice.patch',
                    'mono-2.0-metadata-makefile.patch',
-                   'mono-2.2-ppc-threading.patch',
-                   'mono-2.2-uselibdir.patch',
-                   'mono-22-libdir.patch',
                    'mono-22-libgdiwinform.patch',
+                   'mono-24-ppc-glocks.patch',
+                   # 'mono-22-libdir.patch',
                    ]
     rpmSources = ['monodir.c']
     buildRequires = [ 'zlib:devel', 'glib:devel', 'bison:runtime',
@@ -24,14 +25,16 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
                       'automake:runtime', 'expat:devel', 'libtool:devel',
                       'libtool:runtime', 'm4:runtime', 'pkgconfig:devel',
                       'attr:devel', 'ncurses:devel', 'wget:runtime', 'curl:runtime',
-                      'libgdiplus:devellib', 'libgdiplus:lib']
+                      'libgdiplus:devellib', 'libgdiplus:lib', 
+                      'gettext:runtime', 'intltool:runtime', 'valgrind:devel']
 
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
+        r.addPatch('mono-22-libdir.patch', rpm=r.srpm, filter = """ sed -e 's!@libdir@!%s!' """ % '%(libdir)s', macros = True)
         r.addSource('http://mono.ximian.com/daily/monolite-20080615.tar.gz')
-        r.addAction(""" sed -i -e 's!@libdir@!%(libdir)s!' configure.in  """)
-        r.addAction(""" sed -i -e 's!$(prefix)/lib/!%(libdir)s/!' docs/Makefile.{am,in} """)
+        for f in [ 'data/mono.web.pc.in', 'data/system.web.extensions_1.0.pc.in', 'data/system.web.extensions.design_1.0.pc.in']:
+            r.Replace('@prefix@/lib/', '%(libdir)s', f)
 
         r.Run(' autoreconf -f -i -s ')
         # Add undeclared Arg
@@ -39,10 +42,6 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
         # Remove prebuilt binaries
         # r.Remove('mcs/class/lib/monolite/*', recursive = True)
 
-        # https://bugzilla.novell.com/show_bug.cgi?id=484323
-        r.addPatch('mono-2.2-bug484323.patch')
-        # r129824
-        r.addPatch('mono-2.2-bug484323_2.patch')
 
     def configure(r):
         r.Environment('MONO_SHARED_DIR', '/tmp')
@@ -53,7 +52,7 @@ class Mono(RPMPackageRecipe,AutoPackageRecipe):
 
         extraConfig = ' --with-ikvm=yes --with-jit=yes --with-xen_opt=no '
         extraConfig += ' --disable-static '
-        extraConfig += ' --with-moonlight=no '
+        extraConfig += ' --with-moonlight=yes '
         extraConfig += ' --with-preview=yes '
         extraConfig += ' --with-libgdiplus=installed '
 
