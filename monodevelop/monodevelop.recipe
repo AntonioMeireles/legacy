@@ -7,28 +7,39 @@
 loadSuperClass('rpmpackage')
 class MonoDevelop(RPMPackageRecipe,AutoPackageRecipe):
     name = 'monodevelop'
-    version = '1.9'
-    rpmRelease = '6.fc10'
+    version = '2.0'
+    rpmRelease = '1.fc11'
     buildRequires = [ 'desktop-file-utils:runtime', 'gecko-sharp:devellib', 'gecko-sharp:cil', 'gettext:runtime', 'gnome-sharp:devellib', 'gnome-sharp:lib', 'gtk-sharp:devellib', 'gtk-sharp:lib', 'gtksourceview-sharp:devellib', 'gtksourceview-sharp:cil', 'intltool:runtime', 'mono:devel', 'mono:lib', 'mono:runtime', 'perl:runtime', 'pkgconfig:devel', 'shared-mime-info:runtime', 'libgdiplus:lib', 'gnome-sharp:cil', 'gtk-sharp:cil', 'gtksourceview-sharp:cil', 'mono-addins:devellib', 'mono-addins:cil', 'mono:cil', 'automake:runtime', 'autoconf:runtime', 'libtool:runtime', ]
 
-    rpmPatches = [ 'monodevelop-1.9-libdir.patch',
-#                   'monodevelop-1.9-use-system-cecil.patch',
-#                   'monodevelop-1.9-use-system-nunit.patch',
-                   'monodevelop-1.9-headbuild.patch',
+    rpmPatches = [ # 'monodevelop-1.9.1-use-mono-cecil.patch',
+                   'monodevelop-1.9.2-removed-contrib.patch',
+                   # 'monodevelop-192-nunit.patch',
+                   # 'monodevelop-191-usemonocecil.patch',
+                   # 'md-192-desktop.patch',
                    ]
     def unpack(r):
         RPMPackageRecipe.unpack(r)
         r.Environment('MONO_SHARED_DIR', '/tmp')
+        r.Run("""
+sed -i -e 's!${exec_prefix}/lib!%(libdir)s!' configure
+sed -i -e 's!$PREFIX/lib/!%(libdir)s/!' monodevelop.in
+
+find . -name Makefile.in -or -name Makefile.am -or -name \*.pc.in \
+       -or -name \*.in -or -name \*.xml \
+       | while read f ;
+         do
+           sed -i -e 's!$(prefix)/lib/!%(libdir)s/!' "$f" 
+           sed -i -e 's!@prefix@/lib/!%(libdir)s/!' "$f"
+           sed -i -e 's!/usr/lib/!%(libdir)s/!' "$f"
+           sed -i -e 's!${exec_prefix}/lib/!%(libdir)s/!' "$f" ;
+         done
+
+sed -i src/addins/NUnit/MonoDevelopNUnit.addin.xml -e 's|LIBDIR|%(libdir)s|'
+""")
+
+
         r.Run('autoreconf -f -i -s')
-        r.Run(""" sed -i src/addins/NUnit/MonoDevelopNUnit.addin.xml -e 's|LIBDIR|%(libdir)s|' """)
-        r.macros.cecilver = '$(gacutil -l Mono.Cecil |grep Mono.Cecil | cut -d "=" -f 2 | cut -d "," -f 1)) '
-        r.macros.ceciltoken = '$( gacutil -l Mono.Cecil |grep Mono.Cecil | cut -d "=" -f 4))'
-        r.macros.cecilmdbver = '$(gacutil -l Mono.Cecil.Mdb |grep Mono.Cecil.Mdb | cut -d "=" -f 2 | cut -d "," -f 1))'
-        r.macros.cecilmdbtoken = '$(gacutil -l Mono.Cecil.Mdb |grep Mono.Cecil.Mdb | cut -d "=" -f 4))'
-        # Here is where we replace the LONGCECILSTRING and LONGCECILMDBSTRING
-        # placeholders with the actual values for the Mono.Cecil and Mono.Cecil.Mdb
-        # ver__token
-        # get this right ... 
+
 
     def configure(r):
         r.disableParallelMake()
