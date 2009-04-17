@@ -1,0 +1,37 @@
+From: Herbert Xu <herbert@gondor.apana.org.au>
+Date: Sun, 29 Mar 2009 06:39:18 +0000 (-0700)
+Subject: gso: Fix support for linear packets
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Fdavem%2Fnet-2.6.git;a=commitdiff_plain;h=2f181855a0b3c2b39314944add7b41c15647cf86
+
+gso: Fix support for linear packets
+
+When GRO/frag_list support was added to GSO, I made an error
+which broke the support for segmenting linear GSO packets (GSO
+packets are normally non-linear in the payload).
+
+These days most of these packets are constructed by the tun
+driver, which prefers to allocate linear memory if possible.
+This is fixed in the latest kernel, but for 2.6.29 and earlier
+it is still the norm.
+
+Therefore this bug causes failures with GSO when used with tun
+in 2.6.29.
+
+Reported-by: James Huang <jamesclhuang@gmail.com>
+Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index 6acbf9e..ce6356c 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -2579,7 +2579,7 @@ struct sk_buff *skb_segment(struct sk_buff *skb, int features)
+ 					  skb_network_header_len(skb));
+ 		skb_copy_from_linear_data(skb, nskb->data, doffset);
+ 
+-		if (pos >= offset + len)
++		if (fskb != skb_shinfo(skb)->frag_list)
+ 			continue;
+ 
+ 		if (!sg) {

@@ -1,150 +1,418 @@
-Git diff in linux1394-2.6-git at commit 3346610742cdef8b1670d090008aca0911e95880
-vs. tag v2.6.27, on 2008-10-29.
-
-Edited 2009-02-17 by cebbert to apply to 2.6.27.18
+linux1394-2.6.git tree vs. linus v2.6.29-rc3-git1 on 20090130 by jarod
 
 ---
+ firewire-git/drivers/firewire/fw-card.c        |   68 -
+ firewire-git/drivers/firewire/fw-cdev.c        | 1014 +++++++++++++++++--------
+ firewire-git/drivers/firewire/fw-device.c      |   43 -
+ firewire-git/drivers/firewire/fw-device.h      |    7 
+ firewire-git/drivers/firewire/fw-iso.c         |  225 ++++-
+ firewire-git/drivers/firewire/fw-ohci.c        |  236 ++---
+ firewire-git/drivers/firewire/fw-sbp2.c        |   57 -
+ firewire-git/drivers/firewire/fw-topology.c    |   28 
+ firewire-git/drivers/firewire/fw-topology.h    |   19 
+ firewire-git/drivers/firewire/fw-transaction.c |  151 +--
+ firewire-git/drivers/firewire/fw-transaction.h |  125 ---
+ include/linux/firewire-cdev.h                  |  170 +++-
+ 12 files changed, 1359 insertions(+), 784 deletions(-)
 
- drivers/firewire/fw-card.c         |   58 ++------
- drivers/firewire/fw-cdev.c         |   42 +++---
- drivers/firewire/fw-device.c       |   40 ++----
- drivers/firewire/fw-device.h       |    4 +
- drivers/firewire/fw-ohci.c         |  123 ++++++++++------
- drivers/firewire/fw-sbp2.c         |  154 +++++++++-----------
- drivers/firewire/fw-topology.c     |   18 ++-
- drivers/firewire/fw-transaction.c  |   48 ++++++-
- drivers/firewire/fw-transaction.h  |   20 ++-
- drivers/ieee1394/csr1212.c         |    2 +-
- drivers/ieee1394/dv1394.c          |    2 +-
- drivers/ieee1394/eth1394.c         |    2 +-
- drivers/ieee1394/nodemgr.c         |  279 ++++++++++++++----------------------
- drivers/ieee1394/nodemgr.h         |    2 +-
- drivers/ieee1394/raw1394-private.h |    1 +
- drivers/ieee1394/raw1394.c         |  230 ++++++++++++++++-------------
- drivers/ieee1394/sbp2.c            |  218 ++++++++++++----------------
- drivers/ieee1394/sbp2.h            |   33 ++---
- drivers/ieee1394/video1394.c       |    8 +-
- include/linux/firewire-cdev.h      |    9 +-
- 20 files changed, 622 insertions(+), 671 deletions(-)
-
-diff --git a/drivers/firewire/fw-card.c b/drivers/firewire/fw-card.c
-index bbd73a4..94cf070 100644
---- a/drivers/firewire/fw-card.c
-+++ b/drivers/firewire/fw-card.c
-@@ -189,39 +189,16 @@ static const char gap_count_table[] = {
+diff -Naurp linux-2.6-git/drivers/firewire/fw-card.c firewire-git/drivers/firewire/fw-card.c
+--- linux-2.6-git/drivers/firewire/fw-card.c	2009-01-30 13:39:02.989651512 -0500
++++ firewire-git/drivers/firewire/fw-card.c	2009-01-30 13:35:51.859771884 -0500
+@@ -63,8 +63,7 @@ static int descriptor_count;
+ #define BIB_CMC			((1) << 30)
+ #define BIB_IMC			((1) << 31)
+ 
+-static u32 *
+-generate_config_rom(struct fw_card *card, size_t *config_rom_length)
++static u32 *generate_config_rom(struct fw_card *card, size_t *config_rom_length)
+ {
+ 	struct fw_descriptor *desc;
+ 	static u32 config_rom[256];
+@@ -128,8 +127,7 @@ generate_config_rom(struct fw_card *card
+ 	return config_rom;
+ }
+ 
+-static void
+-update_config_roms(void)
++static void update_config_roms(void)
+ {
+ 	struct fw_card *card;
+ 	u32 *config_rom;
+@@ -141,8 +139,7 @@ update_config_roms(void)
+ 	}
+ }
+ 
+-int
+-fw_core_add_descriptor(struct fw_descriptor *desc)
++int fw_core_add_descriptor(struct fw_descriptor *desc)
+ {
+ 	size_t i;
+ 
+@@ -171,8 +168,7 @@ fw_core_add_descriptor(struct fw_descrip
+ 	return 0;
+ }
+ 
+-void
+-fw_core_remove_descriptor(struct fw_descriptor *desc)
++void fw_core_remove_descriptor(struct fw_descriptor *desc)
+ {
+ 	mutex_lock(&card_mutex);
+ 
+@@ -189,8 +185,7 @@ static const char gap_count_table[] = {
  	63, 5, 7, 8, 10, 13, 16, 18, 21, 24, 26, 29, 32, 35, 37, 40
  };
  
--struct bm_data {
--	struct fw_transaction t;
--	struct {
--		__be32 arg;
--		__be32 data;
--	} lock;
--	u32 old;
--	int rcode;
--	struct completion done;
--};
--
+-void
+-fw_schedule_bm_work(struct fw_card *card, unsigned long delay)
++void fw_schedule_bm_work(struct fw_card *card, unsigned long delay)
+ {
+ 	int scheduled;
+ 
+@@ -200,8 +195,7 @@ fw_schedule_bm_work(struct fw_card *card
+ 		fw_card_put(card);
+ }
+ 
 -static void
--complete_bm_lock(struct fw_card *card, int rcode,
--		 void *payload, size_t length, void *data)
--{
--	struct bm_data *bmd = data;
--
--	if (rcode == RCODE_COMPLETE)
--		bmd->old = be32_to_cpu(*(__be32 *) payload);
--	bmd->rcode = rcode;
--	complete(&bmd->done);
--}
--
- static void
- fw_card_bm_work(struct work_struct *work)
+-fw_card_bm_work(struct work_struct *work)
++static void fw_card_bm_work(struct work_struct *work)
  {
  	struct fw_card *card = container_of(work, struct fw_card, work.work);
  	struct fw_device *root_device;
- 	struct fw_node *root_node, *local_node;
--	struct bm_data bmd;
- 	unsigned long flags;
--	int root_id, new_root_id, irm_id, gap_count, generation, grace;
-+	int root_id, new_root_id, irm_id, gap_count, generation, grace, rcode;
- 	bool do_reset = false;
-+	__be32 lock_data[2];
+@@ -371,17 +365,16 @@ fw_card_bm_work(struct work_struct *work
+ 	fw_card_put(card);
+ }
  
- 	spin_lock_irqsave(&card->lock, flags);
- 	local_node = card->local_node;
-@@ -241,7 +218,7 @@ fw_card_bm_work(struct work_struct *work)
- 	root_id = root_node->node_id;
- 	grace = time_after(jiffies, card->reset_jiffies + DIV_ROUND_UP(HZ, 10));
+-static void
+-flush_timer_callback(unsigned long data)
++static void flush_timer_callback(unsigned long data)
+ {
+ 	struct fw_card *card = (struct fw_card *)data;
  
--	if (card->bm_generation + 1 == generation ||
-+	if (is_next_generation(generation, card->bm_generation) ||
- 	    (card->bm_generation != generation && grace)) {
- 		/*
- 		 * This first step is to figure out who is IRM and
-@@ -263,33 +240,28 @@ fw_card_bm_work(struct work_struct *work)
- 			goto pick_me;
- 		}
+ 	fw_flush_transactions(card);
+ }
  
--		bmd.lock.arg = cpu_to_be32(0x3f);
--		bmd.lock.data = cpu_to_be32(local_node->node_id);
-+		lock_data[0] = cpu_to_be32(0x3f);
-+		lock_data[1] = cpu_to_be32(local_node->node_id);
+-void
+-fw_card_initialize(struct fw_card *card, const struct fw_card_driver *driver,
+-		   struct device *device)
++void fw_card_initialize(struct fw_card *card,
++			const struct fw_card_driver *driver,
++			struct device *device)
+ {
+ 	static atomic_t index = ATOMIC_INIT(-1);
  
- 		spin_unlock_irqrestore(&card->lock, flags);
+@@ -406,9 +399,8 @@ fw_card_initialize(struct fw_card *card,
+ }
+ EXPORT_SYMBOL(fw_card_initialize);
  
--		init_completion(&bmd.done);
--		fw_send_request(card, &bmd.t, TCODE_LOCK_COMPARE_SWAP,
--				irm_id, generation,
--				SCODE_100, CSR_REGISTER_BASE + CSR_BUS_MANAGER_ID,
--				&bmd.lock, sizeof(bmd.lock),
--				complete_bm_lock, &bmd);
--		wait_for_completion(&bmd.done);
-+		rcode = fw_run_transaction(card, TCODE_LOCK_COMPARE_SWAP,
-+				irm_id, generation, SCODE_100,
-+				CSR_REGISTER_BASE + CSR_BUS_MANAGER_ID,
-+				lock_data, sizeof(lock_data));
+-int
+-fw_card_add(struct fw_card *card,
+-	    u32 max_receive, u32 link_speed, u64 guid)
++int fw_card_add(struct fw_card *card,
++		u32 max_receive, u32 link_speed, u64 guid)
+ {
+ 	u32 *config_rom;
+ 	size_t length;
+@@ -435,23 +427,20 @@ EXPORT_SYMBOL(fw_card_add);
+  * dummy driver just fails all IO.
+  */
  
--		if (bmd.rcode == RCODE_GENERATION) {
--			/*
--			 * Another bus reset happened. Just return,
--			 * the BM work has been rescheduled.
--			 */
-+		if (rcode == RCODE_GENERATION)
-+			/* Another bus reset, BM work has been rescheduled. */
- 			goto out;
--		}
+-static int
+-dummy_enable(struct fw_card *card, u32 *config_rom, size_t length)
++static int dummy_enable(struct fw_card *card, u32 *config_rom, size_t length)
+ {
+ 	BUG();
+ 	return -1;
+ }
  
--		if (bmd.rcode == RCODE_COMPLETE && bmd.old != 0x3f)
-+		if (rcode == RCODE_COMPLETE &&
-+		    lock_data[0] != cpu_to_be32(0x3f))
- 			/* Somebody else is BM, let them do the work. */
- 			goto out;
+-static int
+-dummy_update_phy_reg(struct fw_card *card, int address,
+-		     int clear_bits, int set_bits)
++static int dummy_update_phy_reg(struct fw_card *card, int address,
++				int clear_bits, int set_bits)
+ {
+ 	return -ENODEV;
+ }
  
- 		spin_lock_irqsave(&card->lock, flags);
--		if (bmd.rcode != RCODE_COMPLETE) {
-+
-+		if (rcode != RCODE_COMPLETE) {
- 			/*
- 			 * The lock request failed, maybe the IRM
- 			 * isn't really IRM capable after all. Let's
-diff --git a/drivers/firewire/fw-cdev.c b/drivers/firewire/fw-cdev.c
-index 2e6d584..75bbd66 100644
---- a/drivers/firewire/fw-cdev.c
-+++ b/drivers/firewire/fw-cdev.c
-@@ -24,9 +24,11 @@
- #include <linux/errno.h>
+-static int
+-dummy_set_config_rom(struct fw_card *card,
+-		     u32 *config_rom, size_t length)
++static int dummy_set_config_rom(struct fw_card *card,
++				u32 *config_rom, size_t length)
+ {
+ 	/*
+ 	 * We take the card out of card_list before setting the dummy
+@@ -461,27 +450,23 @@ dummy_set_config_rom(struct fw_card *car
+ 	return -1;
+ }
+ 
+-static void
+-dummy_send_request(struct fw_card *card, struct fw_packet *packet)
++static void dummy_send_request(struct fw_card *card, struct fw_packet *packet)
+ {
+ 	packet->callback(packet, card, -ENODEV);
+ }
+ 
+-static void
+-dummy_send_response(struct fw_card *card, struct fw_packet *packet)
++static void dummy_send_response(struct fw_card *card, struct fw_packet *packet)
+ {
+ 	packet->callback(packet, card, -ENODEV);
+ }
+ 
+-static int
+-dummy_cancel_packet(struct fw_card *card, struct fw_packet *packet)
++static int dummy_cancel_packet(struct fw_card *card, struct fw_packet *packet)
+ {
+ 	return -ENOENT;
+ }
+ 
+-static int
+-dummy_enable_phys_dma(struct fw_card *card,
+-		      int node_id, int generation)
++static int dummy_enable_phys_dma(struct fw_card *card,
++				 int node_id, int generation)
+ {
+ 	return -ENODEV;
+ }
+@@ -496,16 +481,14 @@ static struct fw_card_driver dummy_drive
+ 	.enable_phys_dma = dummy_enable_phys_dma,
+ };
+ 
+-void
+-fw_card_release(struct kref *kref)
++void fw_card_release(struct kref *kref)
+ {
+ 	struct fw_card *card = container_of(kref, struct fw_card, kref);
+ 
+ 	complete(&card->done);
+ }
+ 
+-void
+-fw_core_remove_card(struct fw_card *card)
++void fw_core_remove_card(struct fw_card *card)
+ {
+ 	card->driver->update_phy_reg(card, 4,
+ 				     PHY_LINK_ACTIVE | PHY_CONTENDER, 0);
+@@ -529,8 +512,7 @@ fw_core_remove_card(struct fw_card *card
+ }
+ EXPORT_SYMBOL(fw_core_remove_card);
+ 
+-int
+-fw_core_initiate_bus_reset(struct fw_card *card, int short_reset)
++int fw_core_initiate_bus_reset(struct fw_card *card, int short_reset)
+ {
+ 	int reg = short_reset ? 5 : 1;
+ 	int bit = short_reset ? PHY_BUS_SHORT_RESET : PHY_BUS_RESET;
+diff -Naurp linux-2.6-git/drivers/firewire/fw-cdev.c firewire-git/drivers/firewire/fw-cdev.c
+--- linux-2.6-git/drivers/firewire/fw-cdev.c	2008-11-04 11:19:19.000000000 -0500
++++ firewire-git/drivers/firewire/fw-cdev.c	2009-01-30 13:35:51.860646788 -0500
+@@ -18,87 +18,162 @@
+  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+  */
+ 
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/wait.h>
+-#include <linux/errno.h>
++#include <linux/compat.h>
++#include <linux/delay.h>
  #include <linux/device.h>
- #include <linux/vmalloc.h>
+-#include <linux/vmalloc.h>
++#include <linux/errno.h>
++#include <linux/firewire-cdev.h>
++#include <linux/idr.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/kref.h>
++#include <linux/mm.h>
++#include <linux/module.h>
 +#include <linux/mutex.h>
  #include <linux/poll.h>
  #include <linux/preempt.h>
- #include <linux/time.h>
 +#include <linux/spinlock.h>
- #include <linux/delay.h>
- #include <linux/mm.h>
- #include <linux/idr.h>
-@@ -107,7 +109,6 @@ static int fw_device_op_open(struct inode *inode, struct file *file)
+ #include <linux/time.h>
+-#include <linux/delay.h>
+-#include <linux/mm.h>
+-#include <linux/idr.h>
+-#include <linux/compat.h>
+-#include <linux/firewire-cdev.h>
++#include <linux/vmalloc.h>
++#include <linux/wait.h>
++#include <linux/workqueue.h>
++
+ #include <asm/system.h>
+ #include <asm/uaccess.h>
+-#include "fw-transaction.h"
+-#include "fw-topology.h"
++
+ #include "fw-device.h"
++#include "fw-topology.h"
++#include "fw-transaction.h"
++
++struct client {
++	u32 version;
++	struct fw_device *device;
++
++	spinlock_t lock;
++	bool in_shutdown;
++	struct idr resource_idr;
++	struct list_head event_list;
++	wait_queue_head_t wait;
++	u64 bus_reset_closure;
++
++	struct fw_iso_context *iso_context;
++	u64 iso_closure;
++	struct fw_iso_buffer buffer;
++	unsigned long vm_start;
+ 
+-struct client;
+-struct client_resource {
+ 	struct list_head link;
+-	void (*release)(struct client *client, struct client_resource *r);
+-	u32 handle;
++	struct kref kref;
++};
++
++static inline void client_get(struct client *client)
++{
++	kref_get(&client->kref);
++}
++
++static void client_release(struct kref *kref)
++{
++	struct client *client = container_of(kref, struct client, kref);
++
++	fw_device_put(client->device);
++	kfree(client);
++}
++
++static void client_put(struct client *client)
++{
++	kref_put(&client->kref, client_release);
++}
++
++struct client_resource;
++typedef void (*client_resource_release_fn_t)(struct client *,
++					     struct client_resource *);
++struct client_resource {
++	client_resource_release_fn_t release;
++	int handle;
++};
++
++struct address_handler_resource {
++	struct client_resource resource;
++	struct fw_address_handler handler;
++	__u64 closure;
++	struct client *client;
++};
++
++struct outbound_transaction_resource {
++	struct client_resource resource;
++	struct fw_transaction transaction;
++};
++
++struct inbound_transaction_resource {
++	struct client_resource resource;
++	struct fw_request *request;
++	void *data;
++	size_t length;
+ };
+ 
++struct descriptor_resource {
++	struct client_resource resource;
++	struct fw_descriptor descriptor;
++	u32 data[0];
++};
++
++struct iso_resource {
++	struct client_resource resource;
++	struct client *client;
++	/* Schedule work and access todo only with client->lock held. */
++	struct delayed_work work;
++	enum {ISO_RES_ALLOC, ISO_RES_REALLOC, ISO_RES_DEALLOC,
++	      ISO_RES_ALLOC_ONCE, ISO_RES_DEALLOC_ONCE,} todo;
++	int generation;
++	u64 channels;
++	s32 bandwidth;
++	struct iso_resource_event *e_alloc, *e_dealloc;
++};
++
++static void schedule_iso_resource(struct iso_resource *);
++static void release_iso_resource(struct client *, struct client_resource *);
++
+ /*
+  * dequeue_event() just kfree()'s the event, so the event has to be
+- * the first field in the struct.
++ * the first field in a struct XYZ_event.
+  */
+-
+ struct event {
+ 	struct { void *data; size_t size; } v[2];
+ 	struct list_head link;
+ };
+ 
+-struct bus_reset {
++struct bus_reset_event {
+ 	struct event event;
+ 	struct fw_cdev_event_bus_reset reset;
+ };
+ 
+-struct response {
++struct outbound_transaction_event {
+ 	struct event event;
+-	struct fw_transaction transaction;
+ 	struct client *client;
+-	struct client_resource resource;
++	struct outbound_transaction_resource r;
+ 	struct fw_cdev_event_response response;
+ };
+ 
+-struct iso_interrupt {
++struct inbound_transaction_event {
+ 	struct event event;
+-	struct fw_cdev_event_iso_interrupt interrupt;
++	struct fw_cdev_event_request request;
+ };
+ 
+-struct client {
+-	u32 version;
+-	struct fw_device *device;
+-	spinlock_t lock;
+-	u32 resource_handle;
+-	struct list_head resource_list;
+-	struct list_head event_list;
+-	wait_queue_head_t wait;
+-	u64 bus_reset_closure;
+-
+-	struct fw_iso_context *iso_context;
+-	u64 iso_closure;
+-	struct fw_iso_buffer buffer;
+-	unsigned long vm_start;
++struct iso_interrupt_event {
++	struct event event;
++	struct fw_cdev_event_iso_interrupt interrupt;
++};
+ 
+-	struct list_head link;
++struct iso_resource_event {
++	struct event event;
++	struct fw_cdev_event_iso_resource resource;
+ };
+ 
+-static inline void __user *
+-u64_to_uptr(__u64 value)
++static inline void __user *u64_to_uptr(__u64 value)
+ {
+ 	return (void __user *)(unsigned long)value;
+ }
+ 
+-static inline __u64
+-uptr_to_u64(void __user *ptr)
++static inline __u64 uptr_to_u64(void __user *ptr)
+ {
+ 	return (__u64)(unsigned long)ptr;
+ }
+@@ -107,7 +182,6 @@ static int fw_device_op_open(struct inod
  {
  	struct fw_device *device;
  	struct client *client;
@@ -152,7 +420,17 @@ index 2e6d584..75bbd66 100644
  
  	device = fw_device_get_by_devt(inode->i_rdev);
  	if (device == NULL)
-@@ -132,9 +133,9 @@ static int fw_device_op_open(struct inode *inode, struct file *file)
+@@ -125,16 +199,17 @@ static int fw_device_op_open(struct inod
+ 	}
+ 
+ 	client->device = device;
+-	INIT_LIST_HEAD(&client->event_list);
+-	INIT_LIST_HEAD(&client->resource_list);
+ 	spin_lock_init(&client->lock);
++	idr_init(&client->resource_idr);
++	INIT_LIST_HEAD(&client->event_list);
+ 	init_waitqueue_head(&client->wait);
++	kref_init(&client->kref);
  
  	file->private_data = client;
  
@@ -164,33 +442,112 @@ index 2e6d584..75bbd66 100644
  
  	return 0;
  }
-@@ -205,12 +206,14 @@ fw_device_op_read(struct file *file,
+@@ -150,68 +225,69 @@ static void queue_event(struct client *c
+ 	event->v[1].size = size1;
+ 
+ 	spin_lock_irqsave(&client->lock, flags);
+-	list_add_tail(&event->link, &client->event_list);
++	if (client->in_shutdown)
++		kfree(event);
++	else
++		list_add_tail(&event->link, &client->event_list);
+ 	spin_unlock_irqrestore(&client->lock, flags);
+ 
+ 	wake_up_interruptible(&client->wait);
+ }
+ 
+-static int
+-dequeue_event(struct client *client, char __user *buffer, size_t count)
++static int dequeue_event(struct client *client,
++			 char __user *buffer, size_t count)
+ {
+-	unsigned long flags;
+ 	struct event *event;
+ 	size_t size, total;
+-	int i, retval;
++	int i, ret;
+ 
+-	retval = wait_event_interruptible(client->wait,
+-					  !list_empty(&client->event_list) ||
+-					  fw_device_is_shutdown(client->device));
+-	if (retval < 0)
+-		return retval;
++	ret = wait_event_interruptible(client->wait,
++			!list_empty(&client->event_list) ||
++			fw_device_is_shutdown(client->device));
++	if (ret < 0)
++		return ret;
+ 
+ 	if (list_empty(&client->event_list) &&
+ 		       fw_device_is_shutdown(client->device))
+ 		return -ENODEV;
+ 
+-	spin_lock_irqsave(&client->lock, flags);
+-	event = container_of(client->event_list.next, struct event, link);
++	spin_lock_irq(&client->lock);
++	event = list_first_entry(&client->event_list, struct event, link);
+ 	list_del(&event->link);
+-	spin_unlock_irqrestore(&client->lock, flags);
++	spin_unlock_irq(&client->lock);
+ 
+ 	total = 0;
+ 	for (i = 0; i < ARRAY_SIZE(event->v) && total < count; i++) {
+ 		size = min(event->v[i].size, count - total);
+ 		if (copy_to_user(buffer + total, event->v[i].data, size)) {
+-			retval = -EFAULT;
++			ret = -EFAULT;
+ 			goto out;
+ 		}
+ 		total += size;
+ 	}
+-	retval = total;
++	ret = total;
+ 
+  out:
+ 	kfree(event);
+ 
+-	return retval;
++	return ret;
+ }
+ 
+-static ssize_t
+-fw_device_op_read(struct file *file,
+-		  char __user *buffer, size_t count, loff_t *offset)
++static ssize_t fw_device_op_read(struct file *file, char __user *buffer,
++				 size_t count, loff_t *offset)
+ {
+ 	struct client *client = file->private_data;
+ 
  	return dequeue_event(client, buffer, count);
  }
  
 -/* caller must hold card->lock so that node pointers can be dereferenced here */
- static void
- fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
- 		     struct client *client)
+-static void
+-fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
+-		     struct client *client)
++static void fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
++				 struct client *client)
  {
  	struct fw_card *card = client->device->card;
-+	unsigned long flags;
-+
-+	spin_lock_irqsave(&card->lock, flags);
  
++	spin_lock_irq(&card->lock);
++
  	event->closure	     = client->bus_reset_closure;
  	event->type          = FW_CDEV_EVENT_BUS_RESET;
-@@ -220,22 +223,20 @@ fill_bus_reset_event(struct fw_cdev_event_bus_reset *event,
+ 	event->generation    = client->device->generation;
+@@ -220,39 +296,49 @@ fill_bus_reset_event(struct fw_cdev_even
  	event->bm_node_id    = 0; /* FIXME: We don't track the BM. */
  	event->irm_node_id   = card->irm_node->node_id;
  	event->root_node_id  = card->root_node->node_id;
 +
-+	spin_unlock_irqrestore(&card->lock, flags);
++	spin_unlock_irq(&card->lock);
  }
  
- static void
- for_each_client(struct fw_device *device,
- 		void (*callback)(struct client *client))
+-static void
+-for_each_client(struct fw_device *device,
+-		void (*callback)(struct client *client))
++static void for_each_client(struct fw_device *device,
++			    void (*callback)(struct client *client))
  {
 -	struct fw_card *card = device->card;
  	struct client *c;
@@ -201,22 +558,50 @@ index 2e6d584..75bbd66 100644
 +	mutex_lock(&device->client_list_mutex);
  	list_for_each_entry(c, &device->client_list, link)
  		callback(c);
--
--	spin_unlock_irqrestore(&card->lock, flags);
 +	mutex_unlock(&device->client_list_mutex);
++}
++
++static int schedule_reallocations(int id, void *p, void *data)
++{
++	struct client_resource *r = p;
+ 
+-	spin_unlock_irqrestore(&card->lock, flags);
++	if (r->release == release_iso_resource)
++		schedule_iso_resource(container_of(r,
++					struct iso_resource, resource));
++	return 0;
  }
  
- static void
-@@ -243,7 +244,7 @@ queue_bus_reset_event(struct client *client)
+-static void
+-queue_bus_reset_event(struct client *client)
++static void queue_bus_reset_event(struct client *client)
  {
- 	struct bus_reset *bus_reset;
+-	struct bus_reset *bus_reset;
++	struct bus_reset_event *e;
  
 -	bus_reset = kzalloc(sizeof(*bus_reset), GFP_ATOMIC);
-+	bus_reset = kzalloc(sizeof(*bus_reset), GFP_KERNEL);
- 	if (bus_reset == NULL) {
+-	if (bus_reset == NULL) {
++	e = kzalloc(sizeof(*e), GFP_KERNEL);
++	if (e == NULL) {
  		fw_notify("Out of memory when allocating bus reset event\n");
  		return;
-@@ -274,11 +275,11 @@ static int ioctl_get_info(struct client *client, void *buffer)
+ 	}
+ 
+-	fill_bus_reset_event(&bus_reset->reset, client);
++	fill_bus_reset_event(&e->reset, client);
++
++	queue_event(client, &e->event,
++		    &e->reset, sizeof(e->reset), NULL, 0);
+ 
+-	queue_event(client, &bus_reset->event,
+-		    &bus_reset->reset, sizeof(bus_reset->reset), NULL, 0);
++	spin_lock_irq(&client->lock);
++	idr_for_each(&client->resource_idr, schedule_reallocations, client);
++	spin_unlock_irq(&client->lock);
+ }
+ 
+ void fw_device_cdev_update(struct fw_device *device)
+@@ -274,11 +360,11 @@ static int ioctl_get_info(struct client 
  {
  	struct fw_cdev_get_info *get_info = buffer;
  	struct fw_cdev_event_bus_reset bus_reset;
@@ -229,7 +614,7 @@ index 2e6d584..75bbd66 100644
  
  	down_read(&fw_device_rwsem);
  
-@@ -300,18 +301,12 @@ static int ioctl_get_info(struct client *client, void *buffer)
+@@ -300,49 +386,61 @@ static int ioctl_get_info(struct client 
  	client->bus_reset_closure = get_info->bus_reset_closure;
  	if (get_info->bus_reset != 0) {
  		void __user *uptr = u64_to_uptr(get_info->bus_reset);
@@ -248,53 +633,988 @@ index 2e6d584..75bbd66 100644
  	return 0;
  }
  
-@@ -720,8 +715,8 @@ static int ioctl_create_iso_context(struct client *client, void *buffer)
- #define GET_PAYLOAD_LENGTH(v)	((v) & 0xffff)
- #define GET_INTERRUPT(v)	(((v) >> 16) & 0x01)
- #define GET_SKIP(v)		(((v) >> 17) & 0x01)
--#define GET_TAG(v)		(((v) >> 18) & 0x02)
--#define GET_SY(v)		(((v) >> 20) & 0x04)
-+#define GET_TAG(v)		(((v) >> 18) & 0x03)
-+#define GET_SY(v)		(((v) >> 20) & 0x0f)
- #define GET_HEADER_LENGTH(v)	(((v) >> 24) & 0xff)
+-static void
+-add_client_resource(struct client *client, struct client_resource *resource)
++static int add_client_resource(struct client *client,
++			       struct client_resource *resource, gfp_t gfp_mask)
+ {
+ 	unsigned long flags;
++	int ret;
++
++ retry:
++	if (idr_pre_get(&client->resource_idr, gfp_mask | __GFP_ZERO) == 0)
++		return -ENOMEM;
  
- static int ioctl_queue_iso(struct client *client, void *buffer)
-@@ -913,7 +908,7 @@ dispatch_ioctl(struct client *client, unsigned int cmd, void __user *arg)
+ 	spin_lock_irqsave(&client->lock, flags);
+-	list_add_tail(&resource->link, &client->resource_list);
+-	resource->handle = client->resource_handle++;
++	if (client->in_shutdown)
++		ret = -ECANCELED;
++	else
++		ret = idr_get_new(&client->resource_idr, resource,
++				  &resource->handle);
++	if (ret >= 0) {
++		client_get(client);
++		if (resource->release == release_iso_resource)
++			schedule_iso_resource(container_of(resource,
++						struct iso_resource, resource));
++	}
+ 	spin_unlock_irqrestore(&client->lock, flags);
++
++	if (ret == -EAGAIN)
++		goto retry;
++
++	return ret < 0 ? ret : 0;
+ }
+ 
+-static int
+-release_client_resource(struct client *client, u32 handle,
+-			struct client_resource **resource)
++static int release_client_resource(struct client *client, u32 handle,
++				   client_resource_release_fn_t release,
++				   struct client_resource **resource)
+ {
+ 	struct client_resource *r;
+-	unsigned long flags;
+ 
+-	spin_lock_irqsave(&client->lock, flags);
+-	list_for_each_entry(r, &client->resource_list, link) {
+-		if (r->handle == handle) {
+-			list_del(&r->link);
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&client->lock, flags);
++	spin_lock_irq(&client->lock);
++	if (client->in_shutdown)
++		r = NULL;
++	else
++		r = idr_find(&client->resource_idr, handle);
++	if (r && r->release == release)
++		idr_remove(&client->resource_idr, handle);
++	spin_unlock_irq(&client->lock);
+ 
+-	if (&r->link == &client->resource_list)
++	if (!(r && r->release == release))
+ 		return -EINVAL;
+ 
+ 	if (resource)
+@@ -350,203 +448,242 @@ release_client_resource(struct client *c
+ 	else
+ 		r->release(client, r);
+ 
++	client_put(client);
++
+ 	return 0;
+ }
+ 
+-static void
+-release_transaction(struct client *client, struct client_resource *resource)
++static void release_transaction(struct client *client,
++				struct client_resource *resource)
+ {
+-	struct response *response =
+-		container_of(resource, struct response, resource);
++	struct outbound_transaction_resource *r = container_of(resource,
++			struct outbound_transaction_resource, resource);
+ 
+-	fw_cancel_transaction(client->device->card, &response->transaction);
++	fw_cancel_transaction(client->device->card, &r->transaction);
+ }
+ 
+-static void
+-complete_transaction(struct fw_card *card, int rcode,
+-		     void *payload, size_t length, void *data)
++static void complete_transaction(struct fw_card *card, int rcode,
++				 void *payload, size_t length, void *data)
+ {
+-	struct response *response = data;
+-	struct client *client = response->client;
++	struct outbound_transaction_event *e = data;
++	struct fw_cdev_event_response *rsp = &e->response;
++	struct client *client = e->client;
+ 	unsigned long flags;
+-	struct fw_cdev_event_response *r = &response->response;
+ 
+-	if (length < r->length)
+-		r->length = length;
++	if (length < rsp->length)
++		rsp->length = length;
+ 	if (rcode == RCODE_COMPLETE)
+-		memcpy(r->data, payload, r->length);
++		memcpy(rsp->data, payload, rsp->length);
+ 
+ 	spin_lock_irqsave(&client->lock, flags);
+-	list_del(&response->resource.link);
++	/*
++	 * 1. If called while in shutdown, the idr tree must be left untouched.
++	 *    The idr handle will be removed and the client reference will be
++	 *    dropped later.
++	 * 2. If the call chain was release_client_resource ->
++	 *    release_transaction -> complete_transaction (instead of a normal
++	 *    conclusion of the transaction), i.e. if this resource was already
++	 *    unregistered from the idr, the client reference will be dropped
++	 *    by release_client_resource and we must not drop it here.
++	 */
++	if (!client->in_shutdown &&
++	    idr_find(&client->resource_idr, e->r.resource.handle)) {
++		idr_remove(&client->resource_idr, e->r.resource.handle);
++		/* Drop the idr's reference */
++		client_put(client);
++	}
+ 	spin_unlock_irqrestore(&client->lock, flags);
+ 
+-	r->type   = FW_CDEV_EVENT_RESPONSE;
+-	r->rcode  = rcode;
++	rsp->type = FW_CDEV_EVENT_RESPONSE;
++	rsp->rcode = rcode;
+ 
+ 	/*
+-	 * In the case that sizeof(*r) doesn't align with the position of the
++	 * In the case that sizeof(*rsp) doesn't align with the position of the
+ 	 * data, and the read is short, preserve an extra copy of the data
+ 	 * to stay compatible with a pre-2.6.27 bug.  Since the bug is harmless
+ 	 * for short reads and some apps depended on it, this is both safe
+ 	 * and prudent for compatibility.
+ 	 */
+-	if (r->length <= sizeof(*r) - offsetof(typeof(*r), data))
+-		queue_event(client, &response->event, r, sizeof(*r),
+-			    r->data, r->length);
++	if (rsp->length <= sizeof(*rsp) - offsetof(typeof(*rsp), data))
++		queue_event(client, &e->event, rsp, sizeof(*rsp),
++			    rsp->data, rsp->length);
+ 	else
+-		queue_event(client, &response->event, r, sizeof(*r) + r->length,
++		queue_event(client, &e->event, rsp, sizeof(*rsp) + rsp->length,
+ 			    NULL, 0);
++
++	/* Drop the transaction callback's reference */
++	client_put(client);
+ }
+ 
+-static int ioctl_send_request(struct client *client, void *buffer)
++static int init_request(struct client *client,
++			struct fw_cdev_send_request *request,
++			int destination_id, int speed)
+ {
+-	struct fw_device *device = client->device;
+-	struct fw_cdev_send_request *request = buffer;
+-	struct response *response;
++	struct outbound_transaction_event *e;
++	int ret;
+ 
+-	/* What is the biggest size we'll accept, really? */
+-	if (request->length > 4096)
+-		return -EINVAL;
++	if (request->length > 4096 || request->length > 512 << speed)
++		return -EIO;
+ 
+-	response = kmalloc(sizeof(*response) + request->length, GFP_KERNEL);
+-	if (response == NULL)
++	e = kmalloc(sizeof(*e) + request->length, GFP_KERNEL);
++	if (e == NULL)
+ 		return -ENOMEM;
+ 
+-	response->client = client;
+-	response->response.length = request->length;
+-	response->response.closure = request->closure;
++	e->client = client;
++	e->response.length = request->length;
++	e->response.closure = request->closure;
+ 
+ 	if (request->data &&
+-	    copy_from_user(response->response.data,
++	    copy_from_user(e->response.data,
+ 			   u64_to_uptr(request->data), request->length)) {
+-		kfree(response);
+-		return -EFAULT;
++		ret = -EFAULT;
++		goto failed;
+ 	}
+ 
+-	response->resource.release = release_transaction;
+-	add_client_resource(client, &response->resource);
+-
+-	fw_send_request(device->card, &response->transaction,
+-			request->tcode & 0x1f,
+-			device->node->node_id,
+-			request->generation,
+-			device->max_speed,
+-			request->offset,
+-			response->response.data, request->length,
+-			complete_transaction, response);
++	e->r.resource.release = release_transaction;
++	ret = add_client_resource(client, &e->r.resource, GFP_KERNEL);
++	if (ret < 0)
++		goto failed;
++
++	/* Get a reference for the transaction callback */
++	client_get(client);
++
++	fw_send_request(client->device->card, &e->r.transaction,
++			request->tcode & 0x1f, destination_id,
++			request->generation, speed, request->offset,
++			e->response.data, request->length,
++			complete_transaction, e);
+ 
+ 	if (request->data)
+ 		return sizeof(request) + request->length;
+ 	else
+ 		return sizeof(request);
++ failed:
++	kfree(e);
++
++	return ret;
+ }
+ 
+-struct address_handler {
+-	struct fw_address_handler handler;
+-	__u64 closure;
+-	struct client *client;
+-	struct client_resource resource;
+-};
++static int ioctl_send_request(struct client *client, void *buffer)
++{
++	struct fw_cdev_send_request *request = buffer;
+ 
+-struct request {
+-	struct fw_request *request;
+-	void *data;
+-	size_t length;
+-	struct client_resource resource;
+-};
++	switch (request->tcode) {
++	case TCODE_WRITE_QUADLET_REQUEST:
++	case TCODE_WRITE_BLOCK_REQUEST:
++	case TCODE_READ_QUADLET_REQUEST:
++	case TCODE_READ_BLOCK_REQUEST:
++	case TCODE_LOCK_MASK_SWAP:
++	case TCODE_LOCK_COMPARE_SWAP:
++	case TCODE_LOCK_FETCH_ADD:
++	case TCODE_LOCK_LITTLE_ADD:
++	case TCODE_LOCK_BOUNDED_ADD:
++	case TCODE_LOCK_WRAP_ADD:
++	case TCODE_LOCK_VENDOR_DEPENDENT:
++		break;
++	default:
++		return -EINVAL;
++	}
+ 
+-struct request_event {
+-	struct event event;
+-	struct fw_cdev_event_request request;
+-};
++	return init_request(client, request, client->device->node->node_id,
++			    client->device->max_speed);
++}
+ 
+-static void
+-release_request(struct client *client, struct client_resource *resource)
++static void release_request(struct client *client,
++			    struct client_resource *resource)
+ {
+-	struct request *request =
+-		container_of(resource, struct request, resource);
++	struct inbound_transaction_resource *r = container_of(resource,
++			struct inbound_transaction_resource, resource);
+ 
+-	fw_send_response(client->device->card, request->request,
++	fw_send_response(client->device->card, r->request,
+ 			 RCODE_CONFLICT_ERROR);
+-	kfree(request);
++	kfree(r);
+ }
+ 
+-static void
+-handle_request(struct fw_card *card, struct fw_request *r,
+-	       int tcode, int destination, int source,
+-	       int generation, int speed,
+-	       unsigned long long offset,
+-	       void *payload, size_t length, void *callback_data)
+-{
+-	struct address_handler *handler = callback_data;
+-	struct request *request;
+-	struct request_event *e;
+-	struct client *client = handler->client;
++static void handle_request(struct fw_card *card, struct fw_request *request,
++			   int tcode, int destination, int source,
++			   int generation, int speed,
++			   unsigned long long offset,
++			   void *payload, size_t length, void *callback_data)
++{
++	struct address_handler_resource *handler = callback_data;
++	struct inbound_transaction_resource *r;
++	struct inbound_transaction_event *e;
++	int ret;
+ 
+-	request = kmalloc(sizeof(*request), GFP_ATOMIC);
++	r = kmalloc(sizeof(*r), GFP_ATOMIC);
+ 	e = kmalloc(sizeof(*e), GFP_ATOMIC);
+-	if (request == NULL || e == NULL) {
+-		kfree(request);
+-		kfree(e);
+-		fw_send_response(card, r, RCODE_CONFLICT_ERROR);
+-		return;
+-	}
+-
+-	request->request = r;
+-	request->data    = payload;
+-	request->length  = length;
++	if (r == NULL || e == NULL)
++		goto failed;
+ 
+-	request->resource.release = release_request;
+-	add_client_resource(client, &request->resource);
++	r->request = request;
++	r->data    = payload;
++	r->length  = length;
++
++	r->resource.release = release_request;
++	ret = add_client_resource(handler->client, &r->resource, GFP_ATOMIC);
++	if (ret < 0)
++		goto failed;
+ 
+ 	e->request.type    = FW_CDEV_EVENT_REQUEST;
+ 	e->request.tcode   = tcode;
+ 	e->request.offset  = offset;
+ 	e->request.length  = length;
+-	e->request.handle  = request->resource.handle;
++	e->request.handle  = r->resource.handle;
+ 	e->request.closure = handler->closure;
+ 
+-	queue_event(client, &e->event,
++	queue_event(handler->client, &e->event,
+ 		    &e->request, sizeof(e->request), payload, length);
++	return;
++
++ failed:
++	kfree(r);
++	kfree(e);
++	fw_send_response(card, request, RCODE_CONFLICT_ERROR);
+ }
+ 
+-static void
+-release_address_handler(struct client *client,
+-			struct client_resource *resource)
++static void release_address_handler(struct client *client,
++				    struct client_resource *resource)
+ {
+-	struct address_handler *handler =
+-		container_of(resource, struct address_handler, resource);
++	struct address_handler_resource *r =
++	    container_of(resource, struct address_handler_resource, resource);
+ 
+-	fw_core_remove_address_handler(&handler->handler);
+-	kfree(handler);
++	fw_core_remove_address_handler(&r->handler);
++	kfree(r);
+ }
+ 
+ static int ioctl_allocate(struct client *client, void *buffer)
+ {
+ 	struct fw_cdev_allocate *request = buffer;
+-	struct address_handler *handler;
++	struct address_handler_resource *r;
+ 	struct fw_address_region region;
++	int ret;
+ 
+-	handler = kmalloc(sizeof(*handler), GFP_KERNEL);
+-	if (handler == NULL)
++	r = kmalloc(sizeof(*r), GFP_KERNEL);
++	if (r == NULL)
+ 		return -ENOMEM;
+ 
+ 	region.start = request->offset;
+ 	region.end = request->offset + request->length;
+-	handler->handler.length = request->length;
+-	handler->handler.address_callback = handle_request;
+-	handler->handler.callback_data = handler;
+-	handler->closure = request->closure;
+-	handler->client = client;
+-
+-	if (fw_core_add_address_handler(&handler->handler, &region) < 0) {
+-		kfree(handler);
+-		return -EBUSY;
++	r->handler.length = request->length;
++	r->handler.address_callback = handle_request;
++	r->handler.callback_data = r;
++	r->closure = request->closure;
++	r->client = client;
++
++	ret = fw_core_add_address_handler(&r->handler, &region);
++	if (ret < 0) {
++		kfree(r);
++		return ret;
+ 	}
+ 
+-	handler->resource.release = release_address_handler;
+-	add_client_resource(client, &handler->resource);
+-	request->handle = handler->resource.handle;
++	r->resource.release = release_address_handler;
++	ret = add_client_resource(client, &r->resource, GFP_KERNEL);
++	if (ret < 0) {
++		release_address_handler(client, &r->resource);
++		return ret;
++	}
++	request->handle = r->resource.handle;
+ 
+ 	return 0;
+ }
+@@ -555,18 +692,22 @@ static int ioctl_deallocate(struct clien
+ {
+ 	struct fw_cdev_deallocate *request = buffer;
+ 
+-	return release_client_resource(client, request->handle, NULL);
++	return release_client_resource(client, request->handle,
++				       release_address_handler, NULL);
+ }
+ 
+ static int ioctl_send_response(struct client *client, void *buffer)
+ {
+ 	struct fw_cdev_send_response *request = buffer;
+ 	struct client_resource *resource;
+-	struct request *r;
++	struct inbound_transaction_resource *r;
+ 
+-	if (release_client_resource(client, request->handle, &resource) < 0)
++	if (release_client_resource(client, request->handle,
++				    release_request, &resource) < 0)
+ 		return -EINVAL;
+-	r = container_of(resource, struct request, resource);
++
++	r = container_of(resource, struct inbound_transaction_resource,
++			 resource);
+ 	if (request->length < r->length)
+ 		r->length = request->length;
+ 	if (copy_from_user(r->data, u64_to_uptr(request->data), r->length))
+@@ -588,85 +729,84 @@ static int ioctl_initiate_bus_reset(stru
+ 	return fw_core_initiate_bus_reset(client->device->card, short_reset);
+ }
+ 
+-struct descriptor {
+-	struct fw_descriptor d;
+-	struct client_resource resource;
+-	u32 data[0];
+-};
+-
+ static void release_descriptor(struct client *client,
+ 			       struct client_resource *resource)
+ {
+-	struct descriptor *descriptor =
+-		container_of(resource, struct descriptor, resource);
++	struct descriptor_resource *r =
++		container_of(resource, struct descriptor_resource, resource);
+ 
+-	fw_core_remove_descriptor(&descriptor->d);
+-	kfree(descriptor);
++	fw_core_remove_descriptor(&r->descriptor);
++	kfree(r);
+ }
+ 
+ static int ioctl_add_descriptor(struct client *client, void *buffer)
+ {
+ 	struct fw_cdev_add_descriptor *request = buffer;
+-	struct descriptor *descriptor;
+-	int retval;
++	struct descriptor_resource *r;
++	int ret;
+ 
+ 	if (request->length > 256)
+ 		return -EINVAL;
+ 
+-	descriptor =
+-		kmalloc(sizeof(*descriptor) + request->length * 4, GFP_KERNEL);
+-	if (descriptor == NULL)
++	r = kmalloc(sizeof(*r) + request->length * 4, GFP_KERNEL);
++	if (r == NULL)
+ 		return -ENOMEM;
+ 
+-	if (copy_from_user(descriptor->data,
++	if (copy_from_user(r->data,
+ 			   u64_to_uptr(request->data), request->length * 4)) {
+-		kfree(descriptor);
+-		return -EFAULT;
++		ret = -EFAULT;
++		goto failed;
+ 	}
+ 
+-	descriptor->d.length = request->length;
+-	descriptor->d.immediate = request->immediate;
+-	descriptor->d.key = request->key;
+-	descriptor->d.data = descriptor->data;
+-
+-	retval = fw_core_add_descriptor(&descriptor->d);
+-	if (retval < 0) {
+-		kfree(descriptor);
+-		return retval;
++	r->descriptor.length    = request->length;
++	r->descriptor.immediate = request->immediate;
++	r->descriptor.key       = request->key;
++	r->descriptor.data      = r->data;
++
++	ret = fw_core_add_descriptor(&r->descriptor);
++	if (ret < 0)
++		goto failed;
++
++	r->resource.release = release_descriptor;
++	ret = add_client_resource(client, &r->resource, GFP_KERNEL);
++	if (ret < 0) {
++		fw_core_remove_descriptor(&r->descriptor);
++		goto failed;
+ 	}
+-
+-	descriptor->resource.release = release_descriptor;
+-	add_client_resource(client, &descriptor->resource);
+-	request->handle = descriptor->resource.handle;
++	request->handle = r->resource.handle;
+ 
+ 	return 0;
++ failed:
++	kfree(r);
++
++	return ret;
+ }
+ 
+ static int ioctl_remove_descriptor(struct client *client, void *buffer)
+ {
+ 	struct fw_cdev_remove_descriptor *request = buffer;
+ 
+-	return release_client_resource(client, request->handle, NULL);
++	return release_client_resource(client, request->handle,
++				       release_descriptor, NULL);
+ }
+ 
+-static void
+-iso_callback(struct fw_iso_context *context, u32 cycle,
+-	     size_t header_length, void *header, void *data)
++static void iso_callback(struct fw_iso_context *context, u32 cycle,
++			 size_t header_length, void *header, void *data)
+ {
+ 	struct client *client = data;
+-	struct iso_interrupt *irq;
++	struct iso_interrupt_event *e;
+ 
+-	irq = kzalloc(sizeof(*irq) + header_length, GFP_ATOMIC);
+-	if (irq == NULL)
++	e = kzalloc(sizeof(*e) + header_length, GFP_ATOMIC);
++	if (e == NULL)
+ 		return;
+ 
+-	irq->interrupt.type      = FW_CDEV_EVENT_ISO_INTERRUPT;
+-	irq->interrupt.closure   = client->iso_closure;
+-	irq->interrupt.cycle     = cycle;
+-	irq->interrupt.header_length = header_length;
+-	memcpy(irq->interrupt.header, header, header_length);
+-	queue_event(client, &irq->event, &irq->interrupt,
+-		    sizeof(irq->interrupt) + header_length, NULL, 0);
++	e->interrupt.type      = FW_CDEV_EVENT_ISO_INTERRUPT;
++	e->interrupt.closure   = client->iso_closure;
++	e->interrupt.cycle     = cycle;
++	e->interrupt.header_length = header_length;
++	memcpy(e->interrupt.header, header, header_length);
++	queue_event(client, &e->event, &e->interrupt,
++		    sizeof(e->interrupt) + header_length, NULL, 0);
+ }
+ 
+ static int ioctl_create_iso_context(struct client *client, void *buffer)
+@@ -871,6 +1011,237 @@ static int ioctl_get_cycle_timer(struct 
+ 	return 0;
+ }
+ 
++static void iso_resource_work(struct work_struct *work)
++{
++	struct iso_resource_event *e;
++	struct iso_resource *r =
++			container_of(work, struct iso_resource, work.work);
++	struct client *client = r->client;
++	int generation, channel, bandwidth, todo;
++	bool skip, free, success;
++
++	spin_lock_irq(&client->lock);
++	generation = client->device->generation;
++	todo = r->todo;
++	/* Allow 1000ms grace period for other reallocations. */
++	if (todo == ISO_RES_ALLOC &&
++	    time_is_after_jiffies(client->device->card->reset_jiffies + HZ)) {
++		if (schedule_delayed_work(&r->work, DIV_ROUND_UP(HZ, 3)))
++			client_get(client);
++		skip = true;
++	} else {
++		/* We could be called twice within the same generation. */
++		skip = todo == ISO_RES_REALLOC &&
++		       r->generation == generation;
++	}
++	free = todo == ISO_RES_DEALLOC ||
++	       todo == ISO_RES_ALLOC_ONCE ||
++	       todo == ISO_RES_DEALLOC_ONCE;
++	r->generation = generation;
++	spin_unlock_irq(&client->lock);
++
++	if (skip)
++		goto out;
++
++	bandwidth = r->bandwidth;
++
++	fw_iso_resource_manage(client->device->card, generation,
++			r->channels, &channel, &bandwidth,
++			todo == ISO_RES_ALLOC ||
++			todo == ISO_RES_REALLOC ||
++			todo == ISO_RES_ALLOC_ONCE);
++	/*
++	 * Is this generation outdated already?  As long as this resource sticks
++	 * in the idr, it will be scheduled again for a newer generation or at
++	 * shutdown.
++	 */
++	if (channel == -EAGAIN &&
++	    (todo == ISO_RES_ALLOC || todo == ISO_RES_REALLOC))
++		goto out;
++
++	success = channel >= 0 || bandwidth > 0;
++
++	spin_lock_irq(&client->lock);
++	/*
++	 * Transit from allocation to reallocation, except if the client
++	 * requested deallocation in the meantime.
++	 */
++	if (r->todo == ISO_RES_ALLOC)
++		r->todo = ISO_RES_REALLOC;
++	/*
++	 * Allocation or reallocation failure?  Pull this resource out of the
++	 * idr and prepare for deletion, unless the client is shutting down.
++	 */
++	if (r->todo == ISO_RES_REALLOC && !success &&
++	    !client->in_shutdown &&
++	    idr_find(&client->resource_idr, r->resource.handle)) {
++		idr_remove(&client->resource_idr, r->resource.handle);
++		client_put(client);
++		free = true;
++	}
++	spin_unlock_irq(&client->lock);
++
++	if (todo == ISO_RES_ALLOC && channel >= 0)
++		r->channels = 1ULL << channel;
++
++	if (todo == ISO_RES_REALLOC && success)
++		goto out;
++
++	if (todo == ISO_RES_ALLOC || todo == ISO_RES_ALLOC_ONCE) {
++		e = r->e_alloc;
++		r->e_alloc = NULL;
++	} else {
++		e = r->e_dealloc;
++		r->e_dealloc = NULL;
++	}
++	e->resource.handle	= r->resource.handle;
++	e->resource.channel	= channel;
++	e->resource.bandwidth	= bandwidth;
++
++	queue_event(client, &e->event,
++		    &e->resource, sizeof(e->resource), NULL, 0);
++
++	if (free) {
++		cancel_delayed_work(&r->work);
++		kfree(r->e_alloc);
++		kfree(r->e_dealloc);
++		kfree(r);
++	}
++ out:
++	client_put(client);
++}
++
++static void schedule_iso_resource(struct iso_resource *r)
++{
++	client_get(r->client);
++	if (!schedule_delayed_work(&r->work, 0))
++		client_put(r->client);
++}
++
++static void release_iso_resource(struct client *client,
++				 struct client_resource *resource)
++{
++	struct iso_resource *r =
++		container_of(resource, struct iso_resource, resource);
++
++	spin_lock_irq(&client->lock);
++	r->todo = ISO_RES_DEALLOC;
++	schedule_iso_resource(r);
++	spin_unlock_irq(&client->lock);
++}
++
++static int init_iso_resource(struct client *client,
++		struct fw_cdev_allocate_iso_resource *request, int todo)
++{
++	struct iso_resource_event *e1, *e2;
++	struct iso_resource *r;
++	int ret;
++
++	if ((request->channels == 0 && request->bandwidth == 0) ||
++	    request->bandwidth > BANDWIDTH_AVAILABLE_INITIAL ||
++	    request->bandwidth < 0)
++		return -EINVAL;
++
++	r  = kmalloc(sizeof(*r), GFP_KERNEL);
++	e1 = kmalloc(sizeof(*e1), GFP_KERNEL);
++	e2 = kmalloc(sizeof(*e2), GFP_KERNEL);
++	if (r == NULL || e1 == NULL || e2 == NULL) {
++		ret = -ENOMEM;
++		goto fail;
++	}
++
++	INIT_DELAYED_WORK(&r->work, iso_resource_work);
++	r->client	= client;
++	r->todo		= todo;
++	r->generation	= -1;
++	r->channels	= request->channels;
++	r->bandwidth	= request->bandwidth;
++	r->e_alloc	= e1;
++	r->e_dealloc	= e2;
++
++	e1->resource.closure	= request->closure;
++	e1->resource.type	= FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED;
++	e2->resource.closure	= request->closure;
++	e2->resource.type	= FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED;
++
++	if (todo == ISO_RES_ALLOC) {
++		r->resource.release = release_iso_resource;
++		ret = add_client_resource(client, &r->resource, GFP_KERNEL);
++		if (ret < 0)
++			goto fail;
++	} else {
++		r->resource.release = NULL;
++		r->resource.handle = -1;
++		schedule_iso_resource(r);
++	}
++	request->handle = r->resource.handle;
++
++	return 0;
++ fail:
++	kfree(r);
++	kfree(e1);
++	kfree(e2);
++
++	return ret;
++}
++
++static int ioctl_allocate_iso_resource(struct client *client, void *buffer)
++{
++	struct fw_cdev_allocate_iso_resource *request = buffer;
++
++	return init_iso_resource(client, request, ISO_RES_ALLOC);
++}
++
++static int ioctl_deallocate_iso_resource(struct client *client, void *buffer)
++{
++	struct fw_cdev_deallocate *request = buffer;
++
++	return release_client_resource(client, request->handle,
++				       release_iso_resource, NULL);
++}
++
++static int ioctl_allocate_iso_resource_once(struct client *client, void *buffer)
++{
++	struct fw_cdev_allocate_iso_resource *request = buffer;
++
++	return init_iso_resource(client, request, ISO_RES_ALLOC_ONCE);
++}
++
++static int ioctl_deallocate_iso_resource_once(struct client *client, void *buffer)
++{
++	struct fw_cdev_allocate_iso_resource *request = buffer;
++
++	return init_iso_resource(client, request, ISO_RES_DEALLOC_ONCE);
++}
++
++static int ioctl_get_speed(struct client *client, void *buffer)
++{
++	struct fw_cdev_get_speed *request = buffer;
++
++	request->max_speed = client->device->max_speed;
++
++	return 0;
++}
++
++static int ioctl_send_broadcast_request(struct client *client, void *buffer)
++{
++	struct fw_cdev_send_request *request = buffer;
++
++	switch (request->tcode) {
++	case TCODE_WRITE_QUADLET_REQUEST:
++	case TCODE_WRITE_BLOCK_REQUEST:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	/* Security policy: Only allow accesses to Units Space. */
++	if (request->offset < CSR_REGISTER_BASE + CSR_CONFIG_ROM_END)
++		return -EACCES;
++
++	return init_request(client, request, LOCAL_BUS | 0x3f, SCODE_100);
++}
++
+ static int (* const ioctl_handlers[])(struct client *client, void *buffer) = {
+ 	ioctl_get_info,
+ 	ioctl_send_request,
+@@ -885,13 +1256,19 @@ static int (* const ioctl_handlers[])(st
+ 	ioctl_start_iso,
+ 	ioctl_stop_iso,
+ 	ioctl_get_cycle_timer,
++	ioctl_allocate_iso_resource,
++	ioctl_deallocate_iso_resource,
++	ioctl_allocate_iso_resource_once,
++	ioctl_deallocate_iso_resource_once,
++	ioctl_get_speed,
++	ioctl_send_broadcast_request,
+ };
+ 
+-static int
+-dispatch_ioctl(struct client *client, unsigned int cmd, void __user *arg)
++static int dispatch_ioctl(struct client *client,
++			  unsigned int cmd, void __user *arg)
+ {
+ 	char buffer[256];
+-	int retval;
++	int ret;
+ 
+ 	if (_IOC_TYPE(cmd) != '#' ||
+ 	    _IOC_NR(cmd) >= ARRAY_SIZE(ioctl_handlers))
+@@ -903,9 +1280,9 @@ dispatch_ioctl(struct client *client, un
  			return -EFAULT;
  	}
  
--	return 0;
-+	return retval;
+-	retval = ioctl_handlers[_IOC_NR(cmd)](client, buffer);
+-	if (retval < 0)
+-		return retval;
++	ret = ioctl_handlers[_IOC_NR(cmd)](client, buffer);
++	if (ret < 0)
++		return ret;
+ 
+ 	if (_IOC_DIR(cmd) & _IOC_READ) {
+ 		if (_IOC_SIZE(cmd) > sizeof(buffer) ||
+@@ -913,12 +1290,11 @@ dispatch_ioctl(struct client *client, un
+ 			return -EFAULT;
+ 	}
+ 
+-	return retval;
++	return ret;
  }
  
- static long
-@@ -990,7 +985,6 @@ static int fw_device_op_release(struct inode *inode, struct file *file)
+-static long
+-fw_device_op_ioctl(struct file *file,
+-		   unsigned int cmd, unsigned long arg)
++static long fw_device_op_ioctl(struct file *file,
++			       unsigned int cmd, unsigned long arg)
+ {
+ 	struct client *client = file->private_data;
+ 
+@@ -929,9 +1305,8 @@ fw_device_op_ioctl(struct file *file,
+ }
+ 
+ #ifdef CONFIG_COMPAT
+-static long
+-fw_device_op_compat_ioctl(struct file *file,
+-			  unsigned int cmd, unsigned long arg)
++static long fw_device_op_compat_ioctl(struct file *file,
++				      unsigned int cmd, unsigned long arg)
+ {
+ 	struct client *client = file->private_data;
+ 
+@@ -947,7 +1322,7 @@ static int fw_device_op_mmap(struct file
+ 	struct client *client = file->private_data;
+ 	enum dma_data_direction direction;
+ 	unsigned long size;
+-	int page_count, retval;
++	int page_count, ret;
+ 
+ 	if (fw_device_is_shutdown(client->device))
+ 		return -ENODEV;
+@@ -973,48 +1348,57 @@ static int fw_device_op_mmap(struct file
+ 	else
+ 		direction = DMA_FROM_DEVICE;
+ 
+-	retval = fw_iso_buffer_init(&client->buffer, client->device->card,
+-				    page_count, direction);
+-	if (retval < 0)
+-		return retval;
++	ret = fw_iso_buffer_init(&client->buffer, client->device->card,
++				 page_count, direction);
++	if (ret < 0)
++		return ret;
+ 
+-	retval = fw_iso_buffer_map(&client->buffer, vma);
+-	if (retval < 0)
++	ret = fw_iso_buffer_map(&client->buffer, vma);
++	if (ret < 0)
+ 		fw_iso_buffer_destroy(&client->buffer, client->device->card);
+ 
+-	return retval;
++	return ret;
++}
++
++static int shutdown_resource(int id, void *p, void *data)
++{
++	struct client_resource *r = p;
++	struct client *client = data;
++
++	r->release(client, r);
++	client_put(client);
++
++	return 0;
+ }
+ 
+ static int fw_device_op_release(struct inode *inode, struct file *file)
+ {
  	struct client *client = file->private_data;
  	struct event *e, *next_e;
- 	struct client_resource *r, *next_r;
+-	struct client_resource *r, *next_r;
 -	unsigned long flags;
  
- 	if (client->buffer.pages)
- 		fw_iso_buffer_destroy(&client->buffer, client->device->card);
-@@ -1009,9 +1003,9 @@ static int fw_device_op_release(struct inode *inode, struct file *file)
+-	if (client->buffer.pages)
+-		fw_iso_buffer_destroy(&client->buffer, client->device->card);
++	mutex_lock(&client->device->client_list_mutex);
++	list_del(&client->link);
++	mutex_unlock(&client->device->client_list_mutex);
+ 
+ 	if (client->iso_context)
+ 		fw_iso_context_destroy(client->iso_context);
+ 
+-	list_for_each_entry_safe(r, next_r, &client->resource_list, link)
+-		r->release(client, r);
++	if (client->buffer.pages)
++		fw_iso_buffer_destroy(&client->buffer, client->device->card);
+ 
+-	/*
+-	 * FIXME: We should wait for the async tasklets to stop
+-	 * running before freeing the memory.
+-	 */
++	/* Freeze client->resource_idr and client->event_list */
++	spin_lock_irq(&client->lock);
++	client->in_shutdown = true;
++	spin_unlock_irq(&client->lock);
++
++	idr_for_each(&client->resource_idr, shutdown_resource, client);
++	idr_remove_all(&client->resource_idr);
++	idr_destroy(&client->resource_idr);
+ 
  	list_for_each_entry_safe(e, next_e, &client->event_list, link)
  		kfree(e);
  
 -	spin_lock_irqsave(&client->device->card->lock, flags);
-+	mutex_lock(&client->device->client_list_mutex);
- 	list_del(&client->link);
+-	list_del(&client->link);
 -	spin_unlock_irqrestore(&client->device->card->lock, flags);
-+	mutex_unlock(&client->device->client_list_mutex);
+-
+-	fw_device_put(client->device);
+-	kfree(client);
++	client_put(client);
  
- 	fw_device_put(client->device);
- 	kfree(client);
-diff --git a/drivers/firewire/fw-device.c b/drivers/firewire/fw-device.c
-index 0855fb5..dd72d5e 100644
---- a/drivers/firewire/fw-device.c
-+++ b/drivers/firewire/fw-device.c
-@@ -26,8 +26,10 @@
- #include <linux/delay.h>
+ 	return 0;
+ }
+diff -Naurp linux-2.6-git/drivers/firewire/fw-device.c firewire-git/drivers/firewire/fw-device.c
+--- linux-2.6-git/drivers/firewire/fw-device.c	2009-01-30 13:39:02.989651512 -0500
++++ firewire-git/drivers/firewire/fw-device.c	2009-01-30 13:35:51.860646788 -0500
+@@ -27,8 +27,10 @@
  #include <linux/idr.h>
+ #include <linux/jiffies.h>
  #include <linux/string.h>
 +#include <linux/mutex.h>
  #include <linux/rwsem.h>
@@ -303,60 +1623,110 @@ index 0855fb5..dd72d5e 100644
  #include <asm/system.h>
  #include <linux/ctype.h>
  #include "fw-transaction.h"
-@@ -381,46 +383,21 @@ static struct device_attribute fw_device_attributes[] = {
+@@ -132,8 +134,7 @@ static int get_modalias(struct fw_unit *
+ 			vendor, model, specifier_id, version);
+ }
+ 
+-static int
+-fw_unit_uevent(struct device *dev, struct kobj_uevent_env *env)
++static int fw_unit_uevent(struct device *dev, struct kobj_uevent_env *env)
+ {
+ 	struct fw_unit *unit = fw_unit(dev);
+ 	char modalias[64];
+@@ -191,8 +192,8 @@ struct config_rom_attribute {
+ 	u32 key;
+ };
+ 
+-static ssize_t
+-show_immediate(struct device *dev, struct device_attribute *dattr, char *buf)
++static ssize_t show_immediate(struct device *dev,
++			      struct device_attribute *dattr, char *buf)
+ {
+ 	struct config_rom_attribute *attr =
+ 		container_of(dattr, struct config_rom_attribute, attr);
+@@ -223,8 +224,8 @@ show_immediate(struct device *dev, struc
+ #define IMMEDIATE_ATTR(name, key)				\
+ 	{ __ATTR(name, S_IRUGO, show_immediate, NULL), key }
+ 
+-static ssize_t
+-show_text_leaf(struct device *dev, struct device_attribute *dattr, char *buf)
++static ssize_t show_text_leaf(struct device *dev,
++			      struct device_attribute *dattr, char *buf)
+ {
+ 	struct config_rom_attribute *attr =
+ 		container_of(dattr, struct config_rom_attribute, attr);
+@@ -293,10 +294,9 @@ static struct config_rom_attribute confi
+ 	TEXT_LEAF_ATTR(hardware_version_name, CSR_HARDWARE_VERSION),
+ };
+ 
+-static void
+-init_fw_attribute_group(struct device *dev,
+-			struct device_attribute *attrs,
+-			struct fw_attribute_group *group)
++static void init_fw_attribute_group(struct device *dev,
++				    struct device_attribute *attrs,
++				    struct fw_attribute_group *group)
+ {
+ 	struct device_attribute *attr;
+ 	int i, j;
+@@ -319,9 +319,8 @@ init_fw_attribute_group(struct device *d
+ 	dev->groups = group->groups;
+ }
+ 
+-static ssize_t
+-modalias_show(struct device *dev,
+-	      struct device_attribute *attr, char *buf)
++static ssize_t modalias_show(struct device *dev,
++			     struct device_attribute *attr, char *buf)
+ {
+ 	struct fw_unit *unit = fw_unit(dev);
+ 	int length;
+@@ -332,9 +331,8 @@ modalias_show(struct device *dev,
+ 	return length + 1;
+ }
+ 
+-static ssize_t
+-rom_index_show(struct device *dev,
+-	       struct device_attribute *attr, char *buf)
++static ssize_t rom_index_show(struct device *dev,
++			      struct device_attribute *attr, char *buf)
+ {
+ 	struct fw_device *device = fw_device(dev->parent);
+ 	struct fw_unit *unit = fw_unit(dev);
+@@ -349,8 +347,8 @@ static struct device_attribute fw_unit_a
  	__ATTR_NULL,
  };
  
--struct read_quadlet_callback_data {
--	struct completion done;
--	int rcode;
--	u32 data;
--};
--
--static void
--complete_transaction(struct fw_card *card, int rcode,
--		     void *payload, size_t length, void *data)
--{
--	struct read_quadlet_callback_data *callback_data = data;
--
--	if (rcode == RCODE_COMPLETE)
--		callback_data->data = be32_to_cpu(*(__be32 *)payload);
--	callback_data->rcode = rcode;
--	complete(&callback_data->done);
--}
--
- static int
- read_rom(struct fw_device *device, int generation, int index, u32 *data)
+-static ssize_t
+-config_rom_show(struct device *dev, struct device_attribute *attr, char *buf)
++static ssize_t config_rom_show(struct device *dev,
++			       struct device_attribute *attr, char *buf)
  {
--	struct read_quadlet_callback_data callback_data;
--	struct fw_transaction t;
--	u64 offset;
-+	int rcode;
- 
- 	/* device->node_id, accessed below, must not be older than generation */
- 	smp_rmb();
- 
--	init_completion(&callback_data.done);
--
--	offset = (CSR_REGISTER_BASE | CSR_CONFIG_ROM) + index * 4;
--	fw_send_request(device->card, &t, TCODE_READ_QUADLET_REQUEST,
-+	rcode = fw_run_transaction(device->card, TCODE_READ_QUADLET_REQUEST,
- 			device->node_id, generation, device->max_speed,
--			offset, NULL, 4, complete_transaction, &callback_data);
--
--	wait_for_completion(&callback_data.done);
--
--	*data = callback_data.data;
-+			(CSR_REGISTER_BASE | CSR_CONFIG_ROM) + index * 4,
-+			data, 4);
-+	be32_to_cpus(data);
- 
--	return callback_data.rcode;
-+	return rcode;
+ 	struct fw_device *device = fw_device(dev);
+ 	size_t length;
+@@ -363,8 +361,8 @@ config_rom_show(struct device *dev, stru
+ 	return length;
  }
  
- #define READ_BIB_ROM_SIZE	256
-@@ -950,6 +927,7 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event)
+-static ssize_t
+-guid_show(struct device *dev, struct device_attribute *attr, char *buf)
++static ssize_t guid_show(struct device *dev,
++			 struct device_attribute *attr, char *buf)
+ {
+ 	struct fw_device *device = fw_device(dev);
+ 	int ret;
+@@ -383,8 +381,8 @@ static struct device_attribute fw_device
+ 	__ATTR_NULL,
+ };
+ 
+-static int
+-read_rom(struct fw_device *device, int generation, int index, u32 *data)
++static int read_rom(struct fw_device *device,
++		    int generation, int index, u32 *data)
+ {
+ 	int rcode;
+ 
+@@ -1004,6 +1002,7 @@ void fw_node_event(struct fw_card *card,
  		device->node = fw_node_get(node);
  		device->node_id = node->node_id;
  		device->generation = card->generation;
@@ -364,19 +1734,18 @@ index 0855fb5..dd72d5e 100644
  		INIT_LIST_HEAD(&device->client_list);
  
  		/*
-diff --git a/drivers/firewire/fw-device.h b/drivers/firewire/fw-device.h
-index 42305bb..32c628e 100644
---- a/drivers/firewire/fw-device.h
-+++ b/drivers/firewire/fw-device.h
-@@ -22,6 +22,7 @@
- #include <linux/fs.h>
+diff -Naurp linux-2.6-git/drivers/firewire/fw-device.h firewire-git/drivers/firewire/fw-device.h
+--- linux-2.6-git/drivers/firewire/fw-device.h	2009-01-30 13:39:02.989651512 -0500
++++ firewire-git/drivers/firewire/fw-device.h	2009-01-30 13:35:51.860646788 -0500
+@@ -23,6 +23,7 @@
  #include <linux/cdev.h>
+ #include <linux/idr.h>
  #include <linux/rwsem.h>
 +#include <linux/mutex.h>
  #include <asm/atomic.h>
  
  enum fw_device_state {
-@@ -62,7 +63,10 @@ struct fw_device {
+@@ -64,7 +65,10 @@ struct fw_device {
  	bool cmc;
  	struct fw_card *card;
  	struct device device;
@@ -387,41 +1756,566 @@ index 42305bb..32c628e 100644
  	u32 *config_rom;
  	size_t config_rom_length;
  	int config_rom_retries;
-diff --git a/drivers/firewire/fw-ohci.c b/drivers/firewire/fw-ohci.c
-index 251416f..79c20c4 100644
---- a/drivers/firewire/fw-ohci.c
-+++ b/drivers/firewire/fw-ohci.c
-@@ -476,6 +476,7 @@ static int ar_context_add_page(struct ar_context *ctx)
- 	if (ab == NULL)
- 		return -ENOMEM;
+@@ -176,8 +180,7 @@ struct fw_driver {
+ 	const struct fw_device_id *id_table;
+ };
  
-+	ab->next = NULL;
- 	memset(&ab->descriptor, 0, sizeof(ab->descriptor));
- 	ab->descriptor.control        = cpu_to_le16(DESCRIPTOR_INPUT_MORE |
- 						    DESCRIPTOR_STATUS |
-@@ -496,6 +497,21 @@ static int ar_context_add_page(struct ar_context *ctx)
+-static inline struct fw_driver *
+-fw_driver(struct device_driver *drv)
++static inline struct fw_driver *fw_driver(struct device_driver *drv)
+ {
+ 	return container_of(drv, struct fw_driver, driver);
+ }
+diff -Naurp linux-2.6-git/drivers/firewire/fw-iso.c firewire-git/drivers/firewire/fw-iso.c
+--- linux-2.6-git/drivers/firewire/fw-iso.c	2008-11-04 11:18:33.000000000 -0500
++++ firewire-git/drivers/firewire/fw-iso.c	2009-01-30 13:35:51.860646788 -0500
+@@ -1,5 +1,7 @@
+ /*
+- * Isochronous IO functionality
++ * Isochronous I/O functionality:
++ *   - Isochronous DMA context management
++ *   - Isochronous bus resource management (channels, bandwidth), client side
+  *
+  * Copyright (C) 2006 Kristian Hoegsberg <krh@bitplanet.net>
+  *
+@@ -18,21 +20,25 @@
+  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+  */
+ 
+-#include <linux/kernel.h>
+-#include <linux/module.h>
+ #include <linux/dma-mapping.h>
+-#include <linux/vmalloc.h>
++#include <linux/errno.h>
++#include <linux/firewire-constants.h>
++#include <linux/kernel.h>
+ #include <linux/mm.h>
++#include <linux/spinlock.h>
++#include <linux/vmalloc.h>
+ 
+-#include "fw-transaction.h"
+ #include "fw-topology.h"
+-#include "fw-device.h"
++#include "fw-transaction.h"
+ 
+-int
+-fw_iso_buffer_init(struct fw_iso_buffer *buffer, struct fw_card *card,
+-		   int page_count, enum dma_data_direction direction)
++/*
++ * Isochronous DMA context management
++ */
++
++int fw_iso_buffer_init(struct fw_iso_buffer *buffer, struct fw_card *card,
++		       int page_count, enum dma_data_direction direction)
+ {
+-	int i, j, retval = -ENOMEM;
++	int i, j;
+ 	dma_addr_t address;
+ 
+ 	buffer->page_count = page_count;
+@@ -69,19 +75,19 @@ fw_iso_buffer_init(struct fw_iso_buffer 
+ 	kfree(buffer->pages);
+  out:
+ 	buffer->pages = NULL;
+-	return retval;
++	return -ENOMEM;
+ }
+ 
+ int fw_iso_buffer_map(struct fw_iso_buffer *buffer, struct vm_area_struct *vma)
+ {
+ 	unsigned long uaddr;
+-	int i, retval;
++	int i, ret;
+ 
+ 	uaddr = vma->vm_start;
+ 	for (i = 0; i < buffer->page_count; i++) {
+-		retval = vm_insert_page(vma, uaddr, buffer->pages[i]);
+-		if (retval)
+-			return retval;
++		ret = vm_insert_page(vma, uaddr, buffer->pages[i]);
++		if (ret)
++			return ret;
+ 		uaddr += PAGE_SIZE;
+ 	}
+ 
+@@ -105,14 +111,14 @@ void fw_iso_buffer_destroy(struct fw_iso
+ 	buffer->pages = NULL;
+ }
+ 
+-struct fw_iso_context *
+-fw_iso_context_create(struct fw_card *card, int type,
+-		      int channel, int speed, size_t header_size,
+-		      fw_iso_callback_t callback, void *callback_data)
++struct fw_iso_context *fw_iso_context_create(struct fw_card *card,
++		int type, int channel, int speed, size_t header_size,
++		fw_iso_callback_t callback, void *callback_data)
+ {
+ 	struct fw_iso_context *ctx;
+ 
+-	ctx = card->driver->allocate_iso_context(card, type, header_size);
++	ctx = card->driver->allocate_iso_context(card,
++						 type, channel, header_size);
+ 	if (IS_ERR(ctx))
+ 		return ctx;
+ 
+@@ -134,25 +140,186 @@ void fw_iso_context_destroy(struct fw_is
+ 	card->driver->free_iso_context(ctx);
+ }
+ 
+-int
+-fw_iso_context_start(struct fw_iso_context *ctx, int cycle, int sync, int tags)
++int fw_iso_context_start(struct fw_iso_context *ctx,
++			 int cycle, int sync, int tags)
+ {
+ 	return ctx->card->driver->start_iso(ctx, cycle, sync, tags);
+ }
+ 
+-int
+-fw_iso_context_queue(struct fw_iso_context *ctx,
+-		     struct fw_iso_packet *packet,
+-		     struct fw_iso_buffer *buffer,
+-		     unsigned long payload)
++int fw_iso_context_queue(struct fw_iso_context *ctx,
++			 struct fw_iso_packet *packet,
++			 struct fw_iso_buffer *buffer,
++			 unsigned long payload)
+ {
+ 	struct fw_card *card = ctx->card;
+ 
+ 	return card->driver->queue_iso(ctx, packet, buffer, payload);
+ }
+ 
+-int
+-fw_iso_context_stop(struct fw_iso_context *ctx)
++int fw_iso_context_stop(struct fw_iso_context *ctx)
+ {
+ 	return ctx->card->driver->stop_iso(ctx);
+ }
++
++/*
++ * Isochronous bus resource management (channels, bandwidth), client side
++ */
++
++static int manage_bandwidth(struct fw_card *card, int irm_id, int generation,
++			    int bandwidth, bool allocate)
++{
++	__be32 data[2];
++	int try, new, old = allocate ? BANDWIDTH_AVAILABLE_INITIAL : 0;
++
++	/*
++	 * On a 1394a IRM with low contention, try < 1 is enough.
++	 * On a 1394-1995 IRM, we need at least try < 2.
++	 * Let's just do try < 5.
++	 */
++	for (try = 0; try < 5; try++) {
++		new = allocate ? old - bandwidth : old + bandwidth;
++		if (new < 0 || new > BANDWIDTH_AVAILABLE_INITIAL)
++			break;
++
++		data[0] = cpu_to_be32(old);
++		data[1] = cpu_to_be32(new);
++		switch (fw_run_transaction(card, TCODE_LOCK_COMPARE_SWAP,
++				irm_id, generation, SCODE_100,
++				CSR_REGISTER_BASE + CSR_BANDWIDTH_AVAILABLE,
++				data, sizeof(data))) {
++		case RCODE_GENERATION:
++			/* A generation change frees all bandwidth. */
++			return allocate ? -EAGAIN : bandwidth;
++
++		case RCODE_COMPLETE:
++			if (be32_to_cpup(data) == old)
++				return bandwidth;
++
++			old = be32_to_cpup(data);
++			/* Fall through. */
++		}
++	}
++
++	return -EIO;
++}
++
++static int manage_channel(struct fw_card *card, int irm_id, int generation,
++			  u32 channels_mask, u64 offset, bool allocate)
++{
++	__be32 data[2], c, all, old;
++	int i, retry = 5;
++
++	old = all = allocate ? cpu_to_be32(~0) : 0;
++
++	for (i = 0; i < 32; i++) {
++		if (!(channels_mask & 1 << i))
++			continue;
++
++		c = cpu_to_be32(1 << (31 - i));
++		if ((old & c) != (all & c))
++			continue;
++
++		data[0] = old;
++		data[1] = old ^ c;
++		switch (fw_run_transaction(card, TCODE_LOCK_COMPARE_SWAP,
++					   irm_id, generation, SCODE_100,
++					   offset, data, sizeof(data))) {
++		case RCODE_GENERATION:
++			/* A generation change frees all channels. */
++			return allocate ? -EAGAIN : i;
++
++		case RCODE_COMPLETE:
++			if (data[0] == old)
++				return i;
++
++			old = data[0];
++
++			/* Is the IRM 1394a-2000 compliant? */
++			if ((data[0] & c) == (data[1] & c))
++				continue;
++
++			/* 1394-1995 IRM, fall through to retry. */
++		default:
++			if (retry--)
++				i--;
++		}
++	}
++
++	return -EIO;
++}
++
++static void deallocate_channel(struct fw_card *card, int irm_id,
++			       int generation, int channel)
++{
++	u32 mask;
++	u64 offset;
++
++	mask = channel < 32 ? 1 << channel : 1 << (channel - 32);
++	offset = channel < 32 ? CSR_REGISTER_BASE + CSR_CHANNELS_AVAILABLE_HI :
++				CSR_REGISTER_BASE + CSR_CHANNELS_AVAILABLE_LO;
++
++	manage_channel(card, irm_id, generation, mask, offset, false);
++}
++
++/**
++ * fw_iso_resource_manage - Allocate or deallocate a channel and/or bandwidth
++ *
++ * In parameters: card, generation, channels_mask, bandwidth, allocate
++ * Out parameters: channel, bandwidth
++ * This function blocks (sleeps) during communication with the IRM.
++ *
++ * Allocates or deallocates at most one channel out of channels_mask.
++ * channels_mask is a bitfield with MSB for channel 63 and LSB for channel 0.
++ * (Note, the IRM's CHANNELS_AVAILABLE is a big-endian bitfield with MSB for
++ * channel 0 and LSB for channel 63.)
++ * Allocates or deallocates as many bandwidth allocation units as specified.
++ *
++ * Returns channel < 0 if no channel was allocated or deallocated.
++ * Returns bandwidth = 0 if no bandwidth was allocated or deallocated.
++ *
++ * If generation is stale, deallocations succeed but allocations fail with
++ * channel = -EAGAIN.
++ *
++ * If channel allocation fails, no bandwidth will be allocated either.
++ * If bandwidth allocation fails, no channel will be allocated either.
++ * But deallocations of channel and bandwidth are tried independently
++ * of each other's success.
++ */
++void fw_iso_resource_manage(struct fw_card *card, int generation,
++			    u64 channels_mask, int *channel, int *bandwidth,
++			    bool allocate)
++{
++	u32 channels_hi = channels_mask;	/* channels 31...0 */
++	u32 channels_lo = channels_mask >> 32;	/* channels 63...32 */
++	int irm_id, ret, c = -EINVAL;
++
++	spin_lock_irq(&card->lock);
++	irm_id = card->irm_node->node_id;
++	spin_unlock_irq(&card->lock);
++
++	if (channels_hi)
++		c = manage_channel(card, irm_id, generation, channels_hi,
++		    CSR_REGISTER_BASE + CSR_CHANNELS_AVAILABLE_HI, allocate);
++	if (channels_lo && c < 0) {
++		c = manage_channel(card, irm_id, generation, channels_lo,
++		    CSR_REGISTER_BASE + CSR_CHANNELS_AVAILABLE_LO, allocate);
++		if (c >= 0)
++			c += 32;
++	}
++	*channel = c;
++
++	if (allocate && channels_mask != 0 && c < 0)
++		*bandwidth = 0;
++
++	if (*bandwidth == 0)
++		return;
++
++	ret = manage_bandwidth(card, irm_id, generation, *bandwidth, allocate);
++	if (ret < 0)
++		*bandwidth = 0;
++
++	if (allocate && ret < 0 && c >= 0) {
++		deallocate_channel(card, irm_id, generation, c);
++		*channel = ret;
++	}
++}
+diff -Naurp linux-2.6-git/drivers/firewire/fw-ohci.c firewire-git/drivers/firewire/fw-ohci.c
+--- linux-2.6-git/drivers/firewire/fw-ohci.c	2009-01-30 13:39:02.990772025 -0500
++++ firewire-git/drivers/firewire/fw-ohci.c	2009-01-30 13:35:51.861646907 -0500
+@@ -205,6 +205,7 @@ struct fw_ohci {
+ 
+ 	u32 it_context_mask;
+ 	struct iso_context *it_context_list;
++	u64 ir_context_channels;
+ 	u32 ir_context_mask;
+ 	struct iso_context *ir_context_list;
+ };
+@@ -441,9 +442,8 @@ static inline void flush_writes(const st
+ 	reg_read(ohci, OHCI1394_Version);
+ }
+ 
+-static int
+-ohci_update_phy_reg(struct fw_card *card, int addr,
+-		    int clear_bits, int set_bits)
++static int ohci_update_phy_reg(struct fw_card *card, int addr,
++			       int clear_bits, int set_bits)
+ {
+ 	struct fw_ohci *ohci = fw_ohci(card);
+ 	u32 val, old;
+@@ -658,8 +658,8 @@ static void ar_context_tasklet(unsigned 
+ 	}
+ }
+ 
+-static int
+-ar_context_init(struct ar_context *ctx, struct fw_ohci *ohci, u32 regs)
++static int ar_context_init(struct ar_context *ctx,
++			   struct fw_ohci *ohci, u32 regs)
+ {
+ 	struct ar_buffer ab;
+ 
+@@ -690,8 +690,7 @@ static void ar_context_run(struct ar_con
+ 	flush_writes(ctx->ohci);
+ }
+ 
+-static struct descriptor *
+-find_branch_descriptor(struct descriptor *d, int z)
++static struct descriptor *find_branch_descriptor(struct descriptor *d, int z)
+ {
+ 	int b, key;
+ 
+@@ -751,8 +750,7 @@ static void context_tasklet(unsigned lon
+  * Allocate a new buffer and add it to the list of free buffers for this
+  * context.  Must be called with ohci->lock held.
+  */
+-static int
+-context_add_buffer(struct context *ctx)
++static int context_add_buffer(struct context *ctx)
+ {
+ 	struct descriptor_buffer *desc;
+ 	dma_addr_t uninitialized_var(bus_addr);
+@@ -781,9 +779,8 @@ context_add_buffer(struct context *ctx)
  	return 0;
  }
  
-+static void ar_context_release(struct ar_context *ctx)
-+{
-+	struct ar_buffer *ab, *ab_next;
-+	size_t offset;
-+	dma_addr_t ab_bus;
+-static int
+-context_init(struct context *ctx, struct fw_ohci *ohci,
+-	     u32 regs, descriptor_callback_t callback)
++static int context_init(struct context *ctx, struct fw_ohci *ohci,
++			u32 regs, descriptor_callback_t callback)
+ {
+ 	ctx->ohci = ohci;
+ 	ctx->regs = regs;
+@@ -814,8 +811,7 @@ context_init(struct context *ctx, struct
+ 	return 0;
+ }
+ 
+-static void
+-context_release(struct context *ctx)
++static void context_release(struct context *ctx)
+ {
+ 	struct fw_card *card = &ctx->ohci->card;
+ 	struct descriptor_buffer *desc, *tmp;
+@@ -827,8 +823,8 @@ context_release(struct context *ctx)
+ }
+ 
+ /* Must be called with ohci->lock held */
+-static struct descriptor *
+-context_get_descriptors(struct context *ctx, int z, dma_addr_t *d_bus)
++static struct descriptor *context_get_descriptors(struct context *ctx,
++						  int z, dma_addr_t *d_bus)
+ {
+ 	struct descriptor *d = NULL;
+ 	struct descriptor_buffer *desc = ctx->buffer_tail;
+@@ -912,8 +908,8 @@ struct driver_data {
+  * Must always be called with the ochi->lock held to ensure proper
+  * generation handling and locking around packet queue manipulation.
+  */
+-static int
+-at_context_queue_packet(struct context *ctx, struct fw_packet *packet)
++static int at_context_queue_packet(struct context *ctx,
++				   struct fw_packet *packet)
+ {
+ 	struct fw_ohci *ohci = ctx->ohci;
+ 	dma_addr_t d_bus, uninitialized_var(payload_bus);
+@@ -1095,8 +1091,8 @@ static int handle_at_packet(struct conte
+ #define HEADER_GET_DATA_LENGTH(q)	(((q) >> 16) & 0xffff)
+ #define HEADER_GET_EXTENDED_TCODE(q)	(((q) >> 0) & 0xffff)
+ 
+-static void
+-handle_local_rom(struct fw_ohci *ohci, struct fw_packet *packet, u32 csr)
++static void handle_local_rom(struct fw_ohci *ohci,
++			     struct fw_packet *packet, u32 csr)
+ {
+ 	struct fw_packet response;
+ 	int tcode, length, i;
+@@ -1122,8 +1118,8 @@ handle_local_rom(struct fw_ohci *ohci, s
+ 	fw_core_handle_response(&ohci->card, &response);
+ }
+ 
+-static void
+-handle_local_lock(struct fw_ohci *ohci, struct fw_packet *packet, u32 csr)
++static void handle_local_lock(struct fw_ohci *ohci,
++			      struct fw_packet *packet, u32 csr)
+ {
+ 	struct fw_packet response;
+ 	int tcode, length, ext_tcode, sel;
+@@ -1164,8 +1160,7 @@ handle_local_lock(struct fw_ohci *ohci, 
+ 	fw_core_handle_response(&ohci->card, &response);
+ }
+ 
+-static void
+-handle_local_request(struct context *ctx, struct fw_packet *packet)
++static void handle_local_request(struct context *ctx, struct fw_packet *packet)
+ {
+ 	u64 offset;
+ 	u32 csr;
+@@ -1205,11 +1200,10 @@ handle_local_request(struct context *ctx
+ 	}
+ }
+ 
+-static void
+-at_context_transmit(struct context *ctx, struct fw_packet *packet)
++static void at_context_transmit(struct context *ctx, struct fw_packet *packet)
+ {
+ 	unsigned long flags;
+-	int retval;
++	int ret;
+ 
+ 	spin_lock_irqsave(&ctx->ohci->lock, flags);
+ 
+@@ -1220,10 +1214,10 @@ at_context_transmit(struct context *ctx,
+ 		return;
+ 	}
+ 
+-	retval = at_context_queue_packet(ctx, packet);
++	ret = at_context_queue_packet(ctx, packet);
+ 	spin_unlock_irqrestore(&ctx->ohci->lock, flags);
+ 
+-	if (retval < 0)
++	if (ret < 0)
+ 		packet->callback(packet, &ctx->ohci->card, packet->ack);
+ 
+ }
+@@ -1590,12 +1584,12 @@ static int ohci_enable(struct fw_card *c
+ 	return 0;
+ }
+ 
+-static int
+-ohci_set_config_rom(struct fw_card *card, u32 *config_rom, size_t length)
++static int ohci_set_config_rom(struct fw_card *card,
++			       u32 *config_rom, size_t length)
+ {
+ 	struct fw_ohci *ohci;
+ 	unsigned long flags;
+-	int retval = -EBUSY;
++	int ret = -EBUSY;
+ 	__be32 *next_config_rom;
+ 	dma_addr_t uninitialized_var(next_config_rom_bus);
+ 
+@@ -1649,7 +1643,7 @@ ohci_set_config_rom(struct fw_card *card
+ 
+ 		reg_write(ohci, OHCI1394_ConfigROMmap,
+ 			  ohci->next_config_rom_bus);
+-		retval = 0;
++		ret = 0;
+ 	}
+ 
+ 	spin_unlock_irqrestore(&ohci->lock, flags);
+@@ -1661,13 +1655,13 @@ ohci_set_config_rom(struct fw_card *card
+ 	 * controller could need to access it before the bus reset
+ 	 * takes effect.
+ 	 */
+-	if (retval == 0)
++	if (ret == 0)
+ 		fw_core_initiate_bus_reset(&ohci->card, 1);
+ 	else
+ 		dma_free_coherent(ohci->card.device, CONFIG_ROM_SIZE,
+ 				  next_config_rom, next_config_rom_bus);
+ 
+-	return retval;
++	return ret;
+ }
+ 
+ static void ohci_send_request(struct fw_card *card, struct fw_packet *packet)
+@@ -1689,7 +1683,7 @@ static int ohci_cancel_packet(struct fw_
+ 	struct fw_ohci *ohci = fw_ohci(card);
+ 	struct context *ctx = &ohci->at_request_ctx;
+ 	struct driver_data *driver_data = packet->driver_data;
+-	int retval = -ENOENT;
++	int ret = -ENOENT;
+ 
+ 	tasklet_disable(&ctx->tasklet);
+ 
+@@ -1704,23 +1698,22 @@ static int ohci_cancel_packet(struct fw_
+ 	driver_data->packet = NULL;
+ 	packet->ack = RCODE_CANCELLED;
+ 	packet->callback(packet, &ohci->card, packet->ack);
+-	retval = 0;
+-
++	ret = 0;
+  out:
+ 	tasklet_enable(&ctx->tasklet);
+ 
+-	return retval;
++	return ret;
+ }
+ 
+-static int
+-ohci_enable_phys_dma(struct fw_card *card, int node_id, int generation)
++static int ohci_enable_phys_dma(struct fw_card *card,
++				int node_id, int generation)
+ {
+ #ifdef CONFIG_FIREWIRE_OHCI_REMOTE_DMA
+ 	return 0;
+ #else
+ 	struct fw_ohci *ohci = fw_ohci(card);
+ 	unsigned long flags;
+-	int n, retval = 0;
++	int n, ret = 0;
+ 
+ 	/*
+ 	 * FIXME:  Make sure this bitmask is cleared when we clear the busReset
+@@ -1730,7 +1723,7 @@ ohci_enable_phys_dma(struct fw_card *car
+ 	spin_lock_irqsave(&ohci->lock, flags);
+ 
+ 	if (ohci->generation != generation) {
+-		retval = -ESTALE;
++		ret = -ESTALE;
+ 		goto out;
+ 	}
+ 
+@@ -1748,12 +1741,12 @@ ohci_enable_phys_dma(struct fw_card *car
+ 	flush_writes(ohci);
+  out:
+ 	spin_unlock_irqrestore(&ohci->lock, flags);
+-	return retval;
 +
-+	for (ab = ctx->current_buffer; ab; ab = ab_next) {
-+		ab_next = ab->next;
-+		offset = offsetof(struct ar_buffer, data);
-+		ab_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
-+		dma_free_coherent(ctx->ohci->card.device, PAGE_SIZE,
-+				  ab, ab_bus);
-+	}
-+}
-+
- #if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
- #define cond_le32_to_cpu(v) \
- 	(ohci->old_uninorth ? (__force __u32)(v) : le32_to_cpu(v))
-@@ -1746,6 +1762,28 @@ ohci_get_bus_time(struct fw_card *card)
++	return ret;
+ #endif /* CONFIG_FIREWIRE_OHCI_REMOTE_DMA */
+ }
+ 
+-static u64
+-ohci_get_bus_time(struct fw_card *card)
++static u64 ohci_get_bus_time(struct fw_card *card)
+ {
+ 	struct fw_ohci *ohci = fw_ohci(card);
+ 	u32 cycle_time;
+@@ -1765,6 +1758,28 @@ ohci_get_bus_time(struct fw_card *card)
  	return bus_time;
  }
  
@@ -450,7 +2344,7 @@ index 251416f..79c20c4 100644
  static int handle_ir_dualbuffer_packet(struct context *context,
  				       struct descriptor *d,
  				       struct descriptor *last)
-@@ -1756,7 +1794,6 @@ static int handle_ir_dualbuffer_packet(struct context *context,
+@@ -1775,7 +1790,6 @@ static int handle_ir_dualbuffer_packet(s
  	__le32 *ir_header;
  	size_t header_length;
  	void *p, *end;
@@ -458,7 +2352,7 @@ index 251416f..79c20c4 100644
  
  	if (db->first_res_count != 0 && db->second_res_count != 0) {
  		if (ctx->excess_bytes <= le16_to_cpu(db->second_req_count)) {
-@@ -1769,25 +1806,14 @@ static int handle_ir_dualbuffer_packet(struct context *context,
+@@ -1788,25 +1802,14 @@ static int handle_ir_dualbuffer_packet(s
  	header_length = le16_to_cpu(db->first_req_count) -
  		le16_to_cpu(db->first_res_count);
  
@@ -487,7 +2381,7 @@ index 251416f..79c20c4 100644
  
  	ctx->excess_bytes -= le16_to_cpu(db->second_req_count) -
  		le16_to_cpu(db->second_res_count);
-@@ -1813,7 +1839,6 @@ static int handle_ir_packet_per_buffer(struct context *context,
+@@ -1832,7 +1835,6 @@ static int handle_ir_packet_per_buffer(s
  	struct descriptor *pd;
  	__le32 *ir_header;
  	void *p;
@@ -495,7 +2389,7 @@ index 251416f..79c20c4 100644
  
  	for (pd = d; pd <= last; pd++) {
  		if (pd->transfer_status)
-@@ -1823,21 +1848,8 @@ static int handle_ir_packet_per_buffer(struct context *context,
+@@ -1842,21 +1844,8 @@ static int handle_ir_packet_per_buffer(s
  		/* Descriptor(s) not done yet, stop iteration */
  		return 0;
  
@@ -519,7 +2413,107 @@ index 251416f..79c20c4 100644
  
  	if (le16_to_cpu(last->control) & DESCRIPTOR_IRQ_ALWAYS) {
  		ir_header = (__le32 *) p;
-@@ -2132,11 +2144,11 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
+@@ -1888,21 +1877,24 @@ static int handle_it_packet(struct conte
+ 	return 1;
+ }
+ 
+-static struct fw_iso_context *
+-ohci_allocate_iso_context(struct fw_card *card, int type, size_t header_size)
++static struct fw_iso_context *ohci_allocate_iso_context(struct fw_card *card,
++				int type, int channel, size_t header_size)
+ {
+ 	struct fw_ohci *ohci = fw_ohci(card);
+ 	struct iso_context *ctx, *list;
+ 	descriptor_callback_t callback;
++	u64 *channels, dont_care = ~0ULL;
+ 	u32 *mask, regs;
+ 	unsigned long flags;
+-	int index, retval = -ENOMEM;
++	int index, ret = -ENOMEM;
+ 
+ 	if (type == FW_ISO_CONTEXT_TRANSMIT) {
++		channels = &dont_care;
+ 		mask = &ohci->it_context_mask;
+ 		list = ohci->it_context_list;
+ 		callback = handle_it_packet;
+ 	} else {
++		channels = &ohci->ir_context_channels;
+ 		mask = &ohci->ir_context_mask;
+ 		list = ohci->ir_context_list;
+ 		if (ohci->use_dualbuffer)
+@@ -1912,9 +1904,11 @@ ohci_allocate_iso_context(struct fw_card
+ 	}
+ 
+ 	spin_lock_irqsave(&ohci->lock, flags);
+-	index = ffs(*mask) - 1;
+-	if (index >= 0)
++	index = *channels & 1ULL << channel ? ffs(*mask) - 1 : -1;
++	if (index >= 0) {
++		*channels &= ~(1ULL << channel);
+ 		*mask &= ~(1 << index);
++	}
+ 	spin_unlock_irqrestore(&ohci->lock, flags);
+ 
+ 	if (index < 0)
+@@ -1932,8 +1926,8 @@ ohci_allocate_iso_context(struct fw_card
+ 	if (ctx->header == NULL)
+ 		goto out;
+ 
+-	retval = context_init(&ctx->context, ohci, regs, callback);
+-	if (retval < 0)
++	ret = context_init(&ctx->context, ohci, regs, callback);
++	if (ret < 0)
+ 		goto out_with_header;
+ 
+ 	return &ctx->base;
+@@ -1945,7 +1939,7 @@ ohci_allocate_iso_context(struct fw_card
+ 	*mask |= 1 << index;
+ 	spin_unlock_irqrestore(&ohci->lock, flags);
+ 
+-	return ERR_PTR(retval);
++	return ERR_PTR(ret);
+ }
+ 
+ static int ohci_start_iso(struct fw_iso_context *base,
+@@ -2024,16 +2018,16 @@ static void ohci_free_iso_context(struct
+ 	} else {
+ 		index = ctx - ohci->ir_context_list;
+ 		ohci->ir_context_mask |= 1 << index;
++		ohci->ir_context_channels |= 1ULL << base->channel;
+ 	}
+ 
+ 	spin_unlock_irqrestore(&ohci->lock, flags);
+ }
+ 
+-static int
+-ohci_queue_iso_transmit(struct fw_iso_context *base,
+-			struct fw_iso_packet *packet,
+-			struct fw_iso_buffer *buffer,
+-			unsigned long payload)
++static int ohci_queue_iso_transmit(struct fw_iso_context *base,
++				   struct fw_iso_packet *packet,
++				   struct fw_iso_buffer *buffer,
++				   unsigned long payload)
+ {
+ 	struct iso_context *ctx = container_of(base, struct iso_context, base);
+ 	struct descriptor *d, *last, *pd;
+@@ -2128,11 +2122,10 @@ ohci_queue_iso_transmit(struct fw_iso_co
+ 	return 0;
+ }
+ 
+-static int
+-ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
+-				  struct fw_iso_packet *packet,
+-				  struct fw_iso_buffer *buffer,
+-				  unsigned long payload)
++static int ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
++					     struct fw_iso_packet *packet,
++					     struct fw_iso_buffer *buffer,
++					     unsigned long payload)
+ {
+ 	struct iso_context *ctx = container_of(base, struct iso_context, base);
+ 	struct db_descriptor *db = NULL;
+@@ -2151,11 +2144,11 @@ ohci_queue_iso_receive_dualbuffer(struct
  	z = 2;
  
  	/*
@@ -534,7 +2528,7 @@ index 251416f..79c20c4 100644
  
  	/* Get header size in number of descriptors. */
  	header_z = DIV_ROUND_UP(header_size, sizeof(*d));
-@@ -2154,7 +2166,8 @@ ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
+@@ -2173,7 +2166,8 @@ ohci_queue_iso_receive_dualbuffer(struct
  		db = (struct db_descriptor *) d;
  		db->control = cpu_to_le16(DESCRIPTOR_STATUS |
  					  DESCRIPTOR_BRANCH_ALWAYS);
@@ -544,7 +2538,23 @@ index 251416f..79c20c4 100644
  		if (p->skip && rest == p->payload_length) {
  			db->control |= cpu_to_le16(DESCRIPTOR_WAIT);
  			db->first_req_count = db->first_size;
-@@ -2204,11 +2217,11 @@ ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
+@@ -2208,11 +2202,10 @@ ohci_queue_iso_receive_dualbuffer(struct
+ 	return 0;
+ }
+ 
+-static int
+-ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
+-					 struct fw_iso_packet *packet,
+-					 struct fw_iso_buffer *buffer,
+-					 unsigned long payload)
++static int ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
++					struct fw_iso_packet *packet,
++					struct fw_iso_buffer *buffer,
++					unsigned long payload)
+ {
+ 	struct iso_context *ctx = container_of(base, struct iso_context, base);
+ 	struct descriptor *d = NULL, *pd = NULL;
+@@ -2223,11 +2216,11 @@ ohci_queue_iso_receive_packet_per_buffer
  	int page, offset, packet_count, header_size, payload_per_buffer;
  
  	/*
@@ -559,2018 +2569,1114 @@ index 251416f..79c20c4 100644
  
  	/* Get header size in number of descriptors. */
  	header_z = DIV_ROUND_UP(header_size, sizeof(*d));
-@@ -2349,8 +2362,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 
- 	ohci = kzalloc(sizeof(*ohci), GFP_KERNEL);
- 	if (ohci == NULL) {
--		fw_error("Could not malloc fw_ohci data.\n");
--		return -ENOMEM;
-+		err = -ENOMEM;
-+		goto fail;
- 	}
- 
- 	fw_card_initialize(&ohci->card, &ohci_driver, &dev->dev);
-@@ -2359,7 +2372,7 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 
- 	err = pci_enable_device(dev);
- 	if (err) {
--		fw_error("Failed to enable OHCI hardware.\n");
-+		fw_error("Failed to enable OHCI hardware\n");
- 		goto fail_free;
- 	}
- 
-@@ -2427,9 +2440,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 	ohci->ir_context_list = kzalloc(size, GFP_KERNEL);
- 
- 	if (ohci->it_context_list == NULL || ohci->ir_context_list == NULL) {
--		fw_error("Out of memory for it/ir contexts.\n");
- 		err = -ENOMEM;
--		goto fail_registers;
-+		goto fail_contexts;
- 	}
- 
- 	/* self-id dma buffer allocation */
-@@ -2438,9 +2450,8 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
- 					       &ohci->self_id_bus,
- 					       GFP_KERNEL);
- 	if (ohci->self_id_cpu == NULL) {
--		fw_error("Out of memory for self ID buffer.\n");
- 		err = -ENOMEM;
--		goto fail_registers;
-+		goto fail_contexts;
- 	}
- 
- 	bus_options = reg_read(ohci, OHCI1394_BusOptions);
-@@ -2460,9 +2471,13 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
-  fail_self_id:
- 	dma_free_coherent(ohci->card.device, SELF_ID_BUF_SIZE,
- 			  ohci->self_id_cpu, ohci->self_id_bus);
-- fail_registers:
--	kfree(ohci->it_context_list);
-+ fail_contexts:
- 	kfree(ohci->ir_context_list);
-+	kfree(ohci->it_context_list);
-+	context_release(&ohci->at_response_ctx);
-+	context_release(&ohci->at_request_ctx);
-+	ar_context_release(&ohci->ar_response_ctx);
-+	ar_context_release(&ohci->ar_request_ctx);
- 	pci_iounmap(dev, ohci->registers);
-  fail_iomem:
- 	pci_release_region(dev, 0);
-@@ -2471,6 +2486,9 @@ pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
-  fail_free:
- 	kfree(&ohci->card);
- 	ohci_pmac_off(dev);
-+ fail:
-+	if (err == -ENOMEM)
-+		fw_error("Out of memory\n");
- 
- 	return err;
+@@ -2286,29 +2279,27 @@ ohci_queue_iso_receive_packet_per_buffer
+ 	return 0;
  }
-@@ -2491,8 +2509,19 @@ static void pci_remove(struct pci_dev *dev)
  
- 	software_reset(ohci);
- 	free_irq(dev->irq, ohci);
-+
-+	if (ohci->next_config_rom && ohci->next_config_rom != ohci->config_rom)
-+		dma_free_coherent(ohci->card.device, CONFIG_ROM_SIZE,
-+				  ohci->next_config_rom, ohci->next_config_rom_bus);
-+	if (ohci->config_rom)
-+		dma_free_coherent(ohci->card.device, CONFIG_ROM_SIZE,
-+				  ohci->config_rom, ohci->config_rom_bus);
- 	dma_free_coherent(ohci->card.device, SELF_ID_BUF_SIZE,
- 			  ohci->self_id_cpu, ohci->self_id_bus);
-+	ar_context_release(&ohci->ar_request_ctx);
-+	ar_context_release(&ohci->ar_response_ctx);
-+	context_release(&ohci->at_request_ctx);
-+	context_release(&ohci->at_response_ctx);
- 	kfree(ohci->it_context_list);
- 	kfree(ohci->ir_context_list);
- 	pci_iounmap(dev, ohci->registers);
-diff --git a/drivers/firewire/fw-sbp2.c b/drivers/firewire/fw-sbp2.c
-index aaff50e..d334cac 100644
---- a/drivers/firewire/fw-sbp2.c
-+++ b/drivers/firewire/fw-sbp2.c
-@@ -29,6 +29,7 @@
-  */
+-static int
+-ohci_queue_iso(struct fw_iso_context *base,
+-	       struct fw_iso_packet *packet,
+-	       struct fw_iso_buffer *buffer,
+-	       unsigned long payload)
++static int ohci_queue_iso(struct fw_iso_context *base,
++			  struct fw_iso_packet *packet,
++			  struct fw_iso_buffer *buffer,
++			  unsigned long payload)
+ {
+ 	struct iso_context *ctx = container_of(base, struct iso_context, base);
+ 	unsigned long flags;
+-	int retval;
++	int ret;
  
- #include <linux/blkdev.h>
-+#include <linux/bug.h>
- #include <linux/delay.h>
- #include <linux/device.h>
- #include <linux/dma-mapping.h>
-@@ -172,6 +173,9 @@ struct sbp2_target {
- 	int blocked;	/* ditto */
+ 	spin_lock_irqsave(&ctx->context.ohci->lock, flags);
+ 	if (base->type == FW_ISO_CONTEXT_TRANSMIT)
+-		retval = ohci_queue_iso_transmit(base, packet, buffer, payload);
++		ret = ohci_queue_iso_transmit(base, packet, buffer, payload);
+ 	else if (ctx->context.ohci->use_dualbuffer)
+-		retval = ohci_queue_iso_receive_dualbuffer(base, packet,
+-							 buffer, payload);
++		ret = ohci_queue_iso_receive_dualbuffer(base, packet,
++							buffer, payload);
+ 	else
+-		retval = ohci_queue_iso_receive_packet_per_buffer(base, packet,
+-								buffer,
+-								payload);
++		ret = ohci_queue_iso_receive_packet_per_buffer(base, packet,
++							buffer, payload);
+ 	spin_unlock_irqrestore(&ctx->context.ohci->lock, flags);
+ 
+-	return retval;
++	return ret;
+ }
+ 
+ static const struct fw_card_driver ohci_driver = {
+@@ -2357,8 +2348,8 @@ static void ohci_pmac_off(struct pci_dev
+ #define ohci_pmac_off(dev)
+ #endif /* CONFIG_PPC_PMAC */
+ 
+-static int __devinit
+-pci_probe(struct pci_dev *dev, const struct pci_device_id *ent)
++static int __devinit pci_probe(struct pci_dev *dev,
++			       const struct pci_device_id *ent)
+ {
+ 	struct fw_ohci *ohci;
+ 	u32 bus_options, max_receive, link_speed, version;
+@@ -2440,6 +2431,7 @@ pci_probe(struct pci_dev *dev, const str
+ 	ohci->it_context_list = kzalloc(size, GFP_KERNEL);
+ 
+ 	reg_write(ohci, OHCI1394_IsoXmitIntMaskSet, ~0);
++	ohci->ir_context_channels = ~0ULL;
+ 	ohci->ir_context_mask = reg_read(ohci, OHCI1394_IsoXmitIntMaskSet);
+ 	reg_write(ohci, OHCI1394_IsoXmitIntMaskClear, ~0);
+ 	size = sizeof(struct iso_context) * hweight32(ohci->ir_context_mask);
+diff -Naurp linux-2.6-git/drivers/firewire/fw-sbp2.c firewire-git/drivers/firewire/fw-sbp2.c
+--- linux-2.6-git/drivers/firewire/fw-sbp2.c	2009-01-30 13:39:02.991771976 -0500
++++ firewire-git/drivers/firewire/fw-sbp2.c	2009-01-30 13:35:51.861646907 -0500
+@@ -392,20 +392,18 @@ static const struct {
+ 	}
  };
  
-+/* Impossible login_id, to detect logout attempt before successful login */
-+#define INVALID_LOGIN_ID 0x10000
-+
- /*
-  * Per section 7.4.8 of the SBP-2 spec, a mgt_ORB_timeout value can be
-  * provided in the config rom. Most devices do provide a value, which
-@@ -181,10 +185,16 @@ struct sbp2_target {
- #define SBP2_MAX_LOGIN_ORB_TIMEOUT	40000U	/* Timeout in ms */
- #define SBP2_ORB_TIMEOUT		2000U	/* Timeout in ms */
- #define SBP2_ORB_NULL			0x80000000
--#define SBP2_MAX_SG_ELEMENT_LENGTH	0xf000
- #define SBP2_RETRY_LIMIT		0xf		/* 15 retries */
- #define SBP2_CYCLE_LIMIT		(0xc8 << 12)	/* 200 125us cycles */
+-static void
+-free_orb(struct kref *kref)
++static void free_orb(struct kref *kref)
+ {
+ 	struct sbp2_orb *orb = container_of(kref, struct sbp2_orb, kref);
  
-+/*
-+ * The default maximum s/g segment size of a FireWire controller is
-+ * usually 0x10000, but SBP-2 only allows 0xffff. Since buffers have to
-+ * be quadlet-aligned, we set the length limit to 0xffff & ~3.
-+ */
-+#define SBP2_MAX_SEG_SIZE		0xfffc
-+
- /* Unit directory keys */
- #define SBP2_CSR_UNIT_CHARACTERISTICS	0x3a
- #define SBP2_CSR_FIRMWARE_REVISION	0x3c
-@@ -621,25 +631,15 @@ sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
+ 	kfree(orb);
+ }
+ 
+-static void
+-sbp2_status_write(struct fw_card *card, struct fw_request *request,
+-		  int tcode, int destination, int source,
+-		  int generation, int speed,
+-		  unsigned long long offset,
+-		  void *payload, size_t length, void *callback_data)
++static void sbp2_status_write(struct fw_card *card, struct fw_request *request,
++			      int tcode, int destination, int source,
++			      int generation, int speed,
++			      unsigned long long offset,
++			      void *payload, size_t length, void *callback_data)
+ {
+ 	struct sbp2_logical_unit *lu = callback_data;
+ 	struct sbp2_orb *orb;
+@@ -451,9 +449,8 @@ sbp2_status_write(struct fw_card *card, 
+ 	fw_send_response(card, request, RCODE_COMPLETE);
+ }
+ 
+-static void
+-complete_transaction(struct fw_card *card, int rcode,
+-		     void *payload, size_t length, void *data)
++static void complete_transaction(struct fw_card *card, int rcode,
++				 void *payload, size_t length, void *data)
+ {
+ 	struct sbp2_orb *orb = data;
+ 	unsigned long flags;
+@@ -482,9 +479,8 @@ complete_transaction(struct fw_card *car
+ 	kref_put(&orb->kref, free_orb);
+ }
+ 
+-static void
+-sbp2_send_orb(struct sbp2_orb *orb, struct sbp2_logical_unit *lu,
+-	      int node_id, int generation, u64 offset)
++static void sbp2_send_orb(struct sbp2_orb *orb, struct sbp2_logical_unit *lu,
++			  int node_id, int generation, u64 offset)
+ {
+ 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
+ 	unsigned long flags;
+@@ -531,8 +527,8 @@ static int sbp2_cancel_orbs(struct sbp2_
  	return retval;
  }
  
 -static void
--complete_agent_reset_write(struct fw_card *card, int rcode,
--			   void *payload, size_t length, void *done)
--{
--	complete(done);
--}
--
- static void sbp2_agent_reset(struct sbp2_logical_unit *lu)
+-complete_management_orb(struct sbp2_orb *base_orb, struct sbp2_status *status)
++static void complete_management_orb(struct sbp2_orb *base_orb,
++				    struct sbp2_status *status)
  {
- 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
--	DECLARE_COMPLETION_ONSTACK(done);
--	struct fw_transaction t;
--	static u32 z;
-+	__be32 d = 0;
- 
--	fw_send_request(device->card, &t, TCODE_WRITE_QUADLET_REQUEST,
--			lu->tgt->node_id, lu->generation, device->max_speed,
--			lu->command_block_agent_address + SBP2_AGENT_RESET,
--			&z, sizeof(z), complete_agent_reset_write, &done);
--	wait_for_completion(&done);
-+	fw_run_transaction(device->card, TCODE_WRITE_QUADLET_REQUEST,
-+			   lu->tgt->node_id, lu->generation, device->max_speed,
-+			   lu->command_block_agent_address + SBP2_AGENT_RESET,
-+			   &d, sizeof(d));
+ 	struct sbp2_management_orb *orb =
+ 		container_of(base_orb, struct sbp2_management_orb, base);
+@@ -542,10 +538,9 @@ complete_management_orb(struct sbp2_orb 
+ 	complete(&orb->done);
  }
  
- static void
-@@ -653,7 +653,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
+-static int
+-sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
+-			 int generation, int function, int lun_or_login_id,
+-			 void *response)
++static int sbp2_send_management_orb(struct sbp2_logical_unit *lu, int node_id,
++				    int generation, int function,
++				    int lun_or_login_id, void *response)
  {
  	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
- 	struct fw_transaction *t;
--	static u32 z;
-+	static __be32 d;
- 
- 	t = kmalloc(sizeof(*t), GFP_ATOMIC);
- 	if (t == NULL)
-@@ -662,7 +662,7 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
- 	fw_send_request(device->card, t, TCODE_WRITE_QUADLET_REQUEST,
- 			lu->tgt->node_id, lu->generation, device->max_speed,
- 			lu->command_block_agent_address + SBP2_AGENT_RESET,
--			&z, sizeof(z), complete_agent_reset_write_no_wait, t);
-+			&d, sizeof(d), complete_agent_reset_write_no_wait, t);
- }
- 
- static void sbp2_set_generation(struct sbp2_logical_unit *lu, int generation)
-@@ -791,9 +791,20 @@ static void sbp2_release_target(struct kref *kref)
- 			scsi_remove_device(sdev);
- 			scsi_device_put(sdev);
- 		}
--		sbp2_send_management_orb(lu, tgt->node_id, lu->generation,
--				SBP2_LOGOUT_REQUEST, lu->login_id, NULL);
--
-+		if (lu->login_id != INVALID_LOGIN_ID) {
-+			int generation, node_id;
-+			/*
-+			 * tgt->node_id may be obsolete here if we failed
-+			 * during initial login or after a bus reset where
-+			 * the topology changed.
-+			 */
-+			generation = device->generation;
-+			smp_rmb(); /* node_id vs. generation */
-+			node_id    = device->node_id;
-+			sbp2_send_management_orb(lu, node_id, generation,
-+						 SBP2_LOGOUT_REQUEST,
-+						 lu->login_id, NULL);
-+		}
- 		fw_core_remove_address_handler(&lu->address_handler);
- 		list_del(&lu->link);
- 		kfree(lu);
-@@ -808,26 +819,20 @@ static void sbp2_release_target(struct kref *kref)
- 
- static struct workqueue_struct *sbp2_wq;
- 
--/*
-- * Always get the target's kref when scheduling work on one its units.
-- * Each workqueue job is responsible to call sbp2_target_put() upon return.
-- */
--static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
--{
--	if (queue_delayed_work(sbp2_wq, &lu->work, delay))
--		kref_get(&lu->tgt->kref);
--}
--
- static void sbp2_target_put(struct sbp2_target *tgt)
- {
- 	kref_put(&tgt->kref, sbp2_release_target);
+ 	struct sbp2_management_orb *orb;
+@@ -652,9 +647,8 @@ static void sbp2_agent_reset(struct sbp2
+ 			   &d, sizeof(d));
  }
  
 -static void
--complete_set_busy_timeout(struct fw_card *card, int rcode,
--			  void *payload, size_t length, void *done)
-+/*
-+ * Always get the target's kref when scheduling work on one its units.
-+ * Each workqueue job is responsible to call sbp2_target_put() upon return.
-+ */
-+static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
+-complete_agent_reset_write_no_wait(struct fw_card *card, int rcode,
+-				   void *payload, size_t length, void *data)
++static void complete_agent_reset_write_no_wait(struct fw_card *card,
++		int rcode, void *payload, size_t length, void *data)
  {
--	complete(done);
-+	kref_get(&lu->tgt->kref);
-+	if (!queue_delayed_work(sbp2_wq, &lu->work, delay))
-+		sbp2_target_put(lu->tgt);
+ 	kfree(data);
+ }
+@@ -1299,8 +1293,7 @@ static void sbp2_unmap_scatterlist(struc
+ 				 sizeof(orb->page_table), DMA_TO_DEVICE);
  }
  
- /*
-@@ -849,17 +854,12 @@ complete_set_busy_timeout(struct fw_card *card, int rcode,
- static void sbp2_set_busy_timeout(struct sbp2_logical_unit *lu)
+-static unsigned int
+-sbp2_status_to_sense_data(u8 *sbp2_status, u8 *sense_data)
++static unsigned int sbp2_status_to_sense_data(u8 *sbp2_status, u8 *sense_data)
  {
- 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
--	DECLARE_COMPLETION_ONSTACK(done);
--	struct fw_transaction t;
--	static __be32 busy_timeout;
-+	__be32 d = cpu_to_be32(SBP2_CYCLE_LIMIT | SBP2_RETRY_LIMIT);
+ 	int sam_status;
  
--	busy_timeout = cpu_to_be32(SBP2_CYCLE_LIMIT | SBP2_RETRY_LIMIT);
--
--	fw_send_request(device->card, &t, TCODE_WRITE_QUADLET_REQUEST,
--			lu->tgt->node_id, lu->generation, device->max_speed,
--			CSR_REGISTER_BASE + CSR_BUSY_TIMEOUT, &busy_timeout,
--			sizeof(busy_timeout), complete_set_busy_timeout, &done);
--	wait_for_completion(&done);
-+	fw_run_transaction(device->card, TCODE_WRITE_QUADLET_REQUEST,
-+			   lu->tgt->node_id, lu->generation, device->max_speed,
-+			   CSR_REGISTER_BASE + CSR_BUSY_TIMEOUT,
-+			   &d, sizeof(d));
+@@ -1337,8 +1330,8 @@ sbp2_status_to_sense_data(u8 *sbp2_statu
+ 	}
  }
  
- static void sbp2_reconnect(struct work_struct *work);
-@@ -993,6 +993,7 @@ static int sbp2_add_logical_unit(struct sbp2_target *tgt, int lun_entry)
- 
- 	lu->tgt      = tgt;
- 	lu->lun      = lun_entry & 0xffff;
-+	lu->login_id = INVALID_LOGIN_ID;
- 	lu->retries  = 0;
- 	lu->has_sdev = false;
- 	lu->blocked  = false;
-@@ -1121,6 +1122,10 @@ static int sbp2_probe(struct device *dev)
- 	struct Scsi_Host *shost;
- 	u32 model, firmware_revision;
- 
-+	if (dma_get_max_seg_size(device->card->device) > SBP2_MAX_SEG_SIZE)
-+		BUG_ON(dma_set_max_seg_size(device->card->device,
-+					    SBP2_MAX_SEG_SIZE));
-+
- 	shost = scsi_host_alloc(&scsi_driver_template, sizeof(*tgt));
- 	if (shost == NULL)
- 		return -ENOMEM;
-@@ -1158,7 +1163,7 @@ static int sbp2_probe(struct device *dev)
- 
- 	/* Do the login in a workqueue so we can easily reschedule retries. */
- 	list_for_each_entry(lu, &tgt->lu_list, link)
--		sbp2_queue_work(lu, 0);
-+		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
- 	return 0;
- 
-  fail_tgt_put:
-@@ -1369,14 +1374,12 @@ static int
- sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
- 		     struct sbp2_logical_unit *lu)
+-static void
+-complete_command_orb(struct sbp2_orb *base_orb, struct sbp2_status *status)
++static void complete_command_orb(struct sbp2_orb *base_orb,
++				 struct sbp2_status *status)
  {
--	struct scatterlist *sg;
--	int sg_len, l, i, j, count;
--	dma_addr_t sg_addr;
--
--	sg = scsi_sglist(orb->cmd);
--	count = dma_map_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
--			   orb->cmd->sc_data_direction);
--	if (count == 0)
-+	struct scatterlist *sg = scsi_sglist(orb->cmd);
-+	int i, n;
-+
-+	n = dma_map_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
-+		       orb->cmd->sc_data_direction);
-+	if (n == 0)
- 		goto fail;
- 
- 	/*
-@@ -1386,7 +1389,7 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
- 	 * as the second generation iPod which doesn't support page
- 	 * tables.
- 	 */
--	if (count == 1 && sg_dma_len(sg) < SBP2_MAX_SG_ELEMENT_LENGTH) {
-+	if (n == 1) {
- 		orb->request.data_descriptor.high =
- 			cpu_to_be32(lu->tgt->address_high);
- 		orb->request.data_descriptor.low  =
-@@ -1396,29 +1399,9 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
- 		return 0;
- 	}
- 
--	/*
--	 * Convert the scatterlist to an sbp2 page table.  If any
--	 * scatterlist entries are too big for sbp2, we split them as we
--	 * go.  Even if we ask the block I/O layer to not give us sg
--	 * elements larger than 65535 bytes, some IOMMUs may merge sg elements
--	 * during DMA mapping, and Linux currently doesn't prevent this.
--	 */
--	for (i = 0, j = 0; i < count; i++, sg = sg_next(sg)) {
--		sg_len = sg_dma_len(sg);
--		sg_addr = sg_dma_address(sg);
--		while (sg_len) {
--			/* FIXME: This won't get us out of the pinch. */
--			if (unlikely(j >= ARRAY_SIZE(orb->page_table))) {
--				fw_error("page table overflow\n");
--				goto fail_page_table;
--			}
--			l = min(sg_len, SBP2_MAX_SG_ELEMENT_LENGTH);
--			orb->page_table[j].low = cpu_to_be32(sg_addr);
--			orb->page_table[j].high = cpu_to_be32(l << 16);
--			sg_addr += l;
--			sg_len -= l;
--			j++;
--		}
-+	for_each_sg(sg, sg, n, i) {
-+		orb->page_table[i].high = cpu_to_be32(sg_dma_len(sg) << 16);
-+		orb->page_table[i].low = cpu_to_be32(sg_dma_address(sg));
- 	}
- 
- 	orb->page_table_bus =
-@@ -1437,13 +1420,13 @@ sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
- 	orb->request.data_descriptor.high = cpu_to_be32(lu->tgt->address_high);
- 	orb->request.data_descriptor.low  = cpu_to_be32(orb->page_table_bus);
- 	orb->request.misc |= cpu_to_be32(COMMAND_ORB_PAGE_TABLE_PRESENT |
--					 COMMAND_ORB_DATA_SIZE(j));
-+					 COMMAND_ORB_DATA_SIZE(n));
- 
- 	return 0;
- 
-  fail_page_table:
--	dma_unmap_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
--		     orb->cmd->sc_data_direction);
-+	dma_unmap_sg(device->card->device, scsi_sglist(orb->cmd),
-+		     scsi_sg_count(orb->cmd), orb->cmd->sc_data_direction);
-  fail:
- 	return -ENOMEM;
- }
-@@ -1456,7 +1439,7 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
- 	struct fw_device *device = fw_device(lu->tgt->unit->device.parent);
- 	struct sbp2_command_orb *orb;
- 	unsigned int max_payload;
--	int retval = SCSI_MLQUEUE_HOST_BUSY;
-+	int generation, retval = SCSI_MLQUEUE_HOST_BUSY;
- 
- 	/*
- 	 * Bidirectional commands are not yet implemented, and unknown
-@@ -1500,6 +1483,9 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
- 	if (cmd->sc_data_direction == DMA_FROM_DEVICE)
- 		orb->request.misc |= cpu_to_be32(COMMAND_ORB_DIRECTION);
- 
-+	generation = device->generation;
-+	smp_rmb();    /* sbp2_map_scatterlist looks at tgt->address_high */
-+
- 	if (scsi_sg_count(cmd) && sbp2_map_scatterlist(orb, device, lu) < 0)
- 		goto out;
- 
-@@ -1512,7 +1498,7 @@ static int sbp2_scsi_queuecommand(struct scsi_cmnd *cmd, scsi_done_fn_t done)
- 		goto out;
- 	}
- 
--	sbp2_send_orb(&orb->base, lu, lu->tgt->node_id, lu->generation,
-+	sbp2_send_orb(&orb->base, lu, lu->tgt->node_id, generation,
- 		      lu->command_block_agent_address + SBP2_ORB_POINTER);
- 	retval = 0;
-  out:
-@@ -1564,6 +1550,8 @@ static int sbp2_scsi_slave_configure(struct scsi_device *sdev)
- 	if (lu->tgt->workarounds & SBP2_WORKAROUND_128K_MAX_TRANS)
- 		blk_queue_max_sectors(sdev->request_queue, 128 * 1024 / 512);
- 
-+	blk_queue_max_segment_size(sdev->request_queue, SBP2_MAX_SEG_SIZE);
-+
- 	return 0;
+ 	struct sbp2_command_orb *orb =
+ 		container_of(base_orb, struct sbp2_command_orb, base);
+@@ -1384,9 +1377,8 @@ complete_command_orb(struct sbp2_orb *ba
+ 	orb->done(orb->cmd);
  }
  
-diff --git a/drivers/firewire/fw-topology.c b/drivers/firewire/fw-topology.c
-index c1b8107..c42acb8 100644
---- a/drivers/firewire/fw-topology.c
-+++ b/drivers/firewire/fw-topology.c
-@@ -413,7 +413,7 @@ static void
- update_tree(struct fw_card *card, struct fw_node *root)
+-static int
+-sbp2_map_scatterlist(struct sbp2_command_orb *orb, struct fw_device *device,
+-		     struct sbp2_logical_unit *lu)
++static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
++		struct fw_device *device, struct sbp2_logical_unit *lu)
+ {
+ 	struct scatterlist *sg = scsi_sglist(orb->cmd);
+ 	int i, n;
+@@ -1584,9 +1576,8 @@ static int sbp2_scsi_abort(struct scsi_c
+  * This is the concatenation of target port identifier and logical unit
+  * identifier as per SAM-2...SAM-4 annex A.
+  */
+-static ssize_t
+-sbp2_sysfs_ieee1394_id_show(struct device *dev, struct device_attribute *attr,
+-			    char *buf)
++static ssize_t sbp2_sysfs_ieee1394_id_show(struct device *dev,
++			struct device_attribute *attr, char *buf)
+ {
+ 	struct scsi_device *sdev = to_scsi_device(dev);
+ 	struct sbp2_logical_unit *lu;
+diff -Naurp linux-2.6-git/drivers/firewire/fw-topology.c firewire-git/drivers/firewire/fw-topology.c
+--- linux-2.6-git/drivers/firewire/fw-topology.c	2009-01-30 13:39:02.991771976 -0500
++++ firewire-git/drivers/firewire/fw-topology.c	2009-01-30 13:35:51.862647087 -0500
+@@ -314,9 +314,8 @@ typedef void (*fw_node_callback_t)(struc
+ 				   struct fw_node * node,
+ 				   struct fw_node * parent);
+ 
+-static void
+-for_each_fw_node(struct fw_card *card, struct fw_node *root,
+-		 fw_node_callback_t callback)
++static void for_each_fw_node(struct fw_card *card, struct fw_node *root,
++			     fw_node_callback_t callback)
+ {
+ 	struct list_head list;
+ 	struct fw_node *node, *next, *child, *parent;
+@@ -349,9 +348,8 @@ for_each_fw_node(struct fw_card *card, s
+ 		fw_node_put(node);
+ }
+ 
+-static void
+-report_lost_node(struct fw_card *card,
+-		 struct fw_node *node, struct fw_node *parent)
++static void report_lost_node(struct fw_card *card,
++			     struct fw_node *node, struct fw_node *parent)
+ {
+ 	fw_node_event(card, node, FW_NODE_DESTROYED);
+ 	fw_node_put(node);
+@@ -360,9 +358,8 @@ report_lost_node(struct fw_card *card,
+ 	card->bm_retries = 0;
+ }
+ 
+-static void
+-report_found_node(struct fw_card *card,
+-		  struct fw_node *node, struct fw_node *parent)
++static void report_found_node(struct fw_card *card,
++			      struct fw_node *node, struct fw_node *parent)
+ {
+ 	int b_path = (node->phy_speed == SCODE_BETA);
+ 
+@@ -415,8 +412,7 @@ static void move_tree(struct fw_node *no
+  * found, lost or updated.  Update the nodes in the card topology tree
+  * as we go.
+  */
+-static void
+-update_tree(struct fw_card *card, struct fw_node *root)
++static void update_tree(struct fw_card *card, struct fw_node *root)
  {
  	struct list_head list0, list1;
--	struct fw_node *node0, *node1;
-+	struct fw_node *node0, *node1, *next1;
- 	int i, event;
- 
- 	INIT_LIST_HEAD(&list0);
-@@ -485,7 +485,9 @@ update_tree(struct fw_card *card, struct fw_node *root)
- 		}
- 
- 		node0 = fw_node(node0->link.next);
--		node1 = fw_node(node1->link.next);
-+		next1 = fw_node(node1->link.next);
-+		fw_node_put(node1);
-+		node1 = next1;
+ 	struct fw_node *node0, *node1, *next1;
+@@ -497,8 +493,8 @@ update_tree(struct fw_card *card, struct
  	}
  }
  
-@@ -510,6 +512,18 @@ fw_core_handle_bus_reset(struct fw_card *card,
+-static void
+-update_topology_map(struct fw_card *card, u32 *self_ids, int self_id_count)
++static void update_topology_map(struct fw_card *card,
++				u32 *self_ids, int self_id_count)
+ {
+ 	int node_count;
+ 
+@@ -510,10 +506,8 @@ update_topology_map(struct fw_card *card
+ 	fw_compute_block_crc(card->topology_map);
+ }
+ 
+-void
+-fw_core_handle_bus_reset(struct fw_card *card,
+-			 int node_id, int generation,
+-			 int self_id_count, u32 * self_ids)
++void fw_core_handle_bus_reset(struct fw_card *card, int node_id, int generation,
++			      int self_id_count, u32 *self_ids)
+ {
  	struct fw_node *local_node;
  	unsigned long flags;
+diff -Naurp linux-2.6-git/drivers/firewire/fw-topology.h firewire-git/drivers/firewire/fw-topology.h
+--- linux-2.6-git/drivers/firewire/fw-topology.h	2008-11-04 11:18:33.000000000 -0500
++++ firewire-git/drivers/firewire/fw-topology.h	2009-01-30 13:35:51.862647087 -0500
+@@ -19,6 +19,11 @@
+ #ifndef __fw_topology_h
+ #define __fw_topology_h
  
-+	/*
-+	 * If the selfID buffer is not the immediate successor of the
-+	 * previously processed one, we cannot reliably compare the
-+	 * old and new topologies.
-+	 */
-+	if (!is_next_generation(generation, card->generation) &&
-+	    card->local_node != NULL) {
-+		fw_notify("skipped bus generations, destroying all nodes\n");
-+		fw_destroy_nodes(card);
-+		card->bm_retries = 0;
-+	}
++#include <linux/list.h>
++#include <linux/slab.h>
 +
- 	spin_lock_irqsave(&card->lock, flags);
++#include <asm/atomic.h>
++
+ enum {
+ 	FW_NODE_CREATED,
+ 	FW_NODE_UPDATED,
+@@ -51,26 +56,22 @@ struct fw_node {
+ 	struct fw_node *ports[0];
+ };
  
- 	/*
-diff --git a/drivers/firewire/fw-transaction.c b/drivers/firewire/fw-transaction.c
-index e5d1a0b..022ac4f 100644
---- a/drivers/firewire/fw-transaction.c
-+++ b/drivers/firewire/fw-transaction.c
-@@ -247,7 +247,7 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
+-static inline struct fw_node *
+-fw_node_get(struct fw_node *node)
++static inline struct fw_node *fw_node_get(struct fw_node *node)
+ {
+ 	atomic_inc(&node->ref_count);
+ 
+ 	return node;
+ }
+ 
+-static inline void
+-fw_node_put(struct fw_node *node)
++static inline void fw_node_put(struct fw_node *node)
+ {
+ 	if (atomic_dec_and_test(&node->ref_count))
+ 		kfree(node);
+ }
+ 
+-void
+-fw_destroy_nodes(struct fw_card *card);
+-
+-int
+-fw_compute_block_crc(u32 *block);
++struct fw_card;
++void fw_destroy_nodes(struct fw_card *card);
+ 
++int fw_compute_block_crc(u32 *block);
+ 
+ #endif /* __fw_topology_h */
+diff -Naurp linux-2.6-git/drivers/firewire/fw-transaction.c firewire-git/drivers/firewire/fw-transaction.c
+--- linux-2.6-git/drivers/firewire/fw-transaction.c	2009-01-30 13:39:02.991771976 -0500
++++ firewire-git/drivers/firewire/fw-transaction.c	2009-01-30 13:35:51.862647087 -0500
+@@ -64,10 +64,9 @@
+ #define PHY_CONFIG_ROOT_ID(node_id)	((((node_id) & 0x3f) << 24) | (1 << 23))
+ #define PHY_IDENTIFIER(id)		((id) << 30)
+ 
+-static int
+-close_transaction(struct fw_transaction *transaction,
+-		  struct fw_card *card, int rcode,
+-		  u32 *payload, size_t length)
++static int close_transaction(struct fw_transaction *transaction,
++			     struct fw_card *card, int rcode,
++			     u32 *payload, size_t length)
+ {
+ 	struct fw_transaction *t;
+ 	unsigned long flags;
+@@ -94,9 +93,8 @@ close_transaction(struct fw_transaction 
+  * Only valid for transactions that are potentially pending (ie have
+  * been sent).
   */
- void
- fw_send_request(struct fw_card *card, struct fw_transaction *t,
--		int tcode, int node_id, int generation, int speed,
-+		int tcode, int destination_id, int generation, int speed,
- 		unsigned long long offset,
- 		void *payload, size_t length,
- 		fw_transaction_callback_t callback, void *callback_data)
-@@ -279,13 +279,14 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
- 	card->current_tlabel = (card->current_tlabel + 1) & 0x1f;
- 	card->tlabel_mask |= (1 << tlabel);
- 
--	t->node_id = node_id;
-+	t->node_id = destination_id;
- 	t->tlabel = tlabel;
- 	t->callback = callback;
- 	t->callback_data = callback_data;
- 
--	fw_fill_request(&t->packet, tcode, t->tlabel, node_id, card->node_id,
--			generation, speed, offset, payload, length);
-+	fw_fill_request(&t->packet, tcode, t->tlabel,
-+			destination_id, card->node_id, generation,
-+			speed, offset, payload, length);
- 	t->packet.callback = transmit_complete_callback;
- 
- 	list_add_tail(&t->link, &card->transaction_list);
-@@ -296,6 +297,45 @@ fw_send_request(struct fw_card *card, struct fw_transaction *t,
- }
- EXPORT_SYMBOL(fw_send_request);
- 
-+struct transaction_callback_data {
-+	struct completion done;
-+	void *payload;
-+	int rcode;
-+};
-+
-+static void transaction_callback(struct fw_card *card, int rcode,
-+				 void *payload, size_t length, void *data)
-+{
-+	struct transaction_callback_data *d = data;
-+
-+	if (rcode == RCODE_COMPLETE)
-+		memcpy(d->payload, payload, length);
-+	d->rcode = rcode;
-+	complete(&d->done);
-+}
-+
-+/**
-+ * fw_run_transaction - send request and sleep until transaction is completed
-+ *
-+ * Returns the RCODE.
-+ */
-+int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
-+		int generation, int speed, unsigned long long offset,
-+		void *data, size_t length)
-+{
-+	struct transaction_callback_data d;
-+	struct fw_transaction t;
-+
-+	init_completion(&d.done);
-+	d.payload = data;
-+	fw_send_request(card, &t, tcode, destination_id, generation, speed,
-+			offset, data, length, transaction_callback, &d);
-+	wait_for_completion(&d.done);
-+
-+	return d.rcode;
-+}
-+EXPORT_SYMBOL(fw_run_transaction);
-+
- static DEFINE_MUTEX(phy_config_mutex);
- static DECLARE_COMPLETION(phy_config_done);
- 
-diff --git a/drivers/firewire/fw-transaction.h b/drivers/firewire/fw-transaction.h
-index 2ae1b0d..add8a3a 100644
---- a/drivers/firewire/fw-transaction.h
-+++ b/drivers/firewire/fw-transaction.h
-@@ -248,7 +248,7 @@ struct fw_card {
- 	struct fw_node *local_node;
- 	struct fw_node *root_node;
- 	struct fw_node *irm_node;
--	int color;
-+	u8 color; /* must be u8 to match the definition in struct fw_node */
- 	int gap_count;
- 	bool beta_repeaters_present;
- 
-@@ -277,6 +277,15 @@ static inline void fw_card_put(struct fw_card *card)
- }
- 
- /*
-+ * Check whether new_generation is the immediate successor of old_generation.
-+ * Take counter roll-over at 255 (as per to OHCI) into account.
-+ */
-+static inline bool is_next_generation(int new_generation, int old_generation)
-+{
-+	return (new_generation & 0xff) == ((old_generation + 1) & 0xff);
-+}
-+
-+/*
-  * The iso packet format allows for an immediate header/payload part
-  * stored in 'header' immediately after the packet info plus an
-  * indirect payload part that is pointer to by the 'payload' field.
-@@ -426,11 +435,14 @@ fw_core_initiate_bus_reset(struct fw_card *card, int short_reset);
- 
- void
- fw_send_request(struct fw_card *card, struct fw_transaction *t,
--		int tcode, int node_id, int generation, int speed,
--		unsigned long long offset,
--		void *data, size_t length,
-+		int tcode, int destination_id, int generation, int speed,
-+		unsigned long long offset, void *data, size_t length,
- 		fw_transaction_callback_t callback, void *callback_data);
- 
-+int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
-+		       int generation, int speed, unsigned long long offset,
-+		       void *data, size_t length);
-+
- int fw_cancel_transaction(struct fw_card *card,
- 			  struct fw_transaction *transaction);
- 
-diff --git a/drivers/ieee1394/csr1212.c b/drivers/ieee1394/csr1212.c
-index 9f95337..5e38a68 100644
---- a/drivers/ieee1394/csr1212.c
-+++ b/drivers/ieee1394/csr1212.c
-@@ -84,7 +84,7 @@ static const u8 csr1212_key_id_type_map[0x30] = {
- 
- 
- #define quads_to_bytes(_q) ((_q) * sizeof(u32))
--#define bytes_to_quads(_b) (((_b) + sizeof(u32) - 1) / sizeof(u32))
-+#define bytes_to_quads(_b) DIV_ROUND_UP(_b, sizeof(u32))
- 
- static void free_keyval(struct csr1212_keyval *kv)
+-int
+-fw_cancel_transaction(struct fw_card *card,
+-		      struct fw_transaction *transaction)
++int fw_cancel_transaction(struct fw_card *card,
++			  struct fw_transaction *transaction)
  {
-diff --git a/drivers/ieee1394/dv1394.c b/drivers/ieee1394/dv1394.c
-index b6eb2cf..df70f51 100644
---- a/drivers/ieee1394/dv1394.c
-+++ b/drivers/ieee1394/dv1394.c
-@@ -918,7 +918,7 @@ static int do_dv1394_init(struct video_card *video, struct dv1394_init *init)
- 		/* default SYT offset is 3 cycles */
- 		init->syt_offset = 3;
+ 	/*
+ 	 * Cancel the packet transmission if it's still queued.  That
+@@ -116,9 +114,8 @@ fw_cancel_transaction(struct fw_card *ca
+ }
+ EXPORT_SYMBOL(fw_cancel_transaction);
  
--	if ( (init->channel > 63) || (init->channel < 0) )
-+	if (init->channel > 63)
- 		init->channel = 63;
- 
- 	chan_mask = (u64)1 << init->channel;
-diff --git a/drivers/ieee1394/eth1394.c b/drivers/ieee1394/eth1394.c
-index b166b35..2012869 100644
---- a/drivers/ieee1394/eth1394.c
-+++ b/drivers/ieee1394/eth1394.c
-@@ -1361,7 +1361,7 @@ static unsigned int ether1394_encapsulate_prep(unsigned int max_payload,
- 		hdr->ff.dgl = dgl;
- 		adj_max_payload = max_payload - hdr_type_len[ETH1394_HDR_LF_FF];
+-static void
+-transmit_complete_callback(struct fw_packet *packet,
+-			   struct fw_card *card, int status)
++static void transmit_complete_callback(struct fw_packet *packet,
++				       struct fw_card *card, int status)
+ {
+ 	struct fw_transaction *t =
+ 	    container_of(packet, struct fw_transaction, packet);
+@@ -151,8 +148,7 @@ transmit_complete_callback(struct fw_pac
  	}
--	return (dg_size + adj_max_payload - 1) / adj_max_payload;
-+	return DIV_ROUND_UP(dg_size, adj_max_payload);
  }
  
- static unsigned int ether1394_encapsulate(struct sk_buff *skb,
-diff --git a/drivers/ieee1394/nodemgr.c b/drivers/ieee1394/nodemgr.c
-index 16240a7..2376b72 100644
---- a/drivers/ieee1394/nodemgr.c
-+++ b/drivers/ieee1394/nodemgr.c
-@@ -154,9 +154,6 @@ struct host_info {
- 
- static int nodemgr_bus_match(struct device * dev, struct device_driver * drv);
- static int nodemgr_uevent(struct device *dev, struct kobj_uevent_env *env);
--static void nodemgr_resume_ne(struct node_entry *ne);
--static void nodemgr_remove_ne(struct node_entry *ne);
--static struct node_entry *find_entry_by_guid(u64 guid);
- 
- struct bus_type ieee1394_bus_type = {
- 	.name		= "ieee1394",
-@@ -385,27 +382,6 @@ static ssize_t fw_get_ignore_driver(struct device *dev, struct device_attribute
- static DEVICE_ATTR(ignore_driver, S_IWUSR | S_IRUGO, fw_get_ignore_driver, fw_set_ignore_driver);
- 
- 
--static ssize_t fw_set_destroy_node(struct bus_type *bus, const char *buf, size_t count)
--{
--	struct node_entry *ne;
--	u64 guid = (u64)simple_strtoull(buf, NULL, 16);
--
--	ne = find_entry_by_guid(guid);
--
--	if (ne == NULL || !ne->in_limbo)
--		return -EINVAL;
--
--	nodemgr_remove_ne(ne);
--
--	return count;
--}
--static ssize_t fw_get_destroy_node(struct bus_type *bus, char *buf)
--{
--	return sprintf(buf, "You can destroy in_limbo nodes by writing their GUID to this file\n");
--}
--static BUS_ATTR(destroy_node, S_IWUSR | S_IRUGO, fw_get_destroy_node, fw_set_destroy_node);
--
--
- static ssize_t fw_set_rescan(struct bus_type *bus, const char *buf,
- 			     size_t count)
+-static void
+-fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
++static void fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
+ 		int destination_id, int source_id, int generation, int speed,
+ 		unsigned long long offset, void *payload, size_t length)
  {
-@@ -442,7 +418,6 @@ static BUS_ATTR(ignore_drivers, S_IWUSR | S_IRUGO, fw_get_ignore_drivers, fw_set
- 
- 
- struct bus_attribute *const fw_bus_attrs[] = {
--	&bus_attr_destroy_node,
- 	&bus_attr_rescan,
- 	&bus_attr_ignore_drivers,
- 	NULL
-@@ -734,10 +709,10 @@ static int nodemgr_bus_match(struct device * dev, struct device_driver * drv)
- 
- static DEFINE_MUTEX(nodemgr_serialize_remove_uds);
- 
--static int __match_ne(struct device *dev, void *data)
-+static int match_ne(struct device *dev, void *data)
+@@ -247,12 +243,10 @@ fw_fill_request(struct fw_packet *packet
+  * @param callback_data pointer to arbitrary data, which will be
+  *   passed to the callback
+  */
+-void
+-fw_send_request(struct fw_card *card, struct fw_transaction *t,
+-		int tcode, int destination_id, int generation, int speed,
+-		unsigned long long offset,
+-		void *payload, size_t length,
+-		fw_transaction_callback_t callback, void *callback_data)
++void fw_send_request(struct fw_card *card, struct fw_transaction *t, int tcode,
++		     int destination_id, int generation, int speed,
++		     unsigned long long offset, void *payload, size_t length,
++		     fw_transaction_callback_t callback, void *callback_data)
  {
- 	struct unit_directory *ud;
--	struct node_entry *ne = (struct node_entry *)data;
-+	struct node_entry *ne = data;
- 
- 	ud = container_of(dev, struct unit_directory, unit_dev);
- 	return ud->ne == ne;
-@@ -754,8 +729,7 @@ static void nodemgr_remove_uds(struct node_entry *ne)
- 	 */
- 	mutex_lock(&nodemgr_serialize_remove_uds);
- 	for (;;) {
--		dev = class_find_device(&nodemgr_ud_class, NULL, ne,
--					__match_ne);
-+		dev = class_find_device(&nodemgr_ud_class, NULL, ne, match_ne);
- 		if (!dev)
- 			break;
- 		ud = container_of(dev, struct unit_directory, unit_dev);
-@@ -785,7 +759,7 @@ static void nodemgr_remove_ne(struct node_entry *ne)
- 	put_device(dev);
+ 	unsigned long flags;
+ 	int tlabel;
+@@ -322,8 +316,8 @@ static void transaction_callback(struct 
+  * Returns the RCODE.
+  */
+ int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
+-		int generation, int speed, unsigned long long offset,
+-		void *data, size_t length)
++		       int generation, int speed, unsigned long long offset,
++		       void *data, size_t length)
+ {
+ 	struct transaction_callback_data d;
+ 	struct fw_transaction t;
+@@ -399,9 +393,8 @@ void fw_flush_transactions(struct fw_car
+ 	}
  }
  
--static int __nodemgr_remove_host_dev(struct device *dev, void *data)
-+static int remove_host_dev(struct device *dev, void *data)
+-static struct fw_address_handler *
+-lookup_overlapping_address_handler(struct list_head *list,
+-				   unsigned long long offset, size_t length)
++static struct fw_address_handler *lookup_overlapping_address_handler(
++	struct list_head *list, unsigned long long offset, size_t length)
  {
- 	if (dev->bus == &ieee1394_bus_type)
- 		nodemgr_remove_ne(container_of(dev, struct node_entry,
-@@ -795,7 +769,7 @@ static int __nodemgr_remove_host_dev(struct device *dev, void *data)
+ 	struct fw_address_handler *handler;
  
- static void nodemgr_remove_host_dev(struct device *dev)
- {
--	WARN_ON(device_for_each_child(dev, NULL, __nodemgr_remove_host_dev));
-+	device_for_each_child(dev, NULL, remove_host_dev);
- 	sysfs_remove_link(&dev->kobj, "irm_id");
- 	sysfs_remove_link(&dev->kobj, "busmgr_id");
- 	sysfs_remove_link(&dev->kobj, "host_id");
-@@ -830,11 +804,10 @@ static void nodemgr_update_bus_options(struct node_entry *ne)
- }
- 
- 
--static struct node_entry *nodemgr_create_node(octlet_t guid, struct csr1212_csr *csr,
--					      struct host_info *hi, nodeid_t nodeid,
--					      unsigned int generation)
-+static struct node_entry *nodemgr_create_node(octlet_t guid,
-+				struct csr1212_csr *csr, struct hpsb_host *host,
-+				nodeid_t nodeid, unsigned int generation)
- {
--	struct hpsb_host *host = hi->host;
- 	struct node_entry *ne;
- 
- 	ne = kzalloc(sizeof(*ne), GFP_KERNEL);
-@@ -888,10 +861,10 @@ fail_alloc:
+@@ -414,9 +407,8 @@ lookup_overlapping_address_handler(struc
  	return NULL;
  }
  
--static int __match_ne_guid(struct device *dev, void *data)
-+static int match_ne_guid(struct device *dev, void *data)
+-static struct fw_address_handler *
+-lookup_enclosing_address_handler(struct list_head *list,
+-				 unsigned long long offset, size_t length)
++static struct fw_address_handler *lookup_enclosing_address_handler(
++	struct list_head *list, unsigned long long offset, size_t length)
  {
- 	struct node_entry *ne;
--	u64 *guid = (u64 *)data;
-+	u64 *guid = data;
+ 	struct fw_address_handler *handler;
  
- 	ne = container_of(dev, struct node_entry, node_dev);
- 	return ne->guid == *guid;
-@@ -902,8 +875,7 @@ static struct node_entry *find_entry_by_guid(u64 guid)
- 	struct device *dev;
- 	struct node_entry *ne;
+@@ -449,36 +441,44 @@ const struct fw_address_region fw_unit_s
+ #endif  /*  0  */
  
--	dev = class_find_device(&nodemgr_ne_class, NULL, &guid,
--				__match_ne_guid);
-+	dev = class_find_device(&nodemgr_ne_class, NULL, &guid, match_ne_guid);
- 	if (!dev)
- 		return NULL;
- 	ne = container_of(dev, struct node_entry, node_dev);
-@@ -912,21 +884,21 @@ static struct node_entry *find_entry_by_guid(u64 guid)
- 	return ne;
- }
- 
--struct match_nodeid_param {
-+struct match_nodeid_parameter {
- 	struct hpsb_host *host;
- 	nodeid_t nodeid;
- };
- 
--static int __match_ne_nodeid(struct device *dev, void *data)
-+static int match_ne_nodeid(struct device *dev, void *data)
- {
- 	int found = 0;
- 	struct node_entry *ne;
--	struct match_nodeid_param *param = (struct match_nodeid_param *)data;
-+	struct match_nodeid_parameter *p = data;
- 
- 	if (!dev)
- 		goto ret;
- 	ne = container_of(dev, struct node_entry, node_dev);
--	if (ne->host == param->host && ne->nodeid == param->nodeid)
-+	if (ne->host == p->host && ne->nodeid == p->nodeid)
- 		found = 1;
- ret:
- 	return found;
-@@ -937,13 +909,12 @@ static struct node_entry *find_entry_by_nodeid(struct hpsb_host *host,
- {
- 	struct device *dev;
- 	struct node_entry *ne;
--	struct match_nodeid_param param;
-+	struct match_nodeid_parameter p;
- 
--	param.host = host;
--	param.nodeid = nodeid;
-+	p.host = host;
-+	p.nodeid = nodeid;
- 
--	dev = class_find_device(&nodemgr_ne_class, NULL, &param,
--				__match_ne_nodeid);
-+	dev = class_find_device(&nodemgr_ne_class, NULL, &p, match_ne_nodeid);
- 	if (!dev)
- 		return NULL;
- 	ne = container_of(dev, struct node_entry, node_dev);
-@@ -990,7 +961,7 @@ fail_devreg:
-  * immediate unit directories looking for software_id and
-  * software_version entries, in order to get driver autoloading working. */
- static struct unit_directory *nodemgr_process_unit_directory
--	(struct host_info *hi, struct node_entry *ne, struct csr1212_keyval *ud_kv,
-+	(struct node_entry *ne, struct csr1212_keyval *ud_kv,
- 	 unsigned int *id, struct unit_directory *parent)
- {
- 	struct unit_directory *ud;
-@@ -1083,7 +1054,7 @@ static struct unit_directory *nodemgr_process_unit_directory
- 					nodemgr_register_device(ne, ud, &ne->device);
- 				
- 				/* process the child unit */
--				ud_child = nodemgr_process_unit_directory(hi, ne, kv, id, ud);
-+				ud_child = nodemgr_process_unit_directory(ne, kv, id, ud);
- 
- 				if (ud_child == NULL)
- 					break;
-@@ -1137,7 +1108,7 @@ unit_directory_error:
- }
- 
- 
--static void nodemgr_process_root_directory(struct host_info *hi, struct node_entry *ne)
-+static void nodemgr_process_root_directory(struct node_entry *ne)
- {
- 	unsigned int ud_id = 0;
- 	struct csr1212_dentry *dentry;
-@@ -1157,7 +1128,7 @@ static void nodemgr_process_root_directory(struct host_info *hi, struct node_ent
- 			break;
- 
- 		case CSR1212_KV_ID_UNIT:
--			nodemgr_process_unit_directory(hi, ne, kv, &ud_id, NULL);
-+			nodemgr_process_unit_directory(ne, kv, &ud_id, NULL);
- 			break;
- 
- 		case CSR1212_KV_ID_DESCRIPTOR:
-@@ -1273,8 +1244,7 @@ void hpsb_unregister_protocol(struct hpsb_protocol_driver *driver)
-  * the to take whatever actions required.
-  */
- static void nodemgr_update_node(struct node_entry *ne, struct csr1212_csr *csr,
--				struct host_info *hi, nodeid_t nodeid,
--				unsigned int generation)
-+				nodeid_t nodeid, unsigned int generation)
- {
- 	if (ne->nodeid != nodeid) {
- 		HPSB_DEBUG("Node changed: " NODE_BUS_FMT " -> " NODE_BUS_FMT,
-@@ -1305,19 +1275,23 @@ static void nodemgr_update_node(struct node_entry *ne, struct csr1212_csr *csr,
- 		csr1212_destroy_csr(csr);
- 	}
- 
--	if (ne->in_limbo)
--		nodemgr_resume_ne(ne);
--
- 	/* Mark the node current */
- 	ne->generation = generation;
--}
- 
-+	if (ne->in_limbo) {
-+		device_remove_file(&ne->device, &dev_attr_ne_in_limbo);
-+		ne->in_limbo = false;
- 
-+		HPSB_DEBUG("Node reactivated: "
-+			   "ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
-+			   NODE_BUS_ARGS(ne->host, ne->nodeid),
-+			   (unsigned long long)ne->guid);
-+	}
-+}
- 
--static void nodemgr_node_scan_one(struct host_info *hi,
-+static void nodemgr_node_scan_one(struct hpsb_host *host,
- 				  nodeid_t nodeid, int generation)
- {
--	struct hpsb_host *host = hi->host;
- 	struct node_entry *ne;
- 	octlet_t guid;
- 	struct csr1212_csr *csr;
-@@ -1373,16 +1347,15 @@ static void nodemgr_node_scan_one(struct host_info *hi,
- 	}
- 
- 	if (!ne)
--		nodemgr_create_node(guid, csr, hi, nodeid, generation);
-+		nodemgr_create_node(guid, csr, host, nodeid, generation);
- 	else
--		nodemgr_update_node(ne, csr, hi, nodeid, generation);
-+		nodemgr_update_node(ne, csr, nodeid, generation);
- }
- 
- 
--static void nodemgr_node_scan(struct host_info *hi, int generation)
-+static void nodemgr_node_scan(struct hpsb_host *host, int generation)
- {
- 	int count;
--	struct hpsb_host *host = hi->host;
- 	struct selfid *sid = (struct selfid *)host->topology_map;
- 	nodeid_t nodeid = LOCAL_BUS;
- 
-@@ -1395,89 +1368,26 @@ static void nodemgr_node_scan(struct host_info *hi, int generation)
- 			nodeid++;
- 			continue;
- 		}
--		nodemgr_node_scan_one(hi, nodeid++, generation);
--	}
--}
--
--static int __nodemgr_driver_suspend(struct device *dev, void *data)
--{
--	struct unit_directory *ud;
--	struct device_driver *drv;
--	struct node_entry *ne = (struct node_entry *)data;
--	int error;
--
--	ud = container_of(dev, struct unit_directory, unit_dev);
--	if (ud->ne == ne) {
--		drv = get_driver(ud->device.driver);
--		if (drv) {
--			error = 1; /* release if suspend is not implemented */
--			if (drv->suspend) {
--				down(&ud->device.sem);
--				error = drv->suspend(&ud->device, PMSG_SUSPEND);
--				up(&ud->device.sem);
--			}
--			if (error)
--				device_release_driver(&ud->device);
--			put_driver(drv);
--		}
--	}
--
--	return 0;
--}
--
--static int __nodemgr_driver_resume(struct device *dev, void *data)
--{
--	struct unit_directory *ud;
--	struct device_driver *drv;
--	struct node_entry *ne = (struct node_entry *)data;
--
--	ud = container_of(dev, struct unit_directory, unit_dev);
--	if (ud->ne == ne) {
--		drv = get_driver(ud->device.driver);
--		if (drv) {
--			if (drv->resume) {
--				down(&ud->device.sem);
--				drv->resume(&ud->device);
--				up(&ud->device.sem);
--			}
--			put_driver(drv);
--		}
-+		nodemgr_node_scan_one(host, nodeid++, generation);
- 	}
--
--	return 0;
- }
- 
--static void nodemgr_suspend_ne(struct node_entry *ne)
-+static void nodemgr_pause_ne(struct node_entry *ne)
- {
--	HPSB_DEBUG("Node suspended: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
-+	HPSB_DEBUG("Node paused: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
- 		   NODE_BUS_ARGS(ne->host, ne->nodeid),
- 		   (unsigned long long)ne->guid);
- 
--	ne->in_limbo = 1;
-+	ne->in_limbo = true;
- 	WARN_ON(device_create_file(&ne->device, &dev_attr_ne_in_limbo));
--
--	class_for_each_device(&nodemgr_ud_class, NULL, ne,
--			      __nodemgr_driver_suspend);
--}
--
--
--static void nodemgr_resume_ne(struct node_entry *ne)
--{
--	ne->in_limbo = 0;
--	device_remove_file(&ne->device, &dev_attr_ne_in_limbo);
--
--	class_for_each_device(&nodemgr_ud_class, NULL, ne,
--			      __nodemgr_driver_resume);
--	HPSB_DEBUG("Node resumed: ID:BUS[" NODE_BUS_FMT "]  GUID[%016Lx]",
--		   NODE_BUS_ARGS(ne->host, ne->nodeid), (unsigned long long)ne->guid);
- }
- 
--static int __nodemgr_update_pdrv(struct device *dev, void *data)
-+static int update_pdrv(struct device *dev, void *data)
- {
- 	struct unit_directory *ud;
- 	struct device_driver *drv;
- 	struct hpsb_protocol_driver *pdrv;
--	struct node_entry *ne = (struct node_entry *)data;
-+	struct node_entry *ne = data;
- 	int error;
- 
- 	ud = container_of(dev, struct unit_directory, unit_dev);
-@@ -1503,11 +1413,9 @@ static int __nodemgr_update_pdrv(struct device *dev, void *data)
- 
- static void nodemgr_update_pdrv(struct node_entry *ne)
- {
--	class_for_each_device(&nodemgr_ud_class, NULL, ne,
--			      __nodemgr_update_pdrv);
-+	class_for_each_device(&nodemgr_ud_class, NULL, ne, update_pdrv);
- }
- 
--
- /* Write the BROADCAST_CHANNEL as per IEEE1394a 8.3.2.3.11 and 8.4.2.3.  This
-  * seems like an optional service but in the end it is practically mandatory
-  * as a consequence of these clauses.
-@@ -1535,11 +1443,12 @@ static void nodemgr_irm_write_bc(struct node_entry *ne, int generation)
- }
- 
- 
--static void nodemgr_probe_ne(struct host_info *hi, struct node_entry *ne, int generation)
-+static void nodemgr_probe_ne(struct hpsb_host *host, struct node_entry *ne,
-+			     int generation)
- {
- 	struct device *dev;
- 
--	if (ne->host != hi->host || ne->in_limbo)
-+	if (ne->host != host || ne->in_limbo)
- 		return;
- 
- 	dev = get_device(&ne->device);
-@@ -1554,40 +1463,40 @@ static void nodemgr_probe_ne(struct host_info *hi, struct node_entry *ne, int ge
- 	 * down to the drivers. Otherwise, this is a dead node and we
- 	 * suspend it. */
- 	if (ne->needs_probe)
--		nodemgr_process_root_directory(hi, ne);
-+		nodemgr_process_root_directory(ne);
- 	else if (ne->generation == generation)
- 		nodemgr_update_pdrv(ne);
- 	else
--		nodemgr_suspend_ne(ne);
-+		nodemgr_pause_ne(ne);
- 
- 	put_device(dev);
- }
- 
--struct probe_param {
--	struct host_info *hi;
-+struct node_probe_parameter {
-+	struct hpsb_host *host;
- 	int generation;
- 	bool probe_now;
- };
- 
- static int node_probe(struct device *dev, void *data)
- {
--	struct probe_param *p = data;
-+	struct node_probe_parameter *p = data;
- 	struct node_entry *ne;
- 
--	if (p->generation != get_hpsb_generation(p->hi->host))
-+	if (p->generation != get_hpsb_generation(p->host))
- 		return -EAGAIN;
- 
- 	ne = container_of(dev, struct node_entry, node_dev);
- 	if (ne->needs_probe == p->probe_now)
--		nodemgr_probe_ne(p->hi, ne, p->generation);
-+		nodemgr_probe_ne(p->host, ne, p->generation);
- 	return 0;
- }
- 
--static void nodemgr_node_probe(struct host_info *hi, int generation)
-+static int nodemgr_node_probe(struct hpsb_host *host, int generation)
- {
--	struct probe_param p;
-+	struct node_probe_parameter p;
- 
--	p.hi = hi;
-+	p.host = host;
- 	p.generation = generation;
- 	/*
- 	 * Do some processing of the nodes we've probed. This pulls them
-@@ -1604,11 +1513,11 @@ static void nodemgr_node_probe(struct host_info *hi, int generation)
- 	 */
- 	p.probe_now = false;
- 	if (class_for_each_device(&nodemgr_ne_class, NULL, &p, node_probe) != 0)
--		return;
-+		return 0;
- 
- 	p.probe_now = true;
- 	if (class_for_each_device(&nodemgr_ne_class, NULL, &p, node_probe) != 0)
--		return;
-+		return 0;
- 	/*
- 	 * Now let's tell the bus to rescan our devices. This may seem
- 	 * like overhead, but the driver-model core will only scan a
-@@ -1620,6 +1529,27 @@ static void nodemgr_node_probe(struct host_info *hi, int generation)
- 	 */
- 	if (bus_rescan_devices(&ieee1394_bus_type) != 0)
- 		HPSB_DEBUG("bus_rescan_devices had an error");
-+
-+	return 1;
-+}
-+
-+static int remove_nodes_in_limbo(struct device *dev, void *data)
-+{
-+	struct node_entry *ne;
-+
-+	if (dev->bus != &ieee1394_bus_type)
-+		return 0;
-+
-+	ne = container_of(dev, struct node_entry, device);
-+	if (ne->in_limbo)
-+		nodemgr_remove_ne(ne);
-+
-+	return 0;
-+}
-+
-+static void nodemgr_remove_nodes_in_limbo(struct hpsb_host *host)
-+{
-+	device_for_each_child(&host->device, NULL, remove_nodes_in_limbo);
- }
- 
- static int nodemgr_send_resume_packet(struct hpsb_host *host)
-@@ -1730,10 +1660,9 @@ static int nodemgr_check_irm_capability(struct hpsb_host *host, int cycles)
- 	return 1;
- }
- 
--static int nodemgr_host_thread(void *__hi)
-+static int nodemgr_host_thread(void *data)
- {
--	struct host_info *hi = (struct host_info *)__hi;
--	struct hpsb_host *host = hi->host;
-+	struct hpsb_host *host = data;
- 	unsigned int g, generation = 0;
- 	int i, reset_cycles = 0;
- 
-@@ -1787,36 +1716,48 @@ static int nodemgr_host_thread(void *__hi)
- 		 * entries. This does not do the sysfs stuff, since that
- 		 * would trigger uevents and such, which is a bad idea at
- 		 * this point. */
--		nodemgr_node_scan(hi, generation);
-+		nodemgr_node_scan(host, generation);
- 
- 		/* This actually does the full probe, with sysfs
- 		 * registration. */
--		nodemgr_node_probe(hi, generation);
-+		if (!nodemgr_node_probe(host, generation))
-+			continue;
- 
- 		/* Update some of our sysfs symlinks */
- 		nodemgr_update_host_dev_links(host);
-+
-+		/* Sleep 3 seconds */
-+		for (i = 3000/200; i; i--) {
-+			msleep_interruptible(200);
-+			if (kthread_should_stop())
-+				goto exit;
-+
-+			if (generation != get_hpsb_generation(host))
-+				break;
-+		}
-+		/* Remove nodes which are gone, unless a bus reset happened */
-+		if (!i)
-+			nodemgr_remove_nodes_in_limbo(host);
- 	}
- exit:
- 	HPSB_VERBOSE("NodeMgr: Exiting thread");
- 	return 0;
- }
- 
--struct host_iter_param {
-+struct per_host_parameter {
- 	void *data;
- 	int (*cb)(struct hpsb_host *, void *);
- };
- 
--static int __nodemgr_for_each_host(struct device *dev, void *data)
-+static int per_host(struct device *dev, void *data)
- {
- 	struct hpsb_host *host;
--	struct host_iter_param *hip = (struct host_iter_param *)data;
--	int error = 0;
-+	struct per_host_parameter *p = data;
- 
- 	host = container_of(dev, struct hpsb_host, host_dev);
--	error = hip->cb(host, hip->data);
--
--	return error;
-+	return p->cb(host, p->data);
- }
-+
  /**
-  * nodemgr_for_each_host - call a function for each IEEE 1394 host
-  * @data: an address to supply to the callback
-@@ -1831,15 +1772,11 @@ static int __nodemgr_for_each_host(struct device *dev, void *data)
+- * Allocate a range of addresses in the node space of the OHCI
+- * controller.  When a request is received that falls within the
+- * specified address range, the specified callback is invoked.  The
+- * parameters passed to the callback give the details of the
+- * particular request.
++ * fw_core_add_address_handler - register for incoming requests
++ * @handler: callback
++ * @region: region in the IEEE 1212 node space address range
++ *
++ * region->start, ->end, and handler->length have to be quadlet-aligned.
++ *
++ * When a request is received that falls within the specified address range,
++ * the specified callback is invoked.  The parameters passed to the callback
++ * give the details of the particular request.
+  *
+  * Return value:  0 on success, non-zero otherwise.
+  * The start offset of the handler's address region is determined by
+  * fw_core_add_address_handler() and is returned in handler->offset.
+- * The offset is quadlet-aligned.
   */
- int nodemgr_for_each_host(void *data, int (*cb)(struct hpsb_host *, void *))
+-int
+-fw_core_add_address_handler(struct fw_address_handler *handler,
+-			    const struct fw_address_region *region)
++int fw_core_add_address_handler(struct fw_address_handler *handler,
++				const struct fw_address_region *region)
  {
--	struct host_iter_param hip;
--	int error;
--
--	hip.cb = cb;
--	hip.data = data;
--	error = class_for_each_device(&hpsb_host_class, NULL, &hip,
--				      __nodemgr_for_each_host);
-+	struct per_host_parameter p;
+ 	struct fw_address_handler *other;
+ 	unsigned long flags;
+ 	int ret = -EBUSY;
  
--	return error;
-+	p.cb = cb;
-+	p.data = data;
-+	return class_for_each_device(&hpsb_host_class, NULL, &p, per_host);
- }
++	if (region->start & 0xffff000000000003ULL ||
++	    region->end   & 0xffff000000000003ULL ||
++	    region->start >= region->end ||
++	    handler->length & 3 ||
++	    handler->length == 0)
++		return -EINVAL;
++
+ 	spin_lock_irqsave(&address_handler_lock, flags);
  
- /* The following two convenience functions use a struct node_entry
-@@ -1893,7 +1830,7 @@ static void nodemgr_add_host(struct hpsb_host *host)
- 		return;
- 	}
- 	hi->host = host;
--	hi->thread = kthread_run(nodemgr_host_thread, hi, "knodemgrd_%d",
-+	hi->thread = kthread_run(nodemgr_host_thread, host, "knodemgrd_%d",
- 				 host->id);
- 	if (IS_ERR(hi->thread)) {
- 		HPSB_ERR("NodeMgr: cannot start thread for host %d", host->id);
-diff --git a/drivers/ieee1394/nodemgr.h b/drivers/ieee1394/nodemgr.h
-index 6eb2646..4f287a3 100644
---- a/drivers/ieee1394/nodemgr.h
-+++ b/drivers/ieee1394/nodemgr.h
-@@ -110,7 +110,7 @@ struct node_entry {
- 	struct device node_dev;
+-	handler->offset = roundup(region->start, 4);
++	handler->offset = region->start;
+ 	while (handler->offset + handler->length <= region->end) {
+ 		other =
+ 		    lookup_overlapping_address_handler(&address_handler_list,
+ 						       handler->offset,
+ 						       handler->length);
+ 		if (other != NULL) {
+-			handler->offset =
+-			    roundup(other->offset + other->length, 4);
++			handler->offset += other->length;
+ 		} else {
+ 			list_add_tail(&handler->link, &address_handler_list);
+ 			ret = 0;
+@@ -493,12 +493,7 @@ fw_core_add_address_handler(struct fw_ad
+ EXPORT_SYMBOL(fw_core_add_address_handler);
  
- 	/* Means this node is not attached anymore */
--	int in_limbo;
-+	bool in_limbo;
- 
- 	struct csr1212_csr *csr;
+ /**
+- * Deallocate a range of addresses allocated with fw_allocate.  This
+- * will call the associated callback one last time with a the special
+- * tcode TCODE_DEALLOCATE, to let the client destroy the registered
+- * callback data.  For convenience, the callback parameters offset and
+- * length are set to the start and the length respectively for the
+- * deallocated region, payload is set to NULL.
++ * fw_core_remove_address_handler - unregister an address handler
+  */
+ void fw_core_remove_address_handler(struct fw_address_handler *handler)
+ {
+@@ -518,9 +513,8 @@ struct fw_request {
+ 	u32 data[0];
  };
-diff --git a/drivers/ieee1394/raw1394-private.h b/drivers/ieee1394/raw1394-private.h
-index a06aaad..7a225a4 100644
---- a/drivers/ieee1394/raw1394-private.h
-+++ b/drivers/ieee1394/raw1394-private.h
-@@ -22,6 +22,7 @@ enum raw1394_iso_state { RAW1394_ISO_INACTIVE = 0,
- struct file_info {
-         struct list_head list;
  
-+	struct mutex state_mutex;
-         enum { opened, initialized, connected } state;
-         unsigned int protocol_version;
- 
-diff --git a/drivers/ieee1394/raw1394.c b/drivers/ieee1394/raw1394.c
-index 6fa9e4a..2cf4ae7 100644
---- a/drivers/ieee1394/raw1394.c
-+++ b/drivers/ieee1394/raw1394.c
-@@ -34,6 +34,7 @@
- #include <linux/fs.h>
- #include <linux/poll.h>
- #include <linux/module.h>
-+#include <linux/mutex.h>
- #include <linux/init.h>
- #include <linux/interrupt.h>
- #include <linux/vmalloc.h>
-@@ -2267,6 +2268,8 @@ static ssize_t raw1394_write(struct file *file, const char __user * buffer,
- 		return -EFAULT;
- 	}
- 
-+	mutex_lock(&fi->state_mutex);
-+
- 	switch (fi->state) {
- 	case opened:
- 		retval = state_opened(fi, req);
-@@ -2281,6 +2284,8 @@ static ssize_t raw1394_write(struct file *file, const char __user * buffer,
- 		break;
- 	}
- 
-+	mutex_unlock(&fi->state_mutex);
-+
- 	if (retval < 0) {
- 		free_pending_request(req);
- 	} else {
-@@ -2541,109 +2546,120 @@ static int raw1394_read_cycle_timer(struct file_info *fi, void __user * uaddr)
- static int raw1394_mmap(struct file *file, struct vm_area_struct *vma)
+-static void
+-free_response_callback(struct fw_packet *packet,
+-		       struct fw_card *card, int status)
++static void free_response_callback(struct fw_packet *packet,
++				   struct fw_card *card, int status)
  {
- 	struct file_info *fi = file->private_data;
-+	int ret;
-+
-+	mutex_lock(&fi->state_mutex);
+ 	struct fw_request *request;
  
- 	if (fi->iso_state == RAW1394_ISO_INACTIVE)
--		return -EINVAL;
-+		ret = -EINVAL;
-+	else
-+		ret = dma_region_mmap(&fi->iso_handle->data_buf, file, vma);
-+
-+	mutex_unlock(&fi->state_mutex);
- 
--	return dma_region_mmap(&fi->iso_handle->data_buf, file, vma);
-+	return ret;
+@@ -528,9 +522,8 @@ free_response_callback(struct fw_packet 
+ 	kfree(request);
  }
  
--/* ioctl is only used for rawiso operations */
--static long do_raw1394_ioctl(struct file *file, unsigned int cmd,
--							unsigned long arg)
-+static long raw1394_ioctl_inactive(struct file_info *fi, unsigned int cmd,
-+				   void __user *argp)
-+{
-+	switch (cmd) {
-+	case RAW1394_IOC_ISO_XMIT_INIT:
-+		return raw1394_iso_xmit_init(fi, argp);
-+	case RAW1394_IOC_ISO_RECV_INIT:
-+		return raw1394_iso_recv_init(fi, argp);
-+	default:
-+		return -EINVAL;
-+	}
-+}
-+
-+static long raw1394_ioctl_recv(struct file_info *fi, unsigned int cmd,
-+			       unsigned long arg)
+-void
+-fw_fill_response(struct fw_packet *response, u32 *request_header,
+-		 int rcode, void *payload, size_t length)
++void fw_fill_response(struct fw_packet *response, u32 *request_header,
++		      int rcode, void *payload, size_t length)
  {
--	struct file_info *fi = file->private_data;
- 	void __user *argp = (void __user *)arg;
+ 	int tcode, tlabel, extended_tcode, source, destination;
  
--	switch (fi->iso_state) {
--	case RAW1394_ISO_INACTIVE:
--		switch (cmd) {
--		case RAW1394_IOC_ISO_XMIT_INIT:
--			return raw1394_iso_xmit_init(fi, argp);
--		case RAW1394_IOC_ISO_RECV_INIT:
--			return raw1394_iso_recv_init(fi, argp);
--		default:
--			break;
-+	switch (cmd) {
-+	case RAW1394_IOC_ISO_RECV_START:{
-+			int args[3];
-+
-+			if (copy_from_user(&args[0], argp, sizeof(args)))
-+				return -EFAULT;
-+			return hpsb_iso_recv_start(fi->iso_handle,
-+						   args[0], args[1], args[2]);
- 		}
--		break;
--	case RAW1394_ISO_RECV:
--		switch (cmd) {
--		case RAW1394_IOC_ISO_RECV_START:{
--				/* copy args from user-space */
--				int args[3];
--				if (copy_from_user
--				    (&args[0], argp, sizeof(args)))
--					return -EFAULT;
--				return hpsb_iso_recv_start(fi->iso_handle,
--							   args[0], args[1],
--							   args[2]);
--			}
--		case RAW1394_IOC_ISO_XMIT_RECV_STOP:
--			hpsb_iso_stop(fi->iso_handle);
--			return 0;
--		case RAW1394_IOC_ISO_RECV_LISTEN_CHANNEL:
--			return hpsb_iso_recv_listen_channel(fi->iso_handle,
--							    arg);
--		case RAW1394_IOC_ISO_RECV_UNLISTEN_CHANNEL:
--			return hpsb_iso_recv_unlisten_channel(fi->iso_handle,
--							      arg);
--		case RAW1394_IOC_ISO_RECV_SET_CHANNEL_MASK:{
--				/* copy the u64 from user-space */
--				u64 mask;
--				if (copy_from_user(&mask, argp, sizeof(mask)))
--					return -EFAULT;
--				return hpsb_iso_recv_set_channel_mask(fi->
--								      iso_handle,
--								      mask);
--			}
--		case RAW1394_IOC_ISO_GET_STATUS:
--			return raw1394_iso_get_status(fi, argp);
--		case RAW1394_IOC_ISO_RECV_PACKETS:
--			return raw1394_iso_recv_packets(fi, argp);
--		case RAW1394_IOC_ISO_RECV_RELEASE_PACKETS:
--			return hpsb_iso_recv_release_packets(fi->iso_handle,
--							     arg);
--		case RAW1394_IOC_ISO_RECV_FLUSH:
--			return hpsb_iso_recv_flush(fi->iso_handle);
--		case RAW1394_IOC_ISO_SHUTDOWN:
--			raw1394_iso_shutdown(fi);
--			return 0;
--		case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
--			queue_rawiso_event(fi);
--			return 0;
-+	case RAW1394_IOC_ISO_XMIT_RECV_STOP:
-+		hpsb_iso_stop(fi->iso_handle);
-+		return 0;
-+	case RAW1394_IOC_ISO_RECV_LISTEN_CHANNEL:
-+		return hpsb_iso_recv_listen_channel(fi->iso_handle, arg);
-+	case RAW1394_IOC_ISO_RECV_UNLISTEN_CHANNEL:
-+		return hpsb_iso_recv_unlisten_channel(fi->iso_handle, arg);
-+	case RAW1394_IOC_ISO_RECV_SET_CHANNEL_MASK:{
-+			u64 mask;
-+
-+			if (copy_from_user(&mask, argp, sizeof(mask)))
-+				return -EFAULT;
-+			return hpsb_iso_recv_set_channel_mask(fi->iso_handle,
-+							      mask);
- 		}
--		break;
--	case RAW1394_ISO_XMIT:
--		switch (cmd) {
--		case RAW1394_IOC_ISO_XMIT_START:{
--				/* copy two ints from user-space */
--				int args[2];
--				if (copy_from_user
--				    (&args[0], argp, sizeof(args)))
--					return -EFAULT;
--				return hpsb_iso_xmit_start(fi->iso_handle,
--							   args[0], args[1]);
--			}
--		case RAW1394_IOC_ISO_XMIT_SYNC:
--			return hpsb_iso_xmit_sync(fi->iso_handle);
--		case RAW1394_IOC_ISO_XMIT_RECV_STOP:
--			hpsb_iso_stop(fi->iso_handle);
--			return 0;
--		case RAW1394_IOC_ISO_GET_STATUS:
--			return raw1394_iso_get_status(fi, argp);
--		case RAW1394_IOC_ISO_XMIT_PACKETS:
--			return raw1394_iso_send_packets(fi, argp);
--		case RAW1394_IOC_ISO_SHUTDOWN:
--			raw1394_iso_shutdown(fi);
--			return 0;
--		case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
--			queue_rawiso_event(fi);
--			return 0;
-+	case RAW1394_IOC_ISO_GET_STATUS:
-+		return raw1394_iso_get_status(fi, argp);
-+	case RAW1394_IOC_ISO_RECV_PACKETS:
-+		return raw1394_iso_recv_packets(fi, argp);
-+	case RAW1394_IOC_ISO_RECV_RELEASE_PACKETS:
-+		return hpsb_iso_recv_release_packets(fi->iso_handle, arg);
-+	case RAW1394_IOC_ISO_RECV_FLUSH:
-+		return hpsb_iso_recv_flush(fi->iso_handle);
-+	case RAW1394_IOC_ISO_SHUTDOWN:
-+		raw1394_iso_shutdown(fi);
-+		return 0;
-+	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
-+		queue_rawiso_event(fi);
-+		return 0;
-+	default:
-+		return -EINVAL;
-+	}
-+}
-+
-+static long raw1394_ioctl_xmit(struct file_info *fi, unsigned int cmd,
-+			       void __user *argp)
-+{
-+	switch (cmd) {
-+	case RAW1394_IOC_ISO_XMIT_START:{
-+			int args[2];
-+
-+			if (copy_from_user(&args[0], argp, sizeof(args)))
-+				return -EFAULT;
-+			return hpsb_iso_xmit_start(fi->iso_handle,
-+						   args[0], args[1]);
- 		}
--		break;
-+	case RAW1394_IOC_ISO_XMIT_SYNC:
-+		return hpsb_iso_xmit_sync(fi->iso_handle);
-+	case RAW1394_IOC_ISO_XMIT_RECV_STOP:
-+		hpsb_iso_stop(fi->iso_handle);
-+		return 0;
-+	case RAW1394_IOC_ISO_GET_STATUS:
-+		return raw1394_iso_get_status(fi, argp);
-+	case RAW1394_IOC_ISO_XMIT_PACKETS:
-+		return raw1394_iso_send_packets(fi, argp);
-+	case RAW1394_IOC_ISO_SHUTDOWN:
-+		raw1394_iso_shutdown(fi);
-+		return 0;
-+	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
-+		queue_rawiso_event(fi);
-+		return 0;
- 	default:
--		break;
-+		return -EINVAL;
- 	}
-+}
-+
-+/* ioctl is only used for rawiso operations */
-+static long raw1394_ioctl(struct file *file, unsigned int cmd,
-+			  unsigned long arg)
-+{
-+	struct file_info *fi = file->private_data;
-+	void __user *argp = (void __user *)arg;
-+	long ret;
- 
- 	/* state-independent commands */
- 	switch(cmd) {
-@@ -2653,16 +2669,25 @@ static long do_raw1394_ioctl(struct file *file, unsigned int cmd,
- 		break;
- 	}
- 
--	return -EINVAL;
--}
-+	mutex_lock(&fi->state_mutex);
-+
-+	switch (fi->iso_state) {
-+	case RAW1394_ISO_INACTIVE:
-+		ret = raw1394_ioctl_inactive(fi, cmd, argp);
-+		break;
-+	case RAW1394_ISO_RECV:
-+		ret = raw1394_ioctl_recv(fi, cmd, arg);
-+		break;
-+	case RAW1394_ISO_XMIT:
-+		ret = raw1394_ioctl_xmit(fi, cmd, argp);
-+		break;
-+	default:
-+		ret = -EINVAL;
-+		break;
-+	}
-+
-+	mutex_unlock(&fi->state_mutex);
- 
--static long raw1394_ioctl(struct file *file, unsigned int cmd,
--							unsigned long arg)
--{
--	long ret;
--	lock_kernel();
--	ret = do_raw1394_ioctl(file, cmd, arg);
--	unlock_kernel();
- 	return ret;
+@@ -588,8 +581,7 @@ fw_fill_response(struct fw_packet *respo
  }
+ EXPORT_SYMBOL(fw_fill_response);
  
-@@ -2700,7 +2725,7 @@ static long raw1394_iso_xmit_recv_packets32(struct file *file, unsigned int cmd,
- 	    !copy_from_user(&infos32, &arg->infos, sizeof infos32)) {
- 		infos = compat_ptr(infos32);
- 		if (!copy_to_user(&dst->infos, &infos, sizeof infos))
--			err = do_raw1394_ioctl(file, cmd, (unsigned long)dst);
-+			err = raw1394_ioctl(file, cmd, (unsigned long)dst);
- 	}
- 	return err;
- }
-@@ -2724,7 +2749,6 @@ static long raw1394_compat_ioctl(struct file *file,
- 	void __user *argp = (void __user *)arg;
- 	long err;
- 
--	lock_kernel();
- 	switch (cmd) {
- 	/* These requests have same format as long as 'int' has same size. */
- 	case RAW1394_IOC_ISO_RECV_INIT:
-@@ -2741,7 +2765,7 @@ static long raw1394_compat_ioctl(struct file *file,
- 	case RAW1394_IOC_ISO_GET_STATUS:
- 	case RAW1394_IOC_ISO_SHUTDOWN:
- 	case RAW1394_IOC_ISO_QUEUE_ACTIVITY:
--		err = do_raw1394_ioctl(file, cmd, arg);
-+		err = raw1394_ioctl(file, cmd, arg);
- 		break;
- 	/* These request have different format. */
- 	case RAW1394_IOC_ISO_RECV_PACKETS32:
-@@ -2757,7 +2781,6 @@ static long raw1394_compat_ioctl(struct file *file,
- 		err = -EINVAL;
- 		break;
- 	}
--	unlock_kernel();
- 
- 	return err;
- }
-@@ -2791,6 +2814,7 @@ static int raw1394_open(struct inode *inode, struct file *file)
- 	fi->notification = (u8) RAW1394_NOTIFY_ON;	/* busreset notification */
- 
- 	INIT_LIST_HEAD(&fi->list);
-+	mutex_init(&fi->state_mutex);
- 	fi->state = opened;
- 	INIT_LIST_HEAD(&fi->req_pending);
- 	INIT_LIST_HEAD(&fi->req_complete);
-diff --git a/drivers/ieee1394/sbp2.c b/drivers/ieee1394/sbp2.c
-index 1d6ad34..c52f6e6 100644
---- a/drivers/ieee1394/sbp2.c
-+++ b/drivers/ieee1394/sbp2.c
-@@ -526,26 +526,41 @@ static void sbp2util_write_doorbell(struct work_struct *work)
- 
- static int sbp2util_create_command_orb_pool(struct sbp2_lu *lu)
+-static struct fw_request *
+-allocate_request(struct fw_packet *p)
++static struct fw_request *allocate_request(struct fw_packet *p)
  {
--	struct sbp2_fwhost_info *hi = lu->hi;
- 	struct sbp2_command_info *cmd;
-+	struct device *dmadev = lu->hi->host->device.parent;
- 	int i, orbs = sbp2_serialize_io ? 2 : SBP2_MAX_CMDS;
- 
- 	for (i = 0; i < orbs; i++) {
- 		cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
- 		if (!cmd)
--			return -ENOMEM;
--		cmd->command_orb_dma = dma_map_single(hi->host->device.parent,
--						&cmd->command_orb,
--						sizeof(struct sbp2_command_orb),
--						DMA_TO_DEVICE);
--		cmd->sge_dma = dma_map_single(hi->host->device.parent,
--					&cmd->scatter_gather_element,
--					sizeof(cmd->scatter_gather_element),
--					DMA_TO_DEVICE);
-+			goto failed_alloc;
-+
-+		cmd->command_orb_dma =
-+		    dma_map_single(dmadev, &cmd->command_orb,
-+				   sizeof(struct sbp2_command_orb),
-+				   DMA_TO_DEVICE);
-+		if (dma_mapping_error(dmadev, cmd->command_orb_dma))
-+			goto failed_orb;
-+
-+		cmd->sge_dma =
-+		    dma_map_single(dmadev, &cmd->scatter_gather_element,
-+				   sizeof(cmd->scatter_gather_element),
-+				   DMA_TO_DEVICE);
-+		if (dma_mapping_error(dmadev, cmd->sge_dma))
-+			goto failed_sge;
-+
- 		INIT_LIST_HEAD(&cmd->list);
- 		list_add_tail(&cmd->list, &lu->cmd_orb_completed);
- 	}
- 	return 0;
-+
-+failed_sge:
-+	dma_unmap_single(dmadev, cmd->command_orb_dma,
-+			 sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
-+failed_orb:
-+	kfree(cmd);
-+failed_alloc:
-+	return -ENOMEM;
+ 	struct fw_request *request;
+ 	u32 *data, length;
+@@ -649,8 +641,8 @@ allocate_request(struct fw_packet *p)
+ 	return request;
  }
  
- static void sbp2util_remove_command_orb_pool(struct sbp2_lu *lu,
-@@ -641,24 +656,11 @@ static struct sbp2_command_info *sbp2util_allocate_command_orb(
- static void sbp2util_mark_command_completed(struct sbp2_lu *lu,
- 					    struct sbp2_command_info *cmd)
+-void
+-fw_send_response(struct fw_card *card, struct fw_request *request, int rcode)
++void fw_send_response(struct fw_card *card,
++		      struct fw_request *request, int rcode)
  {
--	struct hpsb_host *host = lu->ud->ne->host;
--
--	if (cmd->cmd_dma) {
--		if (cmd->dma_type == CMD_DMA_SINGLE)
--			dma_unmap_single(host->device.parent, cmd->cmd_dma,
--					 cmd->dma_size, cmd->dma_dir);
--		else if (cmd->dma_type == CMD_DMA_PAGE)
--			dma_unmap_page(host->device.parent, cmd->cmd_dma,
--				       cmd->dma_size, cmd->dma_dir);
--		/* XXX: Check for CMD_DMA_NONE bug */
--		cmd->dma_type = CMD_DMA_NONE;
--		cmd->cmd_dma = 0;
--	}
--	if (cmd->sge_buffer) {
--		dma_unmap_sg(host->device.parent, cmd->sge_buffer,
--			     cmd->dma_size, cmd->dma_dir);
--		cmd->sge_buffer = NULL;
--	}
-+	if (scsi_sg_count(cmd->Current_SCpnt))
-+		dma_unmap_sg(lu->ud->ne->host->device.parent,
-+			     scsi_sglist(cmd->Current_SCpnt),
-+			     scsi_sg_count(cmd->Current_SCpnt),
-+			     cmd->Current_SCpnt->sc_data_direction);
- 	list_move_tail(&cmd->list, &lu->cmd_orb_completed);
+ 	/* unified transaction or broadcast transaction: don't respond */
+ 	if (request->ack != ACK_PENDING ||
+@@ -670,8 +662,7 @@ fw_send_response(struct fw_card *card, s
  }
+ EXPORT_SYMBOL(fw_send_response);
  
-@@ -823,6 +825,10 @@ static struct sbp2_lu *sbp2_alloc_device(struct unit_directory *ud)
- #endif
- 	}
- 
-+	if (dma_get_max_seg_size(hi->host->device.parent) > SBP2_MAX_SEG_SIZE)
-+		BUG_ON(dma_set_max_seg_size(hi->host->device.parent,
-+					    SBP2_MAX_SEG_SIZE));
-+
- 	/* Prevent unloading of the 1394 host */
- 	if (!try_module_get(hi->host->driver->owner)) {
- 		SBP2_ERR("failed to get a reference on 1394 host driver");
-@@ -1494,84 +1500,65 @@ static int sbp2_agent_reset(struct sbp2_lu *lu, int wait)
- 	return 0;
- }
- 
--static void sbp2_prep_command_orb_sg(struct sbp2_command_orb *orb,
--				     struct sbp2_fwhost_info *hi,
--				     struct sbp2_command_info *cmd,
--				     unsigned int scsi_use_sg,
--				     struct scatterlist *sg,
--				     u32 orb_direction,
--				     enum dma_data_direction dma_dir)
-+static int sbp2_prep_command_orb_sg(struct sbp2_command_orb *orb,
-+				    struct sbp2_fwhost_info *hi,
-+				    struct sbp2_command_info *cmd,
-+				    unsigned int sg_count,
-+				    struct scatterlist *sg,
-+				    u32 orb_direction,
-+				    enum dma_data_direction dma_dir)
+-void
+-fw_core_handle_request(struct fw_card *card, struct fw_packet *p)
++void fw_core_handle_request(struct fw_card *card, struct fw_packet *p)
  {
--	cmd->dma_dir = dma_dir;
-+	struct device *dmadev = hi->host->device.parent;
-+	struct sbp2_unrestricted_page_table *pt;
-+	int i, n;
-+
-+	n = dma_map_sg(dmadev, sg, sg_count, dma_dir);
-+	if (n == 0)
-+		return -ENOMEM;
-+
- 	orb->data_descriptor_hi = ORB_SET_NODE_ID(hi->host->node_id);
- 	orb->misc |= ORB_SET_DIRECTION(orb_direction);
- 
- 	/* special case if only one element (and less than 64KB in size) */
--	if (scsi_use_sg == 1 && sg->length <= SBP2_MAX_SG_ELEMENT_LENGTH) {
--
--		cmd->dma_size = sg->length;
--		cmd->dma_type = CMD_DMA_PAGE;
--		cmd->cmd_dma = dma_map_page(hi->host->device.parent,
--					    sg_page(sg), sg->offset,
--					    cmd->dma_size, cmd->dma_dir);
--
--		orb->data_descriptor_lo = cmd->cmd_dma;
--		orb->misc |= ORB_SET_DATA_SIZE(cmd->dma_size);
--
-+	if (n == 1) {
-+		orb->misc |= ORB_SET_DATA_SIZE(sg_dma_len(sg));
-+		orb->data_descriptor_lo = sg_dma_address(sg);
- 	} else {
--		struct sbp2_unrestricted_page_table *sg_element =
--						&cmd->scatter_gather_element[0];
--		u32 sg_count, sg_len;
--		dma_addr_t sg_addr;
--		int i, count = dma_map_sg(hi->host->device.parent, sg,
--					  scsi_use_sg, dma_dir);
--
--		cmd->dma_size = scsi_use_sg;
--		cmd->sge_buffer = sg;
--
--		/* use page tables (s/g) */
--		orb->misc |= ORB_SET_PAGE_TABLE_PRESENT(0x1);
--		orb->data_descriptor_lo = cmd->sge_dma;
-+		pt = &cmd->scatter_gather_element[0];
- 
--		/* loop through and fill out our SBP-2 page tables
--		 * (and split up anything too large) */
--		for (i = 0, sg_count = 0; i < count; i++, sg = sg_next(sg)) {
--			sg_len = sg_dma_len(sg);
--			sg_addr = sg_dma_address(sg);
--			while (sg_len) {
--				sg_element[sg_count].segment_base_lo = sg_addr;
--				if (sg_len > SBP2_MAX_SG_ELEMENT_LENGTH) {
--					sg_element[sg_count].length_segment_base_hi =
--						PAGE_TABLE_SET_SEGMENT_LENGTH(SBP2_MAX_SG_ELEMENT_LENGTH);
--					sg_addr += SBP2_MAX_SG_ELEMENT_LENGTH;
--					sg_len -= SBP2_MAX_SG_ELEMENT_LENGTH;
--				} else {
--					sg_element[sg_count].length_segment_base_hi =
--						PAGE_TABLE_SET_SEGMENT_LENGTH(sg_len);
--					sg_len = 0;
--				}
--				sg_count++;
--			}
-+		dma_sync_single_for_cpu(dmadev, cmd->sge_dma,
-+					sizeof(cmd->scatter_gather_element),
-+					DMA_TO_DEVICE);
-+
-+		for_each_sg(sg, sg, n, i) {
-+			pt[i].high = cpu_to_be32(sg_dma_len(sg) << 16);
-+			pt[i].low = cpu_to_be32(sg_dma_address(sg));
- 		}
- 
--		orb->misc |= ORB_SET_DATA_SIZE(sg_count);
-+		orb->misc |= ORB_SET_PAGE_TABLE_PRESENT(0x1) |
-+			     ORB_SET_DATA_SIZE(n);
-+		orb->data_descriptor_lo = cmd->sge_dma;
- 
--		sbp2util_cpu_to_be32_buffer(sg_element,
--				(sizeof(struct sbp2_unrestricted_page_table)) *
--				sg_count);
-+		dma_sync_single_for_device(dmadev, cmd->sge_dma,
-+					   sizeof(cmd->scatter_gather_element),
-+					   DMA_TO_DEVICE);
- 	}
-+	return 0;
+ 	struct fw_address_handler *handler;
+ 	struct fw_request *request;
+@@ -719,8 +710,7 @@ fw_core_handle_request(struct fw_card *c
  }
+ EXPORT_SYMBOL(fw_core_handle_request);
  
--static void sbp2_create_command_orb(struct sbp2_lu *lu,
--				    struct sbp2_command_info *cmd,
--				    struct scsi_cmnd *SCpnt)
-+static int sbp2_create_command_orb(struct sbp2_lu *lu,
-+				   struct sbp2_command_info *cmd,
-+				   struct scsi_cmnd *SCpnt)
+-void
+-fw_core_handle_response(struct fw_card *card, struct fw_packet *p)
++void fw_core_handle_response(struct fw_card *card, struct fw_packet *p)
  {
--	struct sbp2_fwhost_info *hi = lu->hi;
-+	struct device *dmadev = lu->hi->host->device.parent;
- 	struct sbp2_command_orb *orb = &cmd->command_orb;
--	u32 orb_direction;
- 	unsigned int scsi_request_bufflen = scsi_bufflen(SCpnt);
- 	enum dma_data_direction dma_dir = SCpnt->sc_data_direction;
-+	u32 orb_direction;
+ 	struct fw_transaction *t;
+ 	unsigned long flags;
+@@ -793,12 +783,10 @@ static const struct fw_address_region to
+ 	{ .start = CSR_REGISTER_BASE | CSR_TOPOLOGY_MAP,
+ 	  .end   = CSR_REGISTER_BASE | CSR_TOPOLOGY_MAP_END, };
+ 
+-static void
+-handle_topology_map(struct fw_card *card, struct fw_request *request,
+-		    int tcode, int destination, int source,
+-		    int generation, int speed,
+-		    unsigned long long offset,
+-		    void *payload, size_t length, void *callback_data)
++static void handle_topology_map(struct fw_card *card, struct fw_request *request,
++		int tcode, int destination, int source, int generation,
++		int speed, unsigned long long offset,
++		void *payload, size_t length, void *callback_data)
+ {
+ 	int i, start, end;
+ 	__be32 *map;
+@@ -832,12 +820,10 @@ static const struct fw_address_region re
+ 	{ .start = CSR_REGISTER_BASE,
+ 	  .end   = CSR_REGISTER_BASE | CSR_CONFIG_ROM, };
+ 
+-static void
+-handle_registers(struct fw_card *card, struct fw_request *request,
+-		 int tcode, int destination, int source,
+-		 int generation, int speed,
+-		 unsigned long long offset,
+-		 void *payload, size_t length, void *callback_data)
++static void handle_registers(struct fw_card *card, struct fw_request *request,
++		int tcode, int destination, int source, int generation,
++		int speed, unsigned long long offset,
++		void *payload, size_t length, void *callback_data)
+ {
+ 	int reg = offset & ~CSR_REGISTER_BASE;
+ 	unsigned long long bus_time;
+@@ -939,11 +925,11 @@ static struct fw_descriptor model_id_des
+ 
+ static int __init fw_core_init(void)
+ {
+-	int retval;
 +	int ret;
  
-+	dma_sync_single_for_cpu(dmadev, cmd->command_orb_dma,
-+				sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
- 	/*
- 	 * Set-up our command ORB.
- 	 *
-@@ -1602,15 +1589,21 @@ static void sbp2_create_command_orb(struct sbp2_lu *lu,
- 		orb->data_descriptor_hi = 0x0;
- 		orb->data_descriptor_lo = 0x0;
- 		orb->misc |= ORB_SET_DIRECTION(1);
--	} else
--		sbp2_prep_command_orb_sg(orb, hi, cmd, scsi_sg_count(SCpnt),
--					 scsi_sglist(SCpnt),
--					 orb_direction, dma_dir);
+-	retval = bus_register(&fw_bus_type);
+-	if (retval < 0)
+-		return retval;
++	ret = bus_register(&fw_bus_type);
++	if (ret < 0)
++		return ret;
+ 
+ 	fw_cdev_major = register_chrdev(0, "firewire", &fw_device_ops);
+ 	if (fw_cdev_major < 0) {
+@@ -951,19 +937,10 @@ static int __init fw_core_init(void)
+ 		return fw_cdev_major;
+ 	}
+ 
+-	retval = fw_core_add_address_handler(&topology_map,
+-					     &topology_map_region);
+-	BUG_ON(retval < 0);
 -
-+		ret = 0;
-+	} else {
-+		ret = sbp2_prep_command_orb_sg(orb, lu->hi, cmd,
-+					       scsi_sg_count(SCpnt),
-+					       scsi_sglist(SCpnt),
-+					       orb_direction, dma_dir);
-+	}
- 	sbp2util_cpu_to_be32_buffer(orb, sizeof(*orb));
- 
- 	memset(orb->cdb, 0, sizeof(orb->cdb));
- 	memcpy(orb->cdb, SCpnt->cmnd, SCpnt->cmd_len);
-+
-+	dma_sync_single_for_device(dmadev, cmd->command_orb_dma,
-+			sizeof(struct sbp2_command_orb), DMA_TO_DEVICE);
-+	return ret;
- }
- 
- static void sbp2_link_orb_command(struct sbp2_lu *lu,
-@@ -1624,14 +1617,6 @@ static void sbp2_link_orb_command(struct sbp2_lu *lu,
- 	size_t length;
- 	unsigned long flags;
- 
--	dma_sync_single_for_device(hi->host->device.parent,
--				   cmd->command_orb_dma,
--				   sizeof(struct sbp2_command_orb),
--				   DMA_TO_DEVICE);
--	dma_sync_single_for_device(hi->host->device.parent, cmd->sge_dma,
--				   sizeof(cmd->scatter_gather_element),
--				   DMA_TO_DEVICE);
+-	retval = fw_core_add_address_handler(&registers,
+-					     &registers_region);
+-	BUG_ON(retval < 0);
 -
- 	/* check to see if there are any previous orbs to use */
- 	spin_lock_irqsave(&lu->cmd_orb_lock, flags);
- 	last_orb = lu->last_orb;
-@@ -1699,9 +1684,10 @@ static int sbp2_send_command(struct sbp2_lu *lu, struct scsi_cmnd *SCpnt,
- 	if (!cmd)
- 		return -EIO;
+-	/* Add the vendor textual descriptor. */
+-	retval = fw_core_add_descriptor(&vendor_id_descriptor);
+-	BUG_ON(retval < 0);
+-	retval = fw_core_add_descriptor(&model_id_descriptor);
+-	BUG_ON(retval < 0);
++	fw_core_add_address_handler(&topology_map, &topology_map_region);
++	fw_core_add_address_handler(&registers, &registers_region);
++	fw_core_add_descriptor(&vendor_id_descriptor);
++	fw_core_add_descriptor(&model_id_descriptor);
  
--	sbp2_create_command_orb(lu, cmd, SCpnt);
--	sbp2_link_orb_command(lu, cmd);
-+	if (sbp2_create_command_orb(lu, cmd, SCpnt))
-+		return -ENOMEM;
- 
-+	sbp2_link_orb_command(lu, cmd);
  	return 0;
  }
+diff -Naurp linux-2.6-git/drivers/firewire/fw-transaction.h firewire-git/drivers/firewire/fw-transaction.h
+--- linux-2.6-git/drivers/firewire/fw-transaction.h	2009-01-30 13:39:02.992772636 -0500
++++ firewire-git/drivers/firewire/fw-transaction.h	2009-01-30 13:35:51.862647087 -0500
+@@ -82,14 +82,14 @@
+ #define CSR_SPEED_MAP			0x2000
+ #define CSR_SPEED_MAP_END		0x3000
  
-@@ -1789,13 +1775,6 @@ static int sbp2_handle_status_write(struct hpsb_host *host, int nodeid,
- 	else
- 		cmd = sbp2util_find_command_for_orb(lu, sb->ORB_offset_lo);
- 	if (cmd) {
--		dma_sync_single_for_cpu(hi->host->device.parent,
--					cmd->command_orb_dma,
--					sizeof(struct sbp2_command_orb),
--					DMA_TO_DEVICE);
--		dma_sync_single_for_cpu(hi->host->device.parent, cmd->sge_dma,
--					sizeof(cmd->scatter_gather_element),
--					DMA_TO_DEVICE);
- 		/* Grab SCSI command pointers and check status. */
- 		/*
- 		 * FIXME: If the src field in the status is 1, the ORB DMA must
-@@ -1912,7 +1891,6 @@ done:
++#define BANDWIDTH_AVAILABLE_INITIAL	4915
+ #define BROADCAST_CHANNEL_INITIAL	(1 << 31 | 31)
+ #define BROADCAST_CHANNEL_VALID		(1 << 30)
  
- static void sbp2scsi_complete_all_commands(struct sbp2_lu *lu, u32 status)
+ #define fw_notify(s, args...) printk(KERN_NOTICE KBUILD_MODNAME ": " s, ## args)
+ #define fw_error(s, args...) printk(KERN_ERR KBUILD_MODNAME ": " s, ## args)
+ 
+-static inline void
+-fw_memcpy_from_be32(void *_dst, void *_src, size_t size)
++static inline void fw_memcpy_from_be32(void *_dst, void *_src, size_t size)
  {
--	struct sbp2_fwhost_info *hi = lu->hi;
- 	struct list_head *lh;
- 	struct sbp2_command_info *cmd;
- 	unsigned long flags;
-@@ -1921,13 +1899,6 @@ static void sbp2scsi_complete_all_commands(struct sbp2_lu *lu, u32 status)
- 	while (!list_empty(&lu->cmd_orb_inuse)) {
- 		lh = lu->cmd_orb_inuse.next;
- 		cmd = list_entry(lh, struct sbp2_command_info, list);
--		dma_sync_single_for_cpu(hi->host->device.parent,
--				        cmd->command_orb_dma,
--					sizeof(struct sbp2_command_orb),
--					DMA_TO_DEVICE);
--		dma_sync_single_for_cpu(hi->host->device.parent, cmd->sge_dma,
--					sizeof(cmd->scatter_gather_element),
--					DMA_TO_DEVICE);
- 		sbp2util_mark_command_completed(lu, cmd);
- 		if (cmd->Current_SCpnt) {
- 			cmd->Current_SCpnt->result = status << 16;
-@@ -2033,6 +2004,8 @@ static int sbp2scsi_slave_configure(struct scsi_device *sdev)
- 		sdev->start_stop_pwr_cond = 1;
- 	if (lu->workarounds & SBP2_WORKAROUND_128K_MAX_TRANS)
- 		blk_queue_max_sectors(sdev->request_queue, 128 * 1024 / 512);
-+
-+	blk_queue_max_segment_size(sdev->request_queue, SBP2_MAX_SEG_SIZE);
- 	return 0;
+ 	u32    *dst = _dst;
+ 	__be32 *src = _src;
+@@ -99,8 +99,7 @@ fw_memcpy_from_be32(void *_dst, void *_s
+ 		dst[i] = be32_to_cpu(src[i]);
  }
  
-@@ -2049,7 +2022,6 @@ static void sbp2scsi_slave_destroy(struct scsi_device *sdev)
- static int sbp2scsi_abort(struct scsi_cmnd *SCpnt)
+-static inline void
+-fw_memcpy_to_be32(void *_dst, void *_src, size_t size)
++static inline void fw_memcpy_to_be32(void *_dst, void *_src, size_t size)
  {
- 	struct sbp2_lu *lu = (struct sbp2_lu *)SCpnt->device->host->hostdata[0];
--	struct sbp2_fwhost_info *hi = lu->hi;
- 	struct sbp2_command_info *cmd;
- 	unsigned long flags;
+ 	fw_memcpy_from_be32(_dst, _src, size);
+ }
+@@ -125,8 +124,7 @@ typedef void (*fw_packet_callback_t)(str
+ 				     struct fw_card *card, int status);
  
-@@ -2063,14 +2035,6 @@ static int sbp2scsi_abort(struct scsi_cmnd *SCpnt)
- 		spin_lock_irqsave(&lu->cmd_orb_lock, flags);
- 		cmd = sbp2util_find_command_for_SCpnt(lu, SCpnt);
- 		if (cmd) {
--			dma_sync_single_for_cpu(hi->host->device.parent,
--					cmd->command_orb_dma,
--					sizeof(struct sbp2_command_orb),
--					DMA_TO_DEVICE);
--			dma_sync_single_for_cpu(hi->host->device.parent,
--					cmd->sge_dma,
--					sizeof(cmd->scatter_gather_element),
--					DMA_TO_DEVICE);
- 			sbp2util_mark_command_completed(lu, cmd);
- 			if (cmd->Current_SCpnt) {
- 				cmd->Current_SCpnt->result = DID_ABORT << 16;
-diff --git a/drivers/ieee1394/sbp2.h b/drivers/ieee1394/sbp2.h
-index 875428b..c5036f1 100644
---- a/drivers/ieee1394/sbp2.h
-+++ b/drivers/ieee1394/sbp2.h
-@@ -139,13 +139,10 @@ struct sbp2_logout_orb {
- 	u32 status_fifo_lo;
- } __attribute__((packed));
+ typedef void (*fw_transaction_callback_t)(struct fw_card *card, int rcode,
+-					  void *data,
+-					  size_t length,
++					  void *data, size_t length,
+ 					  void *callback_data);
  
--#define PAGE_TABLE_SET_SEGMENT_BASE_HI(v)	((v) & 0xffff)
--#define PAGE_TABLE_SET_SEGMENT_LENGTH(v)	(((v) & 0xffff) << 16)
--
- struct sbp2_unrestricted_page_table {
--	u32 length_segment_base_hi;
--	u32 segment_base_lo;
--} __attribute__((packed));
-+	__be32 high;
-+	__be32 low;
-+};
- 
- #define RESP_STATUS_REQUEST_COMPLETE		0x0
- #define RESP_STATUS_TRANSPORT_FAILURE		0x1
-@@ -216,15 +213,18 @@ struct sbp2_status_block {
- #define SBP2_UNIT_SPEC_ID_ENTRY			0x0000609e
- #define SBP2_SW_VERSION_ENTRY			0x00010483
- 
--
  /*
-- * SCSI specific definitions
-+ * The default maximum s/g segment size of a FireWire controller is
-+ * usually 0x10000, but SBP-2 only allows 0xffff. Since buffers have to
-+ * be quadlet-aligned, we set the length limit to 0xffff & ~3.
-  */
-+#define SBP2_MAX_SEG_SIZE			0xfffc
+@@ -141,12 +139,6 @@ typedef void (*fw_address_callback_t)(st
+ 				      void *data, size_t length,
+ 				      void *callback_data);
  
--#define SBP2_MAX_SG_ELEMENT_LENGTH		0xf000
--/* There is no real limitation of the queue depth (i.e. length of the linked
-+/*
-+ * There is no real limitation of the queue depth (i.e. length of the linked
-  * list of command ORBs) at the target. The chosen depth is merely an
-- * implementation detail of the sbp2 driver. */
-+ * implementation detail of the sbp2 driver.
-+ */
- #define SBP2_MAX_CMDS				8
- 
- #define SBP2_SCSI_STATUS_GOOD			0x0
-@@ -240,12 +240,6 @@ struct sbp2_status_block {
-  * Representations of commands and devices
-  */
- 
--enum sbp2_dma_types {
--	CMD_DMA_NONE,
--	CMD_DMA_PAGE,
--	CMD_DMA_SINGLE
--};
+-typedef void (*fw_bus_reset_callback_t)(struct fw_card *handle,
+-					int node_id, int generation,
+-					u32 *self_ids,
+-					int self_id_count,
+-					void *callback_data);
 -
- /* Per SCSI command */
- struct sbp2_command_info {
- 	struct list_head list;
-@@ -258,11 +252,6 @@ struct sbp2_command_info {
- 	struct sbp2_unrestricted_page_table
- 		scatter_gather_element[SG_ALL] __attribute__((aligned(8)));
- 	dma_addr_t sge_dma;
--	void *sge_buffer;
--	dma_addr_t cmd_dma;
--	enum sbp2_dma_types dma_type;
--	unsigned long dma_size;
--	enum dma_data_direction dma_dir;
+ struct fw_packet {
+ 	int speed;
+ 	int generation;
+@@ -187,12 +179,6 @@ struct fw_transaction {
+ 	void *callback_data;
  };
  
- /* Per FireWire host */
-diff --git a/drivers/ieee1394/video1394.c b/drivers/ieee1394/video1394.c
-index 25db6e6..fa9e7d8 100644
---- a/drivers/ieee1394/video1394.c
-+++ b/drivers/ieee1394/video1394.c
-@@ -893,7 +893,7 @@ static long video1394_ioctl(struct file *file,
- 		if (unlikely(d == NULL))
- 			return -EFAULT;
+-static inline struct fw_packet *
+-fw_packet(struct list_head *l)
+-{
+-	return list_entry(l, struct fw_packet, link);
+-}
+-
+ struct fw_address_handler {
+ 	u64 offset;
+ 	size_t length;
+@@ -201,7 +187,6 @@ struct fw_address_handler {
+ 	struct list_head link;
+ };
  
--		if (unlikely((v.buffer<0) || (v.buffer>=d->num_desc - 1))) {
-+		if (unlikely(v.buffer >= d->num_desc - 1)) {
- 			PRINT(KERN_ERR, ohci->host->id,
- 			      "Buffer %d out of range",v.buffer);
- 			return -EINVAL;
-@@ -959,7 +959,7 @@ static long video1394_ioctl(struct file *file,
- 		if (unlikely(d == NULL))
- 			return -EFAULT;
+-
+ struct fw_address_region {
+ 	u64 start;
+ 	u64 end;
+@@ -315,10 +300,8 @@ struct fw_iso_packet {
+ struct fw_iso_context;
  
--		if (unlikely((v.buffer<0) || (v.buffer>d->num_desc - 1))) {
-+		if (unlikely(v.buffer > d->num_desc - 1)) {
- 			PRINT(KERN_ERR, ohci->host->id,
- 			      "Buffer %d out of range",v.buffer);
- 			return -EINVAL;
-@@ -1030,7 +1030,7 @@ static long video1394_ioctl(struct file *file,
- 		d = find_ctx(&ctx->context_list, OHCI_ISO_TRANSMIT, v.channel);
- 		if (d == NULL) return -EFAULT;
+ typedef void (*fw_iso_callback_t)(struct fw_iso_context *context,
+-				  u32 cycle,
+-				  size_t header_length,
+-				  void *header,
+-				  void *data);
++				  u32 cycle, size_t header_length,
++				  void *header, void *data);
  
--		if ((v.buffer<0) || (v.buffer>=d->num_desc - 1)) {
-+		if (v.buffer >= d->num_desc - 1) {
- 			PRINT(KERN_ERR, ohci->host->id,
- 			      "Buffer %d out of range",v.buffer);
- 			return -EINVAL;
-@@ -1137,7 +1137,7 @@ static long video1394_ioctl(struct file *file,
- 		d = find_ctx(&ctx->context_list, OHCI_ISO_TRANSMIT, v.channel);
- 		if (d == NULL) return -EFAULT;
+ /*
+  * An iso buffer is just a set of pages mapped for DMA in the
+@@ -344,36 +327,25 @@ struct fw_iso_context {
+ 	void *callback_data;
+ };
  
--		if ((v.buffer<0) || (v.buffer>=d->num_desc-1)) {
-+		if (v.buffer >= d->num_desc - 1) {
- 			PRINT(KERN_ERR, ohci->host->id,
- 			      "Buffer %d out of range",v.buffer);
- 			return -EINVAL;
-diff --git a/include/linux/firewire-cdev.h b/include/linux/firewire-cdev.h
-index 0f0e271..4d078e9 100644
---- a/include/linux/firewire-cdev.h
-+++ b/include/linux/firewire-cdev.h
-@@ -154,8 +154,13 @@ struct fw_cdev_event_iso_interrupt {
+-int
+-fw_iso_buffer_init(struct fw_iso_buffer *buffer,
+-		   struct fw_card *card,
+-		   int page_count,
+-		   enum dma_data_direction direction);
+-int
+-fw_iso_buffer_map(struct fw_iso_buffer *buffer, struct vm_area_struct *vma);
+-void
+-fw_iso_buffer_destroy(struct fw_iso_buffer *buffer, struct fw_card *card);
+-
+-struct fw_iso_context *
+-fw_iso_context_create(struct fw_card *card, int type,
+-		      int channel, int speed, size_t header_size,
+-		      fw_iso_callback_t callback, void *callback_data);
+-
+-void
+-fw_iso_context_destroy(struct fw_iso_context *ctx);
+-
+-int
+-fw_iso_context_queue(struct fw_iso_context *ctx,
+-		     struct fw_iso_packet *packet,
+-		     struct fw_iso_buffer *buffer,
+-		     unsigned long payload);
+-
+-int
+-fw_iso_context_start(struct fw_iso_context *ctx,
+-		     int cycle, int sync, int tags);
++int fw_iso_buffer_init(struct fw_iso_buffer *buffer, struct fw_card *card,
++		       int page_count, enum dma_data_direction direction);
++int fw_iso_buffer_map(struct fw_iso_buffer *buffer, struct vm_area_struct *vma);
++void fw_iso_buffer_destroy(struct fw_iso_buffer *buffer, struct fw_card *card);
++
++struct fw_iso_context *fw_iso_context_create(struct fw_card *card,
++		int type, int channel, int speed, size_t header_size,
++		fw_iso_callback_t callback, void *callback_data);
++int fw_iso_context_queue(struct fw_iso_context *ctx,
++			 struct fw_iso_packet *packet,
++			 struct fw_iso_buffer *buffer,
++			 unsigned long payload);
++int fw_iso_context_start(struct fw_iso_context *ctx,
++			 int cycle, int sync, int tags);
++int fw_iso_context_stop(struct fw_iso_context *ctx);
++void fw_iso_context_destroy(struct fw_iso_context *ctx);
+ 
+-int
+-fw_iso_context_stop(struct fw_iso_context *ctx);
++void fw_iso_resource_manage(struct fw_card *card, int generation,
++		u64 channels_mask, int *channel, int *bandwidth, bool allocate);
+ 
+ struct fw_card_driver {
+ 	/*
+@@ -415,7 +387,7 @@ struct fw_card_driver {
+ 
+ 	struct fw_iso_context *
+ 	(*allocate_iso_context)(struct fw_card *card,
+-				int type, size_t header_size);
++				int type, int channel, size_t header_size);
+ 	void (*free_iso_context)(struct fw_iso_context *ctx);
+ 
+ 	int (*start_iso)(struct fw_iso_context *ctx,
+@@ -429,24 +401,18 @@ struct fw_card_driver {
+ 	int (*stop_iso)(struct fw_iso_context *ctx);
+ };
+ 
+-int
+-fw_core_initiate_bus_reset(struct fw_card *card, int short_reset);
++int fw_core_initiate_bus_reset(struct fw_card *card, int short_reset);
+ 
+-void
+-fw_send_request(struct fw_card *card, struct fw_transaction *t,
++void fw_send_request(struct fw_card *card, struct fw_transaction *t,
+ 		int tcode, int destination_id, int generation, int speed,
+ 		unsigned long long offset, void *data, size_t length,
+ 		fw_transaction_callback_t callback, void *callback_data);
+-
+-int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
+-		       int generation, int speed, unsigned long long offset,
+-		       void *data, size_t length);
+-
+ int fw_cancel_transaction(struct fw_card *card,
+ 			  struct fw_transaction *transaction);
+-
+ void fw_flush_transactions(struct fw_card *card);
+-
++int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
++		       int generation, int speed, unsigned long long offset,
++		       void *data, size_t length);
+ void fw_send_phy_config(struct fw_card *card,
+ 			int node_id, int generation, int gap_count);
+ 
+@@ -454,29 +420,18 @@ void fw_send_phy_config(struct fw_card *
+  * Called by the topology code to inform the device code of node
+  * activity; found, lost, or updated nodes.
+  */
+-void
+-fw_node_event(struct fw_card *card, struct fw_node *node, int event);
++void fw_node_event(struct fw_card *card, struct fw_node *node, int event);
+ 
+ /* API used by card level drivers */
+ 
+-void
+-fw_card_initialize(struct fw_card *card, const struct fw_card_driver *driver,
+-		   struct device *device);
+-int
+-fw_card_add(struct fw_card *card,
+-	    u32 max_receive, u32 link_speed, u64 guid);
+-
+-void
+-fw_core_remove_card(struct fw_card *card);
+-
+-void
+-fw_core_handle_bus_reset(struct fw_card *card,
+-			 int node_id, int generation,
+-			 int self_id_count, u32 *self_ids);
+-void
+-fw_core_handle_request(struct fw_card *card, struct fw_packet *request);
+-
+-void
+-fw_core_handle_response(struct fw_card *card, struct fw_packet *packet);
++void fw_card_initialize(struct fw_card *card,
++		const struct fw_card_driver *driver, struct device *device);
++int fw_card_add(struct fw_card *card,
++		u32 max_receive, u32 link_speed, u64 guid);
++void fw_core_remove_card(struct fw_card *card);
++void fw_core_handle_bus_reset(struct fw_card *card, int node_id,
++		int generation, int self_id_count, u32 *self_ids);
++void fw_core_handle_request(struct fw_card *card, struct fw_packet *request);
++void fw_core_handle_response(struct fw_card *card, struct fw_packet *packet);
+ 
+ #endif /* __fw_transaction_h */
+--- linux-2.6-git/include/linux/firewire-cdev.h	2008-11-04 11:19:21.000000000 -0500
++++ firewire-git/include/linux/firewire-cdev.h	2009-01-30 13:35:54.327647015 -0500
+@@ -25,10 +25,12 @@
+ #include <linux/types.h>
+ #include <linux/firewire-constants.h>
+ 
+-#define FW_CDEV_EVENT_BUS_RESET		0x00
+-#define FW_CDEV_EVENT_RESPONSE		0x01
+-#define FW_CDEV_EVENT_REQUEST		0x02
+-#define FW_CDEV_EVENT_ISO_INTERRUPT	0x03
++#define FW_CDEV_EVENT_BUS_RESET			0x00
++#define FW_CDEV_EVENT_RESPONSE			0x01
++#define FW_CDEV_EVENT_REQUEST			0x02
++#define FW_CDEV_EVENT_ISO_INTERRUPT		0x03
++#define FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED	0x04
++#define FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED	0x05
+ 
+ /**
+  * struct fw_cdev_event_common - Common part of all fw_cdev_event_ types
+@@ -136,7 +138,24 @@ struct fw_cdev_event_request {
+  * This event is sent when the controller has completed an &fw_cdev_iso_packet
+  * with the %FW_CDEV_ISO_INTERRUPT bit set.  In the receive case, the headers
+  * stripped of all packets up until and including the interrupt packet are
+- * returned in the @header field.
++ * returned in the @header field.  The amount of header data per packet is as
++ * specified at iso context creation by &fw_cdev_create_iso_context.header_size.
++ *
++ * In version 1 of this ABI, header data consisted of the 1394 isochronous
++ * packet header, followed by quadlets from the packet payload if
++ * &fw_cdev_create_iso_context.header_size > 4.
++ *
++ * In version 2 of this ABI, header data consist of the 1394 isochronous
++ * packet header, followed by a timestamp quadlet if
++ * &fw_cdev_create_iso_context.header_size > 4, followed by quadlets from the
++ * packet payload if &fw_cdev_create_iso_context.header_size > 8.
++ *
++ * Behaviour of ver. 1 of this ABI is no longer available since ABI ver. 2.
++ *
++ * Format of 1394 iso packet header: 16 bits len, 2 bits tag, 6 bits channel,
++ * 4 bits tcode, 4 bits sy, in big endian byte order.  Format of timestamp:
++ * 16 bits invalid, 3 bits cycleSeconds, 13 bits cycleCount, in big endian byte
++ * order.
+  */
+ struct fw_cdev_event_iso_interrupt {
+ 	__u64 closure;
+@@ -147,12 +166,44 @@ struct fw_cdev_event_iso_interrupt {
+ };
+ 
+ /**
++ * struct fw_cdev_event_iso_resource - Iso resources were allocated or freed
++ * @closure:	See &fw_cdev_event_common;
++ *		set by %FW_CDEV_IOC_(DE)ALLOCATE_ISO_RESOURCE(_ONCE) ioctl
++ * @type:	%FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED or
++ *		%FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED
++ * @handle:	Reference by which an allocated resource can be deallocated
++ * @channel:	Isochronous channel which was (de)allocated, if any
++ * @bandwidth:	Bandwidth allocation units which were (de)allocated, if any
++ *
++ * An %FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED event is sent after an isochronous
++ * resource was allocated at the IRM.  The client has to check @channel and
++ * @bandwidth for whether the allocation actually succeeded.
++ *
++ * An %FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED event is sent after an isochronous
++ * resource was deallocated at the IRM.  It is also sent when automatic
++ * reallocation after a bus reset failed.
++ *
++ * @channel is <0 if no channel was (de)allocated or if reallocation failed.
++ * @bandwidth is 0 if no bandwidth was (de)allocated or if reallocation failed.
++ */
++struct fw_cdev_event_iso_resource {
++	__u64 closure;
++	__u32 type;
++	__u32 handle;
++	__s32 channel;
++	__s32 bandwidth;
++};
++
++/**
+  * union fw_cdev_event - Convenience union of fw_cdev_event_ types
+  * @common:        Valid for all types
+  * @bus_reset:     Valid if @common.type == %FW_CDEV_EVENT_BUS_RESET
+  * @response:      Valid if @common.type == %FW_CDEV_EVENT_RESPONSE
   * @request:       Valid if @common.type == %FW_CDEV_EVENT_REQUEST
   * @iso_interrupt: Valid if @common.type == %FW_CDEV_EVENT_ISO_INTERRUPT
++ * @iso_resource:  Valid if @common.type ==
++ *				%FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED or
++ *				%FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED
   *
-- * Convenience union for userspace use.  Events could be read(2) into a char
-- * buffer and then cast to this union for further processing.
-+ * Convenience union for userspace use.  Events could be read(2) into an
-+ * appropriately aligned char buffer and then cast to this union for further
-+ * processing.  Note that for a request, response or iso_interrupt event,
-+ * the data[] or header[] may make the size of the full event larger than
-+ * sizeof(union fw_cdev_event).  Also note that if you attempt to read(2)
-+ * an event into a buffer that is not large enough for it, the data that does
-+ * not fit will be discarded so that the next read(2) will return a new event.
+  * Convenience union for userspace use.  Events could be read(2) into an
+  * appropriately aligned char buffer and then cast to this union for further
+@@ -163,13 +214,15 @@ struct fw_cdev_event_iso_interrupt {
+  * not fit will be discarded so that the next read(2) will return a new event.
   */
  union fw_cdev_event {
- 	struct fw_cdev_event_common common;
+-	struct fw_cdev_event_common common;
+-	struct fw_cdev_event_bus_reset bus_reset;
+-	struct fw_cdev_event_response response;
+-	struct fw_cdev_event_request request;
+-	struct fw_cdev_event_iso_interrupt iso_interrupt;
++	struct fw_cdev_event_common		common;
++	struct fw_cdev_event_bus_reset		bus_reset;
++	struct fw_cdev_event_response		response;
++	struct fw_cdev_event_request		request;
++	struct fw_cdev_event_iso_interrupt	iso_interrupt;
++	struct fw_cdev_event_iso_resource	iso_resource;
+ };
+ 
++/* available since kernel version 2.6.22 */
+ #define FW_CDEV_IOC_GET_INFO		_IOWR('#', 0x00, struct fw_cdev_get_info)
+ #define FW_CDEV_IOC_SEND_REQUEST	_IOW('#', 0x01, struct fw_cdev_send_request)
+ #define FW_CDEV_IOC_ALLOCATE		_IOWR('#', 0x02, struct fw_cdev_allocate)
+@@ -178,18 +231,29 @@ union fw_cdev_event {
+ #define FW_CDEV_IOC_INITIATE_BUS_RESET	_IOW('#', 0x05, struct fw_cdev_initiate_bus_reset)
+ #define FW_CDEV_IOC_ADD_DESCRIPTOR	_IOWR('#', 0x06, struct fw_cdev_add_descriptor)
+ #define FW_CDEV_IOC_REMOVE_DESCRIPTOR	_IOW('#', 0x07, struct fw_cdev_remove_descriptor)
+-
+ #define FW_CDEV_IOC_CREATE_ISO_CONTEXT	_IOWR('#', 0x08, struct fw_cdev_create_iso_context)
+ #define FW_CDEV_IOC_QUEUE_ISO		_IOWR('#', 0x09, struct fw_cdev_queue_iso)
+ #define FW_CDEV_IOC_START_ISO		_IOW('#', 0x0a, struct fw_cdev_start_iso)
+ #define FW_CDEV_IOC_STOP_ISO		_IOW('#', 0x0b, struct fw_cdev_stop_iso)
++
++/* available since kernel version 2.6.24 */
+ #define FW_CDEV_IOC_GET_CYCLE_TIMER	_IOR('#', 0x0c, struct fw_cdev_get_cycle_timer)
+ 
+-/* FW_CDEV_VERSION History
+- *
+- * 1	Feb 18, 2007:  Initial version.
++/* available since kernel version 2.6.30 */
++#define FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE       _IOWR('#', 0x0d, struct fw_cdev_allocate_iso_resource)
++#define FW_CDEV_IOC_DEALLOCATE_ISO_RESOURCE      _IOW('#', 0x0e, struct fw_cdev_deallocate)
++#define FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE_ONCE   _IOW('#', 0x0f, struct fw_cdev_allocate_iso_resource)
++#define FW_CDEV_IOC_DEALLOCATE_ISO_RESOURCE_ONCE _IOW('#', 0x10, struct fw_cdev_allocate_iso_resource)
++#define FW_CDEV_IOC_GET_SPEED                    _IOR('#', 0x11, struct fw_cdev_get_speed)
++#define FW_CDEV_IOC_SEND_BROADCAST_REQUEST       _IOW('#', 0x12, struct fw_cdev_send_request)
++
++/*
++ * FW_CDEV_VERSION History
++ *  1  (2.6.22)  - initial version
++ *  2  (2.6.30)  - changed &fw_cdev_event_iso_interrupt.header if
++ *                 &fw_cdev_create_iso_context.header_size is 8 or more
+  */
+-#define FW_CDEV_VERSION		1
++#define FW_CDEV_VERSION 2
+ 
+ /**
+  * struct fw_cdev_get_info - General purpose information ioctl
+@@ -201,7 +265,7 @@ union fw_cdev_event {
+  *		case, @rom_length is updated with the actual length of the
+  *		configuration ROM.
+  * @rom:	If non-zero, address of a buffer to be filled by a copy of the
+- *		local node's configuration ROM
++ *		device's configuration ROM
+  * @bus_reset:	If non-zero, address of a buffer to be filled by a
+  *		&struct fw_cdev_event_bus_reset with the current state
+  *		of the bus.  This does not cause a bus reset to happen.
+@@ -229,7 +293,7 @@ struct fw_cdev_get_info {
+  * Send a request to the device.  This ioctl implements all outgoing requests.
+  * Both quadlet and block request specify the payload as a pointer to the data
+  * in the @data field.  Once the transaction completes, the kernel writes an
+- * &fw_cdev_event_request event back.  The @closure field is passed back to
++ * &fw_cdev_event_response event back.  The @closure field is passed back to
+  * user space in the response event.
+  */
+ struct fw_cdev_send_request {
+@@ -284,9 +348,9 @@ struct fw_cdev_allocate {
+ };
+ 
+ /**
+- * struct fw_cdev_deallocate - Free an address range allocation
+- * @handle:	Handle to the address range, as returned by the kernel when the
+- *		range was allocated
++ * struct fw_cdev_deallocate - Free a CSR address range or isochronous resource
++ * @handle:	Handle to the address range or iso resource, as returned by the
++ *		kernel when the range or resource was allocated
+  */
+ struct fw_cdev_deallocate {
+ 	__u32 handle;
+@@ -370,6 +434,9 @@ struct fw_cdev_remove_descriptor {
+  *
+  * If a context was successfully created, the kernel writes back a handle to the
+  * context, which must be passed in for subsequent operations on that context.
++ *
++ * Note that the effect of a @header_size > 4 depends on
++ * &fw_cdev_get_info.version, as documented at &fw_cdev_event_iso_interrupt.
+  */
+ struct fw_cdev_create_iso_context {
+ 	__u32 type;
+@@ -473,10 +540,73 @@ struct fw_cdev_stop_iso {
+  * The %FW_CDEV_IOC_GET_CYCLE_TIMER ioctl reads the isochronous cycle timer
+  * and also the system clock.  This allows to express the receive time of an
+  * isochronous packet as a system time with microsecond accuracy.
++ *
++ * @cycle_timer consists of 7 bits cycleSeconds, 13 bits cycleCount, and
++ * 12 bits cycleOffset, in host byte order.
+  */
+ struct fw_cdev_get_cycle_timer {
+ 	__u64 local_time;
+ 	__u32 cycle_timer;
+ };
+ 
++/**
++ * struct fw_cdev_allocate_iso_resource - (De)allocate a channel or bandwidth
++ * @closure:	Passed back to userspace in correponding iso resource events
++ * @channels:	Isochronous channels of which one is to be (de)allocated
++ * @bandwidth:	Isochronous bandwidth units to be (de)allocated
++ * @handle:	Handle to the allocation, written by the kernel (only valid in
++ *		case of %FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE ioctls)
++ *
++ * The %FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE ioctl initiates allocation of an
++ * isochronous channel and/or of isochronous bandwidth at the isochronous
++ * resource manager (IRM).  Only one of the channels specified in @channels is
++ * allocated.  An %FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED is sent after
++ * communication with the IRM, indicating success or failure in the event data.
++ * The kernel will automatically reallocate the resources after bus resets.
++ * Should a reallocation fail, an %FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED event
++ * will be sent.  The kernel will also automatically deallocate the resources
++ * when the file descriptor is closed.
++ *
++ * The %FW_CDEV_IOC_DEALLOCATE_ISO_RESOURCE ioctl can be used to initiate
++ * deallocation of resources which were allocated as described above.
++ * An %FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED event concludes this operation.
++ *
++ * The %FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE_ONCE ioctl is a variant of allocation
++ * without automatic re- or deallocation.
++ * An %FW_CDEV_EVENT_ISO_RESOURCE_ALLOCATED event concludes this operation,
++ * indicating success or failure in its data.
++ *
++ * The %FW_CDEV_IOC_DEALLOCATE_ISO_RESOURCE_ONCE ioctl works like
++ * %FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE_ONCE except that resources are freed
++ * instead of allocated.
++ * An %FW_CDEV_EVENT_ISO_RESOURCE_DEALLOCATED event concludes this operation.
++ *
++ * To summarize, %FW_CDEV_IOC_DEALLOCATE_ISO_RESOURCE allocates iso resources
++ * for the lifetime of the fd or handle.
++ * In contrast, %FW_CDEV_IOC_ALLOCATE_ISO_RESOURCE_ONCE allocates iso resources
++ * for the duration of a bus generation.
++ *
++ * @channels is a host-endian bitfield with the least significant bit
++ * representing channel 0 and the most significant bit representing channel 63:
++ * 1ULL << c for each channel c that is a candidate for (de)allocation.
++ *
++ * @bandwidth is expressed in bandwidth allocation units, i.e. the time to send
++ * one quadlet of data (payload or header data) at speed S1600.
++ */
++struct fw_cdev_allocate_iso_resource {
++	__u64 closure;
++	__u64 channels;
++	__u32 bandwidth;
++	__u32 handle;
++};
++
++/**
++ * struct fw_cdev_get_speed - Query maximum speed to or from this device
++ * @max_speed:	Speed code; minimum of the device's link speed, the local node's
++ *		link speed, and all PHY port speeds between the two links
++ */
++struct fw_cdev_get_speed {
++	__u32 max_speed;
++};
++
+ #endif /* _LINUX_FIREWIRE_CDEV_H */

@@ -1,0 +1,42 @@
+From: Michael K. Johnson <johnsonm@rpath.com>
+Date: Fri, 27 Mar 2009 17:14:41 +0000 (-0400)
+Subject: x86, setup: mark %esi as clobbered in E820 BIOS call
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=01522df346f846906eaf6ca57148641476209909
+
+x86, setup: mark %esi as clobbered in E820 BIOS call
+
+Jordan Hargrave diagnosed a BIOS clobbering %esi in the E820 call.
+That particular BIOS has been fixed, but there is a possibility that
+this is responsible for other occasional reports of early boot
+failure, and it does not hurt to add %esi to the clobbers.
+
+-stable candidate patch.
+
+Cc: Justin Forbes <jmforbes@linuxtx.org>
+Signed-off-by: Michael K Johnson <johnsonm@rpath.com>
+Signed-off-by: H. Peter Anvin <hpa@zytor.com>
+Cc: stable@kernel.org
+---
+
+diff --git a/arch/x86/boot/memory.c b/arch/x86/boot/memory.c
+index 8c3c25f..a99dbbe 100644
+--- a/arch/x86/boot/memory.c
++++ b/arch/x86/boot/memory.c
+@@ -27,13 +27,14 @@ static int detect_memory_e820(void)
+ 	do {
+ 		size = sizeof(struct e820entry);
+ 
+-		/* Important: %edx is clobbered by some BIOSes,
+-		   so it must be either used for the error output
++		/* Important: %edx and %esi are clobbered by some BIOSes,
++		   so they must be either used for the error output
+ 		   or explicitly marked clobbered. */
+ 		asm("int $0x15; setc %0"
+ 		    : "=d" (err), "+b" (next), "=a" (id), "+c" (size),
+ 		      "=m" (*desc)
+-		    : "D" (desc), "d" (SMAP), "a" (0xe820));
++		    : "D" (desc), "d" (SMAP), "a" (0xe820)
++		    : "esi");
+ 
+ 		/* BIOSes which terminate the chain with CF = 1 as opposed
+ 		   to %ebx = 0 don't always report the SMAP signature on

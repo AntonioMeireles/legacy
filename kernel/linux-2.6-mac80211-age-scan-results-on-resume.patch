@@ -1,21 +1,21 @@
 Backport of "cfg80211: age scan results on resume" by Dan Williams.
 
 diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
-index e007508..6e3ff5f 100644
+index 23c0ab7..0432eb6 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -285,6 +285,9 @@ struct wiphy;
+@@ -450,6 +450,9 @@ struct ieee80211_channel;
   * wireless extensions but this is subject to reevaluation as soon as this
   * code is used more widely and we have a first user without wext.
   *
 + * @suspend: wiphy device needs to be suspended
 + * @resume: wiphy device needs to be resumed
 + *
-  * @add_virtual_intf: create a new virtual interface with the given name
+  * @add_virtual_intf: create a new virtual interface with the given name,
+  *	must set the struct wireless_dev's iftype.
   *
-  * @del_virtual_intf: remove the virtual interface determined by ifindex.
-@@ -320,6 +323,9 @@ struct wiphy;
-  * @set_mesh_cfg: set mesh parameters (by now, just mesh id)
+@@ -499,6 +502,9 @@ struct ieee80211_channel;
+  * @set_channel: Set channel
   */
  struct cfg80211_ops {
 +	int	(*suspend)(struct wiphy *wiphy);
@@ -25,10 +25,10 @@ index e007508..6e3ff5f 100644
  				    enum nl80211_iftype type, u32 *flags,
  				    struct vif_params *params);
 diff --git a/include/net/wireless.h b/include/net/wireless.h
-index 9324f8d..f6e18fe 100644
+index 21c5d96..ae2d34d 100644
 --- a/include/net/wireless.h
 +++ b/include/net/wireless.h
-@@ -203,6 +203,9 @@ struct wiphy {
+@@ -220,6 +220,9 @@ struct wiphy {
  	/* dir in debugfs: ieee80211/<wiphyname> */
  	struct dentry *debugfsdir;
  
@@ -39,12 +39,12 @@ index 9324f8d..f6e18fe 100644
  };
  
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 297c257..abd8e4c 100644
+index 9d4e4d8..691183e 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -1005,6 +1005,32 @@ static int ieee80211_dump_mpath(struct wiphy *wiphy, struct net_device *dev,
+@@ -1141,6 +1141,32 @@ static int ieee80211_set_channel(struct wiphy *wiphy,
+ 	return ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_CHANNEL);
  }
- #endif
  
 +#ifdef CONFIG_PM
 +static int ieee80211_suspend(struct wiphy *wiphy)
@@ -56,14 +56,14 @@ index 297c257..abd8e4c 100644
 +{
 +	struct ieee80211_local *local = wiphy_priv(wiphy);
 +	unsigned long age_jiffies;
-+	struct ieee80211_sta_bss *bss;
++	struct ieee80211_bss *bss;
 +
 +	age_jiffies = msecs_to_jiffies(wiphy->suspend_duration * MSEC_PER_SEC);
-+	spin_lock_bh(&local->sta_bss_lock);
-+	list_for_each_entry(bss, &local->sta_bss_list, list) {
++	spin_lock_bh(&local->bss_lock);
++	list_for_each_entry(bss, &local->bss_list, list) {
 +		bss->last_update -= age_jiffies;
 +	}
-+	spin_unlock_bh(&local->sta_bss_lock);
++	spin_unlock_bh(&local->bss_lock);
 +
 +	return 0;
 +}
@@ -75,19 +75,19 @@ index 297c257..abd8e4c 100644
  struct cfg80211_ops mac80211_config_ops = {
  	.add_virtual_intf = ieee80211_add_iface,
  	.del_virtual_intf = ieee80211_del_iface,
-@@ -1028,4 +1054,6 @@ struct cfg80211_ops mac80211_config_ops = {
- 	.get_mpath = ieee80211_get_mpath,
- 	.dump_mpath = ieee80211_dump_mpath,
- #endif
+@@ -1169,4 +1195,6 @@ struct cfg80211_ops mac80211_config_ops = {
+ 	.change_bss = ieee80211_change_bss,
+ 	.set_txq_params = ieee80211_set_txq_params,
+ 	.set_channel = ieee80211_set_channel,
 +	.suspend = ieee80211_suspend,
 +	.resume = ieee80211_resume,
  };
-diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
-index 902cac1..73e5ae1 100644
---- a/net/mac80211/mlme.c
-+++ b/net/mac80211/mlme.c
-@@ -4128,6 +4128,16 @@ int ieee80211_sta_req_scan(struct net_device *dev, u8 *ssid, size_t ssid_len)
- 	return 0;
+diff --git a/net/mac80211/scan.c b/net/mac80211/scan.c
+index f5c7c33..eb43ff5 100644
+--- a/net/mac80211/scan.c
++++ b/net/mac80211/scan.c
+@@ -745,6 +745,15 @@ static void ieee80211_scan_add_ies(struct iw_request_info *info,
+ 	}
  }
  
 +static inline unsigned int elapsed_jiffies_msecs(unsigned long start)
@@ -99,26 +99,25 @@ index 902cac1..73e5ae1 100644
 +
 +	return jiffies_to_msecs(end + (MAX_JIFFY_OFFSET - start) + 1);
 +}
-+
+ 
  static char *
- ieee80211_sta_scan_result(struct net_device *dev,
- 			  struct iw_request_info *info,
-@@ -4264,8 +4274,8 @@ ieee80211_sta_scan_result(struct net_device *dev,
- 							  &iwe, buf);
- 			memset(&iwe, 0, sizeof(iwe));
- 			iwe.cmd = IWEVCUSTOM;
--			sprintf(buf, " Last beacon: %dms ago",
--				jiffies_to_msecs(jiffies - bss->last_update));
-+			sprintf(buf, " Last beacon: %ums ago",
-+				elapsed_jiffies_msecs(bss->last_update));
- 			iwe.u.data.length = strlen(buf);
- 			current_ev = iwe_stream_add_point(info, current_ev,
- 							  end_buf, &iwe, buf);
+ ieee80211_scan_result(struct ieee80211_local *local,
+@@ -857,8 +866,8 @@ ieee80211_scan_result(struct ieee80211_local *local,
+ 						  &iwe, buf);
+ 		memset(&iwe, 0, sizeof(iwe));
+ 		iwe.cmd = IWEVCUSTOM;
+-		sprintf(buf, " Last beacon: %dms ago",
+-			jiffies_to_msecs(jiffies - bss->last_update));
++		sprintf(buf, " Last beacon: %ums ago",
++			elapsed_jiffies_msecs(bss->last_update));
+ 		iwe.u.data.length = strlen(buf);
+ 		current_ev = iwe_stream_add_point(info, current_ev,
+ 						  end_buf, &iwe, buf);
 diff --git a/net/wireless/core.h b/net/wireless/core.h
-index 7a02c35..d848cad 100644
+index f7fb9f4..a4031a9 100644
 --- a/net/wireless/core.h
 +++ b/net/wireless/core.h
-@@ -28,6 +28,8 @@ struct cfg80211_registered_device {
+@@ -41,6 +41,8 @@ struct cfg80211_registered_device {
  	struct mutex devlist_mtx;
  	struct list_head netdev_list;
  
@@ -128,10 +127,10 @@ index 7a02c35..d848cad 100644
  	 * and it should at least be aligned to NETDEV_ALIGN */
  	struct wiphy wiphy __attribute__((__aligned__(NETDEV_ALIGN)));
 diff --git a/net/wireless/sysfs.c b/net/wireless/sysfs.c
-index 29f820e..cc9e9e4 100644
+index 79a3828..dc92564 100644
 --- a/net/wireless/sysfs.c
 +++ b/net/wireless/sysfs.c
-@@ -60,6 +60,39 @@ static int wiphy_uevent(struct device *dev, struct kobj_uevent_env *env)
+@@ -55,6 +55,39 @@ static int wiphy_uevent(struct device *dev, struct kobj_uevent_env *env)
  }
  #endif
  
@@ -171,7 +170,7 @@ index 29f820e..cc9e9e4 100644
  struct class ieee80211_class = {
  	.name = "ieee80211",
  	.owner = THIS_MODULE,
-@@ -68,6 +101,8 @@ struct class ieee80211_class = {
+@@ -63,6 +96,8 @@ struct class ieee80211_class = {
  #ifdef CONFIG_HOTPLUG
  	.dev_uevent = wiphy_uevent,
  #endif

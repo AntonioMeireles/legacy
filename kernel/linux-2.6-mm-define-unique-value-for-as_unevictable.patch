@@ -1,0 +1,56 @@
+From: Lee Schermerhorn <Lee.Schermerhorn@hp.com>
+Date: Thu, 2 Apr 2009 23:56:45 +0000 (-0700)
+Subject: mm: define a UNIQUE value for AS_UNEVICTABLE flag
+X-Git-Tag: v2.6.30-rc1~398
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=9a896c9a48ac6704c0ce8ee081b836644d0afe40
+
+mm: define a UNIQUE value for AS_UNEVICTABLE flag
+
+A new "address_space flag"--AS_MM_ALL_LOCKS--was defined to use the next
+available AS flag while the Unevictable LRU was under development.  The
+Unevictable LRU was using the same flag and "no one" noticed.  Current
+mainline, since 2.6.28, has same value for two symbolic flag names.
+
+So, define a unique flag value for AS_UNEVICTABLE--up close to the other
+flags, [at the cost of an additional #ifdef] so we'll notice next time.
+Note that #ifdef is not actually required, if we don't mind having the
+unused flag value defined.
+
+Replace #defines with an enum.
+
+Signed-off-by: Lee Schermerhorn <lee.schermerhorn@hp.com>
+Cc: <stable@kernel.org>		[2.6.28.x, 2.6.29.x]
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
+index 01ca085..076a7dc 100644
+--- a/include/linux/pagemap.h
++++ b/include/linux/pagemap.h
+@@ -18,9 +18,14 @@
+  * Bits in mapping->flags.  The lower __GFP_BITS_SHIFT bits are the page
+  * allocation mode flags.
+  */
+-#define	AS_EIO		(__GFP_BITS_SHIFT + 0)	/* IO error on async write */
+-#define AS_ENOSPC	(__GFP_BITS_SHIFT + 1)	/* ENOSPC on async write */
+-#define AS_MM_ALL_LOCKS	(__GFP_BITS_SHIFT + 2)	/* under mm_take_all_locks() */
++enum mapping_flags {
++	AS_EIO		= __GFP_BITS_SHIFT + 0,	/* IO error on async write */
++	AS_ENOSPC	= __GFP_BITS_SHIFT + 1,	/* ENOSPC on async write */
++	AS_MM_ALL_LOCKS	= __GFP_BITS_SHIFT + 2,	/* under mm_take_all_locks() */
++#ifdef CONFIG_UNEVICTABLE_LRU
++	AS_UNEVICTABLE	= __GFP_BITS_SHIFT + 3,	/* e.g., ramdisk, SHM_LOCK */
++#endif
++};
+ 
+ static inline void mapping_set_error(struct address_space *mapping, int error)
+ {
+@@ -33,7 +38,6 @@ static inline void mapping_set_error(struct address_space *mapping, int error)
+ }
+ 
+ #ifdef CONFIG_UNEVICTABLE_LRU
+-#define AS_UNEVICTABLE	(__GFP_BITS_SHIFT + 2)	/* e.g., ramdisk, SHM_LOCK */
+ 
+ static inline void mapping_set_unevictable(struct address_space *mapping)
+ {

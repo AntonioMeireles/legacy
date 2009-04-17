@@ -1,20 +1,48 @@
 diff --git a/kernel/panic.c b/kernel/panic.c
-index 6f6e03e..198fc58 100644
+index 2a2ff36..361d852 100644
 --- a/kernel/panic.c
 +++ b/kernel/panic.c
-@@ -173,6 +173,7 @@ const char *print_tainted(void)
+@@ -194,6 +194,7 @@ const char *print_tainted(void)
  		snprintf(buf, sizeof(buf), "Not tainted");
  	return(buf);
  }
 +EXPORT_SYMBOL(print_tainted);
  
- void add_taint(unsigned flag)
+ int test_taint(unsigned flag)
  {
+@@ -334,8 +335,8 @@ void warn_slowpath(const char *file, int line, const char *fmt, ...)
+ 	sprint_symbol(function, caller);
+ 
+ 	printk(KERN_WARNING "------------[ cut here ]------------\n");
+-	printk(KERN_WARNING "WARNING: at %s:%d %s()\n", file,
+-		line, function);
++	printk(KERN_WARNING "WARNING: at %s:%d %s() (%s)\n", file,
++		line, function, print_tainted());
+ 	board = dmi_get_system_info(DMI_PRODUCT_NAME);
+ 	if (board)
+ 		printk(KERN_WARNING "Hardware name: %s\n", board);
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 5675b30..ae3e7ff 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -250,9 +250,10 @@ static void bad_page(struct page *page)
+ 	printk(KERN_ALERT "BUG: Bad page state in process %s  pfn:%05lx\n",
+ 		current->comm, page_to_pfn(page));
+ 	printk(KERN_ALERT
+-		"page:%p flags:%p count:%d mapcount:%d mapping:%p index:%lx\n",
++		"page:%p flags:%p count:%d mapcount:%d mapping:%p ",
+ 		page, (void *)page->flags, page_count(page),
+-		page_mapcount(page), page->mapping, page->index);
++		page_mapcount(page), page->mapping);
++	printk(KERN_CONT "index:%lx (%s)\n", page->index, print_tainted());
+ 
+ 	dump_stack();
+ out:
 diff --git a/mm/slab.c b/mm/slab.c
-index 2e338a5..e5627f9 100644
+index ddc41f3..bf54397 100644
 --- a/mm/slab.c
 +++ b/mm/slab.c
-@@ -1846,8 +1846,8 @@ static void check_poison_obj(struct kmem_cache *cachep, void *objp)
+@@ -1858,8 +1858,8 @@ static void check_poison_obj(struct kmem_cache *cachep, void *objp)
  			/* Print header */
  			if (lines == 0) {
  				printk(KERN_ERR
@@ -25,7 +53,7 @@ index 2e338a5..e5627f9 100644
  				print_objinfo(cachep, objp, 0);
  			}
  			/* Hexdump the affected line */
-@@ -2935,8 +2935,8 @@ static void check_slabp(struct kmem_cache *cachep, struct slab *slabp)
+@@ -2930,8 +2930,8 @@ static void check_slabp(struct kmem_cache *cachep, struct slab *slabp)
  	if (entries != cachep->num - slabp->inuse) {
  bad:
  		printk(KERN_ERR "slab: Internal list corruption detected in "
@@ -37,10 +65,10 @@ index 2e338a5..e5627f9 100644
  		     i < sizeof(*slabp) + cachep->num * sizeof(kmem_bufctl_t);
  		     i++) {
 diff --git a/mm/slub.c b/mm/slub.c
-index 9c1d9f3..e11d58d 100644
+index 6392ae5..4f6acce 100644
 --- a/mm/slub.c
 +++ b/mm/slub.c
-@@ -451,7 +451,7 @@ static void slab_bug(struct kmem_cache *s, char *fmt, ...)
+@@ -435,7 +435,7 @@ static void slab_bug(struct kmem_cache *s, char *fmt, ...)
  	va_end(args);
  	printk(KERN_ERR "========================================"
  			"=====================================\n");
@@ -49,35 +77,3 @@ index 9c1d9f3..e11d58d 100644
  	printk(KERN_ERR "----------------------------------------"
  			"-------------------------------------\n\n");
  }
-diff --git a/kernel/panic.c b/kernel/panic.c
-index d9e90cf..570b1f6 100644
---- a/kernel/panic.c
-+++ b/kernel/panic.c
-@@ -306,8 +306,8 @@ void warn_on_slowpath(const char *file, int line)
- 	sprint_symbol(function, caller);
- 
- 	printk(KERN_WARNING "------------[ cut here ]------------\n");
--	printk(KERN_WARNING "WARNING: at %s:%d %s()\n", file,
--		line, function);
-+	printk(KERN_WARNING "WARNING: at %s:%d %s() (%s)\n", file,
-+		line, function, print_tainted());
- 	print_modules();
- 	dump_stack();
- 	print_oops_end_marker();
-diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index 402a504..2085092 100644
---- a/mm/page_alloc.c
-+++ b/mm/page_alloc.c
-@@ -225,10 +225,10 @@ static void bad_page(struct page *page)
- 	void *pc = page_get_page_cgroup(page);
- 
- 	printk(KERN_EMERG "Bad page state in process '%s'\n" KERN_EMERG
--		"page:%p flags:0x%0*lx mapping:%p mapcount:%d count:%d\n",
-+		"page:%p flags:0x%0*lx mapping:%p mapcount:%d count:%d (%s)\n",
- 		current->comm, page, (int)(2*sizeof(unsigned long)),
- 		(unsigned long)page->flags, page->mapping,
--		page_mapcount(page), page_count(page));
-+		page_mapcount(page), page_count(page), print_tainted());
- 	if (pc) {
- 		printk(KERN_EMERG "cgroup:%p\n", pc);
- 		page_reset_bad_cgroup(page);

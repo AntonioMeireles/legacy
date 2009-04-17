@@ -1,33 +1,60 @@
+utrace core
+
+This adds the utrace facility, a new modular interface in the kernel for
+implementing user thread tracing and debugging.  This fits on top of the
+tracehook_* layer, so the new code is well-isolated.
+
+The new interface is in <linux/utrace.h> and the DocBook utrace book
+describes it.  It allows for multiple separate tracing engines to work in
+parallel without interfering with each other.  Higher-level tracing
+facilities can be implemented as loadable kernel modules using this layer.
+
+The new facility is made optional under CONFIG_UTRACE.
+When this is not enabled, no new code is added.
+It can only be enabled on machines that have all the
+prerequisites and select CONFIG_HAVE_ARCH_TRACEHOOK.
+
+In this initial version, utrace and ptrace do not play together at all.
+If ptrace is attached to a thread, the attach calls in the utrace kernel
+API return -EBUSY.  If utrace is attached to a thread, the PTRACE_ATTACH
+or PTRACE_TRACEME request will return EBUSY to userland.  The old ptrace
+code is otherwise unchanged and nothing using ptrace should be affected
+by this patch as long as utrace is not used at the same time.  In the
+future we can clean up the ptrace implementation and rework it to use
+the utrace API.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+---
  Documentation/DocBook/Makefile    |    2 +-
- Documentation/DocBook/utrace.tmpl |  571 ++++++++
+ Documentation/DocBook/utrace.tmpl |  571 +++++++++
  fs/proc/array.c                   |    3 +
- include/linux/ptrace.h            |   21 +
+ include/linux/init_task.h         |    1 +
  include/linux/sched.h             |    6 +
- include/linux/tracehook.h         |   68 +-
- include/linux/utrace.h            |  707 ++++++++++
- init/Kconfig                      |   26 +
+ include/linux/tracehook.h         |   50 +-
+ include/linux/utrace.h            |  692 +++++++++++
+ include/linux/utrace_struct.h     |   58 +
+ init/Kconfig                      |    9 +
  kernel/Makefile                   |    1 +
- kernel/ptrace.c                   |  793 +++++++++++-
- kernel/signal.c                   |   14 +-
- kernel/utrace.c                   | 2590 +++++++++++++++++++++++++++++++++++++
- 12 files changed, 4790 insertions(+), 12 deletions(-)
+ kernel/ptrace.c                   |   18 +-
+ kernel/utrace.c                   | 2348 +++++++++++++++++++++++++++++++++++++
+ 12 files changed, 3756 insertions(+), 3 deletions(-)
 
 diff --git a/Documentation/DocBook/Makefile b/Documentation/DocBook/Makefile
-index 1615350..d27e093 100644  
+index 1462ed8..f5da1b4 100644  
 --- a/Documentation/DocBook/Makefile
 +++ b/Documentation/DocBook/Makefile
 @@ -9,7 +9,7 @@
- DOCBOOKS := wanbook.xml z8530book.xml mcabook.xml videobook.xml \
+ DOCBOOKS := z8530book.xml mcabook.xml device-drivers.xml \
  	    kernel-hacking.xml kernel-locking.xml deviceiobook.xml \
  	    procfs-guide.xml writing_usb_driver.xml networking.xml \
 -	    kernel-api.xml filesystems.xml lsm.xml usb.xml kgdb.xml \
 +	    kernel-api.xml filesystems.xml lsm.xml usb.xml kgdb.xml utrace.xml \
  	    gadget.xml libata.xml mtdnand.xml librs.xml rapidio.xml \
  	    genericirq.xml s390-drivers.xml uio-howto.xml scsi.xml \
- 	    mac80211.xml debugobjects.xml sh.xml
+ 	    mac80211.xml debugobjects.xml sh.xml regulator.xml
 diff --git a/Documentation/DocBook/utrace.tmpl b/Documentation/DocBook/utrace.tmpl
 new file mode 100644
-index ...f253402 100644  
+index ...b802c55 100644  
 --- /dev/null
 +++ b/Documentation/DocBook/utrace.tmpl
 @@ -0,0 +1,571 @@
@@ -251,7 +278,7 @@ index ...f253402 100644
 +  <sect2 id="refcount"><title>Engine and task pointers</title>
 +  <para>
 +    The first sort of guarantee concerns the core data structures
-+    themselves.  <structname>struct utrace_attached_engine</structname> is
++    themselves.  <structname>struct utrace_engine</structname> is
 +    a reference-counted data structure.  While you hold a reference, an
 +    engine pointer will always stay valid so that you can safely pass it to
 +    any <application>utrace</application> call.  Each call to
@@ -294,7 +321,7 @@ index ...f253402 100644
 +    <function>rcu_read_lock</function> nor any other lock is held while
 +    making a callback, it's always guaranteed that the <structname>struct
 +    task_struct</structname> and the <structname>struct
-+    utrace_attached_engine</structname> passed as arguments remain valid
++    utrace_engine</structname> passed as arguments remain valid
 +    until the callback function returns.
 +  </para>
 +
@@ -359,7 +386,7 @@ index ...f253402 100644
 +    <function>report_death</function> or <function>report_reap</function>
 +    callback will try to do the same.  <constant>utrace_detach</constant>
 +    returns <constant>-ESRCH</constant> when the <structname>struct
-+    utrace_attached_engine</structname> has already been detached, but is
++    utrace_engine</structname> has already been detached, but is
 +    still a valid pointer because of its reference count.  A tracing engine
 +    can use this to safely synchronize its own independent multiple threads
 +    of control with each other and with its event callbacks that detach.
@@ -603,7 +630,7 @@ index ...f253402 100644
 +
 +</book>
 diff --git a/fs/proc/array.c b/fs/proc/array.c
-index 71c9be5..adc7a53 100644  
+index 7e4877d..0c683ed 100644  
 --- a/fs/proc/array.c
 +++ b/fs/proc/array.c
 @@ -81,6 +81,7 @@
@@ -614,80 +641,53 @@ index 71c9be5..adc7a53 100644
  
  #include <asm/pgtable.h>
  #include <asm/processor.h>
-@@ -190,6 +191,8 @@ static inline void task_state(struct seq
- 		p->uid, p->euid, p->suid, p->fsuid,
- 		p->gid, p->egid, p->sgid, p->fsgid);
+@@ -187,6 +188,8 @@ static inline void task_state(struct seq
+ 		cred->uid, cred->euid, cred->suid, cred->fsuid,
+ 		cred->gid, cred->egid, cred->sgid, cred->fsgid);
  
 +	task_utrace_proc_status(m, p);
 +
  	task_lock(p);
  	if (p->files)
  		fdt = files_fdtable(p->files);
-diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
-index ea7416c..06eaace 100644  
---- a/include/linux/ptrace.h
-+++ b/include/linux/ptrace.h
-@@ -121,6 +121,7 @@ static inline void ptrace_unlink(struct 
- int generic_ptrace_peekdata(struct task_struct *tsk, long addr, long data);
- int generic_ptrace_pokedata(struct task_struct *tsk, long addr, long data);
- 
-+#ifndef CONFIG_UTRACE_PTRACE
- /**
-  * task_ptrace - return %PT_* flags that apply to a task
-  * @task:	pointer to &task_struct in question
-@@ -154,6 +155,26 @@ static inline int ptrace_event(int mask,
- 	return 1;
- }
- 
-+static inline void ptrace_utrace_exit(struct task_struct *task)
-+{
-+}
-+
-+#else  /* CONFIG_UTRACE_PTRACE */
-+
-+static inline int task_ptrace(struct task_struct *task)
-+{
-+	return 0;
-+}
-+
-+static inline int ptrace_event(int mask, int event, unsigned long message)
-+{
-+	return 0;
-+}
-+
-+extern void ptrace_utrace_exit(struct task_struct *);
-+
-+#endif	/* !CONFIG_UTRACE_PTRACE */
-+
- /**
-  * ptrace_init_task - initialize ptrace state for a new child
-  * @child:		new child task
+diff --git a/include/linux/init_task.h b/include/linux/init_task.h
+index e752d97..39eebc8 100644  
+--- a/include/linux/init_task.h
++++ b/include/linux/init_task.h
+@@ -181,6 +181,7 @@ extern struct cred init_cred;
+ 		[PIDTYPE_SID]  = INIT_PID_LINK(PIDTYPE_SID),		\
+ 	},								\
+ 	.dirties = INIT_PROP_LOCAL_SINGLE(dirties),			\
++	INIT_UTRACE(tsk)						\
+ 	INIT_IDS							\
+ 	INIT_TRACE_IRQFLAGS						\
+ 	INIT_LOCKDEP							\
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 086f5e1..b0be16c 100644  
+index 011db2f..786ef2d 100644  
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -1200,6 +1200,11 @@ struct task_struct {
+@@ -59,6 +59,7 @@ struct sched_param {
+ #include <linux/errno.h>
+ #include <linux/nodemask.h>
+ #include <linux/mm_types.h>
++#include <linux/utrace_struct.h>
+ 
+ #include <asm/system.h>
+ #include <asm/page.h>
+@@ -1287,6 +1288,11 @@ struct task_struct {
  #endif
  	seccomp_t seccomp;
  
 +#ifdef CONFIG_UTRACE
-+	struct utrace *utrace;
++	struct utrace utrace;
 +	unsigned long utrace_flags;
 +#endif
 +
  /* Thread group tracking */
     	u32 parent_exec_id;
     	u32 self_exec_id;
-@@ -1778,6 +1783,7 @@ extern int kill_pgrp(struct pid *pid, in
- extern int kill_pid(struct pid *pid, int sig, int priv);
- extern int kill_proc_info(int, struct siginfo *, pid_t);
- extern int do_notify_parent(struct task_struct *, int);
-+extern void do_notify_parent_cldstop(struct task_struct *, int);
- extern void force_sig(int, struct task_struct *);
- extern void force_sig_specific(int, struct task_struct *);
- extern int send_sig(int, struct task_struct *, int);
 diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
-index 6186a78..03a4555 100644  
+index b622498..6ff7277 100644  
 --- a/include/linux/tracehook.h
 +++ b/include/linux/tracehook.h
 @@ -49,6 +49,7 @@
@@ -726,25 +726,7 @@ index 6186a78..03a4555 100644
  	ptrace_report_syscall(regs);
  }
  
-@@ -155,6 +163,8 @@ static inline int tracehook_unsafe_exec(
- 		else
- 			unsafe |= LSM_UNSAFE_PTRACE;
- 	}
-+	if (unlikely(task_utrace_flags(task)))
-+		unsafe |= utrace_unsafe_exec(task);
- 	return unsafe;
- }
- 
-@@ -173,6 +183,8 @@ static inline struct task_struct *traceh
- {
- 	if (task_ptrace(tsk) & PT_PTRACED)
- 		return rcu_dereference(tsk->parent);
-+	if (unlikely(task_utrace_flags(tsk)))
-+		return utrace_tracer_task(tsk);
- 	return NULL;
- }
- 
-@@ -194,6 +206,8 @@ static inline void tracehook_report_exec
+@@ -194,6 +202,8 @@ static inline void tracehook_report_exec
  					 struct linux_binprm *bprm,
  					 struct pt_regs *regs)
  {
@@ -753,19 +735,16 @@ index 6186a78..03a4555 100644
  	if (!ptrace_event(PT_TRACE_EXEC, PTRACE_EVENT_EXEC, 0) &&
  	    unlikely(task_ptrace(current) & PT_PTRACED))
  		send_sig(SIGTRAP, current, 0);
-@@ -211,7 +225,11 @@ static inline void tracehook_report_exec
+@@ -211,6 +221,8 @@ static inline void tracehook_report_exec
   */
  static inline void tracehook_report_exit(long *exit_code)
  {
 +	if (unlikely(task_utrace_flags(current) & UTRACE_EVENT(EXIT)))
 +		utrace_report_exit(exit_code);
  	ptrace_event(PT_TRACE_EXIT, PTRACE_EVENT_EXIT, *exit_code);
-+	if (unlikely(!list_empty(&current->ptraced)))
-+		ptrace_utrace_exit(current);
  }
  
- /**
-@@ -254,6 +272,7 @@ static inline int tracehook_prepare_clon
+@@ -254,6 +266,7 @@ static inline int tracehook_prepare_clon
  static inline void tracehook_finish_clone(struct task_struct *child,
  					  unsigned long clone_flags, int trace)
  {
@@ -773,7 +752,7 @@ index 6186a78..03a4555 100644
  	ptrace_init_task(child, (clone_flags & CLONE_PTRACE) || trace);
  }
  
-@@ -280,6 +299,8 @@ static inline void tracehook_report_clon
+@@ -280,6 +293,8 @@ static inline void tracehook_report_clon
  					  unsigned long clone_flags,
  					  pid_t pid, struct task_struct *child)
  {
@@ -782,7 +761,7 @@ index 6186a78..03a4555 100644
  	if (unlikely(trace) || unlikely(clone_flags & CLONE_PTRACE)) {
  		/*
  		 * The child starts up with an immediate SIGSTOP.
-@@ -311,6 +332,9 @@ static inline void tracehook_report_clon
+@@ -311,6 +326,9 @@ static inline void tracehook_report_clon
  						   pid_t pid,
  						   struct task_struct *child)
  {
@@ -792,52 +771,32 @@ index 6186a78..03a4555 100644
  	if (unlikely(trace))
  		ptrace_event(0, trace, pid);
  }
-@@ -345,6 +369,9 @@ static inline void tracehook_report_vfor
+@@ -345,6 +363,7 @@ static inline void tracehook_report_vfor
   */
  static inline void tracehook_prepare_release_task(struct task_struct *task)
  {
-+	smp_mb();
-+	if (task_utrace_struct(task) != NULL)
-+		utrace_release_task(task);
++	utrace_release_task(task);
  }
  
  /**
-@@ -358,7 +385,21 @@ static inline void tracehook_prepare_rel
-  */
+@@ -359,6 +378,7 @@ static inline void tracehook_prepare_rel
  static inline void tracehook_finish_release_task(struct task_struct *task)
  {
-+	int bad = 0;
  	ptrace_release_task(task);
 +	BUG_ON(task->exit_state != EXIT_DEAD);
-+	if (unlikely(task_utrace_struct(task) != NULL)) {
-+		/*
-+		 * In a race condition, utrace_attach() will temporarily set
-+		 * it, but then check @task->exit_state and clear it.  It does
-+		 * all this under task_lock(), so we take the lock to check
-+		 * that there is really a bug and not just that known race.
-+		 */
-+		task_lock(task);
-+		bad = unlikely(task_utrace_struct(task) != NULL);
-+		task_unlock(task);
-+	}
-+	BUG_ON(bad);
  }
  
  /**
-@@ -380,8 +421,12 @@ static inline void tracehook_signal_hand
+@@ -380,6 +400,8 @@ static inline void tracehook_signal_hand
  					    const struct k_sigaction *ka,
  					    struct pt_regs *regs, int stepping)
  {
 +	if (task_utrace_flags(current))
 +		utrace_signal_handler(current, stepping);
-+#ifndef CONFIG_UTRACE_PTRACE
  	if (stepping)
  		ptrace_notify(SIGTRAP);
-+#endif
  }
- 
- /**
-@@ -400,6 +445,8 @@ static inline int tracehook_consider_ign
+@@ -400,6 +422,8 @@ static inline int tracehook_consider_ign
  						    int sig,
  						    void __user *handler)
  {
@@ -846,7 +805,7 @@ index 6186a78..03a4555 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -421,6 +468,9 @@ static inline int tracehook_consider_fat
+@@ -421,6 +445,9 @@ static inline int tracehook_consider_fat
  						  int sig,
  						  void __user *handler)
  {
@@ -856,7 +815,7 @@ index 6186a78..03a4555 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -435,6 +485,8 @@ static inline int tracehook_consider_fat
+@@ -435,6 +462,8 @@ static inline int tracehook_consider_fat
   */
  static inline int tracehook_force_sigpending(void)
  {
@@ -865,7 +824,7 @@ index 6186a78..03a4555 100644
  	return 0;
  }
  
-@@ -464,6 +516,8 @@ static inline int tracehook_get_signal(s
+@@ -464,6 +493,8 @@ static inline int tracehook_get_signal(s
  				       siginfo_t *info,
  				       struct k_sigaction *return_ka)
  {
@@ -874,16 +833,16 @@ index 6186a78..03a4555 100644
  	return 0;
  }
  
-@@ -484,6 +538,8 @@ static inline int tracehook_get_signal(s
+@@ -491,6 +522,8 @@ static inline int tracehook_get_signal(s
   */
  static inline int tracehook_notify_jctl(int notify, int why)
  {
 +	if (task_utrace_flags(current) & UTRACE_EVENT(JCTL))
 +		utrace_report_jctl(notify, why);
- 	return notify || (current->ptrace & PT_PTRACED);
+ 	return notify ?: (current->ptrace & PT_PTRACED) ? why : 0;
  }
  
-@@ -507,6 +563,8 @@ static inline int tracehook_notify_jctl(
+@@ -514,6 +547,8 @@ static inline int tracehook_notify_jctl(
  static inline int tracehook_notify_death(struct task_struct *task,
  					 void **death_cookie, int group_dead)
  {
@@ -892,18 +851,17 @@ index 6186a78..03a4555 100644
  	if (task->exit_signal == -1)
  		return task->ptrace ? SIGCHLD : DEATH_REAP;
  
-@@ -543,6 +601,10 @@ static inline void tracehook_report_deat
+@@ -550,6 +585,9 @@ static inline void tracehook_report_deat
  					  int signal, void *death_cookie,
  					  int group_dead)
  {
 +	smp_mb();
-+	if (task_utrace_flags(task) & (UTRACE_EVENT(DEATH) |
-+				       UTRACE_EVENT(QUIESCE)))
++	if (task_utrace_flags(task) & _UTRACE_DEATH_EVENTS)
 +		utrace_report_death(task, death_cookie, group_dead, signal);
  }
  
  #ifdef TIF_NOTIFY_RESUME
-@@ -572,10 +634,14 @@ static inline void set_notify_resume(str
+@@ -579,10 +617,20 @@ static inline void set_notify_resume(str
   * asynchronously, this will be called again before we return to
   * user mode.
   *
@@ -914,6 +872,12 @@ index 6186a78..03a4555 100644
  static inline void tracehook_notify_resume(struct pt_regs *regs)
  {
 +	struct task_struct *task = current;
++	/*
++	 * This pairs with the barrier implicit in set_notify_resume().
++	 * It ensures that we read the nonzero utrace_flags set before
++	 * set_notify_resume() was called by utrace setup.
++	 */
++	smp_rmb();
 +	if (task_utrace_flags(task))
 +		utrace_resume(task, regs);
  }
@@ -921,14 +885,14 @@ index 6186a78..03a4555 100644
  
 diff --git a/include/linux/utrace.h b/include/linux/utrace.h
 new file mode 100644
-index ...76cdb73 100644  
+index ...f46cc0f 100644  
 --- /dev/null
 +++ b/include/linux/utrace.h
-@@ -0,0 +1,707 @@
+@@ -0,0 +1,692 @@
 +/*
 + * utrace infrastructure interface for debugging user processes
 + *
-+ * Copyright (C) 2006, 2007, 2008 Red Hat, Inc.  All rights reserved.
++ * Copyright (C) 2006-2009 Red Hat, Inc.  All rights reserved.
 + *
 + * This copyrighted material is made available to anyone wishing to use,
 + * modify, copy, or redistribute it subject to the terms and conditions
@@ -944,7 +908,7 @@ index ...76cdb73 100644
 + * A tracing engine starts by calling utrace_attach_task() or
 + * utrace_attach_pid() on the chosen thread, passing in a set of hooks
 + * (&struct utrace_engine_ops), and some associated data.  This produces a
-+ * &struct utrace_attached_engine, which is the handle used for all other
++ * &struct utrace_engine, which is the handle used for all other
 + * operations.  An attached engine has its ops vector, its data, and an
 + * event mask controlled by utrace_set_events().
 + *
@@ -971,7 +935,7 @@ index ...76cdb73 100644
 +/*
 + * Event bits passed to utrace_set_events().
 + * These appear in &struct task_struct.@utrace_flags
-+ * and &struct utrace_attached_engine.@flags.
++ * and &struct utrace_engine.@flags.
 + */
 +enum utrace_events {
 +	_UTRACE_EVENT_QUIESCE,	/* Thread is available for examination.  */
@@ -1009,13 +973,16 @@ index ...76cdb73 100644
 +	(UTRACE_EVENT(SYSCALL_ENTRY) | UTRACE_EVENT(SYSCALL_EXIT))
 +
 +/*
++ * The event reports triggered synchronously by task death.
++ */
++#define _UTRACE_DEATH_EVENTS (UTRACE_EVENT(DEATH) | UTRACE_EVENT(QUIESCE))
++
++/*
 + * Hooks in <linux/tracehook.h> call these entry points to the
 + * utrace dispatch.  They are weak references here only so
 + * tracehook.h doesn't need to #ifndef CONFIG_UTRACE them to
 + * avoid external references in case of unoptimized compilation.
 + */
-+void utrace_release_task(struct task_struct *)
-+	__attribute__((weak));
 +bool utrace_interrupt_pending(void)
 +	__attribute__((weak));
 +void utrace_resume(struct task_struct *, struct pt_regs *)
@@ -1040,10 +1007,6 @@ index ...76cdb73 100644
 +	__attribute__((weak));
 +void utrace_report_syscall_exit(struct pt_regs *)
 +	__attribute__((weak));
-+struct task_struct *utrace_tracer_task(struct task_struct *)
-+	__attribute__((weak));
-+int utrace_unsafe_exec(struct task_struct *)
-+	__attribute__((weak));
 +void utrace_signal_handler(struct task_struct *, int)
 +	__attribute__((weak));
 +
@@ -1063,6 +1026,9 @@ index ...76cdb73 100644
 +static inline void utrace_init_task(struct task_struct *child)
 +{
 +}
++static inline void utrace_release_task(struct task_struct *task)
++{
++}
 +
 +static inline void task_utrace_proc_status(struct seq_file *m,
 +					   struct task_struct *p)
@@ -1078,16 +1044,30 @@ index ...76cdb73 100644
 +
 +static inline struct utrace *task_utrace_struct(struct task_struct *task)
 +{
-+	return task->utrace;
++	return &task->utrace;
 +}
 +
-+static inline void utrace_init_task(struct task_struct *child)
++static inline void utrace_init_task(struct task_struct *task)
 +{
-+	child->utrace_flags = 0;
-+	child->utrace = NULL;
++	task->utrace_flags = 0;
++	memset(&task->utrace, 0, sizeof(task->utrace));
++	INIT_LIST_HEAD(&task->utrace.attached);
++	INIT_LIST_HEAD(&task->utrace.attaching);
++	spin_lock_init(&task->utrace.lock);
 +}
 +
++void utrace_release_task(struct task_struct *);
 +void task_utrace_proc_status(struct seq_file *m, struct task_struct *p);
++
++
++/*
++ * Version number of the API defined in this file.  This will change
++ * whenever a tracing engine's code would need some updates to keep
++ * working.  We maintain this here for the benefit of tracing engine code
++ * that is developed concurrently with utrace API improvements before they
++ * are merged into the kernel, making LINUX_VERSION_CODE checks unwieldy.
++ */
++#define UTRACE_API_VERSION	20090302
 +
 +/**
 + * enum utrace_resume_action - engine's choice of action for a traced task
@@ -1215,7 +1195,7 @@ index ...76cdb73 100644
 +#define UTRACE_ATTACH_MATCH_MASK	0x000f
 +
 +/**
-+ * struct utrace_attached_engine - per-engine structure
++ * struct utrace_engine - per-engine structure
 + * @ops:	&struct utrace_engine_ops pointer passed to utrace_attach_task()
 + * @data:	engine-private &void * passed to utrace_attach_task()
 + * @flags:	event mask set by utrace_set_events() plus internal flag bits
@@ -1228,7 +1208,7 @@ index ...76cdb73 100644
 + * When it drops to zero, the structure is freed.  One reference is held
 + * implicitly while the engine is attached to its task.
 + */
-+struct utrace_attached_engine {
++struct utrace_engine {
 +/* private: */
 +	struct kref kref;
 +	struct list_head entry;
@@ -1241,12 +1221,12 @@ index ...76cdb73 100644
 +};
 +
 +/**
-+ * utrace_engine_get - acquire a reference on a &struct utrace_attached_engine
-+ * @engine:	&struct utrace_attached_engine pointer
++ * utrace_engine_get - acquire a reference on a &struct utrace_engine
++ * @engine:	&struct utrace_engine pointer
 + *
 + * You must hold a reference on @engine, and you get another.
 + */
-+static inline void utrace_engine_get(struct utrace_attached_engine *engine)
++static inline void utrace_engine_get(struct utrace_engine *engine)
 +{
 +	kref_get(&engine->kref);
 +}
@@ -1254,13 +1234,13 @@ index ...76cdb73 100644
 +void __utrace_engine_release(struct kref *);
 +
 +/**
-+ * utrace_engine_put - release a reference on a &struct utrace_attached_engine
-+ * @engine:	&struct utrace_attached_engine pointer
++ * utrace_engine_put - release a reference on a &struct utrace_engine
++ * @engine:	&struct utrace_engine pointer
 + *
 + * You must hold a reference on @engine, and you lose that reference.
 + * If it was the last one, @engine becomes an invalid pointer.
 + */
-+static inline void utrace_engine_put(struct utrace_attached_engine *engine)
++static inline void utrace_engine_put(struct utrace_engine *engine)
 +{
 +	kref_put(&engine->kref, __utrace_engine_release);
 +}
@@ -1313,11 +1293,6 @@ index ...76cdb73 100644
 + * the like, but all hooks are asynchronous and must not block on
 + * external events!  If you want the thread to block, use %UTRACE_STOP
 + * in your hook's return value; then later wake it up with utrace_control().
-+ *
-+ * The @unsafe_exec and @tracer_task hooks are not associated with
-+ * event reports.  These may be %NULL if the engine has nothing to say.
-+ * These hooks are called in more constrained environments and should
-+ * not block or do very much.
 + *
 + * @report_quiesce:
 + *	Requested by %UTRACE_EVENT(%QUIESCE).
@@ -1453,78 +1428,51 @@ index ...76cdb73 100644
 + *	Unlike other callbacks, this can be called from the parent's context
 + *	rather than from the traced thread itself--it must not delay the
 + *	parent by blocking.
-+ *
-+ * @unsafe_exec:
-+ *	Used if not %NULL.
-+ *	Return %LSM_UNSAFE_* bits that apply to the exec in progress
-+ *	due to tracing done by this engine.  These bits indicate that
-+ *	someone is able to examine the process and so a set-UID or similar
-+ *	privilege escalation may not be safe to permit.
-+ *	Called with task_lock() held.
-+ *
-+ * @tracer_task:
-+ *	Used if not %NULL.
-+ *	Return the &struct task_struct for the task using ptrace() on
-+ *	@task, or %NULL.  Always called with rcu_read_lock() held to
-+ *	keep the returned struct alive.  At exec time, this may be
-+ *	called with task_lock() still held from when unsafe_exec() was
-+ *	just called.  In that case it must give results consistent
-+ *	with those unsafe_exec() results, i.e. non-%NULL if any
-+ *	%LSM_UNSAFE_PTRACE_* bits were set.  The value is also used to
-+ *	display after "TracerPid:" in /proc/PID/status, where it is
-+ *	called with only rcu_read_lock() held.  If this engine returns
-+ *	%NULL, another engine may supply the result.
 + */
 +struct utrace_engine_ops {
 +	u32 (*report_quiesce)(enum utrace_resume_action action,
-+			      struct utrace_attached_engine *engine,
++			      struct utrace_engine *engine,
 +			      struct task_struct *task,
 +			      unsigned long event);
 +	u32 (*report_signal)(u32 action,
-+			     struct utrace_attached_engine *engine,
++			     struct utrace_engine *engine,
 +			     struct task_struct *task,
 +			     struct pt_regs *regs,
 +			     siginfo_t *info,
 +			     const struct k_sigaction *orig_ka,
 +			     struct k_sigaction *return_ka);
 +	u32 (*report_clone)(enum utrace_resume_action action,
-+			    struct utrace_attached_engine *engine,
++			    struct utrace_engine *engine,
 +			    struct task_struct *parent,
 +			    unsigned long clone_flags,
 +			    struct task_struct *child);
 +	u32 (*report_jctl)(enum utrace_resume_action action,
-+			   struct utrace_attached_engine *engine,
++			   struct utrace_engine *engine,
 +			   struct task_struct *task,
 +			   int type, int notify);
 +	u32 (*report_exec)(enum utrace_resume_action action,
-+			   struct utrace_attached_engine *engine,
++			   struct utrace_engine *engine,
 +			   struct task_struct *task,
 +			   const struct linux_binfmt *fmt,
 +			   const struct linux_binprm *bprm,
 +			   struct pt_regs *regs);
 +	u32 (*report_syscall_entry)(u32 action,
-+				    struct utrace_attached_engine *engine,
++				    struct utrace_engine *engine,
 +				    struct task_struct *task,
 +				    struct pt_regs *regs);
 +	u32 (*report_syscall_exit)(enum utrace_resume_action action,
-+				   struct utrace_attached_engine *engine,
++				   struct utrace_engine *engine,
 +				   struct task_struct *task,
 +				   struct pt_regs *regs);
 +	u32 (*report_exit)(enum utrace_resume_action action,
-+			   struct utrace_attached_engine *engine,
++			   struct utrace_engine *engine,
 +			   struct task_struct *task,
 +			   long orig_code, long *code);
-+	u32 (*report_death)(struct utrace_attached_engine *engine,
++	u32 (*report_death)(struct utrace_engine *engine,
 +			    struct task_struct *task,
 +			    bool group_dead, int signal);
-+	void (*report_reap)(struct utrace_attached_engine *engine,
++	void (*report_reap)(struct utrace_engine *engine,
 +			    struct task_struct *task);
-+
-+	int (*unsafe_exec)(struct utrace_attached_engine *engine,
-+			   struct task_struct *task);
-+	struct task_struct *(*tracer_task)(
-+		struct utrace_attached_engine *engine,
-+		struct task_struct *task);
 +};
 +
 +/**
@@ -1544,23 +1492,25 @@ index ...76cdb73 100644
 + * These are the exported entry points for tracing engines to use.
 + * See kernel/utrace.c for their kerneldoc comments with interface details.
 + */
-+struct utrace_attached_engine *utrace_attach_task(
-+	struct task_struct *, int, const struct utrace_engine_ops *, void *);
-+struct utrace_attached_engine *utrace_attach_pid(
-+	struct pid *, int, const struct utrace_engine_ops *, void *);
++struct utrace_engine *utrace_attach_task(struct task_struct *, int,
++					 const struct utrace_engine_ops *,
++					 void *);
++struct utrace_engine *utrace_attach_pid(struct pid *, int,
++					const struct utrace_engine_ops *,
++					void *);
 +int __must_check utrace_control(struct task_struct *,
-+				struct utrace_attached_engine *,
++				struct utrace_engine *,
 +				enum utrace_resume_action);
 +int __must_check utrace_set_events(struct task_struct *,
-+				   struct utrace_attached_engine *,
++				   struct utrace_engine *,
 +				   unsigned long eventmask);
 +int __must_check utrace_barrier(struct task_struct *,
-+				struct utrace_attached_engine *);
++				struct utrace_engine *);
 +int __must_check utrace_prepare_examine(struct task_struct *,
-+					struct utrace_attached_engine *,
++					struct utrace_engine *,
 +					struct utrace_examiner *);
 +int __must_check utrace_finish_examine(struct task_struct *,
-+				       struct utrace_attached_engine *,
++				       struct utrace_engine *,
 +				       struct utrace_examiner *);
 +
 +/**
@@ -1576,7 +1526,7 @@ index ...76cdb73 100644
 + * then this call returns -%ESRCH.
 + */
 +static inline __must_check int utrace_control_pid(
-+	struct pid *pid, struct utrace_attached_engine *engine,
++	struct pid *pid, struct utrace_engine *engine,
 +	enum utrace_resume_action action)
 +{
 +	/*
@@ -1603,8 +1553,7 @@ index ...76cdb73 100644
 + * then this call returns -%ESRCH.
 + */
 +static inline __must_check int utrace_set_events_pid(
-+	struct pid *pid, struct utrace_attached_engine *engine,
-+	unsigned long eventmask)
++	struct pid *pid, struct utrace_engine *engine, unsigned long eventmask)
 +{
 +	struct task_struct *task = pid_task(pid, PIDTYPE_PID);
 +	return unlikely(!task) ? -ESRCH :
@@ -1622,8 +1571,8 @@ index ...76cdb73 100644
 + * staying valid.  If it's been reaped so that @pid points nowhere,
 + * then this call returns -%ESRCH.
 + */
-+static inline __must_check int utrace_barrier_pid(
-+	struct pid *pid, struct utrace_attached_engine *engine)
++static inline __must_check int utrace_barrier_pid(struct pid *pid,
++						  struct utrace_engine *engine)
 +{
 +	struct task_struct *task = pid_task(pid, PIDTYPE_PID);
 +	return unlikely(!task) ? -ESRCH : utrace_barrier(task, engine);
@@ -1632,11 +1581,75 @@ index ...76cdb73 100644
 +#endif	/* CONFIG_UTRACE */
 +
 +#endif	/* linux/utrace.h */
+diff --git a/include/linux/utrace_struct.h b/include/linux/utrace_struct.h
+new file mode 100644
+index ...aba7e09 100644  
+--- /dev/null
++++ b/include/linux/utrace_struct.h
+@@ -0,0 +1,58 @@
++/*
++ * 'struct utrace' data structure for kernel/utrace.c private use.
++ *
++ * Copyright (C) 2006-2009 Red Hat, Inc.  All rights reserved.
++ *
++ * This copyrighted material is made available to anyone wishing to use,
++ * modify, copy, or redistribute it subject to the terms and conditions
++ * of the GNU General Public License v.2.
++ */
++
++#ifndef _LINUX_UTRACE_STRUCT_H
++#define _LINUX_UTRACE_STRUCT_H	1
++
++#ifdef CONFIG_UTRACE
++
++#include <linux/list.h>
++#include <linux/spinlock.h>
++
++/*
++ * Per-thread structure private to utrace implementation.  This properly
++ * belongs in kernel/utrace.c and its use is entirely private to the code
++ * there.  It is only defined in a header file so that it can be embedded
++ * in the struct task_struct layout.  It is here rather than in utrace.h
++ * to avoid header nesting order issues getting too complex.
++ *
++ */
++struct utrace {
++	struct task_struct *cloning;
++
++	struct list_head attached, attaching;
++	spinlock_t lock;
++
++	struct utrace_engine *reporting;
++
++	unsigned int stopped:1;
++	unsigned int report:1;
++	unsigned int interrupt:1;
++	unsigned int signal_handler:1;
++	unsigned int vfork_stop:1; /* need utrace_stop() before vfork wait */
++	unsigned int death:1;	/* in utrace_report_death() now */
++	unsigned int reap:1;	/* release_task() has run */
++};
++
++# define INIT_UTRACE(tsk)						      \
++	.utrace_flags = 0,						      \
++	.utrace = {							      \
++		.lock = __SPIN_LOCK_UNLOCKED(tsk.utrace.lock),		      \
++		.attached = LIST_HEAD_INIT(tsk.utrace.attached),	      \
++		.attaching = LIST_HEAD_INIT(tsk.utrace.attaching),	      \
++	},
++
++#else
++
++# define INIT_UTRACE(tsk)	/* Nothing. */
++
++#endif	/* CONFIG_UTRACE */
++
++#endif	/* linux/utrace_struct.h */
 diff --git a/init/Kconfig b/init/Kconfig
-index c11da38..9ca2a8f 100644  
+index 6a5c5fe..4b5ab3e 100644  
 --- a/init/Kconfig
 +++ b/init/Kconfig
-@@ -898,6 +898,32 @@ config STOP_MACHINE
+@@ -1060,6 +1060,15 @@ config STOP_MACHINE
  	help
  	  Need stop_machine() primitive.
  
@@ -1649,31 +1662,14 @@ index c11da38..9ca2a8f 100644
 +	  kernel interface exported to kernel modules, to track events in
 +	  user threads, extract and change user thread state.
 +
-+config UTRACE_PTRACE
-+	bool "utrace-based ptrace (EXPERIMENTAL)"
-+	default y if UTRACE
-+	depends on UTRACE
-+	help
-+	  This changes the implementation of ptrace() to cooperate with
-+	  the utrace facility.  Without this option, using any utrace
-+	  facility on a task that anything also uses ptrace() on (i.e.
-+	  usual debuggers, strace, etc) can have confusing and unreliable
-+	  results.  With this option, the ptrace() implementation is
-+	  changed to work via utrace facilities and the two cooperate well.
-+
-+	  It's recommended to enable this if you are experimenting with
-+	  new modules that use utrace.  But, disabling it makes sure that
-+	  using traditional ptrace() on tasks not touched by utrace will
-+	  not use any experimental new code that might be unreliable.
-+
  source "block/Kconfig"
  
  config PREEMPT_NOTIFIERS
 diff --git a/kernel/Makefile b/kernel/Makefile
-index 143e8b6..a1e4b62 100644  
+index e4791b3..7bff724 100644  
 --- a/kernel/Makefile
 +++ b/kernel/Makefile
-@@ -62,6 +62,7 @@ obj-$(CONFIG_IKCONFIG) += configs.o
+@@ -68,6 +68,7 @@ obj-$(CONFIG_IKCONFIG) += configs.o
  obj-$(CONFIG_RESOURCE_COUNTERS) += res_counter.o
  obj-$(CONFIG_STOP_MACHINE) += stop_machine.o
  obj-$(CONFIG_KPROBES_SANITY_TEST) += test_kprobes.o
@@ -1682,7 +1678,7 @@ index 143e8b6..a1e4b62 100644
  obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
  obj-$(CONFIG_AUDIT_TREE) += audit_tree.o
 diff --git a/kernel/ptrace.c b/kernel/ptrace.c
-index 356699a..bc81174 100644  
+index c9cf48b..41e9542 100644  
 --- a/kernel/ptrace.c
 +++ b/kernel/ptrace.c
 @@ -16,6 +16,7 @@
@@ -1693,948 +1689,50 @@ index 356699a..bc81174 100644
  #include <linux/security.h>
  #include <linux/signal.h>
  #include <linux/audit.h>
-@@ -38,6 +39,7 @@ void __ptrace_link(struct task_struct *c
- 	child->parent = new_parent;
- }
-  
-+#ifndef CONFIG_UTRACE_PTRACE
- /*
-  * Turn a tracing stop into a normal stop now, since with no tracer there
-  * would be no way to wake it up with SIGCONT or SIGKILL.  If there was a
-@@ -58,6 +60,72 @@ void ptrace_untrace(struct task_struct *
- 	spin_unlock(&child->sighand->siglock);
+@@ -172,6 +173,14 @@ bool ptrace_may_access(struct task_struc
+ 	return (!err ? true : false);
  }
  
-+static void ptrace_finish(struct task_struct *child)
-+{
-+	if (task_is_traced(child))
-+		ptrace_untrace(child);
-+}
-+
-+static void ptrace_detach_task(struct task_struct *child, int sig)
-+{
-+	/* Architecture-specific hardware disable .. */
-+	ptrace_disable(child);
-+	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-+}
-+
-+static void utrace_engine_put(struct utrace_attached_engine *engine)
-+{
-+}
-+
-+#else  /* CONFIG_UTRACE_PTRACE */
-+
-+static const struct utrace_engine_ops ptrace_utrace_ops; /* forward decl */
-+
-+static void ptrace_detach_task(struct task_struct *child, int sig)
-+{
-+	enum utrace_resume_action action = UTRACE_DETACH;
-+	struct utrace_attached_engine *engine;
-+	int ret;
-+
-+	engine = utrace_attach_task(child, UTRACE_ATTACH_MATCH_OPS,
-+				    &ptrace_utrace_ops, NULL);
-+	if (unlikely(IS_ERR(engine)))
-+		return;
-+
-+	/*
-+	 * When leaving a parting signal to deliver, we cannot detach our
-+	 * utrace engine yet.  We need it there to get a report_signal()
-+	 * callback that can inject our parting signal.  Instead, we'll
-+	 * mark our engine by clearing its data pointer.  Our callbacks
-+	 * will see this and know it's a PTRACE_DETACH still in progress.
-+	 */
-+	if (sig) {
-+		engine->data = NULL;
-+		action = UTRACE_INTERRUPT;
-+	}
-+
-+	ret = utrace_control(child, engine, action);
-+	WARN_ON(ret && ret != -EINPROGRESS &&
-+		ret != -ESRCH && ret != -EALREADY);
-+
-+	utrace_engine_put(engine);
-+}
-+
-+void ptrace_utrace_exit(struct task_struct *task)
-+{
-+	struct task_struct *child;
-+	read_lock(&tasklist_lock);
-+	list_for_each_entry(child, &task->ptraced, ptrace_entry)
-+		ptrace_detach_task(child, 0);
-+	read_unlock(&tasklist_lock);
-+}
-+
-+static void ptrace_finish(struct task_struct *child)
-+{
-+}
-+
-+#endif	/* !CONFIG_UTRACE_PTRACE */
-+
- /*
-  * unptrace a task: move it back to its original parent and
-  * remove it from the ptrace list.
-@@ -72,10 +140,11 @@ void __ptrace_unlink(struct task_struct 
- 	child->parent = child->real_parent;
- 	list_del_init(&child->ptrace_entry);
- 
--	if (task_is_traced(child))
--		ptrace_untrace(child);
-+	ptrace_finish(child);
- }
- 
-+#ifndef CONFIG_UTRACE_PTRACE
-+
- /*
-  * Check that we have indeed attached to the thing..
-  */
-@@ -113,6 +182,536 @@ int ptrace_check_attach(struct task_stru
- 	return ret;
- }
- 
-+static struct utrace_attached_engine *prepare_ptrace_attach(
-+	struct task_struct *child, struct task_struct *parent)
-+{
-+	return NULL;
-+}
-+
-+static int finish_ptrace_attach(struct task_struct *task,
-+				 struct utrace_attached_engine *engine,
-+				 int retval)
-+{
-+	return retval;
-+}
-+
-+static int ptrace_update_utrace(struct task_struct *task,
-+				struct utrace_attached_engine *engine)
-+{
-+	return 0;
-+}
-+
-+#else	/* CONFIG_UTRACE_PTRACE */
-+
-+static int ptrace_update_utrace(struct task_struct *task,
-+				struct utrace_attached_engine *engine)
-+{
-+	unsigned long events;
-+
-+	/*
-+	 * We need this for resume handling.
-+	 */
-+	events = UTRACE_EVENT(QUIESCE);
-+
-+	/*
-+	 * These events are always reported.
-+	 */
-+	events |= UTRACE_EVENT(EXEC) | UTRACE_EVENT_SIGNAL_ALL;
-+
-+	/*
-+	 * We always have to examine clone events to check for CLONE_PTRACE.
-+	 */
-+	events |= UTRACE_EVENT(CLONE);
-+
-+	/*
-+	 * PTRACE_SETOPTIONS can request more events.
-+	 */
-+	if (task->ptrace & PT_TRACE_EXIT)
-+		events |= UTRACE_EVENT(EXIT);
-+
-+	if (!engine) {
-+		int ret;
-+		engine = utrace_attach_task(task, UTRACE_ATTACH_MATCH_OPS,
-+					    &ptrace_utrace_ops, NULL);
-+		if (IS_ERR(engine))
-+			return -ESRCH;
-+		ret = utrace_set_events(task, engine, events);
-+		utrace_engine_put(engine);
-+		return ret;
-+	}
-+
-+	return utrace_set_events(task, engine, events);
-+}
-+
-+static int ptrace_unsafe_exec(struct utrace_attached_engine *engine,
-+			      struct task_struct *task)
-+{
-+	if (task->ptrace & PT_PTRACE_CAP)
-+		return LSM_UNSAFE_PTRACE_CAP;
-+
-+	return LSM_UNSAFE_PTRACE;
-+}
-+
-+static struct task_struct *ptrace_tracer_task(
-+	struct utrace_attached_engine *engine, struct task_struct *target)
-+{
-+	return target->parent;
-+}
-+
-+static void ptrace_set_action(struct task_struct *task,
-+			      enum utrace_resume_action action,
-+			      enum utrace_syscall_action syscall)
-+{
-+	task->ptrace &= ~((UTRACE_SYSCALL_MASK | UTRACE_RESUME_MASK) << 16);
-+	task->ptrace |= ((UTRACE_RESUME - action) | syscall) << 16;
-+}
-+
-+static enum utrace_resume_action ptrace_resume_action(struct task_struct *task)
-+{
-+	return UTRACE_RESUME - ((task->ptrace >> 16) & UTRACE_RESUME_MASK);
-+}
-+
-+static enum utrace_syscall_action ptrace_syscall_action(
-+	struct task_struct *task)
-+{
-+	return (task->ptrace >> 16) & UTRACE_SYSCALL_MASK;
-+}
-+
 +/*
-+ * Remember which event stop this was.  We have to keep a record that
-+ * won't be wiped by ptrace_do_wait() when @task->exit_code is cleared.
-+ * So we store the PTRACE_EVENT_* value in a nybble of @task->ptrace.
++ * For experimental use of utrace, exclude ptrace on the same task.
 + */
-+static void ptrace_set_stop_event(struct task_struct *task, int event)
++static inline bool exclude_ptrace(struct task_struct *task)
 +{
-+	task->ptrace &= 0xf0ffffffU;
-+	task->ptrace |= event << 24;
++	return unlikely(!!task_utrace_flags(task));
 +}
 +
-+static int ptrace_stop_event(struct task_struct *task)
-+{
-+	return (task->ptrace >> 24) & 0xf;
-+}
-+
-+/*
-+ * This doesn't really exist in the user API, but we pick an unused value
-+ * encoded with ptrace_set_stop_event() to record when the last stop was
-+ * for a syscall stop.
-+ */
-+#define PTRACE_EVENT_SYSCALL	0xf
-+
-+static u32 utrace_ptrace_report(u32 action, struct task_struct *task,
-+				int event, int code)
-+{
-+	/*
-+	 * Special kludge magic in utrace.c (utrace_stop) sees this
-+	 * and calls do_notify_parent_cldstop() for us.  This kludge
-+	 * is necessary to keep that wakeup after we enter TASK_TRACED.
-+	 */
-+	ptrace_set_action(task, UTRACE_STOP, 0);
-+
-+	/*
-+	 * If we already have a pending stop event, then don't override it.
-+	 * We'll simulate this stop when the pending one is cleared,
-+	 * in ptrace_resume(), below.
-+	 */
-+	if (ptrace_stop_event(task) == 0) {
-+		ptrace_set_stop_event(task, event);
-+		task->exit_code = code;
-+	}
-+
-+	return action | UTRACE_STOP;
-+}
-+
-+static u32 utrace_ptrace_event(struct task_struct *task,
-+			       int event, unsigned long msg)
-+{
-+	task->ptrace_message = msg;
-+	return utrace_ptrace_report(0, task, event, (event << 8) | SIGTRAP);
-+}
-+
-+static u32 ptrace_report_exec(enum utrace_resume_action action,
-+			      struct utrace_attached_engine *engine,
-+			      struct task_struct *task,
-+			      const struct linux_binfmt *fmt,
-+			      const struct linux_binprm *bprm,
-+			      struct pt_regs *regs)
-+{
-+	if (task->ptrace & PT_TRACE_EXEC)
-+		return utrace_ptrace_event(task, PTRACE_EVENT_EXEC, 0);
-+
-+	/*
-+	 * Old-fashioned ptrace'd exec just posts a plain signal.
-+	 */
-+	send_sig(SIGTRAP, task, 0);
-+	return UTRACE_RESUME;
-+}
-+
-+static u32 ptrace_report_exit(enum utrace_resume_action action,
-+			      struct utrace_attached_engine *engine,
-+			      struct task_struct *task,
-+			      long orig_code, long *code)
-+{
-+	return utrace_ptrace_event(task, PTRACE_EVENT_EXIT, *code);
-+}
-+
-+static u32 ptrace_report_clone(enum utrace_resume_action action,
-+			       struct utrace_attached_engine *engine,
-+			       struct task_struct *parent,
-+			       unsigned long clone_flags,
-+			       struct task_struct *child)
-+{
-+	int event;
-+	struct utrace_attached_engine *child_engine;
-+
-+	if ((clone_flags & CLONE_VFORK) &&
-+	    (parent->ptrace & PT_TRACE_VFORK_DONE)) {
-+		/*
-+		 * Stash the child PID for a PTRACE_EVENT_VFORK_DONE report,
-+		 * even if we don't report this clone event itself.  Mark
-+		 * that we vfork'd even if we don't actually stop here, so
-+		 * that we'll know to do the vfork-done report.  (This
-+		 * matters when is PTRACE_O_TRACEVFORKDONE set but
-+		 * PTRACE_O_TRACEVFORK is not set.)
-+		 */
-+		int rc = utrace_control(parent, engine, UTRACE_REPORT);
-+		WARN_ON(rc);
-+		parent->ptrace_message = child->pid;
-+		ptrace_set_stop_event(parent, PTRACE_EVENT_VFORK);
-+	}
-+
-+	if (clone_flags & CLONE_UNTRACED)
-+		return UTRACE_RESUME;
-+
-+	event = 0;
-+	if (clone_flags & CLONE_VFORK) {
-+		if (parent->ptrace & PT_TRACE_VFORK)
-+			event = PTRACE_EVENT_VFORK;
-+	} else if ((clone_flags & CSIGNAL) != SIGCHLD) {
-+		if (parent->ptrace & PT_TRACE_CLONE)
-+			event = PTRACE_EVENT_CLONE;
-+	} else if (parent->ptrace & PT_TRACE_FORK) {
-+		event = PTRACE_EVENT_FORK;
-+	}
-+
-+	/*
-+	 * Any of these reports implies auto-attaching the new child.
-+	 * So does CLONE_PTRACE, even with no event to report.
-+	 */
-+	if (event || (clone_flags & CLONE_PTRACE)) {
-+		child_engine = utrace_attach_task(child, UTRACE_ATTACH_CREATE |
-+						  UTRACE_ATTACH_EXCLUSIVE |
-+						  UTRACE_ATTACH_MATCH_OPS,
-+						  &ptrace_utrace_ops,
-+						  parent->parent);
-+		if (unlikely(IS_ERR(child_engine))) {
-+			WARN_ON(1);	/* XXX */
-+		} else {
-+			BUG_ON(!child->ptrace);
-+			/* XXX already set by old ptrace code
-+			   task_lock(child);
-+			   child->ptrace = parent->ptrace;
-+			   child->parent = parent->parent;
-+			   task_unlock(child);
-+			*/
-+			ptrace_update_utrace(child, child_engine);
-+			utrace_engine_put(child_engine);
-+		}
-+	}
-+
-+	if (event)
-+		return utrace_ptrace_event(parent, event, child->pid);
-+
-+	return UTRACE_RESUME;
-+}
-+
-+static u32 ptrace_report_syscall(u32 action, struct task_struct *task)
-+{
-+	int code = SIGTRAP;
-+	if (task->ptrace & PT_TRACESYSGOOD)
-+		code |= 0x80;
-+	return utrace_ptrace_report(action, task, PTRACE_EVENT_SYSCALL, code);
-+}
-+
-+static u32 ptrace_report_syscall_entry(u32 action,
-+				       struct utrace_attached_engine *engine,
-+				       struct task_struct *task,
-+				       struct pt_regs *regs)
-+{
-+	/*
-+	 * If we're doing PTRACE_SYSEMU, just punt here and report
-+	 * at the exit stop instead.
-+	 */
-+	if (ptrace_syscall_action(task))
-+		return UTRACE_SYSCALL_ABORT | UTRACE_RESUME;
-+
-+	return ptrace_report_syscall(UTRACE_SYSCALL_RUN, task);
-+}
-+
-+/*
-+ * Report a vfork-done event to precede another event report.
-+ * There is no utrace callback associated directly with vfork-done.
-+ * Instead, after seeing CLONE_VFORK in report_clone() we notice
-+ * the following syscall-exit, signal, or quiesce callback and
-+ * inject the PTRACE_EVENT_VFORK_DONE stop there.
-+ */
-+static u32 ptrace_report_vfork_done(struct task_struct *task)
-+{
-+	/*
-+	 * We got here after a vfork, when vfork-done tracing
-+	 * was enabled.
-+	 */
-+	ptrace_set_stop_event(task, 0);
-+	return utrace_ptrace_event(task, PTRACE_EVENT_VFORK_DONE,
-+				   task->ptrace_message);
-+}
-+
-+static u32 ptrace_report_syscall_exit(enum utrace_resume_action action,
-+				      struct utrace_attached_engine *engine,
-+				      struct task_struct *task,
-+				      struct pt_regs *regs)
-+{
-+	if (unlikely(ptrace_stop_event(task) == PTRACE_EVENT_VFORK))
-+		return ptrace_report_vfork_done(task);
-+
-+	if (unlikely(ptrace_syscall_action(task)) &&
-+	    unlikely(ptrace_resume_action(task) == UTRACE_SINGLESTEP))
-+		/*
-+		 * This is PTRACE_SYSEMU_SINGLESTEP.
-+		 * Kludge: Prevent arch code from sending a SIGTRAP
-+		 * after tracehook_report_syscall_exit() returns.
-+		 */
-+		user_disable_single_step(task);
-+
-+	return ptrace_report_syscall(0, task);
-+}
-+
-+static u32 ptrace_resumed(struct task_struct *task,
-+			  struct utrace_attached_engine *engine,
-+			  siginfo_t *info, struct k_sigaction *return_ka)
-+{
-+	enum utrace_resume_action resume = ptrace_resume_action(task);
-+
-+	if (unlikely(ptrace_stop_event(task) == PTRACE_EVENT_VFORK))
-+		return UTRACE_SIGNAL_REPORT | ptrace_report_vfork_done(task);
-+
-+	/*
-+	 * If PTRACE_DETACH had a signal for us to deliver,
-+	 * it didn't detach the engine, but marked it for us.
-+	 */
-+	if (!engine->data) {
-+		read_lock(&tasklist_lock);
-+		if (task->ptrace & PT_PTRACED)
-+			engine->data = task->parent;
-+		else
-+			resume = UTRACE_DETACH;
-+		read_unlock(&tasklist_lock);
-+	}
-+
-+	/*
-+	 * If we're stopping, or we haven't reported any signal,
-+	 * then we're all done for now.
-+	 */
-+	if (resume == UTRACE_STOP || !task->last_siginfo)
-+		return UTRACE_SIGNAL_REPORT | resume;
-+
-+	/*
-+	 * We're resuming.  If there's no signal to deliver, just go.
-+	 * If we were given a signal, deliver it now.
-+	 */
-+	WARN_ON(task->last_siginfo != info);
-+	task->last_siginfo = NULL;
-+	if (!task->exit_code)
-+		return UTRACE_SIGNAL_REPORT | resume;
-+
-+	/* Update the siginfo structure if the signal has
-+	   changed.  If the debugger wanted something
-+	   specific in the siginfo structure then it should
-+	   have updated *info via PTRACE_SETSIGINFO.  */
-+	if (task->exit_code != info->si_signo) {
-+		info->si_signo = task->exit_code;
-+		info->si_errno = 0;
-+		info->si_code = SI_USER;
-+		info->si_pid = task_pid_vnr(task->parent);
-+		info->si_uid = task->parent->uid;
-+	}
-+
-+	task->exit_code = 0;
-+
-+	spin_lock_irq(&task->sighand->siglock);
-+	*return_ka = task->sighand->action[info->si_signo - 1];
-+	spin_unlock_irq(&task->sighand->siglock);
-+
-+	return UTRACE_SIGNAL_DELIVER | resume;
-+}
-+
-+static u32 ptrace_report_signal(u32 action,
-+				struct utrace_attached_engine *engine,
-+				struct task_struct *task,
-+				struct pt_regs *regs,
-+				siginfo_t *info,
-+				const struct k_sigaction *orig_ka,
-+				struct k_sigaction *return_ka)
-+{
-+	switch (utrace_signal_action(action)) {
-+	default:
-+		WARN_ON(ptrace_stop_event(task) && info->si_signo != SIGKILL);
-+		break;
-+	case UTRACE_SIGNAL_HANDLER:
-+		WARN_ON(ptrace_stop_event(task));
-+		/*
-+		 * A handler was set up.  If we are stepping, pretend
-+		 * another SIGTRAP arrived.
-+		 */
-+		if (ptrace_resume_action(task) == UTRACE_SINGLESTEP ||
-+		    ptrace_resume_action(task) == UTRACE_BLOCKSTEP) {
-+			memset(info, 0, sizeof *info);
-+			info->si_signo = SIGTRAP;
-+			info->si_code = SIGTRAP;
-+			info->si_pid = task_pid_vnr(task);
-+			info->si_uid = task->uid;
-+			break;
-+		}
-+		/* Fall through.  */
-+	case UTRACE_SIGNAL_REPORT:
-+		/*
-+		 * This is not a new signal, but just a notification we
-+		 * asked for.  Either we're stopping after another report
-+		 * like exec or syscall, or we're resuming.
-+		 */
-+		return ptrace_resumed(task, engine, info, return_ka);
-+	}
-+
-+	WARN_ON(!valid_signal(info->si_signo));
-+	task->last_siginfo = info;
-+	return utrace_ptrace_report(UTRACE_SIGNAL_IGN, task, 0, info->si_signo);
-+}
-+
-+static u32 ptrace_report_quiesce(u32 action,
-+				 struct utrace_attached_engine *engine,
-+				 struct task_struct *task,
-+				 unsigned long event)
-+{
-+	if (event == 0) {
-+		task->last_siginfo = NULL;
-+
-+		if (unlikely(ptrace_stop_event(task) == PTRACE_EVENT_VFORK))
-+			return ptrace_report_vfork_done(task);
-+	}
-+
-+	return ptrace_resume_action(task);
-+}
-+
-+static const struct utrace_engine_ops ptrace_utrace_ops = {
-+	.tracer_task = ptrace_tracer_task,
-+	.unsafe_exec = ptrace_unsafe_exec,
-+	.report_signal = ptrace_report_signal,
-+	.report_quiesce = ptrace_report_quiesce,
-+	.report_exec = ptrace_report_exec,
-+	.report_exit = ptrace_report_exit,
-+	.report_clone = ptrace_report_clone,
-+	.report_syscall_entry = ptrace_report_syscall_entry,
-+	.report_syscall_exit = ptrace_report_syscall_exit,
-+};
-+
-+/*
-+ * Detach the utrace engine on error.  On success, set @engine->data to
-+ * the ptracer's task_struct pointer.  This distinguishes an engine for
-+ * attached ptrace from an engine left behind after a PTRACE_DETACH call
-+ * that left a parting signal to deliver.
-+ */
-+static int finish_ptrace_attach(struct task_struct *task,
-+				struct utrace_attached_engine *engine,
-+				int retval)
-+{
-+	if (retval) {
-+		int error = utrace_control(task, engine, UTRACE_DETACH);
-+		WARN_ON(error && error != -ESRCH && error != -EALREADY);
-+	} else {
-+		engine->data = task->parent;
-+	}
-+	utrace_engine_put(engine);
-+	return retval;
-+}
-+
-+/*
-+ * Attach a utrace engine for ptrace and set up its event mask.
-+ * Returns the engine pointer or an IS_ERR() pointer.
-+ */
-+static struct utrace_attached_engine *prepare_ptrace_attach(
-+	struct task_struct *child, struct task_struct *parent)
-+{
-+	struct utrace_attached_engine *engine;
-+restart:
-+	engine = utrace_attach_task(child, UTRACE_ATTACH_CREATE |
-+				    UTRACE_ATTACH_EXCLUSIVE |
-+				    UTRACE_ATTACH_MATCH_OPS,
-+				    &ptrace_utrace_ops, parent);
-+	if (engine == ERR_PTR(-EEXIST)) {
-+		/*
-+		 * There is already some ptrace engine attached.  Either
-+		 * this attach will fail because another ptracer is
-+		 * already attached, or else this engine was left behind
-+		 * by PTRACE_DETACH to deliver a signal.
-+		 */
-+		engine = utrace_attach_task(child,
-+					    UTRACE_ATTACH_MATCH_OPS,
-+					    &ptrace_utrace_ops, NULL);
-+		if (IS_ERR(engine)) {
-+			BUG_ON(PTR_ERR(engine) != -ENOENT);
-+			goto restart;
-+		}
-+		if (engine->data) {
-+			utrace_engine_put(engine);
-+			engine = ERR_PTR(-EEXIST);
-+		}
-+	}
-+	if (IS_ERR(engine)) {
-+		if (engine != ERR_PTR(-ESRCH))
-+			engine = ERR_PTR(-EPERM);
-+	} else {
-+		int ret = ptrace_update_utrace(child, engine);
-+		if (ret == -EINPROGRESS) {
-+			ret = utrace_barrier(child, engine);
-+			utrace_engine_put(engine);
-+			if (ret != -ERESTARTSYS)
-+				goto restart;
-+			return ERR_PTR(-ERESTARTNOINTR);
-+		}
-+		if (ret)
-+			engine = ERR_PTR(finish_ptrace_attach(child, engine,
-+							      -ESRCH));
-+	}
-+	return engine;
-+}
-+
-+int ptrace_check_attach(struct task_struct *child, int kill)
-+{
-+	struct utrace_attached_engine *engine;
-+	struct utrace_examiner exam;
-+	int ret;
-+
-+	engine = utrace_attach_task(child, UTRACE_ATTACH_MATCH_OPS,
-+				    &ptrace_utrace_ops, NULL);
-+	if (IS_ERR(engine))
-+		return -ESRCH;
-+
-+	/*
-+	 * Make sure our engine has already stopped the child.
-+	 * Then wait for it to be off the CPU.
-+	 */
-+	ret = 0;
-+	if (utrace_control(child, engine, UTRACE_STOP) ||
-+	    utrace_prepare_examine(child, engine, &exam))
-+		ret = -ESRCH;
-+
-+	utrace_engine_put(engine);
-+
-+	return ret;
-+}
-+
-+#endif	/* !CONFIG_UTRACE_PTRACE */
-+
- int __ptrace_may_access(struct task_struct *task, unsigned int mode)
- {
- 	/* May we inspect the given task?
-@@ -156,12 +755,17 @@ int ptrace_attach(struct task_struct *ta
+ int ptrace_attach(struct task_struct *task)
  {
  	int retval;
- 	unsigned long flags;
-+	struct utrace_attached_engine *engine;
- 
- 	audit_ptrace(task);
- 
- 	retval = -EPERM;
- 	if (same_thread_group(task, current))
--		goto out;
-+		return retval;
-+
-+	engine = prepare_ptrace_attach(task, current);
-+	if (unlikely(IS_ERR(engine)))
-+		return PTR_ERR(engine);
- 
- repeat:
- 	/*
-@@ -202,8 +806,8 @@ repeat:
- bad:
- 	write_unlock_irqrestore(&tasklist_lock, flags);
- 	task_unlock(task);
--out:
--	return retval;
-+
-+	return finish_ptrace_attach(task, engine, retval);
- }
- 
- static inline void __ptrace_detach(struct task_struct *child, unsigned int data)
-@@ -221,9 +825,7 @@ int ptrace_detach(struct task_struct *ch
- 	if (!valid_signal(data))
- 		return -EIO;
- 
--	/* Architecture-specific hardware disable .. */
--	ptrace_disable(child);
--	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-+	ptrace_detach_task(child, data);
- 
- 	write_lock_irq(&tasklist_lock);
- 	/* protect against de_thread()->release_task() */
-@@ -309,6 +911,8 @@ static int ptrace_setoptions(struct task
- 	if (data & PTRACE_O_TRACEEXIT)
- 		child->ptrace |= PT_TRACE_EXIT;
- 
-+	ptrace_update_utrace(child, NULL);
-+
- 	return (data & ~PTRACE_O_MASK) ? -EINVAL : 0;
- }
- 
-@@ -367,6 +971,7 @@ static int ptrace_setsiginfo(struct task
- #define is_sysemu_singlestep(request)	0
- #endif
- 
-+#ifndef CONFIG_UTRACE_PTRACE
- static int ptrace_resume(struct task_struct *child, long request, long data)
- {
- 	if (!valid_signal(data))
-@@ -401,6 +1006,170 @@ static int ptrace_resume(struct task_str
- 
- 	return 0;
- }
-+#else  /* CONFIG_UTRACE_PTRACE */
-+static int ptrace_resume(struct task_struct *child, long request, long data)
-+{
-+	struct utrace_attached_engine *engine;
-+	enum utrace_resume_action action;
-+	enum utrace_syscall_action syscall;
-+	int ret = 0;
-+
-+	if (!valid_signal(data))
-+		return -EIO;
-+
-+	engine = utrace_attach_task(child, UTRACE_ATTACH_MATCH_OPS,
-+				    &ptrace_utrace_ops, NULL);
-+	if (IS_ERR(engine))
-+		return -ESRCH;
-+
-+	syscall = UTRACE_SYSCALL_RUN;
-+#ifdef PTRACE_SYSEMU
-+	if (request == PTRACE_SYSEMU || request == PTRACE_SYSEMU_SINGLESTEP)
-+		syscall = UTRACE_SYSCALL_ABORT;
-+#endif
-+
-+	if (syscall != UTRACE_SYSCALL_RUN || request == PTRACE_SYSCALL) {
-+		if (!(engine->flags & UTRACE_EVENT_SYSCALL) &&
-+		    utrace_set_events(child, engine,
-+				      engine->flags | UTRACE_EVENT_SYSCALL))
-+			ret = -ESRCH;
-+	} else if (engine->flags & UTRACE_EVENT(SYSCALL_ENTRY)) {
-+		if (utrace_set_events(child, engine,
-+				      engine->flags & ~UTRACE_EVENT_SYSCALL))
-+			ret = -ESRCH;
-+	}
-+
-+	action = UTRACE_RESUME;
-+	if (is_singleblock(request)) {
-+		if (unlikely(!arch_has_block_step()))
-+			ret = -EIO;
-+		action = UTRACE_BLOCKSTEP;
-+	} else if (is_singlestep(request) || is_sysemu_singlestep(request)) {
-+		if (unlikely(!arch_has_single_step()))
-+			ret = -EIO;
-+		action = UTRACE_SINGLESTEP;
-+	}
-+
-+	if (!ret) {
-+		/*
-+		 * If there was a non-signal event reported last time,
-+		 * we may need to simulate another event that follows
-+		 * it, or do some other special case.  We'll set @event
-+		 * nonzero here if there is an event to simulate.
-+		 */
-+		int event = ptrace_stop_event(child);
-+		ptrace_set_stop_event(child, 0);
-+
-+		switch (event) {
-+		case 0:
-+			break;
-+
-+		default:
-+			WARN_ON(1);
-+		case PTRACE_EVENT_EXIT:
-+			event = 0;
-+			break;
-+
-+		case PTRACE_EVENT_FORK:
-+		case PTRACE_EVENT_CLONE:
-+		case PTRACE_EVENT_EXEC:
-+		case PTRACE_EVENT_VFORK_DONE:
-+			/*
-+			 * At these events, @data is ignored.
-+			 * After these there might be a syscall-exit stop.
-+			 */
-+			if (request == PTRACE_SYSCALL) {
-+				data = SIGTRAP;
-+				if (child->ptrace & PT_TRACESYSGOOD)
-+					data |= 0x80;
-+				ptrace_set_stop_event(child,
-+						      PTRACE_EVENT_SYSCALL);
-+			} else {
-+				data = 0;
-+				event = 0;
-+			}
-+			break;
-+
-+		case PTRACE_EVENT_SYSCALL:
-+			/*
-+			 * After a syscall stop, @data is treated specially.
-+			 * It just queues the signal.
-+			 */
-+			if (data)
-+				send_sig(data, child, 1);
-+			data = 0;
-+			event = 0;
-+			break;
-+
-+		case PTRACE_EVENT_VFORK:
-+			/*
-+			 * For this event, @data is ignored.  We did have a
-+			 * utrace stop right after, so on resuming there
-+			 * can be a normal syscall-exit stop next if needed.
-+			 * But we may need to simulate a vfork-done stop,
-+			 * so we leave the marker in place.
-+			 */
-+			data = 0;
-+			event = 0;
-+			if (child->ptrace & PT_TRACE_VFORK_DONE) {
-+				ptrace_set_stop_event(child,
-+						      PTRACE_EVENT_VFORK);
-+				action = UTRACE_REPORT;
-+			}
-+			break;
-+		}
-+
-+		child->exit_code = data;
-+
-+		ptrace_set_action(child, action, syscall);
-+
-+		/*
-+		 * Whatever action we want to resume with, we need to make
-+		 * sure the child gets into ptrace_report_quiesce() so that
-+		 * it clears last_siginfo before going back to user mode.
-+		 */
-+		if (child->last_siginfo)
-+			action = UTRACE_REPORT;
-+
-+		if (event) {
-+			/*
-+			 * We have a stacked event.  That is, @child is
-+			 * already at the last utrace stop point before
-+			 * returning to user mode.  But the ptrace API
-+			 * wants multiple stops on the way out.  Here the
-+			 * original ptrace would resume the child and have
-+			 * to stop again almost immediately.  Instead we
-+			 * just leave it stopped and simulate the wake-up
-+			 * and new stop by notifying the parent, i.e.
-+			 * current's own thread group.
-+			 */
-+			read_lock(&tasklist_lock);
-+			do_notify_parent_cldstop(child, CLD_TRAPPED);
-+			read_unlock(&tasklist_lock);
-+		} else {
-+			if (task_is_stopped(child)) {
-+				spin_lock_irq(&child->sighand->siglock);
-+				child->signal->flags &= ~SIGNAL_STOP_STOPPED;
-+				spin_unlock_irq(&child->sighand->siglock);
-+			}
-+
-+			/*
-+			 * To resume with a signal we must arrange
-+			 * to enter ptrace_report_signal().
-+			 */
-+			if (data)
-+				action = UTRACE_INTERRUPT;
-+
-+			if (utrace_control(child, engine, action))
-+				ret = -ESRCH;
-+		}
-+	}
-+
-+	utrace_engine_put(engine);
-+
-+	return ret;
-+}
-+#endif	/* !CONFIG_UTRACE_PTRACE */
- 
- int ptrace_request(struct task_struct *child, long request,
- 		   long addr, long data)
-@@ -480,6 +1249,11 @@ int ptrace_request(struct task_struct *c
- int ptrace_traceme(void)
- {
- 	int ret = -EPERM;
-+	struct utrace_attached_engine *engine;
-+
-+	engine = prepare_ptrace_attach(current, current->parent);
-+	if (unlikely(IS_ERR(engine)))
-+		return PTR_ERR(engine);
- 
- 	/*
- 	 * Are we already being traced?
-@@ -513,7 +1287,8 @@ repeat:
- 		write_unlock_irqrestore(&tasklist_lock, flags);
+@@ -210,6 +219,11 @@ repeat:
+ 		goto repeat;
  	}
- 	task_unlock(current);
--	return ret;
+ 
++	if (exclude_ptrace(task)) {
++		retval = -EBUSY;
++		goto bad;
++	}
 +
-+	return finish_ptrace_attach(current, engine, ret);
- }
- 
- /**
-diff --git a/kernel/signal.c b/kernel/signal.c
-index e661b01..1effefc 100644  
---- a/kernel/signal.c
-+++ b/kernel/signal.c
-@@ -1415,7 +1415,7 @@ int do_notify_parent(struct task_struct 
- 	return ret;
- }
- 
--static void do_notify_parent_cldstop(struct task_struct *tsk, int why)
-+void do_notify_parent_cldstop(struct task_struct *tsk, int why)
- {
- 	struct siginfo info;
- 	unsigned long flags;
-@@ -1470,6 +1470,8 @@ static void do_notify_parent_cldstop(str
- 	spin_unlock_irqrestore(&sighand->siglock, flags);
- }
- 
-+#ifndef CONFIG_UTRACE_PTRACE
-+
- static inline int may_ptrace_stop(void)
- {
- 	if (!likely(current->ptrace & PT_PTRACED))
-@@ -1602,6 +1604,8 @@ void ptrace_notify(int exit_code)
- 	spin_unlock_irq(&current->sighand->siglock);
- }
- 
-+#endif	/* !CONFIG_UTRACE_PTRACE */
-+
- static void
- finish_stop(int stop_count)
- {
-@@ -1679,6 +1683,7 @@ static int do_signal_stop(int signr)
- 	return 1;
- }
- 
-+#ifndef CONFIG_UTRACE_PTRACE
- static int ptrace_signal(int signr, siginfo_t *info,
- 			 struct pt_regs *regs, void *cookie)
- {
-@@ -1717,6 +1722,13 @@ static int ptrace_signal(int signr, sigi
- 
- 	return signr;
- }
-+#else
-+static int ptrace_signal(int signr, siginfo_t *info,
-+			 struct pt_regs *regs, void *cookie)
-+{
-+	return signr;
-+}
-+#endif
- 
- int get_signal_to_deliver(siginfo_t *info, struct k_sigaction *return_ka,
- 			  struct pt_regs *regs, void *cookie)
+ 	if (!task->mm)
+ 		goto bad;
+ 	/* the same process cannot be attached many times */
+@@ -515,7 +529,9 @@ int ptrace_traceme(void)
+ 	 */
+ repeat:
+ 	task_lock(current);
+-	if (!(current->ptrace & PT_PTRACED)) {
++	if (exclude_ptrace(current)) {
++		ret = -EBUSY;
++	} else if (!(current->ptrace & PT_PTRACED)) {
+ 		/*
+ 		 * See ptrace_attach() comments about the locking here.
+ 		 */
 diff --git a/kernel/utrace.c b/kernel/utrace.c
 new file mode 100644
-index ...1873b9d 100644  
+index ...115be79 100644  
 --- /dev/null
 +++ b/kernel/utrace.c
-@@ -0,0 +1,2590 @@
+@@ -0,0 +1,2348 @@
 +/*
 + * utrace infrastructure interface for debugging user processes
 + *
@@ -2661,37 +1759,20 @@ index ...1873b9d 100644
 +#include <linux/seq_file.h>
 +
 +
-+#define UTRACE_DEBUG 1
-+#ifdef UTRACE_DEBUG
-+#define CHECK_INIT(p)	atomic_set(&(p)->check_dead, 1)
-+#define CHECK_DEAD(p)	BUG_ON(!atomic_dec_and_test(&(p)->check_dead))
-+#else
-+#define CHECK_INIT(p)	do { } while (0)
-+#define CHECK_DEAD(p)	do { } while (0)
-+#endif
-+
 +/*
-+ * Per-thread structure task_struct.utrace points to.
++ * Rules for 'struct utrace', defined in <linux/utrace_struct.h>
++ * but used entirely privately in this file.
 + *
-+ * The task itself never has to worry about this going away after
-+ * some event is found set in task_struct.utrace_flags.
-+ * Once created, this pointer is changed only when the task is quiescent
-+ * (TASK_TRACED or TASK_STOPPED with the siglock held, or dead).
-+ *
-+ * For other parties, the pointer to this is protected by RCU and
-+ * task_lock.  Since call_rcu is never used while the thread is alive and
-+ * using this struct utrace, we can overlay the RCU data structure used
-+ * only for a dead struct with some local state used only for a live utrace
-+ * on an active thread.
-+ *
-+ * The two lists @attached and @attaching work together for smooth
-+ * asynchronous attaching with low overhead.  Modifying either list
-+ * requires @lock.  The @attaching list can be modified any time while
-+ * holding @lock.  New engines being attached always go on this list.
++ * The common event reporting loops are done by the task making the
++ * report without ever taking any locks.  To facilitate this, the two
++ * lists @attached and @attaching work together for smooth asynchronous
++ * attaching with low overhead.  Modifying either list requires @lock.
++ * The @attaching list can be modified any time while holding @lock.
++ * New engines being attached always go on this list.
 + *
 + * The @attached list is what the task itself uses for its reporting
 + * loops.  When the task itself is not quiescent, it can use the
-+ * @attached list without taking any lock.  Noone may modify the list
++ * @attached list without taking any lock.  Nobody may modify the list
 + * when the task is not quiescent.  When it is quiescent, that means
 + * that it won't run again without taking @lock itself before using
 + * the list.
@@ -2703,174 +1784,16 @@ index ...1873b9d 100644
 + * engines attached asynchronously go on the stable @attached list
 + * in time to have their callbacks seen.
 + */
-+struct utrace {
-+	union {
-+		struct rcu_head dead;
-+		struct {
-+			struct task_struct *cloning;
-+		} live;
-+	} u;
 +
-+	struct list_head attached, attaching;
-+	spinlock_t lock;
-+#ifdef UTRACE_DEBUG
-+	atomic_t check_dead;
-+#endif
-+
-+	struct utrace_attached_engine *reporting;
-+
-+	unsigned int stopped:1;
-+	unsigned int report:1;
-+	unsigned int interrupt:1;
-+	unsigned int signal_handler:1;
-+	unsigned int vfork_stop:1; /* need utrace_stop() before vfork wait */
-+	unsigned int death:1;	/* in utrace_report_death() now */
-+	unsigned int reap:1;	/* release_task() has run */
-+};
-+
-+static struct kmem_cache *utrace_cachep;
 +static struct kmem_cache *utrace_engine_cachep;
 +static const struct utrace_engine_ops utrace_detached_ops; /* forward decl */
 +
 +static int __init utrace_init(void)
 +{
-+	utrace_cachep = KMEM_CACHE(utrace, SLAB_PANIC);
-+	utrace_engine_cachep = KMEM_CACHE(utrace_attached_engine, SLAB_PANIC);
++	utrace_engine_cachep = KMEM_CACHE(utrace_engine, SLAB_PANIC);
 +	return 0;
 +}
 +module_init(utrace_init);
-+
-+
-+/*
-+ * Make sure target->utrace is allocated, and return with it locked on
-+ * success.  This function mediates startup races.  The creating parent
-+ * task has priority, and other callers will delay here to let its call
-+ * succeed and take the new utrace lock first.
-+ */
-+static struct utrace *utrace_first_engine(struct task_struct *target,
-+					  struct utrace_attached_engine *engine)
-+	__acquires(utrace->lock)
-+{
-+	struct utrace *utrace;
-+
-+	/*
-+	 * If this is a newborn thread and we are not the creator,
-+	 * we have to wait for it.  The creator gets the first chance
-+	 * to attach.  The PF_STARTING flag is cleared after its
-+	 * report_clone hook has had a chance to run.
-+	 */
-+	if (target->flags & PF_STARTING) {
-+		utrace = current->utrace;
-+		if (utrace == NULL || utrace->u.live.cloning != target) {
-+			yield();
-+			if (signal_pending(current))
-+				return ERR_PTR(-ERESTARTNOINTR);
-+			return NULL;
-+		}
-+	}
-+
-+	utrace = kmem_cache_zalloc(utrace_cachep, GFP_KERNEL);
-+	if (unlikely(utrace == NULL))
-+		return ERR_PTR(-ENOMEM);
-+
-+	INIT_LIST_HEAD(&utrace->attached);
-+	INIT_LIST_HEAD(&utrace->attaching);
-+	list_add(&engine->entry, &utrace->attached);
-+	spin_lock_init(&utrace->lock);
-+	CHECK_INIT(utrace);
-+
-+	spin_lock(&utrace->lock);
-+	task_lock(target);
-+	if (likely(target->utrace == NULL)) {
-+		rcu_assign_pointer(target->utrace, utrace);
-+
-+		/*
-+		 * The task_lock protects us against another thread doing
-+		 * the same thing.  We might still be racing against
-+		 * tracehook_release_task.  It's called with ->exit_state
-+		 * set to EXIT_DEAD and then checks ->utrace with an
-+		 * smp_mb() in between.  If EXIT_DEAD is set, then
-+		 * release_task might have checked ->utrace already and saw
-+		 * it NULL; we can't attach.  If we see EXIT_DEAD not yet
-+		 * set after our barrier, then we know release_task will
-+		 * see our target->utrace pointer.
-+		 */
-+		smp_mb();
-+		if (likely(target->exit_state != EXIT_DEAD)) {
-+			task_unlock(target);
-+			return utrace;
-+		}
-+
-+		/*
-+		 * The target has already been through release_task.
-+		 * Our caller will restart and notice it's too late now.
-+		 */
-+		target->utrace = NULL;
-+	}
-+
-+	/*
-+	 * Another engine attached first, so there is a struct already.
-+	 * A null return says to restart looking for the existing one.
-+	 */
-+	task_unlock(target);
-+	spin_unlock(&utrace->lock);
-+	kmem_cache_free(utrace_cachep, utrace);
-+
-+	return NULL;
-+}
-+
-+static void utrace_free(struct rcu_head *rhead)
-+{
-+	struct utrace *utrace = container_of(rhead, struct utrace, u.dead);
-+	kmem_cache_free(utrace_cachep, utrace);
-+}
-+
-+/*
-+ * Called with utrace locked.  Clean it up and free it via RCU.
-+ */
-+static void rcu_utrace_free(struct utrace *utrace)
-+	__releases(utrace->lock)
-+{
-+	CHECK_DEAD(utrace);
-+	spin_unlock(&utrace->lock);
-+	call_rcu(&utrace->u.dead, utrace_free);
-+}
-+
-+/*
-+ * This is the exported function used by the utrace_engine_put() inline.
-+ */
-+void __utrace_engine_release(struct kref *kref)
-+{
-+	struct utrace_attached_engine *engine =
-+		container_of(kref, struct utrace_attached_engine, kref);
-+	BUG_ON(!list_empty(&engine->entry));
-+	kmem_cache_free(utrace_engine_cachep, engine);
-+}
-+EXPORT_SYMBOL_GPL(__utrace_engine_release);
-+
-+static bool engine_matches(struct utrace_attached_engine *engine, int flags,
-+			   const struct utrace_engine_ops *ops, void *data)
-+{
-+	if ((flags & UTRACE_ATTACH_MATCH_OPS) && engine->ops != ops)
-+		return false;
-+	if ((flags & UTRACE_ATTACH_MATCH_DATA) && engine->data != data)
-+		return false;
-+	return engine->ops && engine->ops != &utrace_detached_ops;
-+}
-+
-+static struct utrace_attached_engine *matching_engine(
-+	struct utrace *utrace, int flags,
-+	const struct utrace_engine_ops *ops, void *data)
-+{
-+	struct utrace_attached_engine *engine;
-+	list_for_each_entry(engine, &utrace->attached, entry)
-+		if (engine_matches(engine, flags, ops, data))
-+			return engine;
-+	list_for_each_entry(engine, &utrace->attaching, entry)
-+		if (engine_matches(engine, flags, ops, data))
-+			return engine;
-+	return NULL;
-+}
 +
 +/*
 + * This is called with @utrace->lock held when the task is safely
@@ -2884,18 +1807,125 @@ index ...1873b9d 100644
 +}
 +
 +/*
-+ * Allocate a new engine structure.  It starts out with two refs:
-+ * one ref for utrace_attach_task() to return, and ref for being attached.
++ * This is the exported function used by the utrace_engine_put() inline.
 + */
-+static struct utrace_attached_engine *alloc_engine(void)
++void __utrace_engine_release(struct kref *kref)
 +{
-+	struct utrace_attached_engine *engine;
-+	engine = kmem_cache_alloc(utrace_engine_cachep, GFP_KERNEL);
-+	if (likely(engine)) {
-+		engine->flags = 0;
-+		kref_set(&engine->kref, 2);
++	struct utrace_engine *engine = container_of(kref, struct utrace_engine,
++						    kref);
++	BUG_ON(!list_empty(&engine->entry));
++	kmem_cache_free(utrace_engine_cachep, engine);
++}
++EXPORT_SYMBOL_GPL(__utrace_engine_release);
++
++static bool engine_matches(struct utrace_engine *engine, int flags,
++			   const struct utrace_engine_ops *ops, void *data)
++{
++	if ((flags & UTRACE_ATTACH_MATCH_OPS) && engine->ops != ops)
++		return false;
++	if ((flags & UTRACE_ATTACH_MATCH_DATA) && engine->data != data)
++		return false;
++	return engine->ops && engine->ops != &utrace_detached_ops;
++}
++
++static struct utrace_engine *matching_engine(
++	struct utrace *utrace, int flags,
++	const struct utrace_engine_ops *ops, void *data)
++{
++	struct utrace_engine *engine;
++	list_for_each_entry(engine, &utrace->attached, entry)
++		if (engine_matches(engine, flags, ops, data))
++			return engine;
++	list_for_each_entry(engine, &utrace->attaching, entry)
++		if (engine_matches(engine, flags, ops, data))
++			return engine;
++	return NULL;
++}
++
++/*
++ * For experimental use, utrace attach is mutually exclusive with ptrace.
++ */
++static inline bool exclude_utrace(struct task_struct *task)
++{
++	return unlikely(!!task->ptrace);
++}
++
++/*
++ * Called without locks, when we might be the first utrace engine to attach.
++ * If this is a newborn thread and we are not the creator, we have to wait
++ * for it.  The creator gets the first chance to attach.  The PF_STARTING
++ * flag is cleared after its report_clone hook has had a chance to run.
++ */
++static inline int utrace_attach_delay(struct task_struct *target)
++{
++	if ((target->flags & PF_STARTING) &&
++	    current->utrace.cloning != target)
++		do {
++			schedule_timeout_interruptible(1);
++			if (signal_pending(current))
++				return -ERESTARTNOINTR;
++		} while (target->flags & PF_STARTING);
++
++	return 0;
++}
++
++/*
++ * Enqueue @engine, or maybe don't if UTRACE_ATTACH_EXCLUSIVE.
++ */
++static int utrace_add_engine(struct task_struct *target,
++			     struct utrace *utrace,
++			     struct utrace_engine *engine,
++			     int flags,
++			     const struct utrace_engine_ops *ops,
++			     void *data)
++{
++	int ret;
++
++	spin_lock(&utrace->lock);
++
++	if (utrace->reap) {
++		/*
++		 * Already entered utrace_release_task(), cannot attach now.
++		 */
++		ret = -ESRCH;
++	} else if ((flags & UTRACE_ATTACH_EXCLUSIVE) &&
++	    unlikely(matching_engine(utrace, flags, ops, data))) {
++		ret = -EEXIST;
++	} else {
++		/*
++		 * Put the new engine on the pending ->attaching list.
++		 * Make sure it gets onto the ->attached list by the next
++		 * time it's examined.
++		 *
++		 * When target == current, it would be safe just to call
++		 * splice_attaching() right here.  But if we're inside a
++		 * callback, that would mean the new engine also gets
++		 * notified about the event that precipitated its own
++		 * creation.  This is not what the user wants.
++		 *
++		 * Setting ->report ensures that start_report() takes the
++		 * lock and does it next time.  Whenever setting ->report,
++		 * we must maintain the invariant that TIF_NOTIFY_RESUME is
++		 * also set.  Otherwise utrace_control() or utrace_do_stop()
++		 * might skip setting TIF_NOTIFY_RESUME upon seeing ->report
++		 * already set, and we'd miss a necessary callback.
++		 *
++		 * In case we had no engines before, make sure that
++		 * utrace_flags is not zero when tracehook_notify_resume()
++		 * checks.  That would bypass utrace reporting clearing
++		 * TIF_NOTIFY_RESUME, and thus violate the same invariant.
++		 */
++		target->utrace_flags |= UTRACE_EVENT(REAP);
++		list_add_tail(&engine->entry, &utrace->attaching);
++		utrace->report = 1;
++		set_notify_resume(target);
++
++		ret = 0;
 +	}
-+	return engine;
++
++	spin_unlock(&utrace->lock);
++
++	return ret;
 +}
 +
 +/**
@@ -2920,45 +1950,25 @@ index ...1873b9d 100644
 + * UTRACE_ATTACH_MATCH_OPS: Only consider engines matching @ops.
 + * UTRACE_ATTACH_MATCH_DATA: Only consider engines matching @data.
 + */
-+struct utrace_attached_engine *utrace_attach_task(
++struct utrace_engine *utrace_attach_task(
 +	struct task_struct *target, int flags,
 +	const struct utrace_engine_ops *ops, void *data)
 +{
 +	struct utrace *utrace;
-+	struct utrace_attached_engine *engine;
++	struct utrace_engine *engine;
++	int ret;
 +
-+restart:
-+	rcu_read_lock();
-+	utrace = rcu_dereference(target->utrace);
-+	smp_rmb();
++	utrace = &target->utrace;
++
 +	if (unlikely(target->exit_state == EXIT_DEAD)) {
 +		/*
 +		 * The target has already been reaped.
-+		 * Check this first; a race with reaping may lead to restart.
++		 * Check this early, though it's not synchronized.
++		 * utrace_add_engine() will do the final check.
 +		 */
-+		rcu_read_unlock();
 +		if (!(flags & UTRACE_ATTACH_CREATE))
 +			return ERR_PTR(-ENOENT);
 +		return ERR_PTR(-ESRCH);
-+	}
-+
-+	if (utrace == NULL) {
-+		rcu_read_unlock();
-+
-+		if (!(flags & UTRACE_ATTACH_CREATE))
-+			return ERR_PTR(-ENOENT);
-+
-+		if (unlikely(target->flags & PF_KTHREAD))
-+			/*
-+			 * Silly kernel, utrace is for users!
-+			 */
-+			return ERR_PTR(-EPERM);
-+
-+		engine = alloc_engine();
-+		if (unlikely(!engine))
-+			return ERR_PTR(-ENOMEM);
-+
-+		goto first;
 +	}
 +
 +	if (!(flags & UTRACE_ATTACH_CREATE)) {
@@ -2967,87 +1977,40 @@ index ...1873b9d 100644
 +		if (engine)
 +			utrace_engine_get(engine);
 +		spin_unlock(&utrace->lock);
-+		rcu_read_unlock();
 +		return engine ?: ERR_PTR(-ENOENT);
 +	}
-+	rcu_read_unlock();
 +
 +	if (unlikely(!ops) || unlikely(ops == &utrace_detached_ops))
 +		return ERR_PTR(-EINVAL);
 +
-+	engine = alloc_engine();
++	if (unlikely(target->flags & PF_KTHREAD))
++		/*
++		 * Silly kernel, utrace is for users!
++		 */
++		return ERR_PTR(-EPERM);
++
++	engine = kmem_cache_alloc(utrace_engine_cachep, GFP_KERNEL);
 +	if (unlikely(!engine))
 +		return ERR_PTR(-ENOMEM);
 +
-+	rcu_read_lock();
-+	utrace = rcu_dereference(target->utrace);
-+	if (unlikely(utrace == NULL)) { /* Race with detach.  */
-+		rcu_read_unlock();
-+		goto first;
-+	}
-+	spin_lock(&utrace->lock);
-+
-+	if (flags & UTRACE_ATTACH_EXCLUSIVE) {
-+		struct utrace_attached_engine *old;
-+		old = matching_engine(utrace, flags, ops, data);
-+		if (old) {
-+			spin_unlock(&utrace->lock);
-+			rcu_read_unlock();
-+			kmem_cache_free(utrace_engine_cachep, engine);
-+			return ERR_PTR(-EEXIST);
-+		}
-+	}
-+
-+	if (unlikely(rcu_dereference(target->utrace) != utrace)) {
-+		/*
-+		 * We lost a race with other CPUs doing a sequence
-+		 * of detach and attach before we got in.
-+		 */
-+		spin_unlock(&utrace->lock);
-+		rcu_read_unlock();
-+		kmem_cache_free(utrace_engine_cachep, engine);
-+		goto restart;
-+	}
-+	rcu_read_unlock();
-+
-+	list_add_tail(&engine->entry, &utrace->attaching);
-+
 +	/*
-+	 * Now the new engine is on the pending ->attaching list.
-+	 * Make sure it gets onto the ->attached list by the next
-+	 * time it's examined.
-+	 *
-+	 * When target == current, it would be safe just to call
-+	 * splice_attaching() right here.  But if we're inside a
-+	 * callback, that would mean the new engine also gets
-+	 * notified about the event that precipitated its own
-+	 * creation.  This is not what the user wants.
-+	 *
-+	 * Setting ->report ensures that start_report() takes the
-+	 * lock and does it next time.  Whenever setting ->report,
-+	 * we must maintain the invariant that TIF_NOTIFY_RESUME is
-+	 * also set.  Otherwise utrace_control() or utrace_do_stop()
-+	 * might skip setting TIF_NOTIFY_RESUME upon seeing ->report
-+	 * already set, and we'd miss a necessary callback.
++	 * Initialize the new engine structure.  It starts out with two
++	 * refs: one ref to return, and one ref for being attached.
 +	 */
-+	utrace->report = 1;
-+	set_notify_resume(target);
-+	goto finish;
-+
-+first:
-+	utrace = utrace_first_engine(target, engine);
-+	if (IS_ERR(utrace) || unlikely(utrace == NULL)) {
-+		kmem_cache_free(utrace_engine_cachep, engine);
-+		if (unlikely(utrace == NULL)) /* Race condition.  */
-+			goto restart;
-+		return ERR_PTR(PTR_ERR(utrace));
-+	}
-+
-+finish:
++	kref_set(&engine->kref, 2);
++	engine->flags = 0;
 +	engine->ops = ops;
 +	engine->data = data;
 +
-+	spin_unlock(&utrace->lock);
++	ret = utrace_attach_delay(target);
++	if (likely(!ret))
++		ret = utrace_add_engine(target, utrace, engine,
++					flags, ops, data);
++
++	if (unlikely(ret)) {
++		kmem_cache_free(utrace_engine_cachep, engine);
++		engine = ERR_PTR(ret);
++	}
 +
 +	return engine;
 +}
@@ -3066,11 +2029,11 @@ index ...1873b9d 100644
 + * staying valid.  If it's been reaped so that @pid points nowhere,
 + * then this call returns -%ESRCH.
 + */
-+struct utrace_attached_engine *utrace_attach_pid(
++struct utrace_engine *utrace_attach_pid(
 +	struct pid *pid, int flags,
 +	const struct utrace_engine_ops *ops, void *data)
 +{
-+	struct utrace_attached_engine *engine = ERR_PTR(-ESRCH);
++	struct utrace_engine *engine = ERR_PTR(-ESRCH);
 +	struct task_struct *task = get_pid_task(pid, PIDTYPE_PID);
 +	if (task) {
 +		engine = utrace_attach_task(task, flags, ops, data);
@@ -3090,14 +2053,14 @@ index ...1873b9d 100644
 + * supply that callback too.
 + */
 +static u32 utrace_detached_quiesce(enum utrace_resume_action action,
-+				   struct utrace_attached_engine *engine,
++				   struct utrace_engine *engine,
 +				   struct task_struct *task,
 +				   unsigned long event)
 +{
 +	return UTRACE_DETACH;
 +}
 +
-+static void utrace_detached_reap(struct utrace_attached_engine *engine,
++static void utrace_detached_reap(struct utrace_engine *engine,
 +				 struct task_struct *task)
 +{
 +}
@@ -3108,14 +2071,34 @@ index ...1873b9d 100644
 +};
 +
 +/*
-+ * Only these flags matter any more for a dead task (exit_state set).
-+ * We use this mask on flags installed in ->utrace_flags after
-+ * exit_notify (and possibly utrace_report_death) has run.
-+ * This ensures that utrace_release_task knows positively that
-+ * utrace_report_death will not run later.
++ * After waking up from TASK_TRACED, clear bookkeeping in @utrace.
++ * Returns true if we were woken up prematurely by SIGKILL.
 + */
-+#define DEAD_FLAGS_MASK	(UTRACE_EVENT(REAP))
-+#define LIVE_FLAGS_MASK	(~0UL)
++static inline bool finish_utrace_stop(struct task_struct *task,
++				      struct utrace *utrace)
++{
++	bool killed = false;
++
++	/*
++	 * utrace_wakeup() clears @utrace->stopped before waking us up.
++	 * We're officially awake if it's clear.
++	 */
++	spin_lock(&utrace->lock);
++	if (unlikely(utrace->stopped)) {
++		/*
++		 * If we're here with it still set, it must have been
++		 * signal_wake_up() instead, waking us up for a SIGKILL.
++		 */
++		spin_lock_irq(&task->sighand->siglock);
++		WARN_ON(!sigismember(&task->pending.signal, SIGKILL));
++		spin_unlock_irq(&task->sighand->siglock);
++		utrace->stopped = 0;
++		killed = true;
++	}
++	spin_unlock(&utrace->lock);
++
++	return killed;
++}
 +
 +/*
 + * Perform %UTRACE_STOP, i.e. block in TASK_TRACED until woken up.
@@ -3123,7 +2106,8 @@ index ...1873b9d 100644
 + * Return true if we were woken up by SIGKILL even though some utrace
 + * engine may still want us to stay stopped.
 + */
-+static bool utrace_stop(struct task_struct *task, struct utrace *utrace)
++static bool utrace_stop(struct task_struct *task, struct utrace *utrace,
++			bool report)
 +{
 +	bool killed;
 +
@@ -3147,6 +2131,14 @@ index ...1873b9d 100644
 +		return true;
 +	}
 +
++	if (report) {
++		/*
++		 * Ensure a reporting pass when we're resumed.
++		 */
++		utrace->report = 1;
++		set_thread_flag(TIF_NOTIFY_RESUME);
++	}
++
 +	utrace->stopped = 1;
 +	__set_current_state(TASK_TRACED);
 +
@@ -3160,22 +2152,6 @@ index ...1873b9d 100644
 +	spin_unlock_irq(&task->sighand->siglock);
 +	spin_unlock(&utrace->lock);
 +
-+#ifdef CONFIG_UTRACE_PTRACE
-+	/*
-+	 * If ptrace is among the reasons for this stop, do its
-+	 * notification now.  This could not just be done in
-+	 * ptrace's own event report callbacks because it has to
-+	 * be done after we are in TASK_TRACED.  This makes the
-+	 * synchronization with ptrace_do_wait() work right.
-+	 */
-+	if (((task->ptrace >> 16) & UTRACE_RESUME_MASK) ==
-+	    UTRACE_RESUME - UTRACE_STOP) {
-+		read_lock(&tasklist_lock);
-+		do_notify_parent_cldstop(task, CLD_TRAPPED);
-+		read_unlock(&tasklist_lock);
-+	}
-+#endif
-+
 +	schedule();
 +
 +	/*
@@ -3185,33 +2161,11 @@ index ...1873b9d 100644
 +	 */
 +	try_to_freeze();
 +
-+	killed = false;
-+	rcu_read_lock();
-+	utrace = rcu_dereference(task->utrace);
-+	if (utrace) {
-+		/*
-+		 * utrace_wakeup() clears @utrace->stopped before waking us up.
-+		 * We're officially awake if it's clear.
-+		 */
-+		spin_lock(&utrace->lock);
-+		if (unlikely(utrace->stopped)) {
-+			/*
-+			 * If we're here with it still set, it must have been
-+			 * signal_wake_up() instead, waking us up for a SIGKILL.
-+			 */
-+			spin_lock_irq(&task->sighand->siglock);
-+			WARN_ON(!sigismember(&task->pending.signal, SIGKILL));
-+			spin_unlock_irq(&task->sighand->siglock);
-+			utrace->stopped = 0;
-+			killed = true;
-+		}
-+		spin_unlock(&utrace->lock);
-+	}
-+	rcu_read_unlock();
++	killed = finish_utrace_stop(task, utrace);
 +
 +	/*
 +	 * While we were in TASK_TRACED, complete_signal() considered
-+	 * us "uninterested" in signal wakeups.  Now make sure we our
++	 * us "uninterested" in signal wakeups.  Now make sure our
 +	 * TIF_SIGPENDING state is correct for normal running.
 +	 */
 +	spin_lock_irq(&task->sighand->siglock);
@@ -3239,19 +2193,11 @@ index ...1873b9d 100644
 + *	utrace_release_task
 + */
 +static struct utrace *get_utrace_lock(struct task_struct *target,
-+				      struct utrace_attached_engine *engine,
++				      struct utrace_engine *engine,
 +				      bool attached)
 +	__acquires(utrace->lock)
 +{
 +	struct utrace *utrace;
-+
-+	/*
-+	 * You must hold a ref to be making a call.  A call from within
-+	 * a report_* callback in @target might only have the ref for
-+	 * being attached, not a second one of its own.
-+	 */
-+	if (unlikely(atomic_read(&engine->kref.refcount) < 1))
-+		return ERR_PTR(-EINVAL);
 +
 +	rcu_read_lock();
 +
@@ -3275,9 +2221,8 @@ index ...1873b9d 100644
 +		return attached ? ERR_PTR(-ESRCH) : ERR_PTR(-ERESTARTSYS);
 +	}
 +
-+	utrace = rcu_dereference(target->utrace);
-+	smp_rmb();
-+	if (unlikely(!utrace) || unlikely(target->exit_state == EXIT_DEAD)) {
++	utrace = &target->utrace;
++	if (unlikely(target->exit_state == EXIT_DEAD)) {
 +		/*
 +		 * If all engines detached already, utrace is clear.
 +		 * Otherwise, we're called after utrace_release_task might
@@ -3287,8 +2232,7 @@ index ...1873b9d 100644
 +		utrace = ERR_PTR(-ESRCH);
 +	} else {
 +		spin_lock(&utrace->lock);
-+		if (unlikely(rcu_dereference(target->utrace) != utrace) ||
-+		    unlikely(!engine->ops) ||
++		if (unlikely(!engine->ops) ||
 +		    unlikely(engine->ops == &utrace_detached_ops)) {
 +			/*
 +			 * By the time we got the utrace lock,
@@ -3312,7 +2256,7 @@ index ...1873b9d 100644
 + */
 +static void put_detached_list(struct list_head *list)
 +{
-+	struct utrace_attached_engine *engine, *next;
++	struct utrace_engine *engine, *next;
 +	list_for_each_entry_safe(engine, next, list, entry) {
 +		list_del_init(&engine->entry);
 +		utrace_engine_put(engine);
@@ -3326,7 +2270,7 @@ index ...1873b9d 100644
 +static void utrace_reap(struct task_struct *target, struct utrace *utrace)
 +	__releases(utrace->lock)
 +{
-+	struct utrace_attached_engine *engine, *next;
++	struct utrace_engine *engine, *next;
 +	const struct utrace_engine_ops *ops;
 +	LIST_HEAD(detached);
 +
@@ -3344,6 +2288,12 @@ index ...1873b9d 100644
 +		if (!(engine->flags & UTRACE_EVENT(REAP)))
 +			continue;
 +
++		/*
++		 * This synchronizes with utrace_barrier().  Since we
++		 * need the utrace->lock here anyway (unlike the other
++		 * reporting loops), we don't need any memory barrier
++		 * as utrace_barrier() holds the lock.
++		 */
 +		utrace->reporting = engine;
 +		spin_unlock(&utrace->lock);
 +
@@ -3357,12 +2307,10 @@ index ...1873b9d 100644
 +		goto restart;
 +	}
 +
-+	rcu_utrace_free(utrace); /* Releases the lock.  */
++	spin_unlock(&utrace->lock);
 +
 +	put_detached_list(&detached);
 +}
-+
-+#define DEATH_EVENTS (UTRACE_EVENT(DEATH) | UTRACE_EVENT(QUIESCE))
 +
 +/*
 + * Called by release_task.  After this, target->utrace must be cleared.
@@ -3371,57 +2319,46 @@ index ...1873b9d 100644
 +{
 +	struct utrace *utrace;
 +
-+	task_lock(target);
-+	utrace = rcu_dereference(target->utrace);
-+	rcu_assign_pointer(target->utrace, NULL);
-+	task_unlock(target);
-+
-+	if (unlikely(utrace == NULL))
-+		return;
++	utrace = &target->utrace;
 +
 +	spin_lock(&utrace->lock);
-+	/*
-+	 * If the list is empty, utrace is already on its way to be freed.
-+	 * We raced with detach and we won the task_lock race but lost the
-+	 * utrace->lock race.  All we have to do is let RCU run.
-+	 */
-+	if (likely(!list_empty(&utrace->attached))) {
-+		utrace->reap = 1;
 +
-+		if (!(target->utrace_flags & DEATH_EVENTS)) {
-+			utrace_reap(target, utrace); /* Unlocks and frees.  */
-+			return;
-+		}
++	utrace->reap = 1;
 +
-+		/*
-+		 * The target will do some final callbacks but hasn't
-+		 * finished them yet.  We know because it clears these
-+		 * event bits after it's done.  Instead of cleaning up here
-+		 * and requiring utrace_report_death to cope with it, we
-+		 * delay the REAP report and the teardown until after the
-+		 * target finishes its death reports.
-+		 */
++	if (!(target->utrace_flags & _UTRACE_DEATH_EVENTS)) {
++		utrace_reap(target, utrace); /* Unlocks and frees.  */
++		return;
 +	}
++
++	/*
++	 * The target will do some final callbacks but hasn't
++	 * finished them yet.  We know because it clears these
++	 * event bits after it's done.  Instead of cleaning up here
++	 * and requiring utrace_report_death to cope with it, we
++	 * delay the REAP report and the teardown until after the
++	 * target finishes its death reports.
++	 */
++
 +	spin_unlock(&utrace->lock);
 +}
 +
 +/*
-+ * We use an extra bit in utrace_attached_engine.flags past the event bits,
++ * We use an extra bit in utrace_engine.flags past the event bits,
 + * to record whether the engine is keeping the target thread stopped.
 + */
 +#define ENGINE_STOP		(1UL << _UTRACE_NEVENTS)
 +
-+static void mark_engine_wants_stop(struct utrace_attached_engine *engine)
++static void mark_engine_wants_stop(struct utrace_engine *engine)
 +{
 +	engine->flags |= ENGINE_STOP;
 +}
 +
-+static void clear_engine_wants_stop(struct utrace_attached_engine *engine)
++static void clear_engine_wants_stop(struct utrace_engine *engine)
 +{
 +	engine->flags &= ~ENGINE_STOP;
 +}
 +
-+static bool engine_wants_stop(struct utrace_attached_engine *engine)
++static bool engine_wants_stop(struct utrace_engine *engine)
 +{
 +	return (engine->flags & ENGINE_STOP) != 0;
 +}
@@ -3465,13 +2402,11 @@ index ...1873b9d 100644
 + * even when %SIGKILL is breaking its normal simple rules.
 + */
 +int utrace_set_events(struct task_struct *target,
-+		      struct utrace_attached_engine *engine,
++		      struct utrace_engine *engine,
 +		      unsigned long events)
 +{
 +	struct utrace *utrace;
 +	unsigned long old_flags, old_utrace_flags, set_utrace_flags;
-+	struct sighand_struct *sighand;
-+	unsigned long flags;
 +	int ret;
 +
 +	utrace = get_utrace_lock(target, engine, true);
@@ -3483,28 +2418,12 @@ index ...1873b9d 100644
 +	old_flags = engine->flags;
 +
 +	if (target->exit_state &&
-+	    (((events & ~old_flags) & DEATH_EVENTS) ||
-+	     (utrace->death && ((old_flags & ~events) & DEATH_EVENTS)) ||
++	    (((events & ~old_flags) & _UTRACE_DEATH_EVENTS) ||
++	     (utrace->death &&
++	      ((old_flags & ~events) & _UTRACE_DEATH_EVENTS)) ||
 +	     (utrace->reap && ((old_flags & ~events) & UTRACE_EVENT(REAP))))) {
 +		spin_unlock(&utrace->lock);
 +		return -EALREADY;
-+	}
-+
-+	/*
-+	 * When it's in TASK_STOPPED state and UTRACE_EVENT(JCTL) is set,
-+	 * utrace_do_stop() will think it is still running and needs to
-+	 * finish utrace_report_jctl() before it's really stopped.  But
-+	 * if the bit wasn't already set, it can't be running in there
-+	 * and really is quiescent now in its existing job control stop.
-+	 */
-+	if (!utrace->stopped &&
-+	    ((set_utrace_flags & ~old_utrace_flags) & UTRACE_EVENT(JCTL))) {
-+		sighand = lock_task_sighand(target, &flags);
-+		if (likely(sighand)) {
-+			if (task_is_stopped(target))
-+				utrace->stopped = 1;
-+			unlock_task_sighand(target, &flags);
-+		}
 +	}
 +
 +	/*
@@ -3517,7 +2436,7 @@ index ...1873b9d 100644
 +	 * knows positively that utrace_report_death() will be called or
 +	 * that it won't.
 +	 */
-+	if ((set_utrace_flags & ~old_utrace_flags) & DEATH_EVENTS) {
++	if ((set_utrace_flags & ~old_utrace_flags) & _UTRACE_DEATH_EVENTS) {
 +		read_lock(&tasklist_lock);
 +		if (unlikely(target->exit_state)) {
 +			read_unlock(&tasklist_lock);
@@ -3537,6 +2456,14 @@ index ...1873b9d 100644
 +
 +	ret = 0;
 +	if (!utrace->stopped && target != current) {
++		/*
++		 * This barrier ensures that our engine->flags changes
++		 * have hit before we examine utrace->reporting,
++		 * pairing with the barrier in start_callback().  If
++		 * @target has not yet hit finish_callback() to clear
++		 * utrace->reporting, we might be in the middle of a
++		 * callback to @engine.
++		 */
 +		smp_mb();
 +		if (utrace->reporting == engine)
 +			ret = -EINPROGRESS;
@@ -3561,7 +2488,7 @@ index ...1873b9d 100644
 + * Hence, utrace_detached_ops might be used with any old flags in place.
 + * It has report_quiesce() and report_reap() callbacks to handle all cases.
 + */
-+static void mark_engine_detached(struct utrace_attached_engine *engine)
++static void mark_engine_detached(struct utrace_engine *engine)
 +{
 +	engine->ops = &utrace_detached_ops;
 +	smp_wmb();
@@ -3575,23 +2502,8 @@ index ...1873b9d 100644
 + */
 +static bool utrace_do_stop(struct task_struct *target, struct utrace *utrace)
 +{
-+	bool stopped;
++	bool stopped = false;
 +
-+	/*
-+	 * If it will call utrace_report_jctl() but has not gotten
-+	 * through it yet, then don't consider it quiescent yet.
-+	 * utrace_report_jctl() will take @utrace->lock and
-+	 * set @utrace->stopped itself once it finishes.  After that,
-+	 * it is considered quiescent; when it wakes up, it will go
-+	 * through utrace_get_signal() before doing anything else.
-+	 */
-+	if (task_is_stopped(target) &&
-+	    !(target->utrace_flags & UTRACE_EVENT(JCTL))) {
-+		utrace->stopped = 1;
-+		return true;
-+	}
-+
-+	stopped = false;
 +	spin_lock_irq(&target->sighand->siglock);
 +	if (unlikely(target->exit_state)) {
 +		/*
@@ -3599,11 +2511,14 @@ index ...1873b9d 100644
 +		 * if it has already been through
 +		 * utrace_report_death(), or never will.
 +		 */
-+		if (!(target->utrace_flags & DEATH_EVENTS))
++		if (!(target->utrace_flags & _UTRACE_DEATH_EVENTS))
 +			utrace->stopped = stopped = true;
 +	} else if (task_is_stopped(target)) {
-+		if (!(target->utrace_flags & UTRACE_EVENT(JCTL)))
-+			utrace->stopped = stopped = true;
++		/*
++		 * Stopped is considered quiescent; when it wakes up, it will
++		 * go through utrace_get_signal() before doing anything else.
++		 */
++		utrace->stopped = stopped = true;
 +	} else if (!utrace->report && !utrace->interrupt) {
 +		utrace->report = 1;
 +		set_notify_resume(target);
@@ -3656,7 +2571,7 @@ index ...1873b9d 100644
 +			 enum utrace_resume_action *action)
 +	__releases(utrace->lock)
 +{
-+	struct utrace_attached_engine *engine, *next;
++	struct utrace_engine *engine, *next;
 +	unsigned long flags = 0;
 +	LIST_HEAD(detached);
 +	bool wake = !action;
@@ -3681,8 +2596,15 @@ index ...1873b9d 100644
 +	}
 +
 +	if (task->exit_state) {
++		/*
++		 * Once it's already dead, we never install any flags
++		 * except REAP.  When ->exit_state is set and events
++		 * like DEATH are not set, then they never can be set.
++		 * This ensures that utrace_release_task() knows
++		 * positively that utrace_report_death() can never run.
++		 */
 +		BUG_ON(utrace->death);
-+		flags &= DEAD_FLAGS_MASK;
++		flags &= UTRACE_EVENT(REAP);
 +		wake = false;
 +	} else if (!(flags & UTRACE_EVENT_SYSCALL) &&
 +		   test_tsk_thread_flag(task, TIF_SYSCALL_TRACE)) {
@@ -3697,30 +2619,46 @@ index ...1873b9d 100644
 +	/*
 +	 * If any engines are left, we're done.
 +	 */
-+	if (flags) {
-+		spin_unlock(&utrace->lock);
-+	} else {
++	spin_unlock(&utrace->lock);
++	if (!flags) {
 +		/*
-+		 * No more engines, clear out the utrace.  Here we can race
-+		 * with utrace_release_task().  If it gets task_lock()
-+		 * first, then it cleans up this struct for us.
++		 * No more engines, cleared out the utrace.
 +		 */
-+
-+		task_lock(task);
-+		if (unlikely(task->utrace != utrace)) {
-+			task_unlock(task);
-+			spin_unlock(&utrace->lock);
-+		} else {
-+			rcu_assign_pointer(task->utrace, NULL);
-+			task_unlock(task);
-+			rcu_utrace_free(utrace);
-+		}
 +
 +		if (action)
 +			*action = UTRACE_RESUME;
 +	}
 +
 +	put_detached_list(&detached);
++}
++
++/*
++ * You can't do anything to a dead task but detach it.
++ * If release_task() has been called, you can't do that.
++ *
++ * On the exit path, DEATH and QUIESCE event bits are set only
++ * before utrace_report_death() has taken the lock.  At that point,
++ * the death report will come soon, so disallow detach until it's
++ * done.  This prevents us from racing with it detaching itself.
++ *
++ * Called with utrace->lock held, when @target->exit_state is nonzero.
++ */
++static inline int utrace_control_dead(struct task_struct *target,
++				      struct utrace *utrace,
++				      enum utrace_resume_action action)
++{
++	if (action != UTRACE_DETACH || unlikely(utrace->reap))
++		return -ESRCH;
++
++	if (unlikely(utrace->death))
++		/*
++		 * We have already started the death report.  We can't
++		 * prevent the report_death and report_reap callbacks,
++		 * so tell the caller they will happen.
++		 */
++		return -EALREADY;
++
++	return 0;
 +}
 +
 +/**
@@ -3837,7 +2775,7 @@ index ...1873b9d 100644
 + * tracing engine is using %UTRACE_SINGLESTEP at the same time.
 + */
 +int utrace_control(struct task_struct *target,
-+		   struct utrace_attached_engine *engine,
++		   struct utrace_engine *engine,
 +		   enum utrace_resume_action action)
 +{
 +	struct utrace *utrace;
@@ -3852,30 +2790,10 @@ index ...1873b9d 100644
 +		return PTR_ERR(utrace);
 +
 +	if (target->exit_state) {
-+		/*
-+		 * You can't do anything to a dead task but detach it.
-+		 * If release_task() has been called, you can't do that.
-+		 *
-+		 * On the exit path, DEATH and QUIESCE event bits are
-+		 * set only before utrace_report_death() has taken the
-+		 * lock.  At that point, the death report will come
-+		 * soon, so disallow detach until it's done.  This
-+		 * prevents us from racing with it detaching itself.
-+		 */
-+		if (action != UTRACE_DETACH ||
-+		    unlikely(utrace->reap)) {
++		ret = utrace_control_dead(target, utrace, action);
++		if (ret) {
 +			spin_unlock(&utrace->lock);
-+			return -ESRCH;
-+		} else if (unlikely(target->utrace_flags & DEATH_EVENTS) ||
-+			   unlikely(utrace->death)) {
-+			/*
-+			 * We have already started the death report, or
-+			 * are about to very soon.  We can't prevent
-+			 * the report_death and report_reap callbacks,
-+			 * so tell the caller they will happen.
-+			 */
-+			spin_unlock(&utrace->lock);
-+			return -EALREADY;
++			return ret;
 +		}
 +	}
 +
@@ -3895,6 +2813,14 @@ index ...1873b9d 100644
 +		mark_engine_detached(engine);
 +		resume = resume || utrace_do_stop(target, utrace);
 +		if (!resume) {
++			/*
++			 * As in utrace_set_events(), this barrier ensures
++			 * that our engine->flags changes have hit before we
++			 * examine utrace->reporting, pairing with the barrier
++			 * in start_callback().  If @target has not yet hit
++			 * finish_callback() to clear utrace->reporting, we
++			 * might be in the middle of a callback to @engine.
++			 */
 +			smp_mb();
 +			if (utrace->reporting == engine)
 +				ret = -EINPROGRESS;
@@ -4014,7 +2940,8 @@ index ...1873b9d 100644
 + * This blocks while @target might be in the midst of making a callback to
 + * @engine.  It can be interrupted by signals and will return -%ERESTARTSYS.
 + * A return value of zero means no callback from @target to @engine was
-+ * in progress.
++ * in progress.  Any effect of its return value (such as %UTRACE_STOP) has
++ * already been applied to @engine.
 + *
 + * It's not necessary to keep the @target pointer alive for this call.
 + * It's only necessary to hold a ref on @engine.  This will return
@@ -4026,8 +2953,7 @@ index ...1873b9d 100644
 + * still be in progress; utrace_barrier() waits until there is no chance
 + * an unwanted callback can be in progress.
 + */
-+int utrace_barrier(struct task_struct *target,
-+		   struct utrace_attached_engine *engine)
++int utrace_barrier(struct task_struct *target, struct utrace_engine *engine)
 +{
 +	struct utrace *utrace;
 +	int ret = -ERESTARTSYS;
@@ -4042,7 +2968,19 @@ index ...1873b9d 100644
 +			if (ret != -ERESTARTSYS)
 +				break;
 +		} else {
-+			if (utrace->stopped || utrace->reporting != engine)
++			/*
++			 * All engine state changes are done while
++			 * holding the lock, i.e. before we get here.
++			 * Since we have the lock, we only need to
++			 * worry about @target making a callback.
++			 * When it has entered start_callback() but
++			 * not yet gotten to finish_callback(), we
++			 * will see utrace->reporting == @engine.
++			 * When @target doesn't take the lock, it uses
++			 * barriers to order setting utrace->reporting
++			 * before it examines the engine state.
++			 */
++			if (utrace->reporting != engine)
 +				ret = 0;
 +			spin_unlock(&utrace->lock);
 +			if (!ret)
@@ -4062,12 +3000,14 @@ index ...1873b9d 100644
 +	enum utrace_resume_action action;
 +	u32 result;
 +	bool detaches;
++	bool reports;
 +	bool takers;
 +	bool killed;
 +};
 +
 +#define INIT_REPORT(var) \
-+	struct utrace_report var = { UTRACE_RESUME, 0, false, false, false }
++	struct utrace_report var = { UTRACE_RESUME, 0, \
++				     false, false, false, false }
 +
 +/*
 + * We are now making the report, so clear the flag saying we need one.
@@ -4122,19 +3062,10 @@ index ...1873b9d 100644
 + */
 +static bool finish_callback(struct utrace *utrace,
 +			    struct utrace_report *report,
-+			    struct utrace_attached_engine *engine,
++			    struct utrace_engine *engine,
 +			    u32 ret)
 +{
 +	enum utrace_resume_action action = utrace_resume_action(ret);
-+
-+	utrace->reporting = NULL;
-+
-+	/*
-+	 * This is a good place to make sure tracing engines don't
-+	 * introduce too much latency under voluntary preemption.
-+	 */
-+	if (need_resched())
-+		cond_resched();
 +
 +	report->result = ret & ~UTRACE_RESUME_MASK;
 +
@@ -4144,25 +3075,49 @@ index ...1873b9d 100644
 +	if (action == UTRACE_DETACH || engine->ops == &utrace_detached_ops) {
 +		engine->ops = &utrace_detached_ops;
 +		report->detaches = true;
-+		return true;
-+	}
++	} else {
++		if (action < report->action)
++			report->action = action;
 +
-+	if (action < report->action)
-+		report->action = action;
++		if (action == UTRACE_STOP) {
++			if (!engine_wants_stop(engine)) {
++				spin_lock(&utrace->lock);
++				mark_engine_wants_stop(engine);
++				spin_unlock(&utrace->lock);
++			}
++		} else {
++			if (action == UTRACE_REPORT)
++				report->reports = true;
 +
-+	if (action == UTRACE_STOP) {
-+		if (!engine_wants_stop(engine)) {
-+			spin_lock(&utrace->lock);
-+			mark_engine_wants_stop(engine);
-+			spin_unlock(&utrace->lock);
++			if (engine_wants_stop(engine)) {
++				spin_lock(&utrace->lock);
++				clear_engine_wants_stop(engine);
++				spin_unlock(&utrace->lock);
++			}
 +		}
-+	} else if (engine_wants_stop(engine)) {
-+		spin_lock(&utrace->lock);
-+		clear_engine_wants_stop(engine);
-+		spin_unlock(&utrace->lock);
 +	}
 +
-+	return false;
++	/*
++	 * Now that we have applied the effect of the return value,
++	 * clear this so that utrace_barrier() can stop waiting.
++	 * A subsequent utrace_control() can stop or resume @engine
++	 * and know this was ordered after its callback's action.
++	 *
++	 * We don't need any barriers here because utrace_barrier()
++	 * takes utrace->lock.  If we touched engine->flags above,
++	 * the lock guaranteed this change was before utrace_barrier()
++	 * examined utrace->reporting.
++	 */
++	utrace->reporting = NULL;
++
++	/*
++	 * This is a good place to make sure tracing engines don't
++	 * introduce too much latency under voluntary preemption.
++	 */
++	if (need_resched())
++		cond_resched();
++
++	return engine->ops == &utrace_detached_ops;
 +}
 +
 +/*
@@ -4174,12 +3129,19 @@ index ...1873b9d 100644
 + */
 +static const struct utrace_engine_ops *start_callback(
 +	struct utrace *utrace, struct utrace_report *report,
-+	struct utrace_attached_engine *engine, struct task_struct *task,
++	struct utrace_engine *engine, struct task_struct *task,
 +	unsigned long event)
 +{
 +	const struct utrace_engine_ops *ops;
 +	unsigned long want;
 +
++	/*
++	 * This barrier ensures that we've set utrace->reporting before
++	 * we examine engine->flags or engine->ops.  utrace_barrier()
++	 * relies on this ordering to indicate that the effect of any
++	 * utrace_control() and utrace_set_events() calls is in place
++	 * by the time utrace->reporting can be seen to be NULL.
++	 */
 +	utrace->reporting = engine;
 +	smp_mb();
 +
@@ -4197,8 +3159,15 @@ index ...1873b9d 100644
 +				    (*ops->report_quiesce)(report->action,
 +							   engine, task,
 +							   event)))
-+			goto nocall;
++			return NULL;
 +
++		/*
++		 * finish_callback() reset utrace->reporting after the
++		 * quiesce callback.  Now we set it again (as above)
++		 * before re-examining engine->flags, which could have
++		 * been changed synchronously by ->report_quiesce or
++		 * asynchronously by utrace_control() or utrace_set_events().
++		 */
 +		utrace->reporting = engine;
 +		smp_mb();
 +		want = engine->flags;
@@ -4212,8 +3181,6 @@ index ...1873b9d 100644
 +		return ops;
 +	}
 +
-+nocall:
-+	utrace->reporting = NULL;
 +	return NULL;
 +}
 +
@@ -4232,10 +3199,9 @@ index ...1873b9d 100644
 +	} while (0)
 +#define REPORT_CALLBACKS(task, utrace, report, event, callback, ...)	      \
 +	do {								      \
-+		struct utrace_attached_engine *engine, *next;		      \
++		struct utrace_engine *engine;				      \
 +		const struct utrace_engine_ops *ops;			      \
-+		list_for_each_entry_safe(engine, next,			      \
-+					 &utrace->attached, entry) {	      \
++		list_for_each_entry(engine, &utrace->attached, entry) {	      \
 +			ops = start_callback(utrace, report, engine, task,    \
 +					     event);			      \
 +			if (!ops)					      \
@@ -4252,7 +3218,7 @@ index ...1873b9d 100644
 +			struct pt_regs *regs)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
 +
 +	REPORT(task, utrace, &report, UTRACE_EVENT(EXEC),
@@ -4266,7 +3232,7 @@ index ...1873b9d 100644
 +bool utrace_report_syscall_entry(struct pt_regs *regs)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
 +
 +	start_report(utrace);
@@ -4275,7 +3241,8 @@ index ...1873b9d 100644
 +			 engine, current, regs);
 +	finish_report(&report, task, utrace);
 +
-+	if (report.action == UTRACE_STOP && unlikely(utrace_stop(task, utrace)))
++	if (report.action == UTRACE_STOP &&
++	    unlikely(utrace_stop(task, utrace, false)))
 +		/*
 +		 * We are continuing despite UTRACE_STOP because of a
 +		 * SIGKILL.  Don't let the system call actually proceed.
@@ -4309,7 +3276,7 @@ index ...1873b9d 100644
 +void utrace_report_syscall_exit(struct pt_regs *regs)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
 +
 +	REPORT(task, utrace, &report, UTRACE_EVENT(SYSCALL_EXIT),
@@ -4325,23 +3292,23 @@ index ...1873b9d 100644
 +void utrace_report_clone(unsigned long clone_flags, struct task_struct *child)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
 +
 +	/*
 +	 * We don't use the REPORT() macro here, because we need
-+	 * to clear utrace->u.live.cloning before finish_report().
++	 * to clear utrace->cloning before finish_report().
 +	 * After finish_report(), utrace can be a stale pointer
 +	 * in cases when report.action is still UTRACE_RESUME.
 +	 */
 +	start_report(utrace);
-+	utrace->u.live.cloning = child;
++	utrace->cloning = child;
 +
 +	REPORT_CALLBACKS(task, utrace, &report,
 +			 UTRACE_EVENT(CLONE), report_clone,
 +			 report.action, engine, task, clone_flags, child);
 +
-+	utrace->u.live.cloning = NULL;
++	utrace->cloning = NULL;
 +	finish_report(&report, task, utrace);
 +
 +	/*
@@ -4364,7 +3331,7 @@ index ...1873b9d 100644
 + */
 +void utrace_finish_vfork(struct task_struct *task)
 +{
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +
 +	spin_lock(&utrace->lock);
 +	if (!utrace->vfork_stop)
@@ -4372,19 +3339,33 @@ index ...1873b9d 100644
 +	else {
 +		utrace->vfork_stop = 0;
 +		spin_unlock(&utrace->lock);
-+		utrace_stop(task, utrace);
++		utrace_stop(task, utrace, false);
 +	}
 +}
 +
 +/*
 + * Called iff UTRACE_EVENT(JCTL) flag is set.
++ *
++ * Called with siglock held.
 + */
 +void utrace_report_jctl(int notify, int what)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
-+	bool was_stopped = task_is_stopped(task);
++	bool stop = task_is_stopped(task);
++
++	/*
++	 * We have to come out of TASK_STOPPED in case the event report
++	 * hooks might block.  Since we held the siglock throughout, it's
++	 * as if we were never in TASK_STOPPED yet at all.
++	 */
++	if (stop) {
++		__set_current_state(TASK_RUNNING);
++		task->signal->flags &= ~SIGNAL_STOP_STOPPED;
++		++task->signal->group_stop_count;
++	}
++	spin_unlock_irq(&task->sighand->siglock);
 +
 +	/*
 +	 * We get here with CLD_STOPPED when we've just entered
@@ -4397,50 +3378,30 @@ index ...1873b9d 100644
 +	 * was finished, we might be here with utrace already
 +	 * removed or in the middle of being removed.
 +	 *
-+	 * RCU makes it safe to get the utrace->lock even if it's
-+	 * being freed.  Once we have that lock, either an external
-+	 * detach has finished and this struct has been freed, or
-+	 * else we know we are excluding any other detach attempt.
-+	 *
 +	 * If we are indeed attached, then make sure we are no
 +	 * longer considered stopped while we run callbacks.
 +	 */
-+	rcu_read_lock();
-+	utrace = rcu_dereference(task->utrace);
-+	if (unlikely(!utrace)) {
-+		rcu_read_unlock();
-+		return;
-+	}
 +	spin_lock(&utrace->lock);
 +	utrace->stopped = 0;
++	/*
++	 * Do start_report()'s work too since we already have the lock anyway.
++	 */
 +	utrace->report = 0;
++	splice_attaching(utrace);
 +	spin_unlock(&utrace->lock);
-+	rcu_read_unlock();
 +
 +	REPORT(task, utrace, &report, UTRACE_EVENT(JCTL),
-+	       report_jctl, was_stopped ? CLD_STOPPED : CLD_CONTINUED, what);
++	       report_jctl, what, notify);
 +
-+	if (was_stopped && !task_is_stopped(task)) {
-+		/*
-+		 * The event report hooks could have blocked, though
-+		 * it should have been briefly.  Make sure we're in
-+		 * TASK_STOPPED state again to block properly, unless
-+		 * we've just come back out of job control stop.
-+		 */
-+		spin_lock_irq(&task->sighand->siglock);
-+		if (task->signal->flags & SIGNAL_STOP_STOPPED)
-+			__set_current_state(TASK_STOPPED);
-+		spin_unlock_irq(&task->sighand->siglock);
-+	}
-+
-+	if (task_is_stopped(current)) {
-+		/*
-+		 * While in TASK_STOPPED, we can be considered safely
-+		 * stopped by utrace_do_stop() only once we set this.
-+		 */
-+		spin_lock(&utrace->lock);
-+		utrace->stopped = 1;
-+		spin_unlock(&utrace->lock);
++	/*
++	 * Retake the lock, and go back into TASK_STOPPED
++	 * unless the stop was just cleared.
++	 */
++	spin_lock_irq(&task->sighand->siglock);
++	if (stop && task->signal->group_stop_count > 0) {
++		__set_current_state(TASK_STOPPED);
++		if (--task->signal->group_stop_count == 0)
++			task->signal->flags |= SIGNAL_STOP_STOPPED;
 +	}
 +}
 +
@@ -4450,7 +3411,7 @@ index ...1873b9d 100644
 +void utrace_report_exit(long *exit_code)
 +{
 +	struct task_struct *task = current;
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
 +	long orig_code = *exit_code;
 +
@@ -4458,7 +3419,7 @@ index ...1873b9d 100644
 +	       report_exit, orig_code, exit_code);
 +
 +	if (report.action == UTRACE_STOP)
-+		utrace_stop(task, utrace);
++		utrace_stop(task, utrace, false);
 +}
 +
 +/*
@@ -4528,6 +3489,10 @@ index ...1873b9d 100644
 +	}
 +
 +	switch (report->action) {
++	case UTRACE_STOP:
++		report->killed = utrace_stop(task, utrace, report->reports);
++		break;
++
 +	case UTRACE_INTERRUPT:
 +		if (!signal_pending(task))
 +			set_tsk_thread_flag(task, TIF_SIGPENDING);
@@ -4539,10 +3504,6 @@ index ...1873b9d 100644
 +
 +	case UTRACE_BLOCKSTEP:
 +		user_enable_block_step(task);
-+		break;
-+
-+	case UTRACE_STOP:
-+		report->killed = utrace_stop(task, utrace);
 +		break;
 +
 +	case UTRACE_REPORT:
@@ -4560,9 +3521,9 @@ index ...1873b9d 100644
 + */
 +void utrace_resume(struct task_struct *task, struct pt_regs *regs)
 +{
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +	INIT_REPORT(report);
-+	struct utrace_attached_engine *engine, *next;
++	struct utrace_engine *engine;
 +
 +	/*
 +	 * Some machines get here with interrupts disabled.  The same arch
@@ -4590,17 +3551,15 @@ index ...1873b9d 100644
 +	 * If UTRACE_INTERRUPT was just used, we don't bother with a
 +	 * report here.  We will report and stop in utrace_get_signal().
 +	 */
-+	if (unlikely(utrace->interrupt)) {
-+		BUG_ON(!signal_pending(task));
++	if (unlikely(utrace->interrupt))
 +		return;
-+	}
 +
 +	/*
 +	 * Do a simple reporting pass, with no callback after report_quiesce.
 +	 */
 +	start_report(utrace);
 +
-+	list_for_each_entry_safe(engine, next, &utrace->attached, entry)
++	list_for_each_entry(engine, &utrace->attached, entry)
 +		start_callback(utrace, &report, engine, task, 0);
 +
 +	/*
@@ -4618,7 +3577,7 @@ index ...1873b9d 100644
 + */
 +bool utrace_interrupt_pending(void)
 +{
-+	return current->utrace->interrupt;
++	return task_utrace_struct(current)->interrupt;
 +}
 +
 +/*
@@ -4662,26 +3621,13 @@ index ...1873b9d 100644
 +	struct utrace *utrace;
 +	struct k_sigaction *ka;
 +	INIT_REPORT(report);
-+	struct utrace_attached_engine *engine, *next;
++	struct utrace_engine *engine;
 +	const struct utrace_engine_ops *ops;
 +	unsigned long event, want;
 +	u32 ret;
 +	int signr;
 +
-+	/*
-+	 * We could have been considered quiescent while we were in
-+	 * TASK_STOPPED, and detached asynchronously.  If we woke up
-+	 * and checked task->utrace_flags before that was finished,
-+	 * we might be here with utrace already removed or in the
-+	 * middle of being removed.
-+	 */
-+	rcu_read_lock();
-+	utrace = rcu_dereference(task->utrace);
-+	if (unlikely(utrace == NULL)) {
-+		rcu_read_unlock();
-+		return 0;
-+	}
-+
++	utrace = &task->utrace;
 +	if (utrace->interrupt || utrace->report || utrace->signal_handler) {
 +		/*
 +		 * We've been asked for an explicit report before we
@@ -4690,21 +3636,7 @@ index ...1873b9d 100644
 +
 +		spin_unlock_irq(&task->sighand->siglock);
 +
-+		/*
-+		 * RCU makes it safe to get the utrace->lock even if
-+		 * it's being freed.  Once we have that lock, either an
-+		 * external detach has finished and this struct has been
-+		 * freed, or else we know we are excluding any other
-+		 * detach attempt.
-+		 */
 +		spin_lock(&utrace->lock);
-+		rcu_read_unlock();
-+
-+		if (unlikely(task->utrace != utrace)) {
-+			spin_unlock(&utrace->lock);
-+			cond_resched();
-+			return -1;
-+		}
 +
 +		splice_attaching(utrace);
 +
@@ -4720,6 +3652,7 @@ index ...1873b9d 100644
 +		 * interrupt path, so clear the flags asking for those.
 +		 */
 +		utrace->interrupt = utrace->report = utrace->signal_handler = 0;
++		utrace->stopped = 0;
 +
 +		/*
 +		 * Make sure signal_pending() only returns true
@@ -4748,41 +3681,20 @@ index ...1873b9d 100644
 +		event = 0;
 +		ka = NULL;
 +		memset(return_ka, 0, sizeof *return_ka);
-+	} else if ((task->utrace_flags & UTRACE_EVENT_SIGNAL_ALL) == 0) {
++	} else if ((task->utrace_flags & UTRACE_EVENT_SIGNAL_ALL) == 0 &&
++		   !utrace->stopped) {
 +		/*
-+		 * If noone is interested in intercepting signals,
++		 * If no engine is interested in intercepting signals,
 +		 * let the caller just dequeue them normally.
 +		 */
-+		rcu_read_unlock();
 +		return 0;
 +	} else {
 +		if (unlikely(utrace->stopped)) {
-+			/*
-+			 * We were just in TASK_STOPPED, so we have to
-+			 * check for the race mentioned above.
-+			 *
-+			 * RCU makes it safe to get the utrace->lock even
-+			 * if it's being freed.  Once we have that lock,
-+			 * either an external detach has finished and this
-+			 * struct has been freed, or else we know we are
-+			 * excluding any other detach attempt.  Since we
-+			 * are no longer in TASK_STOPPED now, all we needed
-+			 * the lock for was to order any utrace_do_stop()
-+			 * call after us.
-+			 */
 +			spin_unlock_irq(&task->sighand->siglock);
 +			spin_lock(&utrace->lock);
-+			rcu_read_unlock();
-+			if (unlikely(task->utrace != utrace)) {
-+				spin_unlock(&utrace->lock);
-+				cond_resched();
-+				return -1;
-+			}
 +			utrace->stopped = 0;
 +			spin_unlock(&utrace->lock);
 +			spin_lock_irq(&task->sighand->siglock);
-+		} else {
-+			rcu_read_unlock();
 +		}
 +
 +		/*
@@ -4831,8 +3743,8 @@ index ...1873b9d 100644
 +		}
 +
 +		/*
-+		 * Now that we know what event type this signal is,
-+		 * we can short-circuit if noone cares about those.
++		 * Now that we know what event type this signal is, we
++		 * can short-circuit if no engines care about those.
 +		 */
 +		if ((task->utrace_flags & (event | UTRACE_EVENT(QUIESCE))) == 0)
 +			return signr;
@@ -4847,7 +3759,10 @@ index ...1873b9d 100644
 +	/*
 +	 * This reporting pass chooses what signal disposition we'll act on.
 +	 */
-+	list_for_each_entry_safe(engine, next, &utrace->attached, entry) {
++	list_for_each_entry(engine, &utrace->attached, entry) {
++		/*
++		 * See start_callback() comment about this barrier.
++		 */
 +		utrace->reporting = engine;
 +		smp_mb();
 +
@@ -5023,7 +3938,7 @@ index ...1873b9d 100644
 + */
 +void utrace_signal_handler(struct task_struct *task, int stepping)
 +{
-+	struct utrace *utrace = task->utrace;
++	struct utrace *utrace = task_utrace_struct(task);
 +
 +	spin_lock(&utrace->lock);
 +
@@ -5032,7 +3947,7 @@ index ...1873b9d 100644
 +		utrace->interrupt = 1;
 +		set_tsk_thread_flag(task, TIF_SIGPENDING);
 +	} else {
-+		set_notify_resume(task);
++		set_tsk_thread_flag(task, TIF_NOTIFY_RESUME);
 +	}
 +
 +	spin_unlock(&utrace->lock);
@@ -5067,7 +3982,7 @@ index ...1873b9d 100644
 + * completed safely.
 + */
 +int utrace_prepare_examine(struct task_struct *target,
-+			   struct utrace_attached_engine *engine,
++			   struct utrace_engine *engine,
 +			   struct utrace_examiner *exam)
 +{
 +	int ret = 0;
@@ -5120,7 +4035,7 @@ index ...1873b9d 100644
 + * keeping @target stopped, or -%EAGAIN if @target woke up unexpectedly.
 + */
 +int utrace_finish_examine(struct task_struct *target,
-+			  struct utrace_attached_engine *engine,
++			  struct utrace_engine *engine,
 +			  struct utrace_examiner *exam)
 +{
 +	int ret = 0;
@@ -5155,73 +4070,14 @@ index ...1873b9d 100644
 +EXPORT_SYMBOL_GPL(task_user_regset_view);
 +
 +/*
-+ * Return the &struct task_struct for the task using ptrace on this one,
-+ * or %NULL.  Must be called with rcu_read_lock() held to keep the returned
-+ * struct alive.
-+ *
-+ * At exec time, this may be called with task_lock() still held from when
-+ * tracehook_unsafe_exec() was just called.  In that case it must give
-+ * results consistent with those unsafe_exec() results, i.e. non-%NULL if
-+ * any %LSM_UNSAFE_PTRACE_* bits were set.
-+ *
-+ * The value is also used to display after "TracerPid:" in /proc/PID/status,
-+ * where it is called with only rcu_read_lock() held.
-+ */
-+struct task_struct *utrace_tracer_task(struct task_struct *target)
-+{
-+	struct utrace *utrace;
-+	struct task_struct *tracer = NULL;
-+
-+	utrace = rcu_dereference(target->utrace);
-+	if (utrace != NULL) {
-+		struct list_head *pos, *next;
-+		struct utrace_attached_engine *engine;
-+		const struct utrace_engine_ops *ops;
-+		list_for_each_safe(pos, next, &utrace->attached) {
-+			engine = list_entry(pos, struct utrace_attached_engine,
-+					    entry);
-+			ops = rcu_dereference(engine->ops);
-+			if (ops->tracer_task) {
-+				tracer = (*ops->tracer_task)(engine, target);
-+				if (tracer != NULL)
-+					break;
-+			}
-+		}
-+	}
-+
-+	return tracer;
-+}
-+
-+/*
-+ * Called on the current task to return LSM_UNSAFE_* bits implied by tracing.
-+ * Called with task_lock() held.
-+ */
-+int utrace_unsafe_exec(struct task_struct *task)
-+{
-+	struct utrace *utrace = task->utrace;
-+	struct utrace_attached_engine *engine, *next;
-+	const struct utrace_engine_ops *ops;
-+	int unsafe = 0;
-+
-+	list_for_each_entry_safe(engine, next, &utrace->attached, entry) {
-+		ops = rcu_dereference(engine->ops);
-+		if (ops->unsafe_exec)
-+			unsafe |= (*ops->unsafe_exec)(engine, task);
-+	}
-+
-+	return unsafe;
-+}
-+
-+/*
 + * Called with rcu_read_lock() held.
 + */
 +void task_utrace_proc_status(struct seq_file *m, struct task_struct *p)
 +{
-+	struct utrace *utrace = rcu_dereference(p->utrace);
-+	if (unlikely(utrace))
-+		seq_printf(m, "Utrace: %lx%s%s%s\n",
-+			   p->utrace_flags,
-+			   utrace->stopped ? " (stopped)" : "",
-+			   utrace->report ? " (report)" : "",
-+			   utrace->interrupt ? " (interrupt)" : "");
++	struct utrace *utrace = &p->utrace;
++	seq_printf(m, "Utrace:\t%lx%s%s%s\n",
++		   p->utrace_flags,
++		   utrace->stopped ? " (stopped)" : "",
++		   utrace->report ? " (report)" : "",
++		   utrace->interrupt ? " (interrupt)" : "");
 +}

@@ -1,0 +1,66 @@
+From: Oleg Nesterov <oleg@redhat.com>
+Date: Fri, 27 Mar 2009 00:06:07 +0000 (+0100)
+Subject: posix-timers: fix RLIMIT_CPU && fork()
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=6279a751fe096a21dc7704e918d570d3ff06e769
+
+posix-timers: fix RLIMIT_CPU && fork()
+
+See http://bugzilla.kernel.org/show_bug.cgi?id=12911
+
+copy_signal() copies signal->rlim, but RLIMIT_CPU is "lost". Because
+posix_cpu_timers_init_group() sets cputime_expires.prof_exp = 0 and thus
+fastpath_timer_check() returns false unless we have other expired cpu timers.
+
+Change copy_signal() to set cputime_expires.prof_exp if we have RLIMIT_CPU.
+Also, set cputimer.running = 1 in that case. This is not strictly necessary,
+but imho makes sense.
+
+Reported-by: Peter Lojkin <ia6432@inbox.ru>
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Peter Lojkin <ia6432@inbox.ru>
+Cc: Roland McGrath <roland@redhat.com>
+Cc: stable@kernel.org
+LKML-Reference: <20090327000607.GA10104@redhat.com>
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+---
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 4854c2c..9b51a1b 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -808,6 +808,12 @@ static void posix_cpu_timers_init_group(struct signal_struct *sig)
+ 	sig->cputime_expires.virt_exp = cputime_zero;
+ 	sig->cputime_expires.sched_exp = 0;
+ 
++	if (sig->rlim[RLIMIT_CPU].rlim_cur != RLIM_INFINITY) {
++		sig->cputime_expires.prof_exp =
++			secs_to_cputime(sig->rlim[RLIMIT_CPU].rlim_cur);
++		sig->cputimer.running = 1;
++	}
++
+ 	/* The timer lists. */
+ 	INIT_LIST_HEAD(&sig->cpu_timers[0]);
+ 	INIT_LIST_HEAD(&sig->cpu_timers[1]);
+@@ -823,11 +829,8 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
+ 		atomic_inc(&current->signal->live);
+ 		return 0;
+ 	}
+-	sig = kmem_cache_alloc(signal_cachep, GFP_KERNEL);
+-
+-	if (sig)
+-		posix_cpu_timers_init_group(sig);
+ 
++	sig = kmem_cache_alloc(signal_cachep, GFP_KERNEL);
+ 	tsk->signal = sig;
+ 	if (!sig)
+ 		return -ENOMEM;
+@@ -865,6 +868,8 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
+ 	memcpy(sig->rlim, current->signal->rlim, sizeof sig->rlim);
+ 	task_unlock(current->group_leader);
+ 
++	posix_cpu_timers_init_group(sig);
++
+ 	acct_init_pacct(&sig->pacct);
+ 
+ 	tty_audit_fork(sig);

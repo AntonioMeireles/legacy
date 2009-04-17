@@ -1,0 +1,41 @@
+From: Takashi Iwai <tiwai@suse.de>
+Date: Thu, 19 Mar 2009 09:01:47 +0000 (+0100)
+Subject: ALSA: pcm - Reset invalid position even without debug option
+X-Git-Url: http://git.alsa-project.org/?p=alsa-kernel.git;a=commitdiff_plain;h=f28f43ce9ae6573952d2348bb6da859cad762143
+
+ALSA: pcm - Reset invalid position even without debug option
+
+Always reset the invalind hw_ptr position returned by the pointer
+callback.  The behavior should be consitent independently from the
+debug option.
+
+Also, add the printk_ratelimit() check to avoid flooding debug
+prints.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+---
+
+diff --git a/sound/core/pcm_lib.c b/sound/core/pcm_lib.c
+index 3026547..92ed6d8 100644
+--- a/sound/core/pcm_lib.c
++++ b/sound/core/pcm_lib.c
+@@ -159,11 +159,15 @@ snd_pcm_update_hw_ptr_pos(struct snd_pcm_substream *substream,
+ 	pos = substream->ops->pointer(substream);
+ 	if (pos == SNDRV_PCM_POS_XRUN)
+ 		return pos; /* XRUN */
+-#ifdef CONFIG_SND_DEBUG
+ 	if (pos >= runtime->buffer_size) {
+-		snd_printk(KERN_ERR  "BUG: stream = %i, pos = 0x%lx, buffer size = 0x%lx, period size = 0x%lx\n", substream->stream, pos, runtime->buffer_size, runtime->period_size);
++		if (printk_ratelimit()) {
++			snd_printd(KERN_ERR  "BUG: stream = %i, pos = 0x%lx, "
++				   "buffer size = 0x%lx, period size = 0x%lx\n",
++				   substream->stream, pos, runtime->buffer_size,
++				   runtime->period_size);
++		}
++		pos = 0;
+ 	}
+-#endif
+ 	pos -= pos % runtime->min_align;
+ 	return pos;
+ }

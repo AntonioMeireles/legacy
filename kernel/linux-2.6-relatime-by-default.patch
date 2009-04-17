@@ -1,0 +1,129 @@
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 06f8e63..f0e7530 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -780,6 +780,7 @@ static void show_mnt_opts(struct seq_file *m, struct vfsmount *mnt)
+ 		{ MNT_NOATIME, ",noatime" },
+ 		{ MNT_NODIRATIME, ",nodiratime" },
+ 		{ MNT_RELATIME, ",relatime" },
++		{ MNT_STRICTATIME, ",strictatime" },
+ 		{ 0, NULL }
+ 	};
+ 	const struct proc_fs_info *fs_infop;
+@@ -1919,6 +1920,9 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
+ 	if (data_page)
+ 		((char *)data_page)[PAGE_SIZE - 1] = 0;
+ 
++	/* Default to relatime */
++	mnt_flags |= MNT_RELATIME;
++
+ 	/* Separate the per-mountpoint flags */
+ 	if (flags & MS_NOSUID)
+ 		mnt_flags |= MNT_NOSUID;
+@@ -1930,13 +1934,14 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
+ 		mnt_flags |= MNT_NOATIME;
+ 	if (flags & MS_NODIRATIME)
+ 		mnt_flags |= MNT_NODIRATIME;
+-	if (flags & MS_RELATIME)
+-		mnt_flags |= MNT_RELATIME;
++	if (flags & MS_STRICTATIME)
++		mnt_flags &= ~(MNT_RELATIME | MNT_NOATIME);
+ 	if (flags & MS_RDONLY)
+ 		mnt_flags |= MNT_READONLY;
+ 
+ 	flags &= ~(MS_NOSUID | MS_NOEXEC | MS_NODEV | MS_ACTIVE |
+-		   MS_NOATIME | MS_NODIRATIME | MS_RELATIME| MS_KERNMOUNT);
++		   MS_NOATIME | MS_NODIRATIME | MS_RELATIME| MS_KERNMOUNT |
++		   MS_STRICTATIME);
+ 
+ 	/* ... and get the mountpoint */
+ 	retval = kern_path(dir_name, LOOKUP_FOLLOW, &path);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 92734c0..5bc81c4 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -141,6 +141,7 @@ struct inodes_stat_t {
+ #define MS_RELATIME	(1<<21)	/* Update atime relative to mtime/ctime. */
+ #define MS_KERNMOUNT	(1<<22) /* this is a kern_mount call */
+ #define MS_I_VERSION	(1<<23) /* Update inode I_version field */
++#define MS_STRICTATIME	(1<<24) /* Always perform atime updates */
+ #define MS_ACTIVE	(1<<30)
+ #define MS_NOUSER	(1<<31)
+ 
+diff --git a/include/linux/mount.h b/include/linux/mount.h
+index cab2a85..51f55f9 100644
+--- a/include/linux/mount.h
++++ b/include/linux/mount.h
+@@ -27,6 +27,7 @@ struct mnt_namespace;
+ #define MNT_NODIRATIME	0x10
+ #define MNT_RELATIME	0x20
+ #define MNT_READONLY	0x40	/* does the user want this to be r/o? */
++#define MNT_STRICTATIME 0x80
+ 
+ #define MNT_SHRINKABLE	0x100
+ #define MNT_IMBALANCED_WRITE_COUNT	0x200 /* just for debugging */
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -1290,6 +1290,40 @@ sector_t bmap(struct inode * inode, sector_t block)
+ }
+ EXPORT_SYMBOL(bmap);
+ 
++/*
++ * With relative atime, only update atime if the previous atime is
++ * earlier than either the ctime or mtime or if at least a day has
++ * passed since the last atime update.
++ */
++static int relatime_need_update(struct vfsmount *mnt, struct inode *inode,
++			     struct timespec now)
++{
++
++	if (!(mnt->mnt_flags & MNT_RELATIME))
++		return 1;
++	/*
++	 * Is mtime younger than atime? If yes, update atime:
++	 */
++	if (timespec_compare(&inode->i_mtime, &inode->i_atime) >= 0)
++		return 1;
++	/*
++	 * Is ctime younger than atime? If yes, update atime:
++	 */
++	if (timespec_compare(&inode->i_ctime, &inode->i_atime) >= 0)
++		return 1;
++
++	/*
++	 * Is the previous atime value older than a day? If yes,
++	 * update atime:
++	 */
++	if ((long)(now.tv_sec - inode->i_atime.tv_sec) >= 24*60*60)
++		return 1;
++	/*
++	 * Good, we can skip the atime update:
++	 */
++	return 0;
++}
++
+ /**
+  *	touch_atime	-	update the access time
+  *	@mnt: mount the inode is accessed on
+@@ -1317,17 +1351,12 @@ void touch_atime(struct vfsmount *mnt, struct dentry *dentry)
+ 		goto out;
+ 	if ((mnt->mnt_flags & MNT_NODIRATIME) && S_ISDIR(inode->i_mode))
+ 		goto out;
+-	if (mnt->mnt_flags & MNT_RELATIME) {
+-		/*
+-		 * With relative atime, only update atime if the previous
+-		 * atime is earlier than either the ctime or mtime.
+-		 */
+-		if (timespec_compare(&inode->i_mtime, &inode->i_atime) < 0 &&
+-		    timespec_compare(&inode->i_ctime, &inode->i_atime) < 0)
+-			goto out;
+-	}
+ 
+ 	now = current_fs_time(inode->i_sb);
++
++	if (!relatime_need_update(mnt, inode, now))
++		goto out;
++
+ 	if (timespec_equal(&inode->i_atime, &now))
+ 		goto out;
+ 
