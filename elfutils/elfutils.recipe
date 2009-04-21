@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Elfutils(RPMPackageRecipe, CPackageRecipe):
+    name = 'elfutils'
+    version = '0.140'
+    rpmRelease = '2.fc11'
+
+    # NOTE: Elfutils doesn't compile anything locally but it does
+    # some sanity checks w/ readelf.  The native readelf can handle
+    # that w/o us having to muck w/ paths.
+    buildRequires = [ 'libtool:devel', 'sharutils:runtime',
+                      'binutils:runtime[!cross]',
+                      'bzip2:devel', 'gettext:runtime',
+                      'intltool:runtime', 'zlib:devel',
+                      'm4:runtime']
+
+    rpmPatches = [ 'elfutils-robustify.patch',
+                   'elfutils-portability.patch', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+
+        r.macros.bdir = 'build-%(target)s' %r.macros
+
+        # some binaries link against dwlib which does automatically pull in
+        # libelf, although the linker recognizes that it is needed.
+        # The -rpath-link line does not seem to actually modify the created
+        # binary.
+        r.macros.ldflags += ' -Wl,-rpath-link,../libelf '
+        r.macros.cflags += ' -D__NO_INLINE__ -fexceptions '
+
+        # eu-strip, etc
+        r.Configure('--program-prefix=eu- --enable-shared', objDir=r.macros.bdir)
+        r.Replace('-Werror', '', '*/Makefile*', allowNoChange=True)
+        r.Make('AR=%(target)s-ar', dir=r.macros.bdir)
+        r.MakeInstall('AR=%(target)s-ar', dir=r.macros.bdir)
+
+        r.Remove(
+            '%(bindir)s/eu-ld',
+        )
+#        r.Remove('%(prefix)s/usr', recursive=True)
+        # accomodate slightly different library names
+        r.ComponentSpec('lib', '.*-.*\.so')
+        r.PackageSpec(
+            'libelf', '%(libdir)s/libelf.*', '%(includedir)s/libelf.*'
+        )
+        r.Requires('libelf:devel', r'%(includedir)s/gelf\.h')
+        r.EnforceConfigLogBuildRequirements(exceptions='flex:runtime')
