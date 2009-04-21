@@ -7,8 +7,7 @@
 class OpenOffice(CPackageRecipe):
 
     name = 'openoffice.org'
-    version = '3.0.1+m15'
-    ooo_build_version = '15077'
+    version = '3.1.0+m10'
 
     buildRequires = [
         'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
@@ -39,13 +38,16 @@ class OpenOffice(CPackageRecipe):
         'xulrunner:devel', 'zip:runtime', 'zlib:devel'
     ]
 
-    use_kde = True
+    use_kde = False
     use_gnome = True
 
     def setup(r):
 
         r.macros.snapshot = r.version.split('+')[1]
         r.macros.fullName = 'OpenOffice.org-%(major_version)s'
+
+        r.macros.tag = 'ooo%s' % r.version.split('+')[0].replace('.', '')
+        r.macros.TAG = str(r.macros.tag).upper()
 
         # used in loadManifest
         r.manifest_files = {}
@@ -95,10 +97,7 @@ class OpenOffice(CPackageRecipe):
         # -------------------
 
         r.macros.site = 'http://download.go-oo.org'
-
-        r.addSvnSnapshot(
-            'http://svn.gnome.org/svn/ooo-build/branches/ooo-build-3-0-1/', revision=r.ooo_build_version
-        )
+        r.addGitSnapshot('git://anongit.freedesktop.org/git/ooo-build/ooo-build')
 
         r.addSource(
             'openoffice-extension.tag-description',
@@ -116,13 +115,14 @@ class OpenOffice(CPackageRecipe):
             'calc',
             'components',
             'extensions',
+            'extras',
             'filters',
+            'help',
             'impress',
-            'l10n',
-            'libs_core',
-            'libs_extern_sys',
-            'libs_extern',
-            'libs_gui',
+            'libs-core',
+            'libs-extern-sys',
+            'libs-extern',
+            'libs-gui',
             'postprocess',
             'sdk',
             'testing',
@@ -130,7 +130,7 @@ class OpenOffice(CPackageRecipe):
             'writer',
         ]
         for x in oooModules:
-            r.addSource('%(site)s/OOO300/ooo300-%(snapshot)s-'+x+'.tar.bz2', dir='src/')
+            r.addSource('%(site)s/%(TAG)s/%(tag)s-%(snapshot)s-'+x+'.tar.bz2', dir='src/')
 
         oooSupport = [
             'biblio.tar.bz2',
@@ -161,6 +161,9 @@ class OpenOffice(CPackageRecipe):
         # From RH .spec
         r.addSource('compact_templates.sh')
 
+        # we don't have static mono lib
+        #r.Replace('--static', '', 'patches/mono/*.diff', allowNoChange=True)
+
         # XXX
         r.Replace(
             '^rpl2:.*$',
@@ -168,6 +171,8 @@ class OpenOffice(CPackageRecipe):
             'patches/dev300/apply'
         )
         r.Copy('distro-configs/rpl2.conf.in', 'distro-configs/Foresight.conf')
+
+        r.Run('echo -e "\nexit 0\n" >> autogen.sh')
 
         r.Run('NOCONFIGURE=1 ./autogen.sh')
 
@@ -178,14 +183,14 @@ class OpenOffice(CPackageRecipe):
         # --------------------------
 
         if r.use_kde:
-            r.Environment('QTINC', '%(includedir)s/qt3')
+            r.Environment('QTINC', '%(includedir)s/qt4')
 
         r.Environment('MONO_SHARED_DIR', '/tmp')
 
         # Packaging stuff
 
         extraConf = (
-                       ' --with-tag=ooo300-%(snapshot)s'
+                       ' --with-tag=%(tag)s-%(snapshot)s'
                        ' --with-lang="%(langs)s" --with-dict=ALL'
                        ' --with-poor-help-localizations="%(poor_help)s"'
                        ' --with-binsuffix=%(major_version)s'
@@ -255,7 +260,7 @@ class OpenOffice(CPackageRecipe):
                        # so we shouldn't use system xmlsec
                        ' --without-system-xmlsec'
                        ' --enable-binfilter'
-                       ' --enable-mono'
+                       ' --disable-mono'
                        # lucene analayzer not found
                        ' --without-system-lucene'
                        ' --without-system-saxon'
@@ -291,12 +296,7 @@ class OpenOffice(CPackageRecipe):
         # apply upstream sources
         r.Make('patch.apply')
 
-        r.Run('cat solenv-enable-soname.patch | patch -d build/ooo300-%(snapshot)s -p0')
-
-        r.Run("sed -i "
-            "'s/HAVE_GCC_VISIBILITY_FEATURE=TRUE/HAVE_GCC_VISIBILITY_FEATURE_DISABLE=TRUE/' "
-            "'build/ooo300-%(snapshot)s/config_office/configure.in'"
-        )
+        r.Run('cat solenv-enable-soname.patch | patch -d build/%(tag)s-%(snapshot)s -p0')
 
         # compile the program
         r.Make()
@@ -310,7 +310,7 @@ class OpenOffice(CPackageRecipe):
         r.MakeInstall()
 
         # bad symlink
-        r.Remove('%(bindir)s/soffice3.0')
+        r.Remove('%(bindir)s/soffice%(major_version)s')
 
         # deps fixes
         r.ComponentSpec(r.name+':runtime', '%(basisdir)s/program/libsclx.so')
@@ -319,16 +319,12 @@ class OpenOffice(CPackageRecipe):
         # XXX
         r.Install('hsqldb.jar', '%(basedir)s/program/classes/')
 
-        r.Replace(
-            '/bin/python', '%(bindir)s/python', '%(basedir)s/basis%(major_version)s/program/mailmerge.py'
-        )
-
         r.Run('bash compact_templates.sh "%(destdir)s/%(basedir)s/basis%(major_version)s"')
 
         # This is not a help document
         r.ComponentSpec('runtime', '%(basedir)s/basis%(major_version)s/help/main_transform.xsl')
 
-        r.loadManifest('mono_list.txt', r.name+'-mono')
+        #r.loadManifest('mono_list.txt', r.name+'-mono')
         if r.use_kde:
             r.loadManifest('kde_list.txt', r.name+'-kde')
         if r.use_gnome:
