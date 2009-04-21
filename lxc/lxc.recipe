@@ -1,0 +1,50 @@
+#
+# Copyright (c) 2009 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Lxc(CPackageRecipe):
+    name = 'lxc'
+    version = '0.6.0+git_10_gfdc0332'
+
+    buildRequires = [
+        'docbook-utils:runtime',
+        'opensp:runtime',
+        'libcap:devel',
+      ]
+
+    if '+git' in version:
+        buildRequires += [
+            'autoconf:runtime',
+            'automake:runtime',
+            'libtool:runtime',
+          ]
+
+    def setup(r):
+        if '+git' in r.version:
+            rev = ('lxc_' + r.version.replace('_', '-'
+                    ).replace('+git', '+').replace('.', '_'))
+            r.addGitSnapshot('git://lxc.git.sourceforge.net/gitroot/lxc',
+                tag=rev)
+            r.Run('./bootstrap')
+        else:
+            r.addArchive('http://lxc.sourceforge.net/download/lxc/')
+
+        # We might build on older kernels, but we'll never deploy
+        # on anything older than this, and until/unless runtime
+        # uname checking is implemented, we need this to avoid a
+        # long hang on container shutdown
+        r.Configure('--with-kernel-release=2.6.29')
+        r.Make()
+        r.MakeInstall()
+
+        # Rebuild lxc-init without linking against liblxc, which it doesn't
+        # actully need.
+        r.Run('gcc %(cflags)s %(ldflags)s src/lxc/lxc_init.c -o lxc-init')
+        r.Install('lxc-init', '%(bindir)s/lxc-init')
+
+        # Move lxc-init to the :init component so it can be included in
+        # appliances without extra baggage.
+        r.ComponentSpec('init', '%(bindir)s/lxc-init')
+        r.Requires('%(bindir)s/lxc-init', '%(bindir)s/lxc-execute')
