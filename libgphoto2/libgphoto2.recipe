@@ -7,13 +7,13 @@
 loadSuperClass('rpmpackage')
 class LibGphoto2(RPMPackageRecipe,CPackageRecipe):
     name = 'libgphoto2'
-    version = '2.4.0'
-    rpmRelease = '6.fc9'
+    version = '2.4.5'
+    rpmRelease = '1.fc11'
 
-    rpmArchives = [ 'gphoto2-%(version)s.tar.bz2']
-
-    rpmName = 'gphoto2'
-
+    rpmPatches = [ 'gphoto2-pkgcfg.patch',
+                   'gphoto2-storage.patch',
+                   'gphoto2-ixany.patch',
+                   'gphoto2-maxentries.patch']
 
     buildRequires = [ 'gtk:devel', 'findutils:runtime', 'flex:runtime',
                       'libexif:devel', 'libusb:devel', 'bison:runtime',
@@ -21,30 +21,10 @@ class LibGphoto2(RPMPackageRecipe,CPackageRecipe):
                       'pkgconfig:devel', 'libtool:runtime', 'libtool:devel',
                       'gettext:runtime', 'libexif:devel', 'doxygen:runtime',
                       'dbus:devel', 'hal:devel', 'graphviz:runtime', 'popt:devel',
-                      'readline:devel']
+                      'readline:devel', 'intltool:runtime', 'autoconf:runtime']
 
     def setup(r):
         RPMPackageRecipe.unpack(r)
-
-        # ugly... 
-        for p in ['gphoto2-pkgcfg.patch']:
-            r.addSource(p, rpm=r.srpm)
-            r.addAction(""" ln -s ../../%(name)s-%(version)s gphoto2-%(version)s
-sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s/@@' gphoto2-pkgcfg.patch """)
-
-            r.addPatch( p)
-
-        for p in  [ 'gphoto2-storage.patch',
-                        'gphoto2-ixany.patch',
-                        ]:
-            r.addSource(p, rpm=r.srpm)
-        r.addAction(""" sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s@%(name)s-%(version)s@'  gphoto2-storage.patch""")
-        r.addAction(""" sed -i 's@gphoto2-%(version)s/%(name)s-%(version)s@%(name)s-%(version)s@'  gphoto2-ixany.patch""")
-        # %s does not work if i use macros ...
-        for p in  [ 'gphoto2-storage.patch',
-                        'gphoto2-ixany.patch',
-                        ]:
-            r.addPatch(p)
 
         r.Create('gphoto2-%(version)s/gphoto2.pc.in', contents = """
 prefix=@prefix@
@@ -60,23 +40,14 @@ Version: @VERSION@
 Libs: -L%(libdir)s -lgphoto2 -lgphoto2_port -lm
 Cflags: -I%(includedir)s -I%(includedir)s/gphoto2
 """)
-        r.Copy('gphoto2-%(version)s/gphoto2.pc.in', 'gphoto2-%(version)s/gphoto2-port.pc.in')
-        r.Replace('Name: gphoto2','Name: gphoto2-port','gphoto2-%(version)s/gphoto2-port.pc.in')
+
+        r.Run(""" sed -i 's/\(AC_SUBST([^,]*\)}/\1/' {m4m,libgphoto2_port/m4}/gp-documentation.m4; sed -i 's/\(m4_pattern_\)disallow/\1forbid/g' {m4m,libgphoto2_port/m4}/gp-check-library.m4; autoreconf -fi""")
 
         r.Configure(" --with-drivers=all  --with-doc-dir=%(docdir)s/%(name)s  --disable-static --without-aalib")
         r.Make()
 
         r.MakeInstall()
 
-        r.Environment('LIBGPHOTO2_LIBS', '-L%(builddir)s/libgphoto2/.libs -L%(builddir)s/libgphoto2_port/libgphoto2_port/.libs -lgphoto2 -lgphoto2_port')
-        r.Environment('LIBGPHOTO2_CFLAGS', '-I%(builddir)s/ -I%(builddir)s/libgphoto2_port')
-
-        r.Configure("--enable-docs --enable-lockdev --with-doc-dir=%(docdir)s/%(name)s", dir = 'gphoto2-%(version)s')
-        r.Make(dir = 'gphoto2-%(version)s')
-        r.MakeInstall(dir = 'gphoto2-%(version)s')
-
-        r.Install('gphoto2-%(version)s/gphoto2.pc', '%(libdir)s/pkgconfig/', mode = 0644)
-        r.Install('gphoto2-%(version)s/gphoto2-port.pc', '%(libdir)s/pkgconfig/', mode = 0644)
 
         r.MakeDirs('%(datadir)s/hal/fdi/information/20thirdparty')
         r.Run("""
