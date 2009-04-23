@@ -1,0 +1,147 @@
+commit 9499237a1c42a27fbcc7ed1d59e34df2b574cdfb
+Author: Marcel Holtmann <marcel@holtmann.org>
+Date:   Sun Apr 19 19:30:03 2009 +0200
+
+    Bluetooth: Add workaround for wrong HCI event in eSCO setup
+    
+    The Broadcom chips with 2.1 firmware handle the fallback case to a SCO
+    link wrongly when setting up eSCO connections.
+    
+      < HCI Command: Setup Synchronous Connection (0x01|0x0028) plen 17
+          handle 11 voice setting 0x0060
+      > HCI Event: Command Status (0x0f) plen 4
+          Setup Synchronous Connection (0x01|0x0028) status 0x00 ncmd 1
+      > HCI Event: Connect Complete (0x03) plen 11
+          status 0x00 handle 1 bdaddr 00:1E:3A:xx:xx:xx type SCO encrypt 0x01
+    
+    The Link Manager negotiates the fallback to SCO, but then sends out
+    a Connect Complete event. This is wrong and the Link Manager should
+    actually send a Synchronous Connection Complete event if the Setup
+    Synchronous Connection has been used. Only the remote side is allowed
+    to use Connect Complete to indicate the missing support for eSCO in
+    the host stack.
+    
+    This patch adds a workaround for this which clearly should not be
+    needed, but reality is that broken Broadcom devices are deployed.
+    
+    Based on a report by Ville Tervo <ville.tervo@nokia.com>
+    
+    Signed-off-by: Marcel Holtman <marcel@holtmann.org>
+
+commit 732547f96ea2442965a24e0ed529d285321a0fff
+Author: Marcel Holtmann <marcel@holtmann.org>
+Date:   Sun Apr 19 19:14:14 2009 +0200
+
+    Bluetooth: Fallback from eSCO to SCO on unspecified error
+    
+    Some Bluetooth chips (like the ones from Texas Instruments) don't do
+    proper eSCO negotiations inside the Link Manager. They just return an
+    error code and in case of the Kyocera ED-8800 headset it is just a
+    random error.
+    
+      < HCI Command: Setup Synchronous Connection 0x01|0x0028) plen 17
+        handle 1 voice setting 0x0060
+      > HCI Event: Command Status (0x0f) plen 4
+        Setup Synchronous Connection (0x01|0x0028) status 0x00 ncmd 1
+      > HCI Event: Synchronous Connect Complete (0x2c) plen 17
+        status 0x1f handle 257 bdaddr 00:14:0A:xx:xx:xx type eSCO
+        Error: Unspecified Error
+    
+    In these cases it is up to the host stack to fallback to a SCO setup
+    and so retry with SCO parameters.
+    
+    Based on a report by Nick Pelly <npelly@google.com>
+    
+    Signed-off-by: Marcel Holtmann <marcel@holtmann.org>
+
+commit e2139b32726e5dd184974c785ea3f62026590801
+Author: Johan Hedberg <johan.hedberg@nokia.com>
+Date:   Thu Mar 26 16:41:56 2009 +0200
+
+    Bluetooth: Fix removing of RFCOMM DLC timer with DEFER_SETUP
+    
+    There is a missing call to rfcomm_dlc_clear_timer in the case that
+    DEFER_SETUP is used and so the connection gets disconnected after the
+    timeout even if it was successfully accepted previously.
+    
+    This patch adds a call to rfcomm_dlc_clear_timer to rfcomm_dlc_accept
+    which will get called when the user accepts the connection by calling
+    read() on the socket.
+    
+    Signed-off-by: Johan Hedberg <johan.hedberg@nokia.com>
+    Signed-off-by: Marcel Holtmann <marcel@holtmann.org>
+
+diff --git a/net/bluetooth/hci_event.c b/net/bluetooth/hci_event.c
+index 5553424..15f40ea 100644
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -866,8 +866,16 @@ static inline void hci_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *s
+ 	hci_dev_lock(hdev);
+ 
+ 	conn = hci_conn_hash_lookup_ba(hdev, ev->link_type, &ev->bdaddr);
+-	if (!conn)
+-		goto unlock;
++	if (!conn) {
++		if (ev->link_type != SCO_LINK)
++			goto unlock;
++
++		conn = hci_conn_hash_lookup_ba(hdev, ESCO_LINK, &ev->bdaddr);
++		if (!conn)
++			goto unlock;
++
++		conn->type = SCO_LINK;
++	}
+ 
+ 	if (!ev->status) {
+ 		conn->handle = __le16_to_cpu(ev->handle);
+@@ -1646,20 +1654,28 @@ static inline void hci_sync_conn_complete_evt(struct hci_dev *hdev, struct sk_bu
+ 		conn->type = SCO_LINK;
+ 	}
+ 
+-	if (conn->out && ev->status == 0x1c && conn->attempt < 2) {
+-		conn->pkt_type = (hdev->esco_type & SCO_ESCO_MASK) |
+-					(hdev->esco_type & EDR_ESCO_MASK);
+-		hci_setup_sync(conn, conn->link->handle);
+-		goto unlock;
+-	}
+-
+-	if (!ev->status) {
++	switch (ev->status) {
++	case 0x00:
+ 		conn->handle = __le16_to_cpu(ev->handle);
+ 		conn->state  = BT_CONNECTED;
+ 
+ 		hci_conn_add_sysfs(conn);
+-	} else
++		break;
++
++	case 0x1c:	/* SCO interval rejected */
++	case 0x1f:	/* Unspecified error */
++		if (conn->out && conn->attempt < 2) {
++			conn->pkt_type = (hdev->esco_type & SCO_ESCO_MASK) |
++					(hdev->esco_type & EDR_ESCO_MASK);
++			hci_setup_sync(conn, conn->link->handle);
++			goto unlock;
++		}
++		/* fall through */
++
++	default:
+ 		conn->state = BT_CLOSED;
++		break;
++	}
+ 
+ 	hci_proto_connect_cfm(conn, ev->status);
+ 	if (ev->status)
+diff --git a/net/bluetooth/rfcomm/core.c b/net/bluetooth/rfcomm/core.c
+index 1d0fb0f..374536e 100644
+--- a/net/bluetooth/rfcomm/core.c
++++ b/net/bluetooth/rfcomm/core.c
+@@ -1194,6 +1194,8 @@ void rfcomm_dlc_accept(struct rfcomm_dlc *d)
+ 
+ 	rfcomm_send_ua(d->session, d->dlci);
+ 
++	rfcomm_dlc_clear_timer(d);
++
+ 	rfcomm_dlc_lock(d);
+ 	d->state = BT_CONNECTED;
+ 	d->state_change(d, 0);
