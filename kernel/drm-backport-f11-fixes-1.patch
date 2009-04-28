@@ -1,0 +1,67 @@
+from: commit 33769d2b889e01e0026ce8980ce4f5803ce14d15
+      Author: Dave Airlie <airlied@redhat.com>
+      Date:   Fri Apr 17 14:04:02 2009 +1000
+
+         fix oops when setting palette on disconnected crtc
+
+commit 19f4dc490ab0417a28c100012bdd8d3633fd42a7
+Author: Adam Jackson <ajax@redhat.com>
+Date:   Fri Apr 17 08:41:09 2009 +1000
+
+    radeon: fix panel mode name
+
+commit 80a878ea6be30bcd9a48d9b825f0bc5f42a6f31f
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Fri Apr 17 10:45:51 2009 +1000
+
+    radeon: r3xx/r4xx hw i2c engine ties up lines when in reset
+    
+    When the hw offload engine is in reset, it ties up the DDC
+    lines on certain chips
+
+--- a/drivers/gpu/drm/radeon/radeon_display.c
++++ b/drivers/gpu/drm/radeon/radeon_display.c
+@@ -130,6 +130,9 @@
+ 	if (size != 256)
+ 		return;
+ 
++	if (!crtc->fb)
++		return;
++
+ 	if (crtc->fb->depth == 16) {
+ 		for (i = 0; i < 64; i++) {
+ 			if (i <= 31) {
+--- a/drivers/gpu/drm/radeon/radeon_connectors.c
++++ b/drivers/gpu/drm/radeon/radeon_connectors.c
+@@ -119,9 +119,9 @@
+ 		mode->flags = 0;
+ 
+ 		mode->type = DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
++		drm_mode_set_name(mode);
+ 
+-		DRM_DEBUG("Adding native panel mode %dx%d\n",
+-			  native_mode->panel_xres, native_mode->panel_yres);
++		DRM_DEBUG("Adding native panel mode %s\n", mode->name);
+ 	}
+ 	return mode;
+ }
+--- a/drivers/gpu/drm/radeon/radeon_i2c.c
++++ b/drivers/gpu/drm/radeon/radeon_i2c.c
+@@ -65,6 +65,16 @@
+ 	uint32_t temp;
+ 	struct radeon_i2c_bus_rec *rec = &radeon_connector->ddc_bus->rec;
+ 
++	/*
++ 	 * on certain r3xx/rv4xx the hw i2c block appears to hold the
++	 * gpio lines in reset, select different gpios to avoid this
++	 */
++	if (radeon_is_r300(dev_priv)) {
++		if (rec->a_clk_reg == RADEON_GPIO_VGA_DDC)
++			RADEON_WRITE(RADEON_DVI_I2C_CNTL_0, 0x30);
++		else
++			RADEON_WRITE(RADEON_DVI_I2C_CNTL_0, 0x20);
++	}
+ 	if (lock_state) {
+ 		temp = RADEON_READ(rec->a_clk_reg);
+ 		temp &= ~(rec->a_clk_mask);
+
