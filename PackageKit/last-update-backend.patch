@@ -1,6 +1,98 @@
-diff -r baa9137832d8 backends/conary/conaryBackend.py
---- a/backends/conary/conaryBackend.py	Wed Apr 08 08:29:00 2009 -0400
-+++ b/backends/conary/conaryBackend.py	Wed Apr 08 09:01:25 2009 -0400
+diff -r 0d5aead087a6 backends/conary/Makefile.am
+--- a/backends/conary/Makefile.am	Wed Apr 01 21:54:00 2009 -0600
++++ b/backends/conary/Makefile.am	Fri May 01 11:46:11 2009 -0500
+@@ -5,6 +5,7 @@
+ 	conaryCallback.py		\
+ 	conaryInit.py			\
+ 	XMLCache.py			    \
++	generateXML.py  	    \
+ 	pkConaryLog.py			\
+ 	conarypk.py			    \
+     conaryProgress.py       \
+diff -r 0d5aead087a6 backends/conary/XMLCache.py
+--- a/backends/conary/XMLCache.py	Wed Apr 01 21:54:00 2009 -0600
++++ b/backends/conary/XMLCache.py	Fri May 01 11:46:11 2009 -0500
+@@ -1,6 +1,5 @@
+ import os
+ import cElementTree
+-#from xml.dom.minidom import parse, parseString
+ from xml.parsers.expat import ExpatError
+ import urllib as url
+ 
+@@ -9,7 +8,7 @@
+ from conary.lib import util
+ 
+ from packagekit.backend import PackageKitBaseBackend
+-from packagekit.enums import ERROR_NO_CACHE,ERROR_REPO_CONFIGURATION_ERROR
++from packagekit.enums import ERROR_NO_CACHE,ERROR_REPO_CONFIGURATION_ERROR, ERROR_NO_NETWORK
+ 
+ 
+ from pkConaryLog import log
+@@ -83,9 +82,9 @@
+                 r = self.xml_path +self.repo
+                 self._repo =   cElementTree.parse(r).getroot()
+                 return self._repo
+-            except ExpatError:
++            except:
+                 Pk = PackageKitBaseBackend("")
+-                Pk.error(ERROR_REPO_CONFIGURATION_ERROR," The file %s not parsed submit a issue " % ( self.xml_path + self.repo, ) )
++                Pk.error(ERROR_REPO_CONFIGURATION_ERROR," The file %s not parsed submit a issue at http://issues.foresightlinux.org" % self.repo )
+        
+ 
+     def _generatePackage(self, package_node ): 
+@@ -106,8 +105,9 @@
+     def _getPackage(self, name):
+         doc = self._open()
+         for package in  doc.findall("Package"):
+-            if package.find("name").text in name:
++            if package.find("name").text == name:
+                 return self._generatePackage(package)
++        return None
+ 
+     def _getPackages(self, name_list ):
+         doc = self._open()
+@@ -279,18 +279,27 @@
+         con = ConaryPk()
+         labels = con.get_labels_from_config()
+         log.info(labels)
++        Pk = PackageKitBaseBackend("")
+         for i in labels:
+-            label = i + '.xml'
+-            filename = self.xml_path + label
+-            wwwfile = self.server + label
+-            try:
+-                wget = url.urlopen( wwwfile )
+-            except:
+-                Pk = PackageKitBaseBackend("")
+-                Pk.error(ERROR_NO_CACHE," %s can not open" % wwwfile)
+-            openfile = open( filename ,'w')
+-            openfile.writelines(wget.readlines())
+-            openfile.close()
++            if "foresight.rpath.org" in i or "conary.rpath.com" in i:
++                label = i + '.xml'
++                filename = self.xml_path + label
++                wwwfile = self.server + label
++                if os.environ.get("NETWORK"):
++                    try:
++                        wget = url.urlopen( wwwfile )
++                    except:
++                        Pk.error(ERROR_NO_NETWORK,"%s can not open" % wwwfile)
++                else:
++                    Pk.error(ERROR_NO_CACHE,"Not exist network conection")
++                openfile = open( filename ,'w')
++                openfile.writelines(wget.readlines())
++                openfile.close()
++            else:
++                import generateXML
++                filename = self.xml_path + i + ".xml"
++                generateXML.init(i,filename)
++
+     def getGroup(self,categorieList):
+         return getGroup(categorieList)
+                 
+diff -r 0d5aead087a6 backends/conary/conaryBackend.py
+--- a/backends/conary/conaryBackend.py	Wed Apr 01 21:54:00 2009 -0600
++++ b/backends/conary/conaryBackend.py	Fri May 01 11:46:11 2009 -0500
 @@ -51,6 +51,7 @@
  def ExceptionHandler(func):
      return func
@@ -39,7 +131,34 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
      def _get_arch(self, flavor):
          return _get_arch(flavor)
   
-@@ -422,6 +423,29 @@
+@@ -253,6 +254,7 @@
+         updJob = self.client.newUpdateJob()
+         try:
+             log.info("prepare updateJOb...............")
++            log.info(applyList)
+             suggMap = self.client.prepareUpdateJob(updJob, applyList)
+             log.info("end prepare updateJOB..............")
+         except NoNewTrovesError:
+@@ -264,7 +266,7 @@
+             
+             dep_package = [ str(i[0][0]).split(":")[0] for i in deps ]
+             log.info(dep_package)
+-            self.error(ERROR_DEP_RESOLUTION_FAILED,  "This package depends of:  %s" % " ,".join(set(dep_package)))
++            self.error(ERROR_DEP_RESOLUTION_FAILED,  "This package depends of:  %s" % ", ".join(set(dep_package)))
+         if cache:
+             Cache().cacheUpdateJob(applyList, updJob)
+         return updJob, suggMap
+@@ -367,6 +369,9 @@
+ 
+         cache = Cache()
+         pkg_dict = cache.resolve( package[0] )
++        log.info(pkg_dict)
++        if pkg_dict is None:
++            return None
+         log.info("doing a resolve")
+ 
+         filter = ConaryFilter(filters)
+@@ -422,6 +427,29 @@
          log.info("options: %s searchlist:%s "%(options, searchlist))
          self._do_search(options, searchlist, 'group')
  
@@ -69,7 +188,7 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
  
      @ExceptionHandler
      def search_name(self, options, searchlist):
-@@ -520,7 +544,7 @@
+@@ -520,7 +548,7 @@
          applyList = [ (x[0], (None, None), x[1:], True) for x in updateItems ]
  
          log.info(">>>>>>>>>> get update >>>>>>>>>>>>")
@@ -78,8 +197,13 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
          log.info(">>>>>>>>>> DO Update >>>>>>>>>>>>")
          jobs = self._do_update(applyList)
          log.info(">>>>>>>>>>END DO Update >>>>>>>>>>>>")
-@@ -536,24 +560,6 @@
-         self.status(STATUS_REFRESH_CACHE)
+@@ -532,28 +560,10 @@
+         #log.debug("refresh-cache command ")
+     #    self.percentage()
+ 
++        self.status(STATUS_REFRESH_CACHE)
+         self.percentage(None)
+-        self.status(STATUS_REFRESH_CACHE)
          cache = Cache()
          cache.refresh()
 -    """
@@ -103,7 +227,7 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
  
      def install_packages(self, package_ids):
          """
-@@ -587,6 +593,7 @@
+@@ -587,6 +597,7 @@
                  log.info(">>> end Prepare Update")
                  self._do_package_update(name, version, flavor)
  
@@ -111,7 +235,7 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
      @ExceptionHandler
      def remove_packages(self, allowDeps, package_ids):
          '''
-@@ -809,6 +816,15 @@
+@@ -809,6 +820,15 @@
                  if lic[1:][0].lower() == j.lower():
                      return j
          return ""
@@ -127,14 +251,52 @@ diff -r baa9137832d8 backends/conary/conaryBackend.py
  
      def _get_branch(self, branch ):
          branchList = branch.split("@")
-diff -r baa9137832d8 backends/conary/conarypk.py
---- a/backends/conary/conarypk.py	Wed Apr 08 08:29:00 2009 -0400
-+++ b/backends/conary/conarypk.py	Wed Apr 08 09:01:25 2009 -0400
-@@ -52,6 +52,18 @@
-             if "foresight.rpath.org" or "conary.rpath.com" in i.asString():
-                 labels.append(i.asString())
-         return labels
+diff -r 0d5aead087a6 backends/conary/conarypk.py
+--- a/backends/conary/conarypk.py	Wed Apr 01 21:54:00 2009 -0600
++++ b/backends/conary/conarypk.py	Fri May 01 11:46:11 2009 -0500
+@@ -11,6 +11,13 @@
+ 
+ from pkConaryLog import log
+ 
++import os
 +
++from packagekit.backend import PackageKitBaseBackend
++from packagekit.enums import ERROR_NO_NETWORK
++
++
++
+ class ConaryPk:
+     def __init__(self):
+         # get configs from /etc/conary
+@@ -25,6 +32,7 @@
+         self.default_label = self.cfg.installLabelPath
+ 
+         # get if x86 or x86_64
++        self.flavors = self.cfg.flavor
+         self.flavor = self.cfg.flavor[0]
+         # for client
+         self.cli = cli
+@@ -32,6 +40,10 @@
+         self.db = cli.db
+         # for request query on repository (repos)
+         self.repos = cli.repos
++    def _exist_network(self):
++        if not os.environ.get("NETWORK"):
++            Pk = PackageKitBaseBackend("")
++            Pk.error(ERROR_NO_NETWORK,"Not exist network conection")
+ 
+     def _get_db(self):
+         """ get the database for do querys """
+@@ -49,10 +61,20 @@
+     def get_labels_from_config(self):
+         labels = []
+         for i in self.default_label:
+-            if "foresight.rpath.org" or "conary.rpath.com" in i.asString():
+-                labels.append(i.asString())
++            #if "foresight.rpath.org" or "conary.rpath.com" in i.asString():
++            labels.append(i.asString())
+         return labels
+ 
 +    def search_path(self,path_file ):
 +        labels = self.get_labels_from_config()
 +        where = self._get_repos()
@@ -145,11 +307,18 @@ diff -r baa9137832d8 backends/conary/conarypk.py
 +                for ( name,version,flavor) in trove[path_file]:
 +                    return name
 +                
-+
- 
      def query(self, name):
          """ do a conary query """
-@@ -109,7 +121,7 @@
+         if name is None or name == "":
+@@ -67,6 +89,7 @@
+ 
+     def request_query(self, name, installLabel = None):
+         """ Do a conary request query """
++        self._exist_network()
+         label = self.label( installLabel )
+         repos = self._get_repos()
+         try:
+@@ -109,7 +132,7 @@
  
  if __name__ == "__main__":
      conary = ConaryPk()
@@ -158,27 +327,100 @@ diff -r baa9137832d8 backends/conary/conarypk.py
      #print conary.query("gimpasdas")
      #print conary.request_query("dpaster",'zodyrepo.rpath.org@rpl:devel')
      #print conary.request_query("gimp")
-diff -r baa9137832d8 backends/conary/pk-backend-conary.c
---- a/backends/conary/pk-backend-conary.c	Wed Apr 08 08:29:00 2009 -0400
-+++ b/backends/conary/pk-backend-conary.c	Wed Apr 08 09:01:25 2009 -0400
-@@ -236,6 +236,7 @@
- /**
-     pk_backend_search_groups
- */
-+/**
- static void
- backend_search_group (PkBackend *backend, PkBitfield filters, const gchar *search)
- {
-@@ -244,7 +245,7 @@
- 	pk_backend_spawn_helper (spawn, "conaryBackend.py", "search-group", filters_text, search, NULL);
- 	g_free (filters_text);
- }
--
-+*/
- 
- 
- /**
-@@ -327,8 +328,27 @@
+diff -r 0d5aead087a6 backends/conary/generateXML.py
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/backends/conary/generateXML.py	Fri May 01 11:46:11 2009 -0500
+@@ -0,0 +1,86 @@
++from conarypk import ConaryPk
++
++from conary import versions
++from conary.conarycfg import CfgFlavor
++from conary.deps import deps
++from conary.lib.cfg import ConfigFile
++from conary.lib.cfgtypes import CfgInt, CfgPath
++import cElementTree
++from pkConaryLog import log
++
++def getPackagesFromLabel(cfg, cli, label):
++    '''
++    Return a set of (name, version, flavor) triples representing each
++    package on the specified I{label}.
++    '''
++    repos = cli.getRepos()
++    label = versions.Label(label)
++    #searchFlavor =  (CfgFlavor, deps.parseFlavor('is: x86(~i486,~i586,~i686,~sse,~sse2)'))
++    searchFlavor =   deps.parseFlavor('is: x86(~i486,~i586,~i686,~sse,~sse2)')
++    mapping = repos.getTroveLatestByLabel({'': {label: None}})
++
++    # Get a list of troves on that label
++    # {name: {version: [flavor, ...], ...}, ...}
++    ret = set()
++    for name, trove_versions in mapping.iteritems():
++        if ':' in name:
++            # Skip components
++            continue
++        latestVersion = max(trove_versions.iterkeys())
++        flavors = trove_versions[latestVersion]
++        for flavor in flavors:
++            #if flavor.satisfies(searchFlavor):
++            ret.add((name, latestVersion, flavor))
++            break
++    return ret
++
++
++def generate_xml( troves, label):
++    document = cElementTree.Element("Packages", label = label)
++    for trove in troves:
++        name = trove.getName()
++        version= trove.getVersion().trailingRevision().asString()
++        meta = trove.getMetadata()
++
++        package = cElementTree.Element("Package")
++
++        node_name = cElementTree.Element("name")
++        node_name.text = name
++        node_version = cElementTree.Element("version")
++        node_version.text = version 
++
++        for i in [ node_name, node_version ]:
++            package.append(i)
++
++        for key,value in meta.items():
++            if value is not None and value != "None":
++                if key == "categories":
++                    for cat in value:
++                        cat_node = cElementTree.Element("category", lang = "en")
++                        cat_node.text = cat
++                        package.append(node)
++                else:
++                    node = cElementTree.Element(key, lang = "en")
++                    node.text = value
++                    package.append(node)
++
++        document.append(package)
++    return document
++
++
++def init(label, fileoutput ):
++    conary = ConaryPk()
++    cli = conary.cli
++
++    cfg = conary.cfg
++    log.info(" write %s on xml" %  label)
++    pkgs = getPackagesFromLabel(cfg,cli,label)
++    troves = conary.repos.getTroves(pkgs,withFiles=False)
++    nodes = generate_xml(troves,label)
++    cElementTree.ElementTree(nodes).write(fileoutput)
++    log.info("%s repo done" % label)
++
++
++
++if __name__ == "__main__":
++    init('zodyrepo.rpath.org@rpl:devel','tmp.xml')
+diff -r 0d5aead087a6 backends/conary/pk-backend-conary.c
+--- a/backends/conary/pk-backend-conary.c	Wed Apr 01 21:54:00 2009 -0600
++++ b/backends/conary/pk-backend-conary.c	Fri May 01 11:46:11 2009 -0500
+@@ -327,8 +327,27 @@
      pk_backend_spawn_helper (spawn, "conaryBackend.py", "get-packages", filters_text, NULL);
      g_free (filters_text);
  }
@@ -206,7 +448,7 @@ diff -r baa9137832d8 backends/conary/pk-backend-conary.c
  
  PK_BACKEND_OPTIONS (
  	"Conary with XMLCache",				/* description */
-@@ -344,7 +364,7 @@
+@@ -344,7 +363,7 @@
  	NULL,					/* get_categories */
  	NULL,					/* get_depends */
  	backend_get_details,			/* get_details */
@@ -215,20 +457,18 @@ diff -r baa9137832d8 backends/conary/pk-backend-conary.c
  	backend_get_files,			/* get_files */
  	backend_get_packages,					/* get_packages */
  	NULL,					/* get_repo_list */
-@@ -361,8 +381,8 @@
+@@ -361,7 +380,7 @@
  	backend_resolve,			/* resolve */
  	NULL,					/* rollback */
  	backend_search_details,					/* search_details */
 -	NULL,					/* search_file */
--	backend_search_group,					/* search_group */
 +	backend_search_file,					/* search_file */
-+	NULL,					/* search_group */
+ 	backend_search_group,					/* search_group */
  	backend_search_name,			/* search_name */
  	backend_update_packages,		/* update_packages */
- 	backend_update_system,			/* update_system */
-diff -r baa9137832d8 configure.ac
---- a/configure.ac	Wed Apr 08 08:29:00 2009 -0400
-+++ b/configure.ac	Wed Apr 08 09:01:25 2009 -0400
+diff -r 0d5aead087a6 configure.ac
+--- a/configure.ac	Wed Apr 01 21:54:00 2009 -0600
++++ b/configure.ac	Fri May 01 11:46:11 2009 -0500
 @@ -1,6 +1,6 @@
  AC_PREREQ(2.52)
  
