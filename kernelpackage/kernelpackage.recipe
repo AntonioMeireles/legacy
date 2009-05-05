@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2008 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -113,19 +113,25 @@ class KernelPackageRecipe(CPackageRecipe):
             return
         r.setMacros()
         r.unpackBase()
+        r.fixPermissions()
+        r.addNonInteractiveConfig()
         r.setCompileInfo()
         r.unpack() # patches go here
         r.distCleanup()
         r.createLocalVersion()
         r.configure() # manually generated .config's go here
-        r.buildBase()
+        r.buildBase() # includes installation
+        r.buildAtaModuleMap() # may be overridden if modules.libata not needed
+        r.removeDuplicateFirmware() # /lib/firmware conflicts RPL-3012
         r.build() # extra build actions go here
         r.policyBase()
         r.policy() # extra policy goes here
 
     def setMacros(r):
+        r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
-        r.macros.sublevel = r.version.split('.')[2]
+        r.macros.sublevel = r.version.split('.')[2].split('_')[0]
+
         if 'serial' in r.__dict__:
             r.macros.serial = r.serial
         else:
@@ -143,7 +149,7 @@ class KernelPackageRecipe(CPackageRecipe):
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
         r.macros.localversion = '-%(serial)s%(cfgver)s'
-        r.macros.kver = '%(version)s%(localversion)s'
+        r.macros.kver = '%(archive_version)s%(localversion)s'
         r.macros.sourcever = '%(version)s-%(serial)s'
         r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
 
@@ -160,16 +166,29 @@ class KernelPackageRecipe(CPackageRecipe):
         if not r.Flags.debugdata:
             r.Strip(debuginfo=False)
 
+        if 'archive_dir' in r.__dict__:
+            r.macros.archive_dir = r.archive_dir + '/'
+        else:
+            if '-rc' in r.macros.archive_version:
+                r.macros.archive_dir = 'testing/'
+            else:
+                r.macros.archive_dir = ''
+
     def unpackBase(r):
         r.addArchive(
-            'ftp://ftp2.kernel.org/pub/linux/kernel/v%(majorversion)s/'
-            'linux-%(version)s.tar.bz2',
+            'ftp://ftp.kernel.org/pub/linux/kernel/v%(majorversion)s/'
+            '%(archive_dir)s'
+            'linux-%(archive_version)s.tar.bz2',
             keyid='517D0F0E'
         )
+
+    def fixPermissions(r):
         # Conary preserves world-write/execute permissions in the tarball,
         # which we do not want to preserve on the installed system or in
         # the build
         r.addAction('chmod -R go-w .')
+
+    def addNonInteractiveConfig(r):
         # avoid requests for interactive response
         r.addPatch('linux-2.4.0-nonintconfig.patch')
 
@@ -201,8 +220,9 @@ class KernelPackageRecipe(CPackageRecipe):
     def configure(r):
         r.extraSource(addConfigs(r))
         r.Make('nonint_oldconfig 2>oc.err ||'
-               ' { cat oc.err; diff -u .config.old .config > config.changes;'
-               '   echo "missing config items:"; cat config.changes ;'
+               ' { diff -u .config.old .config > config.changes;'
+               '   cat config.changes ;'
+               '   echo "missing config items:"; cat oc.err ;'
                '   exit 1; }')
         # if we get here, this file is empty, remove it
         r.Remove('oc.err')
@@ -252,6 +272,23 @@ class KernelPackageRecipe(CPackageRecipe):
             r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
             r.Provides('abi: ELF64(SysV x86_64)', '/boot/vmlinu.*')
 
+    def buildAtaModuleMap(r):
+        # find libata modules
+        r.Run('for i in $(find %(destdir)s | grep drivers\/ata); '
+              'do if [ $(nm $i |grep --count ata_pci_remove_one) -ne 0 ]; '
+              'then basename `echo $i` ;fi ; done | grep -v sata | '
+              'grep -v pdc_adma | sort >> modules.libata')
+        r.Install('modules.libata', '/lib/modules/%(kver)s/modules.libata')
+
+    def removeDuplicateFirmware(r):
+        # /lib/firmware conflicts RPL-3012
+        # subclasses can override this if they REALLY want /lib/firmware
+        # file conflicts
+        r.extraSource(testConfig(r, 'CONFIG_FIRMWARE_IN_KERNEL', 'y',
+            'CONFIG_FIRMWARE_IN_KERNEL must be set to "y" to'
+            ' avoid building kernels that cannot be installed in parallel'))
+        r.Remove('/lib/firmware', recursive=True)
+
     def build(r):
         """
         Add any special build actions here
@@ -262,7 +299,7 @@ class KernelPackageRecipe(CPackageRecipe):
         # Place open-vm-tools modules into a seperate component.  This
         # allows easy removal for people who wish to run a vmware host.
         r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/fs/vm.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/misc/vm.*')
+        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/misc/v.*')
         r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/net/vm.*')
 
     def policyBase(r):
@@ -331,6 +368,9 @@ class CreateBuildTree(build.BuildAction):
                 srcpath = util.joinPaths(bldincdir, entry)
                 util.copytree(srcpath, destincdir)
         os.symlink(asmarch, destincdir+'/asm')
+        if os.path.isdir('arch/%s/include' % arch):
+            util.copytree('arch/%s/include' % arch,
+                    util.joinPaths(destdir, 'arch/%s' % arch))
         if Arch.x86_64:
             srcpath = util.joinPaths(bldincdir, 'asm-i386')
             if os.path.exists(srcpath):
@@ -349,9 +389,9 @@ class CreateBuildTree(build.BuildAction):
         if topdir in ('arch',):
             if nextdir != arch:
                 return
-        util.mkdirChain(util.joinPaths(destdir, subpath))
         for name in names:
             if regex.match(name):
+                util.mkdirChain(util.joinPaths(destdir, subpath))
                 srcpath = util.joinPaths(dirname, name)
                 if not os.path.isdir(srcpath):
                     destpath = util.joinPaths(destdir, subpath, name)
@@ -412,7 +452,7 @@ class addConfigs(action.RecipeAction):
             {True: 'kernel.numa', False:''}[numa],
             ', '.join(flaglist), arch,
         )
-        config = self.config()
+        config = self.getConfig()
 
         thisArch = True and Arch[arch]
         if not thisArch:
@@ -499,9 +539,10 @@ class addConfigs(action.RecipeAction):
                 util.copyfile(config.filename(self.confdir),
                     '%(builddir)s/%(maindir)s/.config' %self.recipe.macros)
                 self.recipe.macros.cfgver = config.unamePrefix+config.unameArch
+                self.recipe.kernelConfig = config
                 print 'building with cfgver = "%s"' %self.recipe.macros.cfgver
 
-    def config(self):
+    def getConfig(self):
         f = self.lookaside.findAll(self.recipe.cfg, self.recipe.laReposCache,
                 'config.base', self.recipe.name, self.recipe.srcdirs)
         self.sourcemap['config.base'] = f
@@ -528,6 +569,18 @@ class addConfigs(action.RecipeAction):
             config.setUnamePrefix(configdata)
         elif unameArch:
             config.setUnameArch(configdata)
+
+
+# kernelConfigs can't be tested until after configuration has happened
+class testConfig(action.RecipeAction):
+    def __init__(self, *args, **keywords):
+        self.key, self.value, self.errMsg = args[1:]
+        action.RecipeAction.__init__(self, *args, **keywords)
+
+    def do(self):
+        if not self.recipe.kernelConfig[self.key] == self.value:
+            self.recipe.reportErrors(self.errorMsg)
+
 
 
 class KernelConfig(list):
@@ -561,10 +614,11 @@ class KernelConfig(list):
             f.close()
     def write(self, dirname):
         f = file(self.filename(dirname), 'w')
-        # kernel config files need weird syntax
-        self.commentNo()
-        f.write("\n".join(self))
+        f.write(self.format())
         f.close()
+    def format(self):
+        # kernel config files need weird syntax
+        return "\n".join(self.commentNo(x) for x in self)
     def filename(self, dirname):
         return dirname+'/config'+self.unamePrefix+self.unameArch
     def extend(self, items):
@@ -595,13 +649,12 @@ class KernelConfig(list):
             self.applyline(line)
     def _isval(self, item):
         return item.find("=") != -1 and not item.startswith('#')
-    def commentNo(self):
+    def commentNo(self, line):
         # unusual comment-for-no syntax
-        for index in range(len(self)):
-            line = self[index]
-            if line.endswith("=n"):
-                key = line.split("=")[0]
-                list.__setitem__(self, index, "# %s is not set" %key)
+        if line.endswith("=n"):
+            key = line.split("=")[0]
+            return "# %s is not set" %key
+        return line
     def __getitem__(self, key):
         if type(key) == type(""):
             return self.dict[key]
