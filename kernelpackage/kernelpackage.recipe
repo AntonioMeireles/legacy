@@ -121,16 +121,17 @@ class KernelPackageRecipe(CPackageRecipe):
         r.distCleanup()
         r.createLocalVersion()
         r.configure() # manually generated .config's go here
+        r.buildBase() # includes installation
         r.buildAtaModuleMap() # may be overridden if modules.libata not needed
-        r.buildBase()
         r.build() # extra build actions go here
         r.policyBase()
         r.policy() # extra policy goes here
 
     def setMacros(r):
-        r.macros.archive_version = '-'.join(r.version.split('_'))
+        r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
         r.macros.sublevel = r.version.split('.')[2].split('_')[0]
+
         if 'serial' in r.__dict__:
             r.macros.serial = r.serial
         else:
@@ -148,7 +149,7 @@ class KernelPackageRecipe(CPackageRecipe):
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
         r.macros.localversion = '-%(serial)s-fl%(cfgver)s'
-        r.macros.kver = '%(version)s%(localversion)s'
+        r.macros.kver = '%(archive_version)s%(localversion)s'
         r.macros.sourcever = '%(version)s-%(serial)s'
         r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
 
@@ -175,7 +176,7 @@ class KernelPackageRecipe(CPackageRecipe):
 
     def unpackBase(r):
         r.addArchive(
-            'ftp://ftp2.kernel.org/pub/linux/kernel/v%(majorversion)s/'
+            'ftp://ftp.kernel.org/pub/linux/kernel/v%(majorversion)s/'
             '%(archive_dir)s'
             'linux-%(archive_version)s.tar.bz2',
             keyid='517D0F0E'
@@ -438,6 +439,7 @@ class addConfigs(action.RecipeAction):
         if self.failed:
             raise KernelConfigError, 'all keys set in any config file must be in config.base,\nbecause the order of the keys matters'
 
+
     def do_one(self, arch, flaglist, smp=False, pae=False, numa=False):
         print 'Creating configuration file for flavor [%s %s is: %s]' %(
             {True: 'kernel.smp', False:''}[smp] +
@@ -445,7 +447,7 @@ class addConfigs(action.RecipeAction):
             {True: 'kernel.numa', False:''}[numa],
             ', '.join(flaglist), arch,
         )
-        config = self.config()
+        config = self.getConfig()
 
         thisArch = True and Arch[arch]
         if not thisArch:
@@ -532,9 +534,10 @@ class addConfigs(action.RecipeAction):
                 util.copyfile(config.filename(self.confdir),
                     '%(builddir)s/%(maindir)s/.config' %self.recipe.macros)
                 self.recipe.macros.cfgver = config.unamePrefix+config.unameArch
+                self.recipe.kernelConfig = config
                 print 'building with cfgver = "%s"' %self.recipe.macros.cfgver
 
-    def config(self):
+    def getConfig(self):
         f = self.lookaside.findAll(self.recipe.cfg, self.recipe.laReposCache,
                 'config.base', self.recipe.name, self.recipe.srcdirs)
         self.sourcemap['config.base'] = f
@@ -561,6 +564,18 @@ class addConfigs(action.RecipeAction):
             config.setUnamePrefix(configdata)
         elif unameArch:
             config.setUnameArch(configdata)
+
+
+# kernelConfigs can't be tested until after configuration has happened
+class testConfig(action.RecipeAction):
+    def __init__(self, *args, **keywords):
+        self.key, self.value, self.errMsg = args[1:]
+        action.RecipeAction.__init__(self, *args, **keywords)
+
+    def do(self):
+        if not self.recipe.kernelConfig[self.key] == self.value:
+            self.recipe.reportErrors(self.errorMsg)
+
 
 
 class KernelConfig(list):
@@ -594,10 +609,11 @@ class KernelConfig(list):
             f.close()
     def write(self, dirname):
         f = file(self.filename(dirname), 'w')
-        # kernel config files need weird syntax
-        self.commentNo()
-        f.write("\n".join(self))
+        f.write(self.format())
         f.close()
+    def format(self):
+        # kernel config files need weird syntax
+        return "\n".join(self.commentNo(x) for x in self)
     def filename(self, dirname):
         return dirname+'/config'+self.unamePrefix+self.unameArch
     def extend(self, items):
@@ -628,13 +644,12 @@ class KernelConfig(list):
             self.applyline(line)
     def _isval(self, item):
         return item.find("=") != -1 and not item.startswith('#')
-    def commentNo(self):
+    def commentNo(self, line):
         # unusual comment-for-no syntax
-        for index in range(len(self)):
-            line = self[index]
-            if line.endswith("=n"):
-                key = line.split("=")[0]
-                list.__setitem__(self, index, "# %s is not set" %key)
+        if line.endswith("=n"):
+            key = line.split("=")[0]
+            return "# %s is not set" %key
+        return line
     def __getitem__(self, key):
         if type(key) == type(""):
             return self.dict[key]
