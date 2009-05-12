@@ -1,0 +1,170 @@
+Index: CMakeLists.txt
+===================================================================
+--- kopete/CMakeLists.txt	(revision 937303)
++++ kopete/CMakeLists.txt	(working copy)
+@@ -96,6 +96,10 @@
+ macro_bool_to_01(LIBGADU_FOUND HAVE_LIBGADU)
+ macro_log_feature(LIBGADU_FOUND "libgadu" "A library providing support for Gadu-Gadu protocol" "http://toxygen.net/libgadu/" FALSE "1.8.0" "Required for Kopete Gadu-Gadu protocol")
+ 
++macro_optional_find_package(LibV4L2)
++macro_bool_to_01(LIBV4L2_FOUND HAVE_LIBV4L2)
++macro_log_feature(LIBV4L2_FOUND "libv4l2" "Collection of video4linux support libraries" "http://hansdegoede.livejournal.com/3636.html" FALSE "" "Required for better webcam support")
++
+ check_include_files(valgrind/valgrind.h HAVE_VALGRIND_H)
+ check_include_files(stdint.h HAVE_STDINT_H)
+ check_include_files(inttypes.h HAVE_INTTYPES_H)
+Index: cmake/modules/FindLibV4L2.cmake
+===================================================================
+--- cmake/modules/FindLibV4L2.cmake	(revision 0)
++++ cmake/modules/FindLibV4L2.cmake	(revision 0)
+@@ -0,0 +1,32 @@
++# cmake macro to test LibV4L2
++
++# Copyright (c) 2009, Jaroslav Reznik <jreznik@redhat.com>
++#
++# LIBV4L2_FOUND
++# LIBV4L2_INCLUDE_DIR
++# LIBV4L2_LIBRARY
++#
++# Redistribution and use is allowed according to the terms of the BSD license.
++# For details see the accompanying COPYING-CMAKE-SCRIPTS file.
++
++INCLUDE (FindPackageHandleStandardArgs)
++
++IF (LIBV4L2_INCLUDE_DIR AND LIBV4L2_LIBRARY)
++    # Already in cache, be silent
++    SET (LIBV4L2_FIND_QUIETLY TRUE)
++ENDIF (LIBV4L2_INCLUDE_DIR AND LIBV4L2_LIBRARY)
++
++IF (NOT LIBV4L2_FOUND)
++  FIND_PATH (LIBV4L2_INCLUDE_DIR libv4l2.h)
++  FIND_LIBRARY (LIBV4L2_LIBRARY NAMES v4l2)
++
++  IF (LIBV4L2_INCLUDE_DIR AND LIBV4L2_LIBRARY)
++    SET (LIBV4L2_FOUND TRUE)
++  ENDIF( LIBV4L2_INCLUDE_DIR AND LIBV4L2_LIBRARY )
++ENDIF ( NOT LIBV4L2_FOUND)
++
++IF( LIBV4L2_FOUND )
++  IF( NOT LIBV4L2_FIND_QUIETLY )
++    MESSAGE( STATUS "Found LIBV4L2: ${LIBV4L2_LIBRARY}")
++  ENDIF( NOT LIBV4L2_FIND_QUIETLY )
++ENDIF( LIBV4L2_FOUND )
+Index: config-kopete.h.cmake
+===================================================================
+--- kopete/config-kopete.h.cmake	(revision 937303)
++++ kopete/config-kopete.h.cmake	(working copy)
+@@ -59,3 +59,6 @@
+ 
+ /* The size of a `unsigned long', as computed by sizeof. */
+ #define SIZEOF_UNSIGNED_LONG ${SIZEOF_UNSIGNED_LONG}
++
++/* Define to 1 if you want libv4l support */
++#cmakedefine HAVE_LIBV4L2 1
+Index: libkopete/avdevice/CMakeLists.txt
+===================================================================
+--- kopete/libkopete/avdevice/CMakeLists.txt	(revision 937303)
++++ kopete/libkopete/avdevice/CMakeLists.txt	(working copy)
+@@ -18,7 +18,11 @@
+ 
+ kde4_add_library(kopete_videodevice SHARED ${kopete_videodevice_LIB_SRCS})
+ 
++if (LIBV4L2_FOUND)
++target_link_libraries(kopete_videodevice ${QT_QTGUI_LIBRARY} ${KDE4_KDECORE_LIBS} ${KDE4_SOLID_LIBS} ${LIBV4L2_LIBRARY})
++else (LIBV4L2_FOUND)
+ target_link_libraries(kopete_videodevice ${QT_QTGUI_LIBRARY} ${KDE4_KDECORE_LIBS} ${KDE4_SOLID_LIBS})
++endif (LIBV4L2_FOUND)
+ 
+ set_target_properties(kopete_videodevice PROPERTIES VERSION ${GENERIC_LIB_VERSION} SOVERSION ${GENERIC_LIB_SOVERSION} )
+ install(TARGETS kopete_videodevice ${INSTALL_TARGETS_DEFAULT_ARGS})
+Index: libkopete/avdevice/videodevice.h
+===================================================================
+--- kopete/libkopete/avdevice/videodevice.h	(revision 937303)
++++ kopete/libkopete/avdevice/videodevice.h	(working copy)
+@@ -56,6 +56,10 @@
+ #define VIDEO_MODE_NTSC_JP 6
+ #define __STRICT_ANSI__
+ 
++#ifdef HAVE_LIBV4L2
++#include <libv4l2.h>
++#endif // HAVE_V4L2
++
+ #endif // __linux__
+ 
+ #include <qstring.h>
+Index: libkopete/avdevice/videodevice.cpp
+===================================================================
+--- kopete/libkopete/avdevice/videodevice.cpp	(revision 937303)
++++ kopete/libkopete/avdevice/videodevice.cpp	(working copy)
+@@ -147,7 +147,11 @@
+ {
+ 	int r;
+ 
++#ifdef HAVE_LIBV4L2
++	do r = v4l2_ioctl (descriptor, request, arg);
++#else
+ 	do r = ioctl (descriptor, request, arg);
++#endif
+ 	while (-1 == r && EINTR == errno);
+ 	return r;
+ }
+@@ -185,7 +189,11 @@
+ 		kDebug() << "Device is already open";
+ 		return EXIT_SUCCESS;
+ 	}
++#ifdef HAVE_LIBV4L2
++	descriptor = ::v4l2_open (QFile::encodeName(full_filename), O_RDWR, 0);
++#else
+ 	descriptor = ::open (QFile::encodeName(full_filename), O_RDWR, 0);
++#endif
+ 	if(isOpen())
+ 	{
+ 		kDebug() << "File " << full_filename << " was opened successfuly";
+@@ -988,7 +996,11 @@
+ 				if (m_currentbuffer.data.isEmpty())
+ 					return EXIT_FAILURE;
+ 
++#ifdef HAVE_LIBV4L2
++				bytesread = v4l2_read (descriptor, &m_currentbuffer.data[0], m_currentbuffer.data.size());
++#else
+ 				bytesread = read (descriptor, &m_currentbuffer.data[0], m_currentbuffer.data.size());
++#endif
+ 				if (-1 == bytesread) // must verify this point with ov511 driver.
+ 				{
+ 					kDebug() << "IO_METHOD_READ failed.";
+@@ -1434,7 +1446,11 @@
+ 						unsigned int loop;
+ 						for (loop = 0; loop < m_streambuffers; ++loop)
+ 						{
++#ifdef HAVE_LIBV4L2
++							if (v4l2_munmap(m_rawbuffers[loop].start,m_rawbuffers[loop].length) != 0)
++#else
+ 							if (munmap(m_rawbuffers[loop].start,m_rawbuffers[loop].length) != 0)
++#endif
+ 							{
+ 								kDebug() << "unable to munmap.";
+ 							}
+@@ -1462,7 +1478,11 @@
+ 	{
+ 		kDebug() << " Device is open. Trying to properly shutdown the device.";
+ 		stopCapturing();
++#ifdef HAVE_LIBV4L2
++		int ret = ::v4l2_close(descriptor);
++#else
+ 		int ret = ::close(descriptor);
++#endif
+ 		kDebug() << "::close() returns " << ret;
+ 	}
+ 	descriptor = -1;
+@@ -2749,7 +2769,11 @@
+ 				return errnoReturn ("VIDIOC_QUERYBUF");
+ 
+ 			m_rawbuffers[m_streambuffers].length = v4l2buffer.length;
++#ifdef HAVE_LIBV4L2
++			m_rawbuffers[m_streambuffers].start = (uchar *) v4l2_mmap (NULL /* start anywhere */, v4l2buffer.length, PROT_READ | PROT_WRITE /* required */, MAP_SHARED /* recommended */, descriptor, v4l2buffer.m.offset);
++#else
+ 			m_rawbuffers[m_streambuffers].start = (uchar *) mmap (NULL /* start anywhere */, v4l2buffer.length, PROT_READ | PROT_WRITE /* required */, MAP_SHARED /* recommended */, descriptor, v4l2buffer.m.offset);
++#endif
+ 
+ 			if (MAP_FAILED == m_rawbuffers[m_streambuffers].start)
+ 			return errnoReturn ("mmap");
