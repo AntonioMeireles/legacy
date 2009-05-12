@@ -1,0 +1,92 @@
+vmscan: make mapped executable pages the first class citizen
+
+Protect referenced PROT_EXEC mapped pages from being deactivated.
+
+PROT_EXEC(or its internal presentation VM_EXEC) pages normally belong to some
+currently running executables and their linked libraries, they shall really be
+cached aggressively to provide good user experiences.
+
+CC: Elladan <elladan@eskimo.com>
+CC: Nick Piggin <npiggin@suse.de>
+CC: Johannes Weiner <hannes@cmpxchg.org>
+CC: Christoph Lameter <cl@linux-foundation.org>
+CC: KOSAKI Motohiro <kosaki.motohiro@jp.fujitsu.com>
+Acked-by: Peter Zijlstra <peterz@infradead.org>
+Acked-by: Rik van Riel <riel@redhat.com>
+Signed-off-by: Wu Fengguang <fengguang.wu@intel.com>
+---
+ mm/vmscan.c |   33 +++++++++++++++++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+--- linux.orig/mm/vmscan.c
++++ linux/mm/vmscan.c
+@@ -1233,6 +1233,7 @@ static void shrink_active_list(unsigned 
+ 	unsigned long pgscanned;
+ 	unsigned long vm_flags;
+ 	LIST_HEAD(l_hold);	/* The pages which were snipped off */
++	LIST_HEAD(l_active);
+ 	LIST_HEAD(l_inactive);
+ 	struct page *page;
+ 	struct pagevec pvec;
+@@ -1272,8 +1273,13 @@ static void shrink_active_list(unsigned 
+ 
+ 		/* page_referenced clears PageReferenced */
+ 		if (page_mapping_inuse(page) &&
+-		    page_referenced(page, 0, sc->mem_cgroup, &vm_flags))
++		    page_referenced(page, 0, sc->mem_cgroup, &vm_flags)) {
+ 			pgmoved++;
++			if ((vm_flags & VM_EXEC) && !PageAnon(page)) {
++				list_add(&page->lru, &l_active);
++				continue;
++			}
++		}
+ 
+ 		list_add(&page->lru, &l_inactive);
+ 	}
+@@ -1282,7 +1288,6 @@ static void shrink_active_list(unsigned 
+ 	 * Move the pages to the [file or anon] inactive list.
+ 	 */
+ 	pagevec_init(&pvec, 1);
+-	lru = LRU_BASE + file * LRU_FILE;
+ 
+ 	spin_lock_irq(&zone->lru_lock);
+ 	/*
+@@ -1294,6 +1299,7 @@ static void shrink_active_list(unsigned 
+ 	reclaim_stat->recent_rotated[!!file] += pgmoved;
+ 
+ 	pgmoved = 0;
++	lru = LRU_BASE + file * LRU_FILE;
+ 	while (!list_empty(&l_inactive)) {
+ 		page = lru_to_page(&l_inactive);
+ 		prefetchw_prev_lru_page(page, &l_inactive, flags);
+@@ -1316,6 +1322,29 @@ static void shrink_active_list(unsigned 
+ 	}
+ 	__count_zone_vm_events(PGREFILL, zone, pgscanned);
+ 	__count_vm_events(PGDEACTIVATE, pgdeactivate);
++
++	pgmoved = 0;  /* count pages moved back to active list */
++	lru = LRU_ACTIVE + file * LRU_FILE;
++	while (!list_empty(&l_active)) {
++		page = lru_to_page(&l_active);
++		prefetchw_prev_lru_page(page, &l_active, flags);
++		VM_BUG_ON(PageLRU(page));
++		SetPageLRU(page);
++		VM_BUG_ON(!PageActive(page));
++
++		list_move(&page->lru, &zone->lru[lru].list);
++		mem_cgroup_add_lru_list(page, lru);
++		pgmoved++;
++		if (!pagevec_add(&pvec, page)) {
++			spin_unlock_irq(&zone->lru_lock);
++			if (buffer_heads_over_limit)
++				pagevec_strip(&pvec);
++			__pagevec_release(&pvec);
++			spin_lock_irq(&zone->lru_lock);
++		}
++	}
++	__mod_zone_page_state(zone, NR_LRU_BASE + lru, pgmoved);
++
+ 	spin_unlock_irq(&zone->lru_lock);
+ 	if (vm_swap_full())
+ 		pagevec_swap_free(&pvec);
+
