@@ -8,7 +8,7 @@ loadSuperClass('kernelpackage')
 class Kernel(KernelPackageRecipe):
 
     name = 'kernel'
-    version = '2.6.27.18'
+    version = '2.6.29.3'
 
     def unpack(r):
         # VMware support
@@ -17,18 +17,12 @@ class Kernel(KernelPackageRecipe):
         r.buildvmmodules = not Use.xen
         r.addArchive('mirror://sourceforge/open-vm-tools/'
                      'open-vm-tools-%(ovmtoolsver)s.tar.gz',
-                     dir='linux-%(version)s',
+                     dir='linux-%(archive_version)s',
                      use=r.buildvmmodules)
-
+        r.addPatch('open-vm-tools-api.patch',
+                   dir='open-vm-tools-%(ovmtoolsver)s')
 
     def build(r):
-        # find libata modules
-        r.Run('for i in $(find %(destdir)s | grep drivers\/ata); '
-              'do if [ $(nm $i |grep --count ata_pci_remove_one) -ne 0 ]; '
-              'then basename `echo $i` ;fi ; done | grep -v sata | '
-              'grep -v pdc_adma | sort >> modules.libata')
-        r.Install('modules.libata', '/lib/modules/%(kver)s/modules.libata')
-
         # Build VMware kernel modules
         if r.buildvmmodules:
             r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
@@ -44,4 +38,5 @@ class Kernel(KernelPackageRecipe):
                 modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
                 r.Make('HEADER_DIR=%(builddir)s/include', dir=modsrc)
                 kmod = module + '.ko'
-                r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod)
+                r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod,
+                          package=':vmware')
