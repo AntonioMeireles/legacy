@@ -1,0 +1,2279 @@
+Index: src/main.c
+===================================================================
+--- src/main.c	(Revision 5214)
++++ src/main.c	(Revision 5744)
+@@ -265,7 +265,7 @@
+     gint slideshow_timeout = xfce_rc_read_int_entry(xfce_rc, "SlideShowTimeout", 5000);
+     gboolean slideshow_hide_thumbnail = xfce_rc_read_bool_entry(xfce_rc, "SlideShowHideThumbnail", TRUE);
+     gint max_cache = xfce_rc_read_int_entry(xfce_rc, "MaxImagesCacheSize", 64);
+-    gboolean preload_during_slideshow = xfce_rc_read_bool_entry (xfce_rc, "PreloadDuringSlideShow", FALSE);
++    gboolean preload_imgs = xfce_rc_read_bool_entry (xfce_rc, "PreloadImgs", FALSE);
+     gboolean override_bg_color = xfce_rc_read_bool_entry (xfce_rc, "OverrideBgColor", FALSE);
+     gboolean scale_to_100 = xfce_rc_read_bool_entry (xfce_rc, "ScaleTo100", FALSE);
+ 
+@@ -284,7 +284,7 @@
+ 
+     RsttoNavigator *navigator = rstto_main_window_get_navigator(RSTTO_MAIN_WINDOW(window));
+ 
+-    navigator->preload = preload_during_slideshow;
++    navigator->preload = preload_imgs;
+ 
+     rstto_main_window_set_max_cache_size(RSTTO_MAIN_WINDOW(window), max_cache);
+     rstto_main_window_set_slideshow_timeout(RSTTO_MAIN_WINDOW(window), (gdouble)slideshow_timeout);
+@@ -346,7 +346,7 @@
+ 
+     xfce_rc_write_bool_entry(xfce_rc, "ShowToolBar", rstto_main_window_get_show_toolbar(RSTTO_MAIN_WINDOW(window)));
+     xfce_rc_write_bool_entry(xfce_rc, "ScaleTo100", rstto_main_window_get_scale_to_100(RSTTO_MAIN_WINDOW(window)));
+-    xfce_rc_write_bool_entry(xfce_rc, "PreloadDuringSlideShow", navigator->preload);
++    xfce_rc_write_bool_entry(xfce_rc, "PreloadImgs", navigator->preload);
+     xfce_rc_write_bool_entry(xfce_rc, "ShowThumbnailViewer", rstto_main_window_get_show_thumbnail_viewer(RSTTO_MAIN_WINDOW(window)));
+     if (bg_color)
+     {
+Index: src/navigator.c
+===================================================================
+--- src/navigator.c	(Revision 5214)
++++ src/navigator.c	(Revision 5744)
+@@ -264,47 +264,22 @@
+     return g_strcasecmp(a->info->display_name, b->info->display_name);
+ }
+ 
+-void
+-rstto_navigator_guard_history(RsttoNavigator *navigator, RsttoNavigatorEntry *entry)
++
++static void
++rstto_navigator_add_entry_to_history(RsttoNavigator *navigator, RsttoNavigatorEntry *entry)
+ {
+-    /* check if the image is still loading, if so... don't cache the image */
+-    if(entry->io_channel)
+-    {
+-        g_source_remove(entry->io_source_id);
+-        g_io_channel_unref(entry->io_channel);
+-        entry->io_channel = NULL;
+-        entry->io_source_id = 0;
+-        if(entry->loader)
+-        {
+-            g_signal_handlers_disconnect_by_func(entry->loader , cb_rstto_navigator_entry_area_prepared, entry);
+-            gdk_pixbuf_loader_close(entry->loader, NULL);
+-        }
+ 
+-        if (entry->timeout_id)
+-        {
+-            g_source_remove(entry->timeout_id);
+-            entry->timeout_id = 0;
+-        }
++    /* rstto_debug_print_src_pixbufs(navigator); */
+ 
+-        if(entry->animation)
+-        {
+-            g_object_unref(entry->animation);
+-            entry->animation = NULL;
+-        }
+-
+-        if(entry->src_pixbuf)
+-        {
+-            gdk_pixbuf_unref(entry->src_pixbuf);
+-            entry->src_pixbuf = NULL;
+-        }
+-    }
+-
+-    /* add image to the cache-history */
+-    if (g_list_index(navigator->history, entry) == -1)
++    /* Check if the image is already available in the image-cache */
++    if (g_list_index(navigator->history, entry) != -1)
+     {
+-        navigator->history = g_list_prepend(navigator->history, entry);
++        /* Remove the image from the history, we are going to re-add it at the front of the list later */
++        navigator->history = g_list_remove(navigator->history, entry);
+     }
++    navigator->history = g_list_prepend(navigator->history, entry);
+ 
++    /* manage history by kicking excess elements out */
+     GList *iter = NULL;
+     guint64 size = 0;
+ 
+@@ -346,7 +321,118 @@
+     }
+ }
+ 
++
+ void
++rstto_navigator_guard_history(RsttoNavigator *navigator, RsttoNavigatorEntry *entry)
++{
++    /* check if the image is still loading, if so... don't cache the image */
++    if(entry->io_channel)
++    {
++        g_source_remove(entry->io_source_id);
++        g_io_channel_unref(entry->io_channel);
++        entry->io_channel = NULL;
++        entry->io_source_id = 0;
++        if(entry->loader)
++        {
++            g_signal_handlers_disconnect_by_func(entry->loader , cb_rstto_navigator_entry_area_prepared, entry);
++            gdk_pixbuf_loader_close(entry->loader, NULL);
++        }
++
++        if (entry->timeout_id)
++        {
++            g_source_remove(entry->timeout_id);
++            entry->timeout_id = 0;
++        }
++
++        if(entry->animation)
++        {
++            g_object_unref(entry->animation);
++            entry->animation = NULL;
++        }
++
++        if(entry->src_pixbuf)
++        {
++            gdk_pixbuf_unref(entry->src_pixbuf);
++            entry->src_pixbuf = NULL;
++        }
++    }
++
++    rstto_navigator_add_entry_to_history(navigator, entry);
++}
++
++/* for debugging:
++ * iterate through navigator->file_list and print out all
++ * pixbuf entries to see whether they've been loaded or not
++ */
++void
++rstto_debug_print_src_pixbufs (RsttoNavigator *navigator)
++{
++    GList *e = navigator->file_list;
++    int i = 1;
++    printf("src_pixbufs loaded for these image indices: ");
++    while (e != NULL)
++    {
++        RsttoNavigatorEntry *re = e->data;
++        if (re->src_pixbuf != NULL)
++        {
++            printf("%d ", i);
++        }
++        e = g_list_next(e);
++        i++;
++    }
++    printf("\n");
++}
++
++
++/* preloading for improved responsiveness
++ * (at the expense of increased memory usage) 
++ */
++static gboolean
++rstto_navigator_preload_next_img (RsttoNavigator *navigator)
++{
++    GList *next = g_list_next(navigator->file_iter);
++    /* wraparound case */
++    if (next == NULL)
++    {
++        next = navigator->file_list;
++    }
++    if (next != NULL)
++    {
++        RsttoNavigatorEntry *next_entry = next->data;
++        rstto_navigator_entry_load_image(next_entry, FALSE);
++
++        /* add image to the cache-history */
++        rstto_navigator_add_entry_to_history(navigator, next_entry);
++    }
++
++    /* for use with g_timeout_add() */
++    return FALSE;
++}
++
++static gboolean
++rstto_navigator_preload_prev_img (RsttoNavigator *navigator)
++{
++    GList *prev = g_list_previous(navigator->file_iter);
++    /* wraparound case */
++    if (prev == NULL)
++    {
++        prev = g_list_last(navigator->file_list);
++    }
++    if (prev != NULL)
++    {
++        RsttoNavigatorEntry *prev_entry = prev->data;
++        rstto_navigator_entry_load_image(prev_entry, FALSE);
++
++        /* add image to the cache-history */
++        rstto_navigator_add_entry_to_history(navigator, prev_entry);
++    }
++    
++    /* for use with g_timeout_add() */
++    return FALSE;
++}
++
++
++void
+ rstto_navigator_jump_first (RsttoNavigator *navigator)
+ {
+     if(navigator->file_iter)
+@@ -358,6 +444,13 @@
+     if(navigator->file_iter)
+     {
+         g_signal_emit(G_OBJECT(navigator), rstto_navigator_signals[RSTTO_NAVIGATOR_SIGNAL_ITER_CHANGED], 0, 0, navigator->file_iter->data, NULL);
++
++        if (navigator->preload)
++        {
++            /* preload in both directions */
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_next_img, navigator);
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_prev_img, navigator);
++        }
+     }
+ }
+ 
+@@ -381,6 +474,12 @@
+                       g_list_position(navigator->file_list, navigator->file_iter),
+                       navigator->file_iter->data,
+                       NULL);
++
++        if (navigator->preload)
++        {
++            /* preload forwards */
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_next_img, navigator);
++        }
+     }
+     else
+     {
+@@ -414,6 +513,12 @@
+                       g_list_position(navigator->file_list, navigator->file_iter),
+                       navigator->file_iter->data,
+                       NULL);
++
++        if (navigator->preload)
++        {
++            /* preload backwards */
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_prev_img, navigator);
++        }
+     }
+ }
+ 
+@@ -435,6 +540,13 @@
+                       g_list_position(navigator->file_list, navigator->file_iter),
+                       navigator->file_iter->data,
+                       NULL);
++
++        if (navigator->preload)
++        {
++            /* preload in both directions */
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_next_img, navigator);
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_prev_img, navigator);
++        }
+     }
+ }
+ 
+@@ -449,17 +561,8 @@
+             navigator->id = g_timeout_add(navigator->timeout, (GSourceFunc)cb_rstto_navigator_running, navigator);
+             if (navigator->preload)
+             {
+-                GList *next = g_list_next(navigator->file_iter);
+-                if (next == NULL)
+-                {
+-                    next = navigator->file_list;
+-                }
+-                if (next != NULL)
+-                {
+-                    RsttoNavigatorEntry *next_entry = next->data;
+-                    
+-                    rstto_navigator_entry_load_image(next_entry, FALSE);
+-                }
++                /* preload forwards */
++                rstto_navigator_preload_next_img(navigator);
+             }
+         }
+     }
+@@ -554,9 +657,13 @@
+             if(!navigator->file_iter)
+                 navigator->file_iter = g_list_first(navigator->file_list);
+ 
+-            /* Ehm... an item can exist several times inside the history? */
++            /* An item should not be able to exist several times inside the
++             * history, g_list_remove should suffice here
++             */
+             if (navigator->history)
+-                navigator->history = g_list_remove_all(navigator->history, entry);
++            {
++                navigator->history = g_list_remove (navigator->history, entry);
++            }
+ 
+             if (navigator->busy == FALSE)
+             {
+@@ -622,7 +729,6 @@
+     }
+     g_signal_emit(G_OBJECT(navigator), rstto_navigator_signals[RSTTO_NAVIGATOR_SIGNAL_ITER_CHANGED], 0, -1, NULL, NULL);
+     g_signal_emit(G_OBJECT(navigator), rstto_navigator_signals[RSTTO_NAVIGATOR_SIGNAL_REORDERED], 0, NULL);
+-    
+ }
+ 
+ void
+@@ -656,21 +762,14 @@
+ 
+         if (navigator->preload)
+         {
+-            GList *next = g_list_next(navigator->file_iter);
+-            if (next == NULL)
+-            {
+-                next = navigator->file_list;
+-            }
+-            if (next != NULL)
+-            {
+-                RsttoNavigatorEntry *next_entry = next->data;
+-                
+-                rstto_navigator_entry_load_image(next_entry, FALSE);
+-            }
++            /* preload forwards */
++            rstto_navigator_preload_next_img(navigator);
+         }
+     }
+     else
++    {
+         navigator->id = 0;
++    }
+     return navigator->running;
+ }
+ 
+@@ -791,9 +890,13 @@
+ rstto_navigator_entry_get_flip (RsttoNavigatorEntry *entry, gboolean horizontal)
+ {
+     if (horizontal)
++    {
+         return entry->h_flipped;
++    }
+     else
++    {
+         return entry->v_flipped;
++    }
+ }
+ 
+ static void
+@@ -945,10 +1048,14 @@
+     }
+     /* Max scale 1600% */
+     if (scale > 16)
++    {
+         scale = 16;
++    }
+     /* Min scale 5% */
+     if (scale < 0.05)
++    {
+         scale = 0.05;
++    }
+     entry->scale = scale;
+ }
+ 
+@@ -1049,6 +1156,11 @@
+     }
+     if ((entry->loader == NULL) && ((empty_cache == TRUE ) || entry->src_pixbuf == NULL))
+     {
++        if (entry->src_pixbuf)
++        {
++            gdk_pixbuf_unref(entry->src_pixbuf);
++            entry->src_pixbuf = NULL;
++        }
+         entry->loader = gdk_pixbuf_loader_new();
+ 
+         g_signal_connect(entry->loader, "area-prepared", G_CALLBACK(cb_rstto_navigator_entry_area_prepared), entry);
+@@ -1056,6 +1168,7 @@
+         g_signal_connect(entry->loader, "closed", G_CALLBACK(cb_rstto_navigator_entry_closed), entry);
+ 
+         path = thunar_vfs_path_dup_string(entry->info->path);
++
+         entry->io_channel = g_io_channel_new_file(path, "r", NULL);
+ 
+         g_io_channel_set_encoding(entry->io_channel, NULL, NULL);
+@@ -1164,14 +1277,14 @@
+ static void
+ cb_rstto_navigator_entry_closed (GdkPixbufLoader *loader, RsttoNavigatorEntry *entry)
+ {
++    GdkPixbuf *pixbuf = NULL;
++
+     if (entry->src_pixbuf)
+     {
+         gdk_pixbuf_unref(entry->src_pixbuf);
+         entry->src_pixbuf = NULL;
+     }
+ 
+-    GdkPixbuf *pixbuf = NULL;
+-
+     if (entry->iter)
+     {
+         pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(entry->iter);
+@@ -1194,11 +1307,14 @@
+     if (pixbuf != NULL)
+     {
+         entry->src_pixbuf = gdk_pixbuf_rotate_simple(pixbuf, rstto_navigator_entry_get_rotation(entry));
++        gdk_pixbuf_unref(pixbuf);
++        pixbuf = NULL;
+         if (rstto_navigator_entry_get_flip(entry, FALSE))
+         {
+             pixbuf = entry->src_pixbuf;
+             entry->src_pixbuf = gdk_pixbuf_flip(pixbuf, FALSE);
+             gdk_pixbuf_unref(pixbuf);
++            pixbuf = NULL;
+         }
+ 
+         if (rstto_navigator_entry_get_flip(entry, TRUE))
+@@ -1206,6 +1322,7 @@
+             pixbuf = entry->src_pixbuf;
+             entry->src_pixbuf = gdk_pixbuf_flip(pixbuf, TRUE);
+             gdk_pixbuf_unref(pixbuf);
++            pixbuf = NULL;
+         }
+         g_signal_emit(G_OBJECT(entry->navigator), rstto_navigator_signals[RSTTO_NAVIGATOR_SIGNAL_ENTRY_MODIFIED], 0, entry, NULL);
+     }
+@@ -1366,6 +1483,14 @@
+                       navigator->file_iter->data,
+                       NULL);
+         }
++
++        if (navigator->preload)
++        {
++            /* preload in both directions */
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_next_img, navigator);
++            g_timeout_add(500, (GSourceFunc)rstto_navigator_preload_prev_img, navigator);
++
++        }
+     }
+ 
+ }
+Index: src/main_window.c
+===================================================================
+--- src/main_window.c	(Revision 5214)
++++ src/main_window.c	(Revision 5744)
+@@ -431,44 +431,17 @@
+     /** Set xfce-desktop as default when support has been compiled in */
+     /* Check if xfdesktop is running */
+     {
+-        Atom actual_type;
+-        int actual_format;
+-        unsigned long n_items;
+-        unsigned long bytes_after;
+-        unsigned char *prop;
+         gchar selection_name[100];
+ 
+         GdkScreen *gdk_screen = gdk_screen_get_default();
+         gint xscreen = gdk_screen_get_number(gdk_screen);
+ 
+-
+         g_snprintf(selection_name, 100, XFDESKTOP_SELECTION_FMT, xscreen);
+ 
+-        Window root_window = GDK_ROOT_WINDOW();
+-        Atom xfce_desktop_atom = XInternAtom (gdk_display, "XFCE_DESKTOP_WINDOW", False);
+         Atom xfce_selection_atom = XInternAtom (gdk_display, selection_name, False);
+-        XGetWindowProperty (gdk_display, 
+-                            root_window,
+-                            xfce_desktop_atom,
+-                            0,
+-                            1,
+-                            False,
+-                            AnyPropertyType,
+-                            &actual_type,
+-                            &actual_format,
+-                            &n_items,
+-                            &bytes_after,
+-                            &prop);
+-        if (n_items > 0)
++        if((XGetSelectionOwner(GDK_DISPLAY(), xfce_selection_atom)))
+         {
+-            /* TODO: check XID */
+-            /* Window xid = (Window) prop[1]; */
+-            if(XGetSelectionOwner(gdk_display, xfce_selection_atom) == prop[1] != 0)
+-                window->priv->settings.desktop = RSTTO_DESKTOP_XFCE;
+-            else
+-            {
+-                g_debug("xfdesktop is not running");
+-            }
++            window->priv->settings.desktop = RSTTO_DESKTOP_XFCE;
+         }
+         else
+         {
+@@ -934,7 +907,7 @@
+             if (gtk_dialog_run (GTK_DIALOG(dialog)) == GTK_RESPONSE_YES)
+             {
+                 gtk_widget_hide(dialog);
+-                GtkWidget *save_dialog = rstto_save_dialog_new (window, modified_files);
++                GtkWidget *save_dialog = rstto_save_dialog_new (GTK_WINDOW(window), modified_files);
+                 gtk_dialog_run (GTK_DIALOG(save_dialog));
+             }
+         }
+@@ -1241,6 +1214,7 @@
+                 }
+                 g_free(image_path_prop);
+                 g_free(image_show_prop);
++                g_free(image_style_prop);
+                 g_object_unref(xfdesktop_channel);
+             }
+             break;
+@@ -1434,17 +1408,17 @@
+     gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), notebook,  TRUE, TRUE, 0);
+ 
+ /** Add notebook pages */
+-    behaviour_main_vbox = gtk_vbox_new(FALSE, 0);
+-    behaviour_main_lbl = gtk_label_new(_("Behaviour"));
+-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), behaviour_main_vbox, behaviour_main_lbl);
++    display_main_vbox = gtk_vbox_new(FALSE, 0);
++    display_main_lbl = gtk_label_new(_("Display"));
++    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), display_main_vbox, display_main_lbl);
+ 
+     slideshow_main_vbox = gtk_vbox_new(FALSE, 0);
+     slideshow_main_lbl = gtk_label_new(_("Slideshow"));
+     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), slideshow_main_vbox, slideshow_main_lbl);
+ 
+-    display_main_vbox = gtk_vbox_new(FALSE, 0);
+-    display_main_lbl = gtk_label_new(_("Display"));
+-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), display_main_vbox, display_main_lbl);
++    behaviour_main_vbox = gtk_vbox_new(FALSE, 0);
++    behaviour_main_lbl = gtk_label_new(_("Behaviour"));
++    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), behaviour_main_vbox, behaviour_main_lbl);
+ 
+ /** Add content for behaviour page */
+     resize_to_content_vbox = gtk_vbox_new(FALSE, 0);
+@@ -1491,67 +1465,55 @@
+     cache_label = gtk_label_new(_("Cache size:"));
+     cache_mb_label = gtk_label_new(_("MB"));
+ 
++    GtkWidget *preload_check = gtk_check_button_new_with_mnemonic(_("_Preload images (GUI more responsive but more CPU-intensive)"));
++    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(preload_check), window->priv->navigator->preload);
++
+     gtk_box_pack_start(GTK_BOX(cache_hbox), cache_label, FALSE, FALSE, 0);
+     gtk_box_pack_start(GTK_BOX(cache_hbox), cache_spin_button, FALSE, FALSE, 0);
+     gtk_box_pack_start(GTK_BOX(cache_hbox), cache_mb_label, FALSE, FALSE, 0);
+     gtk_box_pack_start(GTK_BOX(cache_vbox), cache_hbox, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(cache_vbox), preload_check, FALSE, FALSE, 0);
+ 
+-
+     gtk_container_set_border_width (GTK_CONTAINER (bg_color_frame), 8);
+     gtk_container_set_border_width (GTK_CONTAINER (cache_frame), 8);
+ 
+     gtk_box_pack_start(GTK_BOX(display_main_vbox), bg_color_frame, FALSE, TRUE, 0);
+     gtk_box_pack_start(GTK_BOX(display_main_vbox), cache_frame, FALSE, TRUE, 0);
+ 
++
+ /** Add content for slideshow page */
+     GtkWidget *slideshow_vbox = gtk_vbox_new(FALSE, 0);
+     GtkWidget *slideshow_frame = xfce_create_framebox_with_content (_("Timeout"), slideshow_vbox);
+ 
+-    GtkWidget *preload_vbox = gtk_vbox_new(FALSE, 0);
+-    GtkWidget *preload_frame = xfce_create_framebox_with_content (_("Preload"), preload_vbox);
+-
+     GtkWidget *thumbnails_vbox = gtk_vbox_new(FALSE, 0);
+     GtkWidget *thumbnails_frame = xfce_create_framebox_with_content (_("Thumbnails"), thumbnails_vbox);
+ 
+     gtk_container_set_border_width (GTK_CONTAINER (slideshow_frame), 8);
+     gtk_container_set_border_width (GTK_CONTAINER (thumbnails_frame), 8);
+-    gtk_container_set_border_width (GTK_CONTAINER (preload_frame), 8);
+ 
+     GtkWidget *slideshow_lbl = gtk_label_new(_("The time period an individual image is displayed during a slideshow\n(in seconds)"));
+     GtkWidget *slideshow_hscale = gtk_hscale_new_with_range(1, 60, 1);
+ 
+-
+-    GtkWidget *preload_lbl = gtk_label_new(_("Preload images during slideshow\n(uses more memory)"));
+-    GtkWidget *preload_check = gtk_check_button_new_with_mnemonic(_("_Preload images"));
+-
+     GtkWidget *thumbnails_lbl = gtk_label_new(_("Hide the thumbnails bar during slideshow"));
+     GtkWidget *thumbnails_check = gtk_check_button_new_with_mnemonic(_("_Hide thumbnails"));
+ 
+     gtk_misc_set_alignment(GTK_MISC(slideshow_lbl), 0, 0.5);
+-    gtk_misc_set_alignment(GTK_MISC(preload_lbl), 0, 0.5);
+     gtk_misc_set_alignment(GTK_MISC(thumbnails_lbl), 0, 0.5);
+ 
+     gtk_misc_set_padding(GTK_MISC(slideshow_lbl), 2, 2);
+-    gtk_misc_set_padding(GTK_MISC(preload_lbl), 2, 2);
+     gtk_misc_set_padding(GTK_MISC(thumbnails_lbl), 2, 2);
+     
+     gtk_range_set_value(GTK_RANGE(slideshow_hscale), window->priv->settings.slideshow_timeout / 1000);
+ 
+-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(preload_check), window->priv->navigator->preload);
+-
+     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(thumbnails_check), window->priv->settings.slideshow_hide_thumbnail);
+ 
+     gtk_box_pack_start(GTK_BOX(slideshow_vbox), slideshow_lbl, TRUE, TRUE, 0);
+     gtk_box_pack_start(GTK_BOX(slideshow_vbox), slideshow_hscale, FALSE, TRUE, 0);
+ 
+-    gtk_box_pack_start(GTK_BOX(preload_vbox), preload_lbl, TRUE, TRUE, 0);
+-    gtk_box_pack_start(GTK_BOX(preload_vbox), preload_check, FALSE, TRUE, 0);
+-
+     gtk_box_pack_start(GTK_BOX(thumbnails_vbox), thumbnails_lbl, TRUE, TRUE, 0);
+     gtk_box_pack_start(GTK_BOX(thumbnails_vbox), thumbnails_check, FALSE, TRUE, 0);
+ 
+     gtk_box_pack_start(GTK_BOX(slideshow_main_vbox), slideshow_frame, FALSE, TRUE, 0);
+-    gtk_box_pack_start(GTK_BOX(slideshow_main_vbox), preload_frame, FALSE, TRUE, 0);
+     gtk_box_pack_start(GTK_BOX(slideshow_main_vbox), thumbnails_frame, FALSE, TRUE, 0);
+ 
+     gtk_widget_show_all(notebook);
+Index: po/es.po
+===================================================================
+--- po/es.po	(Revision 0)
++++ po/es.po	(Revision 5744)
+@@ -0,0 +1,284 @@
++# Spanish translations for ristretto package.
++# Copyright (C) 2007 THE ristretto'S COPYRIGHT HOLDER
++# This file is distributed under the same license as the PACKAGE package.
++# Abel Martín <abel.martin.ruiz@gmail.com>, 2008
++#
++msgid ""
++msgstr ""
++"Project-Id-Version: ristretto\n"
++"Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
++"POT-Creation-Date: 2008-06-02 00:31+0200\n"
++"PO-Revision-Date: 2008-10-16 22:34+0100\n"
++"Last-Translator: Abel Martín <abel.martin.ruiz@gmail.com>\n"
++"Language-Team: Spanish <xfce-i18n@xfce.org>\n"
++"MIME-Version: 1.0\n"
++"Content-Type: text/plain; charset=UTF-8\n"
++"Content-Transfer-Encoding: 8bit\n"
++"X-Poedit-Bookmarks: -1,-1,-1,-1,-1,-1,11,-1,-1,-1\n"
++
++#: ../src/main.c:61
++msgid "Version information"
++msgstr "Información de versión"
++
++#: ../src/main.c:65
++msgid "Start in fullscreen mode"
++msgstr "Iniciar en modo pantalla completa"
++
++#: ../src/main.c:69
++msgid "Start a slideshow"
++msgstr "Iniciar diapositivas"
++
++#: ../src/main.c:235
++#, c-format
++msgid ""
++"%s: %s\n"
++"Try %s --help to see a full list of available command line options.\n"
++msgstr ""
++"%s: %s\n"
++"Pruebe %s --help para ver una lista completa de opciones de línea de comando disponibles.\n"
++
++#: ../src/main.c:448
++#: ../src/main_window.c:1636
++#: ../src/main_window.c:1676
++#: ../src/main_window.c:1713
++msgid "Opening file(s)..."
++msgstr "Abriendo fichero(s)..."
++
++#. Create 'File' menu
++#: ../src/main_window.c:340
++msgid "_File"
++msgstr "_Archivo"
++
++#: ../src/main_window.c:347
++msgid "O_pen Folder"
++msgstr "_Abrir carpeta"
++
++#: ../src/main_window.c:348
++msgid "_Recently used"
++msgstr "_Recientemente usados"
++
++#: ../src/main_window.c:353
++msgid "Close _all"
++msgstr "Cerrar _todo"
++
++#. Create 'Edit' menu
++#: ../src/main_window.c:383
++msgid "_Edit"
++msgstr "_Editar"
++
++#: ../src/main_window.c:388
++#: ../src/main_window.c:686
++msgid "Open with..."
++msgstr "Abrir con..."
++
++#: ../src/main_window.c:396
++#: ../src/main_window.c:697
++msgid "No applications available"
++msgstr "No hay aplicaciones disponibles"
++
++#. Create 'View' menu
++#: ../src/main_window.c:405
++msgid "_View"
++msgstr "_Ver"
++
++#: ../src/main_window.c:412
++msgid "Show _Toolbar"
++msgstr "Mostrar _barra de herramientas"
++
++#: ../src/main_window.c:413
++msgid "Thumbnail _Viewer"
++msgstr "_Visor de miniaturas"
++
++#: ../src/main_window.c:417
++msgid "_Zooming"
++msgstr "_Ampliar"
++
++#: ../src/main_window.c:418
++msgid "_Rotate"
++msgstr "_Rotar"
++
++#: ../src/main_window.c:425
++msgid "_Set as wallpaper"
++msgstr "_Establecer como fondo de escritorio"
++
++#: ../src/main_window.c:503
++msgid "Show _Horizontally"
++msgstr "Mostrar _horizontalmente"
++
++#: ../src/main_window.c:507
++msgid "Show _Vertically"
++msgstr "Mostrar _verticalmente"
++
++#: ../src/main_window.c:511
++msgid "H_ide"
++msgstr "_Ocultar"
++
++#: ../src/main_window.c:548
++msgid "Rotate _Right"
++msgstr "Girar a la _derecha"
++
++#: ../src/main_window.c:549
++msgid "Rotate _Left"
++msgstr "Girar a la _izquierda"
++
++#. Create 'Go' menu
++#: ../src/main_window.c:570
++msgid "_Go"
++msgstr "_Ir"
++
++#. Create 'Help' menu
++#: ../src/main_window.c:601
++msgid "_Help"
++msgstr "Ay_uda"
++
++#: ../src/main_window.c:933
++msgid "One or more images have been modified, do you want to save the changes?"
++msgstr "Una o más imágenes han sido modificadas. ¿Desea guardar los cambios?"
++
++#: ../src/main_window.c:1420
++msgid "Image viewer Preferences"
++msgstr "Preferencias del visor de imágenes"
++
++#: ../src/main_window.c:1438
++msgid "Behaviour"
++msgstr "Comportamiento"
++
++#: ../src/main_window.c:1442
++msgid "Slideshow"
++msgstr "Diapositivas"
++
++#: ../src/main_window.c:1446
++msgid "Display"
++msgstr "Visualizador"
++
++#: ../src/main_window.c:1451
++msgid "Scaling"
++msgstr "Escala"
++
++#: ../src/main_window.c:1453
++msgid "Don't scale over 100% when maximizing the window."
++msgstr "No aumentar por encima del 100% al maximizar la ventana."
++
++#: ../src/main_window.c:1463
++msgid "Background Color"
++msgstr "Color de fondo"
++
++#: ../src/main_window.c:1465
++msgid "_Override Background Color:"
++msgstr "_Ignorar color de fondo:"
++
++#: ../src/main_window.c:1488
++msgid "Image Cache"
++msgstr "Caché de imagen"
++
++#: ../src/main_window.c:1491
++msgid "Cache size:"
++msgstr "Tamaño del caché:"
++
++#: ../src/main_window.c:1492
++msgid "MB"
++msgstr "MB"
++
++#: ../src/main_window.c:1508
++msgid "Timeout"
++msgstr "Tiempo de expiración"
++
++#: ../src/main_window.c:1511
++msgid "Preload"
++msgstr "Precarga"
++
++#: ../src/main_window.c:1514
++msgid "Thumbnails"
++msgstr "Miniaturas"
++
++#: ../src/main_window.c:1520
++msgid ""
++"The time period an individual image is displayed during a slideshow\n"
++"(in seconds)"
++msgstr ""
++"El periodo de tiempo que una imagen individual es mostrada durante la vista de diapositivas\n"
++"(en segundos)"
++
++#: ../src/main_window.c:1524
++msgid ""
++"Preload images during slideshow\n"
++"(uses more memory)"
++msgstr ""
++"Precargar las imágenes durante la vista de diapositivas\n"
++"(usa más memoria)"
++
++#: ../src/main_window.c:1525
++msgid "_Preload images"
++msgstr "_Precargar las imágenes"
++
++#: ../src/main_window.c:1527
++msgid "Hide the thumbnails bar during slideshow"
++msgstr "Ocultar la barra de miniaturas en la vista de diapositivas"
++
++#: ../src/main_window.c:1528
++msgid "_Hide thumbnails"
++msgstr "_Ocultar las miniaturas"
++
++#: ../src/main_window.c:1594
++msgid "Developer:"
++msgstr "Desarrollador:"
++
++#: ../src/main_window.c:1604
++msgid "Ristretto is a fast and lightweight picture-viewer for the Xfce desktop environment."
++msgstr "Ristretto es un visor de imágenes rápido y ligero para el entorno de escritorio de Xfce."
++
++#: ../src/main_window.c:1612
++msgid "translator-credits"
++msgstr "Abel Martín <abel.martin.ruiz@gmail.com>"
++
++#: ../src/main_window.c:1638
++msgid "Open image"
++msgstr "Abrir imagen"
++
++#: ../src/main_window.c:1656
++msgid "Could not open file"
++msgstr "No se pudo abrir el archivo"
++
++#: ../src/main_window.c:1678
++msgid "Open folder"
++msgstr "Abrir directorio"
++
++#: ../src/main_window.c:1753
++msgid "Are you sure you want to clear ristretto's list of recently opened documents?"
++msgstr "¿Está seguro de que quiere vaciar la lista de documentos abiertos recientemente de ristretto?"
++
++#: ../src/thumbnail_bar.c:185
++msgid "Spacing"
++msgstr "Espaciado"
++
++#: ../src/thumbnail_bar.c:186
++msgid "The amount of space between the thumbnails"
++msgstr "La cantidad de espacio entre miniaturas"
++
++#: ../src/thumbnail_bar.c:192
++msgid "Border Width"
++msgstr "Ancho del borde"
++
++#: ../src/thumbnail_bar.c:193
++msgid "The border width of the thumbnail-bar"
++msgstr "El ancho del borde de la barra de miniaturas"
++
++#: ../ristretto.desktop.in.h:1
++msgid "Image Viewer"
++msgstr "Visor de imágenes"
++
++#: ../ristretto.desktop.in.h:2
++msgid "Ristretto"
++msgstr "Ristretto"
++
++#: ../ristretto.desktop.in.h:3
++msgid "Xfce Image viewer"
++msgstr "Visor de imágenes de Xfce"
++
++#~ msgid "Ristretto Image Viewer"
++#~ msgstr "Ristretto : Visualiseur d’Images"
++#~ msgid "Flip _Vertically"
++#~ msgstr "Retourner _verticalement"
++#~ msgid "Flip _Horizontally"
++#~ msgstr "Retourner _horizontalement"
++
+Index: po/eu.po
+===================================================================
+--- po/eu.po	(Revision 0)
++++ po/eu.po	(Revision 5744)
+@@ -0,0 +1,275 @@
++# translation of ristretto.po to Euskara
++# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
++# This file is distributed under the same license as the PACKAGE package.
++#: ../src/main.c:231
++# Piarres Beobide <pi@beobide.net>, 2008.
++msgid ""
++msgstr ""
++"Project-Id-Version: ristretto\n"
++"Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
++"POT-Creation-Date: 2008-06-02 00:31+0200\n"
++"PO-Revision-Date: 2008-09-12 11:57+0200\n"
++"Last-Translator: Piarres Beobide <pi@beobide.net>\n"
++"Language-Team: Euskara <debian-l10n-basque@lists.debian.org>\n"
++"MIME-Version: 1.0\n"
++"Content-Type: text/plain; charset=UTF-8\n"
++"Content-Transfer-Encoding: 8bit\n"
++"X-Generator: KBabel 1.11.4\n"
++
++#: ../src/main.c:61
++msgid "Version information"
++msgstr "Bertsio argibideak"
++
++#: ../src/main.c:65
++msgid "Start in fullscreen mode"
++msgstr "Abiarazi pantaila-osoko moduan"
++
++#: ../src/main.c:69
++msgid "Start a slideshow"
++msgstr "Abiarazi aurkezpena"
++
++#: ../src/main.c:235
++#, c-format
++msgid ""
++"%s: %s\n"
++"Try %s --help to see a full list of available command line options.\n"
++msgstr ""
++"%s: %s\n"
++"Erabili %s --help komando-lerroko komando erabilgarriak ikusteko.\n"
++
++#: ../src/main.c:448 ../src/main_window.c:1636 ../src/main_window.c:1676
++#: ../src/main_window.c:1713
++msgid "Opening file(s)..."
++msgstr "Fitxategia(k) irekitzen..."
++
++#. Create 'File' menu
++#: ../src/main_window.c:340
++msgid "_File"
++msgstr "_Fitxategia"
++
++#: ../src/main_window.c:347
++msgid "O_pen Folder"
++msgstr "I_reki karpeta"
++
++#: ../src/main_window.c:348
++msgid "_Recently used"
++msgstr "Az_kenak"
++
++#: ../src/main_window.c:353
++msgid "Close _all"
++msgstr "Itxi den_a"
++
++#. Create 'Edit' menu
++#: ../src/main_window.c:383
++msgid "_Edit"
++msgstr "_Editatu"
++
++#: ../src/main_window.c:388 ../src/main_window.c:686
++msgid "Open with..."
++msgstr "Ireki honekin..."
++
++#: ../src/main_window.c:396 ../src/main_window.c:697
++msgid "No applications available"
++msgstr "Ez dago aplikazio erabilgarririk"
++
++#. Create 'View' menu
++#: ../src/main_window.c:405
++msgid "_View"
++msgstr "_Ikusi"
++
++#: ../src/main_window.c:412
++msgid "Show _Toolbar"
++msgstr "Ikusi _tresna-barra"
++
++#: ../src/main_window.c:413
++msgid "Thumbnail _Viewer"
++msgstr "Argazkitxo _Ikustatzailea"
++
++#: ../src/main_window.c:417
++msgid "_Zooming"
++msgstr "_Zooma gerturatzen"
++
++#: ../src/main_window.c:418
++msgid "_Rotate"
++msgstr "Bi_ratu"
++
++#: ../src/main_window.c:425
++msgid "_Set as wallpaper"
++msgstr "E_zarri idamahai-irudi gisa"
++
++#: ../src/main_window.c:503
++msgid "Show _Horizontally"
++msgstr "Erakutsi _horizontalki"
++
++#: ../src/main_window.c:507
++msgid "Show _Vertically"
++msgstr "Erakutsi _bertikalki"
++
++#: ../src/main_window.c:511
++msgid "H_ide"
++msgstr "Ezk_utatu"
++
++#: ../src/main_window.c:548
++msgid "Rotate _Right"
++msgstr "Biratu eskuine_ra"
++
++#: ../src/main_window.c:549
++msgid "Rotate _Left"
++msgstr "Biratu ez_kerrera"
++
++#. Create 'Go' menu
++#: ../src/main_window.c:570
++msgid "_Go"
++msgstr "_Joan"
++
++#. Create 'Help' menu
++#: ../src/main_window.c:601
++msgid "_Help"
++msgstr "_Laguntza"
++
++#: ../src/main_window.c:933
++msgid "One or more images have been modified, do you want to save the changes?"
++msgstr "Irudi bat edo gehiago eraldatua izan da, aldaketak gorde nahi al dituzu?"
++
++#: ../src/main_window.c:1420
++msgid "Image viewer Preferences"
++msgstr "Irudi ikustatzaile hobespenak"
++
++#: ../src/main_window.c:1438
++msgid "Behaviour"
++msgstr "Portaera"
++
++#: ../src/main_window.c:1442
++msgid "Slideshow"
++msgstr "Aurkezpena"
++
++#: ../src/main_window.c:1446
++msgid "Display"
++msgstr "Bistaratu"
++
++#: ../src/main_window.c:1451
++msgid "Scaling"
++msgstr "Eskalatzen"
++
++#: ../src/main_window.c:1453
++msgid "Don't scale over 100% when maximizing the window."
++msgstr "Ez eskalatu %100 baino gehiago leihoa handitzean."
++
++#: ../src/main_window.c:1463
++msgid "Background Color"
++msgstr "Atzeko planoaren kolorea"
++
++#: ../src/main_window.c:1465
++msgid "_Override Background Color:"
++msgstr "_Gainidatzi atzeko planoa kolorea:"
++
++#: ../src/main_window.c:1488
++msgid "Image Cache"
++msgstr "Irudi katxea"
++
++#: ../src/main_window.c:1491
++msgid "Cache size:"
++msgstr "Katxe tamaina:"
++
++#: ../src/main_window.c:1492
++msgid "MB"
++msgstr "MB"
++
++#: ../src/main_window.c:1508
++msgid "Timeout"
++msgstr "Denboraz-kanpo"
++
++#: ../src/main_window.c:1511
++msgid "Preload"
++msgstr "Aurrekargatu"
++
++#: ../src/main_window.c:1514
++msgid "Thumbnails"
++msgstr "Argazkitxoak"
++
++#: ../src/main_window.c:1520
++msgid ""
++"The time period an individual image is displayed during a slideshow\n"
++"(in seconds)"
++msgstr ""
++"Aurkezpenean irudi bakoitza ikusten den denbora tartea\n"
++"(segundutan)"
++
++#: ../src/main_window.c:1524
++msgid ""
++"Preload images during slideshow\n"
++"(uses more memory)"
++msgstr ""
++"Aurrekargatu irudiak aurkezpenean\n"
++"(memoria gehiago erabiltzen du)"
++
++#: ../src/main_window.c:1525
++msgid "_Preload images"
++msgstr "Aurre_kargatu irudiak"
++
++#: ../src/main_window.c:1527
++msgid "Hide the thumbnails bar during slideshow"
++msgstr "Ezkutatu argazkitxo barra aurkezpenean"
++
++#: ../src/main_window.c:1528
++msgid "_Hide thumbnails"
++msgstr "E_zkutatu argazkitxoak"
++
++#: ../src/main_window.c:1594
++msgid "Developer:"
++msgstr "Garatzailea:"
++
++#: ../src/main_window.c:1604
++msgid ""
++"Ristretto is a fast and lightweight picture-viewer for the Xfce desktop "
++"environment."
++msgstr "Ristretto Xfce idazmahai inguruneko irudi-ikustatzaile arin eta azkar bat da."
++
++#: ../src/main_window.c:1612
++msgid "translator-credits"
++msgstr "itzultzaile-kreditua"
++
++#: ../src/main_window.c:1638
++msgid "Open image"
++msgstr "Ireki irudia"
++
++#: ../src/main_window.c:1656
++msgid "Could not open file"
++msgstr "Ezin da fitxategia ireki"
++
++#: ../src/main_window.c:1678
++msgid "Open folder"
++msgstr "Ireki karpeta"
++
++#: ../src/main_window.c:1753
++msgid "Are you sure you want to clear ristretto's list of recently opened documents?"
++msgstr "Ziur zaude ristretto-ren azken aldian irekitako dokumentuen zerrenda ezabatu nahi duzula?"
++
++#: ../src/thumbnail_bar.c:185
++msgid "Spacing"
++msgstr "Tartea"
++
++#: ../src/thumbnail_bar.c:186
++msgid "The amount of space between the thumbnails"
++msgstr "Argazkitxo artean dagoen tartea"
++
++#: ../src/thumbnail_bar.c:192
++msgid "Border Width"
++msgstr "Ertz zabalera"
++
++#: ../src/thumbnail_bar.c:193
++msgid "The border width of the thumbnail-bar"
++msgstr "Argazkitxo-barraren ertzaren zabalera"
++
++#: ../ristretto.desktop.in.h:1
++msgid "Image Viewer"
++msgstr "Irudi ikustatzailea"
++
++#: ../ristretto.desktop.in.h:2
++msgid "Ristretto"
++msgstr "Ristretto"
++
++#: ../ristretto.desktop.in.h:3
++msgid "Xfce Image viewer"
++msgstr "Xfce irudi ikustatzailea"
++
+Index: po/pt_PT.po
+===================================================================
+--- po/pt_PT.po	(Revision 5214)
++++ po/pt_PT.po	(Revision 5744)
+@@ -8,7 +8,7 @@
+ "Project-Id-Version: ristretto\n"
+ "Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
+ "POT-Creation-Date: 2008-06-02 00:31+0200\n"
+-"PO-Revision-Date: 2008-06-16 21:55+0100\n"
++"PO-Revision-Date: 2008-08-29 19:20+0100\n"
+ "Last-Translator: Nuno Miguel <nunis@netcabo.pt>\n"
+ "Language-Team: \n"
+ "MIME-Version: 1.0\n"
+@@ -35,7 +35,7 @@
+ "Try %s --help to see a full list of available command line options.\n"
+ msgstr ""
+ "%s: %s\n"
+-"Tente %s --help para ver uma lista completa de opções da linha de comando disponíveis.\n"
++"Tente %s --help para ver uma lista completa de opções em linha de comandos disponíveis.\n"
+ 
+ #: ../src/main.c:448
+ #: ../src/main_window.c:1636
+@@ -196,7 +196,7 @@
+ "The time period an individual image is displayed during a slideshow\n"
+ "(in seconds)"
+ msgstr ""
+-"O tempo que imagens individuais são exibidas durante uma apresentação de slides\n"
++"O período de tempo que uma imagem individual é exibida durante uma apresentação de slides\n"
+ "(em segundos)"
+ 
+ #: ../src/main_window.c:1524
+@@ -221,7 +221,7 @@
+ 
+ #: ../src/main_window.c:1594
+ msgid "Developer:"
+-msgstr "Programador"
++msgstr "Programador:"
+ 
+ #: ../src/main_window.c:1604
+ msgid "Ristretto is a fast and lightweight picture-viewer for the Xfce desktop environment."
+Index: po/ChangeLog
+===================================================================
+--- po/ChangeLog	(Revision 5214)
++++ po/ChangeLog	(Revision 5744)
+@@ -1,3 +1,35 @@
++2008-10-19  Maximilian Schleiss <maximilian@xfce.org>
++
++	* de.po: German translation update (Fabian Nowak)
++
++2008-10-18  Maximilian Schleiss <maximilian@xfce.org>
++
++	* es.po, LINGUAS: Spanish translation added (Abel Martin)
++
++2008-10-14 Lars Nielsen <lars@mit-web.dk>
++
++	* da.po, LINGUAS: Danish translation added (Per Kongstad)
++
++2008-10-07  Maximilian Schleiss <maximilian@xfce.org>
++
++	* ja.po, LINGUAS: Japanese translation added (Masato Hashimoto)
++
++2008-09-11 Piarres Beobide <pi@beobide.net>
++
++	* eu.po, LINGUAS: Basque translation added 
++
++2008-09-08 Og Maciel <ogmaciel@gnome.org>
++
++	* pt_PT.po: Updated European Portuguese translation by Nuno Miguel.
++
++2008-08-29  Maximilian Schleiss <maximilian@xfce.org>
++
++	* de.po: German translation updated (Fabian Nowak)
++
++2008-08-17  Jari Rahkonen <jari.rahkonen@pp1.inet.fi>
++
++	* fi.po: Updated Finnish translation
++
+ 2008-08-10  Maximilian Schleiss <maximilian@xfce.org>
+ 
+ 	* pl.po, LINGUAS: Polish translation added (Piotr Maliński)
+@@ -2,3 +34,3 @@
+ 
+-2008-07-15 Mohamed Magdy <alnokta@xfce.org>
++2008-07-15  Mohamed Magdy <alnokta@xfce.org>
+ 
+Index: po/da.po
+===================================================================
+--- po/da.po	(Revision 0)
++++ po/da.po	(Revision 5744)
+@@ -0,0 +1,283 @@
++# Danish translation Ristretto
++# Copyright (C) 2007 Stephan Arts <stephan@xfce.org>
++# This file is distributed under the same license as the Ristretto package.
++# Per Kongstad <p_kongstad@op.pl>, 2008.
++#
++msgid ""
++msgstr ""
++"Project-Id-Version: ristretto 0.0.21\n"
++"Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
++"POT-Creation-Date: 2008-06-02 00:31+0200\n"
++"PO-Revision-Date: 2008-10-14 11:52+0100\n"
++"Last-Translator: Per Kongstad <p_kongstad@op.pl>\n"
++"Language-Team: Danish <dansk@dansk-gruppen.dk>\n"
++"MIME-Version: 1.0\n"
++"Content-Type: text/plain; charset=UTF-8\n"
++"Content-Transfer-Encoding: 8bit\n"
++"X-Poedit-Language: Danish\n"
++"X-Poedit-Country: DENMARK\n"
++"X-Poedit-SourceCharset: utf-8\n"
++
++#: ../src/main.c:61
++msgid "Version information"
++msgstr "Versionsinformation"
++
++#: ../src/main.c:65
++msgid "Start in fullscreen mode"
++msgstr "Start i fuldskærmstilstand"
++
++#: ../src/main.c:69
++msgid "Start a slideshow"
++msgstr "Start et diasshow"
++
++#: ../src/main.c:235
++#, c-format
++msgid ""
++"%s: %s\n"
++"Try %s --help to see a full list of available command line options.\n"
++msgstr ""
++"%s: %s\n"
++"Prøv %s --help for at se en fuld liste over tilgængelige kommandolinjetilvalg.\n"
++
++#: ../src/main.c:448
++#: ../src/main_window.c:1636
++#: ../src/main_window.c:1676
++#: ../src/main_window.c:1713
++msgid "Opening file(s)..."
++msgstr "Åbner fil(er)..."
++
++#. Create 'File' menu
++#: ../src/main_window.c:340
++msgid "_File"
++msgstr "_Fil"
++
++#: ../src/main_window.c:347
++msgid "O_pen Folder"
++msgstr "Å_ben mappe"
++
++#: ../src/main_window.c:348
++msgid "_Recently used"
++msgstr "_Senest brugte"
++
++#: ../src/main_window.c:353
++msgid "Close _all"
++msgstr "Afslut a_lle"
++
++#. Create 'Edit' menu
++#: ../src/main_window.c:383
++msgid "_Edit"
++msgstr "_Redigér"
++
++#: ../src/main_window.c:388
++#: ../src/main_window.c:686
++msgid "Open with..."
++msgstr "Åben med..."
++
++#: ../src/main_window.c:396
++#: ../src/main_window.c:697
++msgid "No applications available"
++msgstr "Ingen tilgængelige programmer"
++
++#. Create 'View' menu
++#: ../src/main_window.c:405
++msgid "_View"
++msgstr "_Vis"
++
++#: ../src/main_window.c:412
++msgid "Show _Toolbar"
++msgstr "Vis _værktøjslinje"
++
++#: ../src/main_window.c:413
++msgid "Thumbnail _Viewer"
++msgstr "Miniature_viser"
++
++#: ../src/main_window.c:417
++msgid "_Zooming"
++msgstr "_Forstørring"
++
++#: ../src/main_window.c:418
++msgid "_Rotate"
++msgstr "_Rotér"
++
++#: ../src/main_window.c:425
++msgid "_Set as wallpaper"
++msgstr "_Brug som skrivebordsbaggrund"
++
++#: ../src/main_window.c:503
++msgid "Show _Horizontally"
++msgstr "Vis _vandret"
++
++#: ../src/main_window.c:507
++msgid "Show _Vertically"
++msgstr "Vis _lodret"
++
++#: ../src/main_window.c:511
++msgid "H_ide"
++msgstr "S_kjul"
++
++#: ../src/main_window.c:548
++msgid "Rotate _Right"
++msgstr "Rotér til høj_re"
++
++#: ../src/main_window.c:549
++msgid "Rotate _Left"
++msgstr "Rotér til _venstre"
++
++#. Create 'Go' menu
++#: ../src/main_window.c:570
++msgid "_Go"
++msgstr "_Gå til"
++
++#. Create 'Help' menu
++#: ../src/main_window.c:601
++msgid "_Help"
++msgstr "_Hjælp"
++
++#: ../src/main_window.c:933
++msgid "One or more images have been modified, do you want to save the changes?"
++msgstr "Et eller flere billeder er blevet ændret, ønsker du at gemme disse ændringer?"
++
++#: ../src/main_window.c:1420
++msgid "Image viewer Preferences"
++msgstr "Indstillinger for billedfremviser"
++
++#: ../src/main_window.c:1438
++msgid "Behaviour"
++msgstr "Opførsel"
++
++#: ../src/main_window.c:1442
++msgid "Slideshow"
++msgstr "Diasshow"
++
++#: ../src/main_window.c:1446
++msgid "Display"
++msgstr "Vis"
++
++#: ../src/main_window.c:1451
++msgid "Scaling"
++msgstr "Skalering"
++
++#: ../src/main_window.c:1453
++msgid "Don't scale over 100% when maximizing the window."
++msgstr "Undlad at skalere mere end 100%, når vindue maksimeres."
++
++#: ../src/main_window.c:1463
++msgid "Background Color"
++msgstr "Baggrundsfarve"
++
++#: ../src/main_window.c:1465
++msgid "_Override Background Color:"
++msgstr "_Tilsidesæt baggrundsfarve:"
++
++#: ../src/main_window.c:1488
++msgid "Image Cache"
++msgstr "Billedmellemlager"
++
++#: ../src/main_window.c:1491
++msgid "Cache size:"
++msgstr "Størrelse af mellemlager:"
++
++#: ../src/main_window.c:1492
++msgid "MB"
++msgstr "MB"
++
++#: ../src/main_window.c:1508
++msgid "Timeout"
++msgstr "Tidsudløb"
++
++#: ../src/main_window.c:1511
++msgid "Preload"
++msgstr "Forudindlæs"
++
++#: ../src/main_window.c:1514
++msgid "Thumbnails"
++msgstr "Miniaturer"
++
++#: ../src/main_window.c:1520
++msgid ""
++"The time period an individual image is displayed during a slideshow\n"
++"(in seconds)"
++msgstr ""
++"Den tid de enkelte billeder bliver vist under et diasshow\n"
++"(i sekunder)"
++
++#: ../src/main_window.c:1524
++msgid ""
++"Preload images during slideshow\n"
++"(uses more memory)"
++msgstr ""
++"Forudindlæs billeder ved diasshow\n"
++"(bruger mere hukommelse)"
++
++#: ../src/main_window.c:1525
++msgid "_Preload images"
++msgstr "_Forudindlæs billeder"
++
++#: ../src/main_window.c:1527
++msgid "Hide the thumbnails bar during slideshow"
++msgstr "Skjul miniaturebjælke under diasshow"
++
++#: ../src/main_window.c:1528
++msgid "_Hide thumbnails"
++msgstr "_Skjul miniaturer"
++
++#: ../src/main_window.c:1594
++msgid "Developer:"
++msgstr "Udvikler:"
++
++#: ../src/main_window.c:1604
++msgid "Ristretto is a fast and lightweight picture-viewer for the Xfce desktop environment."
++msgstr "Ristretto er en hurtig og let billedfremviser til Xfce-skrivebordsmiljøet."
++
++#: ../src/main_window.c:1612
++msgid "translator-credits"
++msgstr ""
++"Per Kongstad\n"
++"\n"
++"Dansk-gruppen <dansk@dansk-gruppen.dk>\n"
++"Mere info: http://www.dansk-gruppen.dk"
++
++#: ../src/main_window.c:1638
++msgid "Open image"
++msgstr "Åben billede"
++
++#: ../src/main_window.c:1656
++msgid "Could not open file"
++msgstr "Kunne ikke åbne fil"
++
++#: ../src/main_window.c:1678
++msgid "Open folder"
++msgstr "Åben mappe"
++
++#: ../src/main_window.c:1753
++msgid "Are you sure you want to clear ristretto's list of recently opened documents?"
++msgstr "Er du sikker på, at du vil slette Ristrettos liste over senest åbnede dokumenter?"
++
++#: ../src/thumbnail_bar.c:185
++msgid "Spacing"
++msgstr "Mellemrum"
++
++#: ../src/thumbnail_bar.c:186
++msgid "The amount of space between the thumbnails"
++msgstr "Hvor meget mellemrum der er mellem miniaturerne"
++
++#: ../src/thumbnail_bar.c:192
++msgid "Border Width"
++msgstr "Kantbredde"
++
++#: ../src/thumbnail_bar.c:193
++msgid "The border width of the thumbnail-bar"
++msgstr "Bredden af kanten rundt om miniaturebjælken"
++
++#: ../ristretto.desktop.in.h:1
++msgid "Image Viewer"
++msgstr "Billedfremviser"
++
++#: ../ristretto.desktop.in.h:2
++msgid "Ristretto"
++msgstr "Ristretto"
++
++#: ../ristretto.desktop.in.h:3
++msgid "Xfce Image viewer"
++msgstr "Xfce-billedfremviser"
++
+Index: po/LINGUAS
+===================================================================
+--- po/LINGUAS	(Revision 5214)
++++ po/LINGUAS	(Revision 5744)
+@@ -1,2 +1,2 @@
+ # set of available languages (in alphabetic order)
+-ar bg cs de el en_GB fi fr gl hu id it lv nb_NO nl pl pt_BR pt_PT ru sk tr uk ur zh_CN
++ar bg cs da de el en_GB es eu fi fr gl hu id it ja lv nb_NO nl pl pt_BR pt_PT ru sk tr uk ur zh_CN
+Index: po/de.po
+===================================================================
+--- po/de.po	(Revision 5214)
++++ po/de.po	(Revision 5744)
+@@ -2,15 +2,15 @@
+ # Copyright (C) 2007 Stephan Arts <stephan@xfce.org>
+ # This file is distributed under the same license as the ristretto package.
+ # Christian Dywan <christian@twotoasts.de>, 2007.
+-# Fabian Nowak <timystery@arcor.de>, 2007.
++# Fabian Nowak <timystery@arcor.de>, 2007, 2008.
+ #
+ #: ../src/main.c:231
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: ristretto\n"
+ "Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
+-"POT-Creation-Date: 2008-06-02 00:31+0200\n"
+-"PO-Revision-Date: 2007-12-01 17:41:21+0000\n"
++"POT-Creation-Date: 2008-10-18 16:33+0200\n"
++"PO-Revision-Date: 2008-10-18 16:33:00+0200\n"
+ "Last-Translator: Fabian Nowak <timystery@arcor.de>\n"
+ "Language-Team: German\n"
+ "MIME-Version: 1.0\n"
+@@ -23,12 +23,11 @@
+ 
+ #: ../src/main.c:65
+ msgid "Start in fullscreen mode"
+-msgstr ""
++msgstr "Im Vollbildmodus starten"
+ 
+ #: ../src/main.c:69
+-#, fuzzy
+ msgid "Start a slideshow"
+-msgstr "Diavorführung"
++msgstr "Diavorführung starten"
+ 
+ #: ../src/main.c:235
+ #, c-format
+@@ -40,8 +39,8 @@
+ "Versuchen Sie »%s --help«, um eine komplette Liste verfügbarer "
+ "Kommandozeilenoptionen anzusehen.\n"
+ 
+-#: ../src/main.c:448 ../src/main_window.c:1636 ../src/main_window.c:1676
+-#: ../src/main_window.c:1713
++#: ../src/main.c:448 ../src/main_window.c:1598 ../src/main_window.c:1638
++#: ../src/main_window.c:1675
+ msgid "Opening file(s)..."
+ msgstr "Datei(en) öffnen..."
+ 
+@@ -60,18 +59,18 @@
+ 
+ #: ../src/main_window.c:353
+ msgid "Close _all"
+-msgstr ""
++msgstr "_Alle schließen"
+ 
+ #. Create 'Edit' menu
+ #: ../src/main_window.c:383
+ msgid "_Edit"
+ msgstr "_Bearbeiten"
+ 
+-#: ../src/main_window.c:388 ../src/main_window.c:686
++#: ../src/main_window.c:388 ../src/main_window.c:660
+ msgid "Open with..."
+ msgstr "Öffnen mit..."
+ 
+-#: ../src/main_window.c:396 ../src/main_window.c:697
++#: ../src/main_window.c:396 ../src/main_window.c:671
+ msgid "No applications available"
+ msgstr "Keine Programme verfügbar"
+ 
+@@ -86,7 +85,7 @@
+ 
+ #: ../src/main_window.c:413
+ msgid "Thumbnail _Viewer"
+-msgstr "Miniaturbilder"
++msgstr "_Miniaturbilder"
+ 
+ #: ../src/main_window.c:417
+ msgid "_Zooming"
+@@ -98,100 +97,101 @@
+ 
+ #: ../src/main_window.c:425
+ msgid "_Set as wallpaper"
+-msgstr ""
++msgstr "Al_s Hintergrundbild einstellen"
+ 
+-#: ../src/main_window.c:503
++#: ../src/main_window.c:477
+ msgid "Show _Horizontally"
+ msgstr "_Horizontal anzeigen"
+ 
+-#: ../src/main_window.c:507
++#: ../src/main_window.c:481
+ msgid "Show _Vertically"
+ msgstr "_Vertikal anzeigen"
+ 
+-#: ../src/main_window.c:511
++#: ../src/main_window.c:485
+ msgid "H_ide"
+ msgstr "Ver_bergen"
+ 
+-#: ../src/main_window.c:548
++#: ../src/main_window.c:522
+ msgid "Rotate _Right"
+ msgstr "Nach _rechts drehen"
+ 
+-#: ../src/main_window.c:549
++#: ../src/main_window.c:523
+ msgid "Rotate _Left"
+ msgstr "Nach _links drehen"
+ 
+ #. Create 'Go' menu
+-#: ../src/main_window.c:570
++#: ../src/main_window.c:544
+ msgid "_Go"
+ msgstr "_Gehe zu"
+ 
+ #. Create 'Help' menu
+-#: ../src/main_window.c:601
++#: ../src/main_window.c:575
+ msgid "_Help"
+ msgstr "_Hilfe"
+ 
+-#: ../src/main_window.c:933
++#: ../src/main_window.c:907
+ msgid "One or more images have been modified, do you want to save the changes?"
+ msgstr ""
++"Ein oder mehrere Bilder wurden geändert. Möchten Sie die Änderungen "
++"speichern?"
+ 
+-#: ../src/main_window.c:1420
++#: ../src/main_window.c:1394
+ msgid "Image viewer Preferences"
+ msgstr "Einstellungen für den Bildbetrachter"
+ 
+-#: ../src/main_window.c:1438
+-msgid "Behaviour"
+-msgstr "Verhalten"
++#: ../src/main_window.c:1412
++msgid "Display"
++msgstr "Anzeige"
+ 
+-#: ../src/main_window.c:1442
++#: ../src/main_window.c:1416
+ msgid "Slideshow"
+ msgstr "Diavorführung"
+ 
+-#: ../src/main_window.c:1446
+-msgid "Display"
+-msgstr "Anzeige"
++#: ../src/main_window.c:1420
++msgid "Behaviour"
++msgstr "Verhalten"
+ 
+-#: ../src/main_window.c:1451
++#: ../src/main_window.c:1425
+ msgid "Scaling"
+ msgstr "Skalierung"
+ 
+-#: ../src/main_window.c:1453
++#: ../src/main_window.c:1427
+ msgid "Don't scale over 100% when maximizing the window."
+ msgstr "Beim Maximieren des Fensters nicht über 100% vergrößern."
+ 
+-#: ../src/main_window.c:1463
++#: ../src/main_window.c:1437
+ msgid "Background Color"
+ msgstr "Hintergrundfarbe"
+ 
+-#: ../src/main_window.c:1465
++#: ../src/main_window.c:1439
+ msgid "_Override Background Color:"
+-msgstr "Hintergrundfarbe ü_berschreiben"
++msgstr "_Hintergrundfarbe überschreiben"
+ 
+-#: ../src/main_window.c:1488
++#: ../src/main_window.c:1462
+ msgid "Image Cache"
+ msgstr "Bildzwischenspeicher"
+ 
+-#: ../src/main_window.c:1491
++#: ../src/main_window.c:1465
+ msgid "Cache size:"
+ msgstr "Zwischenspeichergröße:"
+ 
+-#: ../src/main_window.c:1492
++#: ../src/main_window.c:1466
+ msgid "MB"
+ msgstr "MB"
+ 
+-#: ../src/main_window.c:1508
++#: ../src/main_window.c:1468
++msgid "_Preload images (GUI more responsive but more CPU-intensive)"
++msgstr "_Bilder vorladen (schnellere Oberfläche, aber mehr CPU-Last)"
++
++#: ../src/main_window.c:1486
+ msgid "Timeout"
+ msgstr "Zeitspanne"
+ 
+-#: ../src/main_window.c:1511
+-msgid "Preload"
+-msgstr "Vorladen"
+-
+-#: ../src/main_window.c:1514
+-#, fuzzy
++#: ../src/main_window.c:1489
+ msgid "Thumbnails"
+ msgstr "Miniaturbilder"
+ 
+-#: ../src/main_window.c:1520
++#: ../src/main_window.c:1494
+ msgid ""
+ "The time period an individual image is displayed during a slideshow\n"
+ "(in seconds)"
+@@ -199,31 +199,19 @@
+ "Die Zeitspanne, während der ein Bild angezeigt wird\n"
+ "(in Sekunden)"
+ 
+-#: ../src/main_window.c:1524
+-msgid ""
+-"Preload images during slideshow\n"
+-"(uses more memory)"
+-msgstr ""
+-"Bilder während einer Diavorführung vorladen\n"
+-"(benötigt mehr Speicher)"
+-
+-#: ../src/main_window.c:1525
+-msgid "_Preload images"
+-msgstr "Bilder _vorladen"
+-
+-#: ../src/main_window.c:1527
++#: ../src/main_window.c:1497
+ msgid "Hide the thumbnails bar during slideshow"
+-msgstr ""
++msgstr "Miniaturbilder während Diashow verbergen"
+ 
+-#: ../src/main_window.c:1528
++#: ../src/main_window.c:1498
+ msgid "_Hide thumbnails"
+-msgstr ""
++msgstr "_Miniaturbilder verbergen"
+ 
+-#: ../src/main_window.c:1594
++#: ../src/main_window.c:1556
+ msgid "Developer:"
+ msgstr "Entwickler:"
+ 
+-#: ../src/main_window.c:1604
++#: ../src/main_window.c:1566
+ msgid ""
+ "Ristretto is a fast and lightweight picture-viewer for the Xfce desktop "
+ "environment."
+@@ -231,25 +219,25 @@
+ "Ristretto ist ein schneller und schlanker Bildbetrachter für die "
+ "Arbeitsumgebung Xfce."
+ 
+-#: ../src/main_window.c:1612
++#: ../src/main_window.c:1574
+ msgid "translator-credits"
+ msgstr ""
+ "Christian Dywan <christian@twotoasts.de>\n"
+ "Fabian Nowak <timystery@arcor.de>"
+ 
+-#: ../src/main_window.c:1638
++#: ../src/main_window.c:1600
+ msgid "Open image"
+ msgstr "Bild öffnen"
+ 
+-#: ../src/main_window.c:1656
++#: ../src/main_window.c:1618
+ msgid "Could not open file"
+ msgstr "Datei konnte nicht geöffnet werden"
+ 
+-#: ../src/main_window.c:1678
++#: ../src/main_window.c:1640
+ msgid "Open folder"
+ msgstr "_Ordner öffnen"
+ 
+-#: ../src/main_window.c:1753
++#: ../src/main_window.c:1715
+ msgid ""
+ "Are you sure you want to clear ristretto's list of recently opened documents?"
+ msgstr ""
+@@ -278,11 +266,24 @@
+ 
+ #: ../ristretto.desktop.in.h:2
+ msgid "Ristretto"
+-msgstr ""
++msgstr "Ristretto"
+ 
+ #: ../ristretto.desktop.in.h:3
+ msgid "Xfce Image viewer"
+ msgstr "Xfce-Bildbetrachter"
+ 
++#~ msgid "Preload"
++#~ msgstr "Vorladen"
++
++#~ msgid ""
++#~ "Preload images during slideshow\n"
++#~ "(uses more memory)"
++#~ msgstr ""
++#~ "Bilder während einer Diavorführung vorladen\n"
++#~ "(benötigt mehr Speicher)"
++
++#~ msgid "_Preload images"
++#~ msgstr "Bilder _vorladen"
++
+ #~ msgid "Ristretto Image Viewer"
+ #~ msgstr "Bildbetrachter Ristretto"
+Index: po/ja.po
+===================================================================
+--- po/ja.po	(Revision 0)
++++ po/ja.po	(Revision 5744)
+@@ -0,0 +1,279 @@
++# Japanese translations for ristretto package
++# ristretto パッケージに対する英訳.
++# Copyright (C) 2008 Stephan Arts
++# This file is distributed under the same license as the ristretto package.
++# HASHIMOTO Masato <cabezon.hashimoto@gmail.com>, 2008.
++#
++#: ../src/main.c:231
++msgid ""
++msgstr ""
++"Project-Id-Version: 0.0.18\n"
++"Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
++"POT-Creation-Date: 2008-06-02 00:31+0200\n"
++"PO-Revision-Date: 2008-10-06 14:44+0900\n"
++"Last-Translator: HASHIMOTO Masato <cabezon.hashimoto@gmail.com>\n"
++"Language-Team: Japanese\n"
++"MIME-Version: 1.0\n"
++"Content-Type: text/plain; charset=UTF-8\n"
++"Content-Transfer-Encoding: 8bit\n"
++"Plural-Forms: nplurals=1; plural=0;\n"
++
++#: ../src/main.c:61
++msgid "Version information"
++msgstr "バージョン情報"
++
++#: ../src/main.c:65
++msgid "Start in fullscreen mode"
++msgstr "フルスクリーンモードで開始する"
++
++#: ../src/main.c:69
++msgid "Start a slideshow"
++msgstr "スライドショーを開始"
++
++#: ../src/main.c:235
++#, c-format
++msgid ""
++"%s: %s\n"
++"Try %s --help to see a full list of available command line options.\n"
++msgstr ""
++"%s: %s\n"
++"%s --help で使用可能な全てのコマンドラインオプションが表示されます。\n"
++
++#: ../src/main.c:448 ../src/main_window.c:1636 ../src/main_window.c:1676
++#: ../src/main_window.c:1713
++msgid "Opening file(s)..."
++msgstr "ファイルを開いています..."
++
++#. Create 'File' menu
++#: ../src/main_window.c:340
++msgid "_File"
++msgstr "ファイル(_F)"
++
++#: ../src/main_window.c:347
++msgid "O_pen Folder"
++msgstr "フォルダを開く(_P)"
++
++#: ../src/main_window.c:348
++msgid "_Recently used"
++msgstr "最近開いたファイル(_R)"
++
++#: ../src/main_window.c:353
++msgid "Close _all"
++msgstr "全て閉じる(_A)"
++
++#. Create 'Edit' menu
++#: ../src/main_window.c:383
++msgid "_Edit"
++msgstr "編集(_E)"
++
++#: ../src/main_window.c:388 ../src/main_window.c:686
++msgid "Open with..."
++msgstr "他のアプリケーションで開く..."
++
++#: ../src/main_window.c:396 ../src/main_window.c:697
++msgid "No applications available"
++msgstr "使用可能なアプリケーションはありません"
++
++#. Create 'View' menu
++#: ../src/main_window.c:405
++msgid "_View"
++msgstr "表示(_V)"
++
++#: ../src/main_window.c:412
++msgid "Show _Toolbar"
++msgstr "ツールバーを表示(_T)"
++
++#: ../src/main_window.c:413
++msgid "Thumbnail _Viewer"
++msgstr "サムネイルビューア(_V)"
++
++#: ../src/main_window.c:417
++msgid "_Zooming"
++msgstr "拡大/縮小(_Z)"
++
++#: ../src/main_window.c:418
++msgid "_Rotate"
++msgstr "回転(_R)"
++
++#: ../src/main_window.c:425
++msgid "_Set as wallpaper"
++msgstr "壁紙に設定(_S)"
++
++#: ../src/main_window.c:503
++msgid "Show _Horizontally"
++msgstr "横に表示(_H)"
++
++#: ../src/main_window.c:507
++msgid "Show _Vertically"
++msgstr "縦に表示(_V)"
++
++#: ../src/main_window.c:511
++msgid "H_ide"
++msgstr "非表示(_I)"
++
++#: ../src/main_window.c:548
++msgid "Rotate _Right"
++msgstr "右回転(_R)"
++
++#: ../src/main_window.c:549
++msgid "Rotate _Left"
++msgstr "左回転(_L)"
++
++#. Create 'Go' menu
++#: ../src/main_window.c:570
++msgid "_Go"
++msgstr "移動(_G)"
++
++#. Create 'Help' menu
++#: ../src/main_window.c:601
++msgid "_Help"
++msgstr "ヘルプ(_H)"
++
++#: ../src/main_window.c:933
++msgid "One or more images have been modified, do you want to save the changes?"
++msgstr "一つ以上の画像が修正されています。保存しますか?"
++
++#: ../src/main_window.c:1420
++msgid "Image viewer Preferences"
++msgstr "画像ビューア設定"
++
++#: ../src/main_window.c:1438
++msgid "Behaviour"
++msgstr "振る舞い"
++
++#: ../src/main_window.c:1442
++msgid "Slideshow"
++msgstr "スライドショー"
++
++#: ../src/main_window.c:1446
++msgid "Display"
++msgstr "表示"
++
++#: ../src/main_window.c:1451
++msgid "Scaling"
++msgstr "サイズ変更"
++
++#: ../src/main_window.c:1453
++msgid "Don't scale over 100% when maximizing the window."
++msgstr "ウィンドウを最大化したときにサイズを100%より大きくしない"
++
++#: ../src/main_window.c:1463
++msgid "Background Color"
++msgstr "背景色"
++
++#: ../src/main_window.c:1465
++msgid "_Override Background Color:"
++msgstr "背景色を変更する(_O):"
++
++#: ../src/main_window.c:1488
++msgid "Image Cache"
++msgstr "画像キャッシュ"
++
++#: ../src/main_window.c:1491
++msgid "Cache size:"
++msgstr "キャッシュサイズ:"
++
++#: ../src/main_window.c:1492
++msgid "MB"
++msgstr "MB"
++
++#: ../src/main_window.c:1508
++msgid "Timeout"
++msgstr "タイムアウト"
++
++#: ../src/main_window.c:1511
++msgid "Preload"
++msgstr "プレロード"
++
++#: ../src/main_window.c:1514
++msgid "Thumbnails"
++msgstr "サムネイル"
++
++#: ../src/main_window.c:1520
++msgid ""
++"The time period an individual image is displayed during a slideshow\n"
++"(in seconds)"
++msgstr ""
++"スライドショー中に各画像を表示する時間(秒)"
++
++#: ../src/main_window.c:1524
++msgid ""
++"Preload images during slideshow\n"
++"(uses more memory)"
++msgstr ""
++"スライドショー中のイメージの先行読み込み\n"
++"(メモリ使用量が増加)"
++
++#: ../src/main_window.c:1525
++msgid "_Preload images"
++msgstr "画像をプレロードする(_P)"
++
++#: ../src/main_window.c:1527
++msgid "Hide the thumbnails bar during slideshow"
++msgstr "スライドショー中はサムネイルの非表示"
++
++#: ../src/main_window.c:1528
++msgid "_Hide thumbnails"
++msgstr "サムネイルを表示しない(_H)"
++
++#: ../src/main_window.c:1594
++msgid "Developer:"
++msgstr "Developer:"
++
++#: ../src/main_window.c:1604
++msgid ""
++"Ristretto is a fast and lightweight picture-viewer for the Xfce desktop "
++"environment."
++msgstr ""
++"Ristretto は Xfce デスクトップ環境向けの\n"
++"軽快で軽量な画像ビューアです。"
++
++#: ../src/main_window.c:1612
++msgid "translator-credits"
++msgstr "Masato Hashimoto <cabezon.hashimoto@gmail.com>"
++
++#: ../src/main_window.c:1638
++msgid "Open image"
++msgstr "画像を開く"
++
++#: ../src/main_window.c:1656
++msgid "Could not open file"
++msgstr "ファイルを開けませんでした"
++
++#: ../src/main_window.c:1678
++msgid "Open folder"
++msgstr "フォルダを開く"
++
++#: ../src/main_window.c:1753
++msgid ""
++"Are you sure you want to clear ristretto's list of recently opened documents?"
++msgstr ""
++"ristretto の最近開いたファイルリストをクリアしてよろしいですか?"
++
++#: ../src/thumbnail_bar.c:185
++msgid "Spacing"
++msgstr "間隔"
++
++#: ../src/thumbnail_bar.c:186
++msgid "The amount of space between the thumbnails"
++msgstr "サムネイル間の間隔"
++
++#: ../src/thumbnail_bar.c:192
++msgid "Border Width"
++msgstr "境界線幅"
++
++#: ../src/thumbnail_bar.c:193
++msgid "The border width of the thumbnail-bar"
++msgstr "サムネイルバーの境界線幅"
++
++#: ../ristretto.desktop.in.h:1
++msgid "Image Viewer"
++msgstr "画像ビューア"
++
++#: ../ristretto.desktop.in.h:2
++msgid "Ristretto"
++msgstr "Ristretto"
++
++#: ../ristretto.desktop.in.h:3
++msgid "Xfce Image viewer"
++msgstr "Xfce 画像ビューア"
+Index: po/fi.po
+===================================================================
+--- po/fi.po	(Revision 5214)
++++ po/fi.po	(Revision 5744)
+@@ -8,8 +8,8 @@
+ msgstr ""
+ "Project-Id-Version: ristretto 0.0.5\n"
+ "Report-Msgid-Bugs-To: xfce-i18n@xfce.org\n"
+-"POT-Creation-Date: 2008-06-11 10:24+0300\n"
+-"PO-Revision-Date: 2008-06-11 10:26+0300\n"
++"POT-Creation-Date: 2008-08-17 11:09+0300\n"
++"PO-Revision-Date: 2008-08-17 11:12+0300\n"
+ "Last-Translator: Jari Rahkonen <jari.rahkonen@pp1.inet.fi>\n"
+ "Language-Team: Finnish <xfce-i18n@xfce.org>\n"
+ "MIME-Version: 1.0\n"
+@@ -37,8 +37,8 @@
+ "%s: %s\n"
+ "Näet listan komentorivivalitsimista kirjoittamalla %s --help.\n"
+ 
+-#: ../src/main.c:448 ../src/main_window.c:1636 ../src/main_window.c:1676
+-#: ../src/main_window.c:1713
++#: ../src/main.c:448 ../src/main_window.c:1624 ../src/main_window.c:1664
++#: ../src/main_window.c:1701
+ msgid "Opening file(s)..."
+ msgstr "Avataan tiedosto(j)a..."
+ 
+@@ -136,16 +136,16 @@
+ msgstr "Kuvakatselimen asetukset"
+ 
+ #: ../src/main_window.c:1438
+-msgid "Behaviour"
+-msgstr "Käytös"
++msgid "Display"
++msgstr "Näyttö"
+ 
+ #: ../src/main_window.c:1442
+ msgid "Slideshow"
+ msgstr "Diaesitys"
+ 
+ #: ../src/main_window.c:1446
+-msgid "Display"
+-msgstr "Näyttö"
++msgid "Behaviour"
++msgstr "Käytös"
+ 
+ #: ../src/main_window.c:1451
+ msgid "Scaling"
+@@ -175,15 +175,15 @@
+ msgid "MB"
+ msgstr "Mt"
+ 
+-#: ../src/main_window.c:1508
++#: ../src/main_window.c:1494
++msgid "_Preload images (GUI more responsive but more CPU-intensive)"
++msgstr "_Esilataa kuvat (nopeuttaa käyttöä, vaatii suoritintehoa)"
++
++#: ../src/main_window.c:1512
+ msgid "Timeout"
+ msgstr "Esitysaika"
+ 
+-#: ../src/main_window.c:1511
+-msgid "Preload"
+-msgstr "Esilataus"
+-
+-#: ../src/main_window.c:1514
++#: ../src/main_window.c:1515
+ msgid "Thumbnails"
+ msgstr "Pienoiskuvat"
+ 
+@@ -193,51 +193,41 @@
+ "(in seconds)"
+ msgstr "Montako sekuntia yksittäistä kuvaa esitetään diaesityksessä"
+ 
+-#: ../src/main_window.c:1524
+-msgid ""
+-"Preload images during slideshow\n"
+-"(uses more memory)"
+-msgstr "Esilataa kuvat diaesitystilassa (käyttää enemmän keskusmuistia)"
+-
+-#: ../src/main_window.c:1525
+-msgid "_Preload images"
+-msgstr "_Esilataa kuvat"
+-
+-#: ../src/main_window.c:1527
++#: ../src/main_window.c:1523
+ msgid "Hide the thumbnails bar during slideshow"
+ msgstr "Piilota pienoiskuvat diaesityksen ajaksi"
+ 
+-#: ../src/main_window.c:1528
++#: ../src/main_window.c:1524
+ msgid "_Hide thumbnails"
+ msgstr "_Piilota pienoiskuvat"
+ 
+-#: ../src/main_window.c:1594
++#: ../src/main_window.c:1582
+ msgid "Developer:"
+ msgstr "Kehittäjä:"
+ 
+-#: ../src/main_window.c:1604
++#: ../src/main_window.c:1592
+ msgid ""
+ "Ristretto is a fast and lightweight picture-viewer for the Xfce desktop "
+ "environment."
+ msgstr "Ristretto on nopea ja kevyt kuvakatselin Xfce-työpöydälle."
+ 
+-#: ../src/main_window.c:1612
++#: ../src/main_window.c:1600
+ msgid "translator-credits"
+ msgstr "Jari Rahkonen <jari.rahkonen@pp1.inet.fi>"
+ 
+-#: ../src/main_window.c:1638
++#: ../src/main_window.c:1626
+ msgid "Open image"
+ msgstr "Avaa kuva"
+ 
+-#: ../src/main_window.c:1656
++#: ../src/main_window.c:1644
+ msgid "Could not open file"
+ msgstr "Tiedoston avaus ei onnistunut"
+ 
+-#: ../src/main_window.c:1678
++#: ../src/main_window.c:1666
+ msgid "Open folder"
+ msgstr "Avaa hakemisto"
+ 
+-#: ../src/main_window.c:1753
++#: ../src/main_window.c:1741
+ msgid ""
+ "Are you sure you want to clear ristretto's list of recently opened documents?"
+ msgstr ""
