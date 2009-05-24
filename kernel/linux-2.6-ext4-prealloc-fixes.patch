@@ -1,0 +1,51 @@
+From: Aneesh Kumar K.V <aneesh.kumar@linux.vnet.ibm.com>
+Date: Wed, 13 May 2009 22:36:58 +0000 (-0400)
+Subject: ext4: Fix sub-block zeroing for writes into preallocated extents
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=9c1ee184a30394e54165fa4c15923cabd952c106
+
+ext4: Fix sub-block zeroing for writes into preallocated extents
+
+We need to mark the buffer_head mapping preallocated space as new
+during write_begin. Otherwise we don't zero out the page cache content
+properly for a partial write. This will cause file corruption with
+preallocation.
+
+Now that we mark the buffer_head new we also need to have a valid
+buffer_head blocknr so that unmap_underlying_metadata() unmaps the
+correct block.
+
+Signed-off-by: Aneesh Kumar K.V <aneesh.kumar@linux.vnet.ibm.com>
+Signed-off-by: "Theodore Ts'o" <tytso@mit.edu>
+---
+
+Index: linux-2.6.29.noarch/fs/ext4/extents.c
+===================================================================
+--- linux-2.6.29.noarch.orig/fs/ext4/extents.c
++++ linux-2.6.29.noarch/fs/ext4/extents.c
+@@ -2776,6 +2776,8 @@ int ext4_ext_get_blocks(handle_t *handle
+ 				if (allocated > max_blocks)
+ 					allocated = max_blocks;
+ 				set_buffer_unwritten(bh_result);
++				bh_result->b_bdev = inode->i_sb->s_bdev;
++				bh_result->b_blocknr = newblock;
+ 				goto out2;
+ 			}
+ 
+Index: linux-2.6.29.noarch/fs/ext4/inode.c
+===================================================================
+--- linux-2.6.29.noarch.orig/fs/ext4/inode.c
++++ linux-2.6.29.noarch/fs/ext4/inode.c
+@@ -2239,6 +2239,13 @@ static int ext4_da_get_block_prep(struct
+ 		set_buffer_delay(bh_result);
+ 	} else if (ret > 0) {
+ 		bh_result->b_size = (ret << inode->i_blkbits);
++		/*
++		 * With sub-block writes into unwritten extents
++		 * we also need to mark the buffer as new so that
++		 * the unwritten parts of the buffer gets correctly zeroed.
++		 */
++		if (buffer_unwritten(bh_result))
++			set_buffer_new(bh_result);
+ 		ret = 0;
+ 	}
+ 

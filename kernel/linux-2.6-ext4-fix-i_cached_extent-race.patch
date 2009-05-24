@@ -1,0 +1,79 @@
+From: Theodore Ts'o <tytso@mit.edu>
+Date: Fri, 15 May 2009 13:07:28 +0000 (-0400)
+Subject: ext4: Fix race in ext4_inode_info.i_cached_extent
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=2ec0ae3acec47f628179ee95fe2c4da01b5e9fc4
+
+ext4: Fix race in ext4_inode_info.i_cached_extent
+
+If two CPU's simultaneously call ext4_ext_get_blocks() at the same
+time, there is nothing protecting the i_cached_extent structure from
+being used and updated at the same time.  This could potentially cause
+the wrong location on disk to be read or written to, including
+potentially causing the corruption of the block group descriptors
+and/or inode table.
+
+This bug has been in the ext4 code since almost the very beginning of
+ext4's development.  Fortunately once the data is stored in the page
+cache cache, ext4_get_blocks() doesn't need to be called, so trying to
+replicate this problem to the point where we could identify its root
+cause was *extremely* difficult.  Many thanks to Kevin Shanahan for
+working over several months to be able to reproduce this easily so we
+could finally nail down the cause of the corruption.
+
+Signed-off-by: "Theodore Ts'o" <tytso@mit.edu>
+Reviewed-by: "Aneesh Kumar K.V" <aneesh.kumar@linux.vnet.ibm.com>
+---
+
+Index: linux-2.6.29.noarch/fs/ext4/extents.c
+===================================================================
+--- linux-2.6.29.noarch.orig/fs/ext4/extents.c
++++ linux-2.6.29.noarch/fs/ext4/extents.c
+@@ -1740,11 +1740,13 @@ ext4_ext_put_in_cache(struct inode *inod
+ {
+ 	struct ext4_ext_cache *cex;
+ 	BUG_ON(len == 0);
++	spin_lock(&EXT4_I(inode)->i_block_reservation_lock);
+ 	cex = &EXT4_I(inode)->i_cached_extent;
+ 	cex->ec_type = type;
+ 	cex->ec_block = block;
+ 	cex->ec_len = len;
+ 	cex->ec_start = start;
++	spin_unlock(&EXT4_I(inode)->i_block_reservation_lock);
+ }
+ 
+ /*
+@@ -1801,12 +1803,17 @@ ext4_ext_in_cache(struct inode *inode, e
+ 			struct ext4_extent *ex)
+ {
+ 	struct ext4_ext_cache *cex;
++	int ret = EXT4_EXT_CACHE_NO;
+ 
++	/* 
++	 * We borrow i_block_reservation_lock to protect i_cached_extent
++	 */
++	spin_lock(&EXT4_I(inode)->i_block_reservation_lock);
+ 	cex = &EXT4_I(inode)->i_cached_extent;
+ 
+ 	/* has cache valid data? */
+ 	if (cex->ec_type == EXT4_EXT_CACHE_NO)
+-		return EXT4_EXT_CACHE_NO;
++		goto errout;
+ 
+ 	BUG_ON(cex->ec_type != EXT4_EXT_CACHE_GAP &&
+ 			cex->ec_type != EXT4_EXT_CACHE_EXTENT);
+@@ -1817,11 +1824,11 @@ ext4_ext_in_cache(struct inode *inode, e
+ 		ext_debug("%u cached by %u:%u:%llu\n",
+ 				block,
+ 				cex->ec_block, cex->ec_len, cex->ec_start);
+-		return cex->ec_type;
++		ret = cex->ec_type;
+ 	}
+-
+-	/* not in cache */
+-	return EXT4_EXT_CACHE_NO;
++errout:
++	spin_unlock(&EXT4_I(inode)->i_block_reservation_lock);
++	return ret;
+ }
+ 
+ /*
