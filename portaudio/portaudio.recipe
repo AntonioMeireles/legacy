@@ -4,37 +4,28 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class PortAudio(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class PortAudio(RPMPackageRecipe,AutoPackageRecipe):
     buildRequires = [ 'dos2unix:runtime', 'unzip:runtime' ]
 
     name = "portaudio"
-    version = "18.1"
+    version = "19"
+    rpmRelease = '8.fc11'
+    rpmPatches = [ 'portaudio-non-mmap-alsa.patch',
+                   'portaudio-doxynodate.patch']
+    tarballName = 'pa_stable_v19_20071207.tar.gz'
+    buildRequires = ['alsa-lib:devel', 'jack:devel', 'libstdc++:devel', 'pkgconfig:devel']
 
-    def unpack(r):
-        r.macros.cflags += ' -fPIC'
-        r.macros.fv = r.version.replace('.', '_')
-        r.mainDir('%(name)s_v%(fv)s')
-        r.addArchive('http://www.portaudio.com/archives/portaudio_v%(fv)s.zip')
-        # zip archive has world-writeable perimissions, and the Makefile
-        # doesn't change that
-        r.Run('find . -type f | xargs chmod go-w')
 
-        # Convert to unix files
-        r.Run('find . -type f | xargs dos2unix')
-
-        # Make configure executable
-        r.Run('chmod +x configure')
+    def configure(r):
+        r.Configure('--disable-static --enable-cxx')
 
     def makeinstall(r):
-        r.Replace(r'\$\(PREFIX\)/lib', '$(PREFIX)/%(lib)s', 'Makefile')
         # encode a soname; use the full version because we can't make
         # compatibility statements in lieu of the author
         r.Replace('-o lib/', '-Wl,-soname,$(PADLLV) -o lib/', 'Makefile')
-        r.MakeDirs('%(libdir)s', '%(includedir)s')
-        r.MakeInstall('PREFIX=%(destdir)s/%(prefix)s')
-        r.Install('pa_common/portaudio.h', '%(includedir)s/')
+        r.MakeInstall()
 
-        r.Doc('docs', 'README.txt', 'LICENSE.txt', 'pa_tests/patest_saw.c')
 
     def policy(r):
         # at least openoffice.org will dlopen "libportaudio.so"
