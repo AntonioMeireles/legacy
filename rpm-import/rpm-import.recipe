@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-# Copyright (c) 2006-2008 rPath, Inc.
+# Copyright (c) 2006-2009 rPath, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -187,7 +187,8 @@ class RPMImportRecipe(PackageRecipe):
         # collapse suffixes
         for suffix in ('-devel', '-docs', '-doc', '-info',
                        '-lib', '-libs', '-locale', '-man',
-                       '-i18ndata', '-html'):
+                       '-i18ndata', '-html', '-debuginfo',
+                       '-debugsource',):
             # collapse foo-devel -> foo
             if rpmname.endswith(suffix) and r.name != rpmname:
                 packagename = packagename[:-len(suffix)]
@@ -233,7 +234,9 @@ class RPMImportRecipe(PackageRecipe):
         del r.FilesForDirectories
         del r.FilesInMandir
         del r.FixDirModes
-        del r.FixupMultilibPaths
+        # On Ubuntu there is no FixupMultilibPaths policy
+        if 'FixupMultilibPaths' in r._policyMap:
+            del r.FixupMultilibPaths
         r.LinkCount(**_args)
         del r.IgnoredSetuid
         del r.ImproperlyShared
@@ -329,7 +332,13 @@ class RPMImportRecipe(PackageRecipe):
                     # GHOST.  We only handle ghost files, not ghost dirs
                     if stat.S_ISREG(mode):
                         r.Create(path)
-                        r.InitialContents(escaped_path)
+                        # Do not mark pyc and pyo files as InitialContents
+                        # since they are automatically marked as transient.
+                        # Also applies to emacs lisp files.
+                        if not (path.endswith('.pyc') or
+                                path.endswith('.pyo') or
+                                path.endswith('.el')):
+                            r.InitialContents(escaped_path)
                     elif stat.S_ISDIR(mode):
                         r.MakeDirs(escaped_path)
                         r.ExcludeDirectories(exceptions=escaped_path)
