@@ -21,5 +21,6 @@ case $branch in
 esac
 
 #time cvc cook --context $CONTEXT --build-label=$BRANCH group-desktop-platform.recipe'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]' 2> log2
-time cvc cook --context $CONTEXT --build-label=$BRANCH group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen  is: x86 x86_64]' group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]'  --allow-flavor-change  2>&1 |tee log
+# time cvc cook --context $CONTEXT --build-label=$BRANCH group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen  is: x86 x86_64]' group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]'  --allow-flavor-change  --lsprof 2>&1 |tee log
+time cvc cook --context $CONTEXT --build-label=$BRANCH group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen  is: x86 x86_64]' group-desktop-platform=$BRANCH'[~!bootstrap,~!builddocs,~!dom0,~!domU,~!vmware,~!xen is: x86]'  --allow-flavor-change 2>&1 |tee log
 date
