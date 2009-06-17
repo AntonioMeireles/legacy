@@ -1,8 +1,183 @@
-class Geany(AutoPackageRecipe):
+# vim: ts=4 sw=4 expandtab ai
+#
+# Copyright (c) 2009 Erik Southworth <erik.southworth@gmail.com>
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Geany(PackageRecipe):
     name = 'geany'
     version = '0.17'
+    archive = 'mirror://sourceforge/%(name)s/'
 
-    buildRequires = ['atk:devel', 'cairo:devel', 'desktop-file-utils:runtime', 'expat:devel', 'freetype:devel', 'glib:devel', 'gtk:devel', 'libXrender:devel', 'libstdc++:devel', 'pango:devel', 'pkgconfig:devel', 'zlib:devel', 'intltool:runtime', 'gettext:runtime', 'which:runtime']
+    buildRequires = [
+        'aspell:devel', 'atk:devel', 'binutils:runtime', 'cairo:devel',
+        'debugedit:runtime', 'desktop-file-utils:runtime',
+        'diffutils:runtime', 'elfutils:runtime', 'expat:devel',
+        'file:runtime', 'fontconfig:devel', 'freetype:devel',
+        'gcc-c++:runtime', 'gcc:devel', 'gcc:devellib', 'gcc:lib',
+        'gcc:runtime', 'gettext:runtime', 'glibc:runtime', 'glib:devel',
+        'gtk:devel', 'gtkspell:devel', 'intltool:runtime',
+        'libgcc:devellib', 'libpng:devel', 'libstdc++:devel',
+        'libX11:devel', 'libXrender:devel', 'make:runtime',
+        'pango:devel', 'perl:runtime', 'pixman:devel', 'pkgconfig:devel',
+        'which:runtime', 'zlib:devel', 'enchant:devel',
+        ]
 
-    def unpack(r):
-        r.addArchive('mirror://sourceforge/%(name)s/')
+    extraConfig = 'GEANY_CFLAGS=\" -I%(destdir)s/%(includedir)s/geany \
+        -I%(destdir)s/%(includedir)s/geany/tagmanager \
+        -I%(destdir)s/%(includedir)s/geany/scintilla\"'
+
+    def setup(r):
+        r.setMacros()
+        r.setEnvironment()
+        r.buildGeany()
+        r.buildGeanyAddons()
+        r.buildGeanyDoc()
+        r.buildGeanyGDB()
+        r.buildGeanyLatex()
+        r.buildGeanyLipsum()
+# FIXME r.buildGeanyLua()
+        r.buildGeanyPrj()
+        r.buildGeanySendMail()
+        r.buildGeanyVC()
+        r.buildGeanySpellCheck()
+        r.policy()
+
+    def setMacros(r):
+        r.macros.addonpkg = 'geany-plugins'
+        r.macros.homepage = r.packageHomepage
+        r.macros.cppflags += '-I%(includedir)s/gtkspell-2.0 \
+            -I%(includedir)s/gtk-2.0 -I%(libdir)s/gtk-2.0/include \
+            -I%(includedir)s/atk-1.0 -I%(includedir)s/cairo \
+            -I%(includedir)s/pango-1.0 -I%(includedir)s/glib-2.0 \
+            -I%(libdir)s/glib-2.0/include -I%(includedir)s/pixman-1 \
+            -I%(includedir)s/freetype2 -I%(includedir)s/libpng12'
+
+    def setEnvironment(r):
+        r.Environment('PKG_CONFIG_PATH',
+            '$PATH:%(libdir)s/pkgconfig:%(destdir)s/%(libdir)s/pkgconfig')
+
+    def buildGeany(r):
+        r.addArchive(r.archive)
+        r.Configure()
+        r.Make()
+        r.MakeInstall()
+
+    addonsVersion = '0.2'
+    addonsArchive = 'http://plugins.geany.org/addons/%(addonsdir)s.tar.gz'
+    def buildGeanyAddons(r):
+        r.macros.addonsVersion = r.addonsVersion
+        r.macros.addonsdir = 'addons-%(addonsVersion)s'
+        r.addArchive(r.addonsArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(addonsdir)s')
+        r.Make(dir='%(addonsdir)s')
+        r.MakeInstall(dir='%(addonsdir)s', package='%(addonpkg)s')
+
+    geanydocVersion = '0.4'
+    geanydocArchive = 'http://users.cosmostv.by/yurand/geanydoc/%(geanydocdir)s.tar.gz'
+    def buildGeanyDoc(r):
+        r.macros.geanydocVersion = r.geanydocVersion
+        r.macros.geanydocdir = '%(name)sdoc-%(geanydocVersion)s'
+        r.addArchive(r.geanydocArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanydocdir)s')
+        r.Make(dir='%(geanydocdir)s')
+        r.MakeInstall(dir='%(geanydocdir)s', package='%(addonpkg)s')
+
+    geanygdbVersion = '0.0.2'
+    geanygdbArchive = 'http://plugins.geany.org/geanygdb/%(geanygdbdir)s.tar.gz'
+    def buildGeanyGDB(r):
+        r.macros.geanygdbVersion = r.geanygdbVersion
+        r.macros.geanygdbdir = '%(name)sgdb-%(geanygdbVersion)s'
+        r.addArchive(r.geanygdbArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanygdbdir)s')
+        r.Make(dir='%(geanygdbdir)s')
+        r.MakeInstall(dir='%(geanygdbdir)s', package='%(addonpkg)s')
+
+    geanylatexVersion = '0.4'
+    geanylatexArchive = 'http://frank.uvena.de/files/geany/%(geanylatexdir)s.tar.gz'
+    def buildGeanyLatex(r):
+        r.macros.geanylatexVersion = r.geanylatexVersion
+        r.macros.geanylatexdir = '%(name)slatex-%(geanylatexVersion)s'
+        r.addArchive(r.geanylatexArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanylatexdir)s')
+        r.Make(dir='%(geanylatexdir)s')
+        r.MakeInstall(dir='%(geanylatexdir)s', package='%(addonpkg)s')
+
+    geanylipsumVersion = '0.1.1'
+    geanylipsumArchive = 'http://frank.uvena.de/files/geany/%(geanylipsumdir)s.tar.gz'
+    def buildGeanyLipsum(r):
+        r.macros.geanylipsumVersion = r.geanylipsumVersion
+        r.macros.geanylipsumdir = '%(name)slipsum-%(geanylipsumVersion)s'
+        r.addArchive(r.geanylipsumArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanylipsumdir)s')
+        r.Make(dir='%(geanylipsumdir)s')
+        r.MakeInstall(dir='%(geanylipsumdir)s', package='%(addonpkg)s')
+
+    geanyluaVersion = '2009-06-14'
+    luaArchive = 'http://plugins.geany.org/geanylua/%(geanyluadir)s.tar.gz'
+    geanyluaSvnSnapshot= ('http://geany-plugins.svn.sf.net/svnroot/geany-plugins/trunk/geanylua/')
+    def buildGeanyLua(r):
+        r.macros.geanyluaVersion = r.geanyluaVersion
+        r.macros.geanyluadir = '%(name)slua-%(geanyluaVersion)s'
+# FIXME r.addArchive(r.geanyluaArchive, dir='%(maindir)s')
+        r.addSvnSnapshot(r.geanyluaSvnSnapshot, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanyluadir)s')
+        r.Make(dir='%(geanyluadir)s')
+        r.MakeInstall(dir='%(geanyluadir)s', package='%(addonpkg)s')
+
+    geanyprjVersion = '0.5'
+    geanyprjArchive = 'http://users.cosmostv.by/yurand/geanyprj/%(geanyprjdir)s.tar.gz'
+    def buildGeanyPrj(r):
+        r.macros.geanyprjVersion = r.geanyprjVersion
+        r.macros.geanyprjdir = '%(name)sprj-%(geanyprjVersion)s'
+        r.addArchive(r.geanyprjArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanyprjdir)s')
+        r.Make(dir='%(geanyprjdir)s')
+        r.MakeInstall(dir='%(geanyprjdir)s', package='%(addonpkg)s')
+
+    geanysendmailVersion = '0.4.2'
+    geanysendmailArchive = 'http://frank.uvena.de/files/geany/%(geanysendmaildir)s.tar.gz'
+    def buildGeanySendMail(r):
+        r.macros.geanysendmailVersion = r.geanysendmailVersion
+        r.macros.geanysendmaildir = '%(name)ssendmail-%(geanysendmailVersion)s'
+        r.addArchive(r.geanysendmailArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanysendmaildir)s')
+        r.Make(dir='%(geanysendmaildir)s')
+        r.MakeInstall(dir='%(geanysendmaildir)s', package='%(addonpkg)s')
+
+    geanyvcVersion = '0.5'
+    geanyvcArchive = 'http://users.cosmostv.by/yurand/geanyvc/%(geanyvcdir)s.tar.gz'
+    def buildGeanyVC(r):
+        r.macros.geanyvcVersion = r.geanyvcVersion
+        r.macros.geanyvcdir = '%(name)svc-%(geanyvcVersion)s'
+        r.addArchive(r.geanyvcArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(geanyvcdir)s')
+        r.Make(dir='%(geanyvcdir)s')
+        r.MakeInstall(dir='%(geanyvcdir)s', package='%(addonpkg)s')
+
+    spellcheckVersion = '0.4'
+    spellcheckArchive = 'http://plugins.geany.org/spellcheck/%(spellcheckdir)s.tar.gz'
+    def buildGeanySpellCheck(r):
+        r.macros.spellcheckVersion = r.spellcheckVersion
+        r.macros.spellcheckdir = 'spellcheck-%(spellcheckVersion)s'
+        r.addArchive(r.spellcheckArchive, dir='%(maindir)s')
+        r.Configure(r.extraConfig, dir='%(spellcheckdir)s')
+        r.Make(dir='%(spellcheckdir)s')
+        r.MakeInstall(dir='%(spellcheckdir)s', package='%(addonpkg)s')
+
+    def policy(r):
+        #r.PackageSpec('%(name)s', '')
+        #r.ComponentSpec(catchall='%(name)s-plugins')
+
+        r.Licenses('GPLv2')
+
+        r.Description(
+            shortDesc=r.packageSummary,
+            longDesc =r.packageDescription)
+    packageHomepage = 'http://www.geany.org/'
+    packageSummary = 'Geany - A fast and lightweight IDE'
+    packageDescription = \
+        """Geany is a small and lightweight integrated development
+           environment. It was developed to provide a small and
+           fast IDE. Homepage: %(homepage)s"""
