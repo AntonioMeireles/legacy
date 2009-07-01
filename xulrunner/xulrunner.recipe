@@ -6,8 +6,8 @@
 loadSuperClass('rpmpackage')
 class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
     name = 'xulrunner'
-    version = '1.9.0.11'
-    rpmRelease = '1.fc10'
+    version = '1.9.1'
+    rpmRelease = '2.fc11'
     tarballName = '%(name)s-%(version)s-source.tar.bz2'
 
     buildRequires = [
@@ -21,7 +21,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
         'libXinerama:devel', 'libXrender:devel', 'libXt:devel',
         'makedepend:runtime', 'nspr:devel', 'nss:devel', 'pango:devel',
         'perl:runtime', 'pkgconfig:devel', 'unzip:runtime', 'zip:runtime',
-        'zlib:devel', 'expat:devel', 'libXinerama:devel',
+        'zlib:devel', 'expat:devel', 'libXinerama:devel', 'alsa-lib:devel',
         'bzip2:devel', 'lcms:devel', 'sqlite:devel', 'python:devel',
         # gnome-related buildreqs
         'GConf:devel', 'ORBit2:devel', 'gnome-vfs:devel',
@@ -35,24 +35,21 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
     rpmSources = ['%(name)s-redhat-default-prefs.js']
 
-    rpmPatches = [ 'mozilla-build.patch',
-                   'xulrunner-path.patch',
-                   'xulrunner-version.patch',
-                   'mozilla-sqlite.patch',
-                   'mozilla-mochitest.patch',
-                   'mozilla-about-firefox-version.patch',
-                   'mozilla-pkgconfig.patch',
+    rpmPatches = [ 'xulrunner-version.patch',
+                   'mozilla-build.patch',
+                   'mozilla-191-path.patch',
+                   'mozilla-jemalloc.patch',
+                   'mozilla-191-pkgconfig.patch',
                    'mozilla-ps-pdf-simplify-operators.patch',
-                   # 'mozilla-ssl-exception.patch',
                    ]
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
-        r.Replace('SQLITE_VERSION=3.6.7', 'SQLITE_VERSION=3.5', 'configure')
 
     def configure(r):
         r.macros.longVersion =  r.macros.version
-        r.macros.version = '1.9'
+        r.macros.version = '1.9.1'
+        r.Replace('__RPM_VERSION_INTERNAL__', '%(version)s', 'xulrunner/installer/Makefile.in')
         r.Environment('INTERNAL_GECKO','%(version)s')
         r.Environment('MOZ_APP_DIR','%(libdir)s/%(name)s-%(version)s')
 
@@ -129,6 +126,8 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
         # Prepare our devel package
         r.Run('cp -rL dist/include/*   %(destdir)s/%(includedir)s/%(INTERNAL_APP_SDK_NAME)s')
+        # Copy mozilla-config to stable include dir
+        r.Copy('dist/include/mozilla-config.h', '%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/stable/')
 
         # Fix multilib devel conflicts...
         if Arch.x86_64:
@@ -140,7 +139,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
             if target.endswith('cfg'):
                 subDir = ['js', 'unstable']
             else:
-                subDir = ['', 'unstable']
+                subDir = ['', 'stable', 'unstable']
 
             for d in subDir:
                 dir = '%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/' + d + '/'
