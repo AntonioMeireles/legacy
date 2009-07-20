@@ -1,0 +1,67 @@
+Currently blkfront gives a warning when hot unplugging due to calling
+del_gendisk() with interrupts disabled (due to blkif_io_lock).
+
+WARNING: at kernel/softirq.c:124 local_bh_enable+0x36/0x84()
+Modules linked in: xenfs xen_netfront ext3 jbd mbcache xen_blkfront
+Pid: 13, comm: xenwatch Not tainted 2.6.29-xs5.5.0.13 #3
+Call Trace:
+ [<c012611c>] warn_slowpath+0x80/0xb6
+ [<c0104cf1>] xen_sched_clock+0x16/0x63
+ [<c0104710>] xen_force_evtchn_callback+0xc/0x10
+ [<c0104e32>] check_events+0x8/0xe
+ [<c0104d9b>] xen_restore_fl_direct_end+0x0/0x1
+ [<c0103749>] xen_mc_flush+0x10a/0x13f
+ [<c0105bd2>] __switch_to+0x114/0x14e
+ [<c011d92b>] dequeue_task+0x62/0x70
+ [<c0123b6f>] finish_task_switch+0x2b/0x84
+ [<c0299877>] schedule+0x66d/0x6e7
+ [<c0104710>] xen_force_evtchn_callback+0xc/0x10
+ [<c0104710>] xen_force_evtchn_callback+0xc/0x10
+ [<c012a642>] local_bh_enable+0x36/0x84
+ [<c022f9a7>] sk_filter+0x57/0x5c
+ [<c0233dae>] netlink_broadcast+0x1d5/0x315
+ [<c01c6371>] kobject_uevent_env+0x28d/0x331
+ [<c01e7ead>] device_del+0x10f/0x120
+ [<c01e7ec6>] device_unregister+0x8/0x10
+ [<c015f86d>] bdi_unregister+0x2d/0x39
+ [<c01bf6f4>] unlink_gendisk+0x23/0x3e
+ [<c01ac946>] del_gendisk+0x7b/0xe7
+ [<d0828c19>] blkfront_closing+0x28/0x6e [xen_blkfront]
+ [<d082900c>] backend_changed+0x3ad/0x41d [xen_blkfront]
+
+We can fix this by calling del_gendisk() later in blkfront_closing, after
+releasing blkif_io_lock. Since the queue is stopped during the interrupts
+disabled phase I don't think there is any danger of an event occuring between
+releasing the blkif_io_lock and deleting the disk.
+
+Signed-off-by: Ian Campbell <ian.campbell@citrix.com>
+Cc: Jeremy Fitzhardinge <jeremy@goop.org>
+---
+ drivers/block/xen-blkfront.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/block/xen-blkfront.c b/drivers/block/xen-blkfront.c
+index 8f90508..aa0c94b 100644
+--- a/drivers/block/xen-blkfront.c
++++ b/drivers/block/xen-blkfront.c
+@@ -934,8 +934,6 @@ static void blkfront_closing(struct xenbus_device *dev)
+ 
+ 	spin_lock_irqsave(&blkif_io_lock, flags);
+ 
+-	del_gendisk(info->gd);
+-
+ 	/* No more blkif_request(). */
+ 	blk_stop_queue(info->rq);
+ 
+@@ -949,6 +947,8 @@ static void blkfront_closing(struct xenbus_device *dev)
+ 	blk_cleanup_queue(info->rq);
+ 	info->rq = NULL;
+ 
++	del_gendisk(info->gd);
++
+  out:
+ 	xenbus_frontend_closed(dev);
+ }
+-- 
+1.5.6.5
+

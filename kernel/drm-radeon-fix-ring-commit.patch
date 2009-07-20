@@ -1,0 +1,50 @@
+commit 9863871bd1bbf218b921af5e0bc48ca4f6ea9f12
+Author: Dave Airlie <airlied@linux.ie>
+Date:   Thu Jun 4 07:08:13 2009 +1000
+
+    drm/radeon: fix ring free alignment calculations
+    
+    fd.o bz#21849
+    
+    We were aligning to +16 dwords, instead of to the next 16dword
+    boundary in the ring. Fix the calculation to go to the next 16dword
+    boundary when space checking.
+    
+    Signed-off-by: Dave Airlie <airlied@redhat.com>
+
+diff --git a/drivers/gpu/drm/radeon/radeon_cp.c b/drivers/gpu/drm/radeon/radeon_cp.c
+index 77a7a4d..aff90bb 100644
+--- a/drivers/gpu/drm/radeon/radeon_cp.c
++++ b/drivers/gpu/drm/radeon/radeon_cp.c
+@@ -2185,9 +2185,9 @@ void radeon_commit_ring(drm_radeon_private_t *dev_priv)
+ 
+ 	/* check if the ring is padded out to 16-dword alignment */
+ 
+-	tail_aligned = dev_priv->ring.tail & 0xf;
++	tail_aligned = dev_priv->ring.tail & (RADEON_RING_ALIGN-1);
+ 	if (tail_aligned) {
+-		int num_p2 = 16 - tail_aligned;
++		int num_p2 = RADEON_RING_ALIGN - tail_aligned;
+ 
+ 		ring = dev_priv->ring.start;
+ 		/* pad with some CP_PACKET2 */
+diff --git a/drivers/gpu/drm/radeon/radeon_drv.h b/drivers/gpu/drm/radeon/radeon_drv.h
+index 8071d96..0c6bfc1 100644
+--- a/drivers/gpu/drm/radeon/radeon_drv.h
++++ b/drivers/gpu/drm/radeon/radeon_drv.h
+@@ -1964,11 +1964,14 @@ do {								\
+ 
+ #define RING_LOCALS	int write, _nr, _align_nr; unsigned int mask; u32 *ring;
+ 
++#define RADEON_RING_ALIGN 16
++
+ #define BEGIN_RING( n ) do {						\
+ 	if ( RADEON_VERBOSE ) {						\
+ 		DRM_INFO( "BEGIN_RING( %d )\n", (n));			\
+ 	}								\
+-	_align_nr = (n + 0xf) & ~0xf;					\
++	_align_nr = RADEON_RING_ALIGN - ((dev_priv->ring.tail + n) & (RADEON_RING_ALIGN-1));	\
++	_align_nr += n;							\
+ 	if (dev_priv->ring.space <= (_align_nr * sizeof(u32))) {	\
+                 COMMIT_RING();						\
+ 		radeon_wait_ring( dev_priv, _align_nr * sizeof(u32));	\

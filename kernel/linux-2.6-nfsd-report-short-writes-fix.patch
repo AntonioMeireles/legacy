@@ -1,0 +1,54 @@
+From: Wei Yongjun <yjwei@cn.fujitsu.com>
+Date: Tue, 19 May 2009 04:03:15 +0000 (+0800)
+Subject: nfsd: fix hung up of nfs client while sync write data to nfs server
+X-Git-Tag: v2.6.30-rc8~20^2~2
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=a0d24b295aed7a9daf4ca36bd4784e4d40f82303
+
+nfsd: fix hung up of nfs client while sync write data to nfs server
+
+Commit 'Short write in nfsd becomes a full write to the client'
+(31dec2538e45e9fff2007ea1f4c6bae9f78db724) broken the sync write.
+With the following commands to reproduce:
+
+  $ mount -t nfs -o sync 192.168.0.21:/nfsroot /mnt
+  $ cd /mnt
+  $ echo aaaa > temp.txt
+
+Then nfs client is hung up.
+
+In SYNC mode the server alaways return the write count 0 to the
+client. This is because the value of host_err in nfsd_vfs_write()
+will be overwrite in SYNC mode by 'host_err=nfsd_sync(file);',
+and then we return host_err(which is now 0) as write count.
+
+This patch fixed the problem.
+
+Signed-off-by: Wei Yongjun <yjwei@cn.fujitsu.com>
+Signed-off-by: J. Bruce Fields <bfields@citi.umich.edu>
+---
+
+diff --git a/fs/nfsd/vfs.c b/fs/nfsd/vfs.c
+index 6c68ffd..b660435 100644
+--- a/fs/nfsd/vfs.c
++++ b/fs/nfsd/vfs.c
+@@ -1015,6 +1015,7 @@ nfsd_vfs_write(struct svc_rqst *rqstp, struct svc_fh *fhp, struct file *file,
+ 	host_err = vfs_writev(file, (struct iovec __user *)vec, vlen, &offset);
+ 	set_fs(oldfs);
+ 	if (host_err >= 0) {
++		*cnt = host_err;
+ 		nfsdstats.io_write += host_err;
+ 		fsnotify_modify(file->f_path.dentry);
+ 	}
+@@ -1060,10 +1061,9 @@ nfsd_vfs_write(struct svc_rqst *rqstp, struct svc_fh *fhp, struct file *file,
+ 	}
+ 
+ 	dprintk("nfsd: write complete host_err=%d\n", host_err);
+-	if (host_err >= 0) {
++	if (host_err >= 0)
+ 		err = 0;
+-		*cnt = host_err;
+-	} else
++	else
+ 		err = nfserrno(host_err);
+ out:
+ 	return err;

@@ -26,18 +26,18 @@ the utrace API.
 Signed-off-by: Roland McGrath <roland@redhat.com>
 ---
  Documentation/DocBook/Makefile    |    2 +-
- Documentation/DocBook/utrace.tmpl |  571 +++++++++
+ Documentation/DocBook/utrace.tmpl |  590 ++++++++++
  fs/proc/array.c                   |    3 +
  include/linux/init_task.h         |    1 +
  include/linux/sched.h             |    6 +
- include/linux/tracehook.h         |   50 +-
+ include/linux/tracehook.h         |   61 +-
  include/linux/utrace.h            |  692 +++++++++++
  include/linux/utrace_struct.h     |   58 +
  init/Kconfig                      |    9 +
  kernel/Makefile                   |    1 +
  kernel/ptrace.c                   |   18 +-
- kernel/utrace.c                   | 2348 +++++++++++++++++++++++++++++++++++++
- 12 files changed, 3756 insertions(+), 3 deletions(-)
+ kernel/utrace.c                   | 2357 +++++++++++++++++++++++++++++++++++++
+ 12 files changed, 3795 insertions(+), 3 deletions(-)
 
 diff --git a/Documentation/DocBook/Makefile b/Documentation/DocBook/Makefile
 index 1462ed8..f5da1b4 100644  
@@ -54,10 +54,10 @@ index 1462ed8..f5da1b4 100644
  	    mac80211.xml debugobjects.xml sh.xml regulator.xml
 diff --git a/Documentation/DocBook/utrace.tmpl b/Documentation/DocBook/utrace.tmpl
 new file mode 100644
-index ...b802c55 100644  
+index ...6cc58a1 100644  
 --- /dev/null
 +++ b/Documentation/DocBook/utrace.tmpl
-@@ -0,0 +1,571 @@
+@@ -0,0 +1,590 @@
 +<?xml version="1.0" encoding="UTF-8"?>
 +<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
 +"http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd" []>
@@ -123,12 +123,12 @@ index ...b802c55 100644
 +  <para>
 +    Many engines can be attached to each thread.  When a thread has an
 +    event, each engine gets a callback if it has set the event flag for
-+    that event type.  Engines are called in the order they attached.
-+    Engines that attach after the event has occurred do not get callbacks
-+    for that event.  This includes any new engines just attached by an
-+    existing engine's callback function.  Once the sequence of callbacks
-+    for that one event has completed, such new engines are then eligible in
-+    the next sequence that starts when there is another event.
++    that event type.  For most events, engines are called in the order they
++    attached.  Engines that attach after the event has occurred do not get
++    callbacks for that event.  This includes any new engines just attached
++    by an existing engine's callback function.  Once the sequence of
++    callbacks for that one event has completed, such new engines are then
++    eligible in the next sequence that starts when there is another event.
 +  </para>
 +
 +  <para>
@@ -144,6 +144,25 @@ index ...b802c55 100644
 +    <constant>UTRACE_STOP</constant> and return from the callback
 +    quickly.  When your i/o finishes or whatever, you can use
 +    <function>utrace_control</function> to resume the thread.
++  </para>
++
++  <para>
++    The <constant>UTRACE_EVENT(SYSCALL_ENTRY)</constant> event is a special
++    case.  While other events happen in the kernel when it will return to
++    user mode soon, this event happens when entering the kernel before it
++    will proceed with the work requested from user mode.  Because of this
++    difference, the <function>report_syscall_entry</function> callback is
++    special in two ways.  For this event, engines are called in reverse of
++    the normal order (this includes the <function>report_quiesce</function>
++    call that precedes a <function>report_syscall_entry</function> call).
++    This preserves the semantics that the last engine to attach is called
++    "closest to user mode"--the engine that is first to see a thread's user
++    state when it enters the kernel is also the last to see that state when
++    the thread returns to user mode.  For the same reason, if these
++    callbacks use <constant>UTRACE_STOP</constant> (see the next section),
++    the thread stops immediately after callbacks rather than only when it's
++    ready to return to user mode; when allowed to resume, it will actually
++    attempt the system call indicated by the register values at that time.
 +  </para>
 +
 +  </sect1>
@@ -630,10 +649,10 @@ index ...b802c55 100644
 +
 +</book>
 diff --git a/fs/proc/array.c b/fs/proc/array.c
-index 7e4877d..0c683ed 100644  
+index 725a650..e299a63 100644  
 --- a/fs/proc/array.c
 +++ b/fs/proc/array.c
-@@ -81,6 +81,7 @@
+@@ -82,6 +82,7 @@
  #include <linux/pid_namespace.h>
  #include <linux/ptrace.h>
  #include <linux/tracehook.h>
@@ -641,7 +660,7 @@ index 7e4877d..0c683ed 100644
  
  #include <asm/pgtable.h>
  #include <asm/processor.h>
-@@ -187,6 +188,8 @@ static inline void task_state(struct seq
+@@ -188,6 +189,8 @@ static inline void task_state(struct seq
  		cred->uid, cred->euid, cred->suid, cred->fsuid,
  		cred->gid, cred->egid, cred->sgid, cred->fsgid);
  
@@ -663,7 +682,7 @@ index e752d97..39eebc8 100644
  	INIT_TRACE_IRQFLAGS						\
  	INIT_LOCKDEP							\
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 011db2f..786ef2d 100644  
+index f8af167..454de2a 100644  
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -59,6 +59,7 @@ struct sched_param {
@@ -674,7 +693,7 @@ index 011db2f..786ef2d 100644
  
  #include <asm/system.h>
  #include <asm/page.h>
-@@ -1287,6 +1288,11 @@ struct task_struct {
+@@ -1288,6 +1289,11 @@ struct task_struct {
  #endif
  	seccomp_t seccomp;
  
@@ -687,7 +706,7 @@ index 011db2f..786ef2d 100644
     	u32 parent_exec_id;
     	u32 self_exec_id;
 diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
-index b622498..6ff7277 100644  
+index b622498..8def62a 100644  
 --- a/include/linux/tracehook.h
 +++ b/include/linux/tracehook.h
 @@ -49,6 +49,7 @@
@@ -851,17 +870,28 @@ index b622498..6ff7277 100644
  	if (task->exit_signal == -1)
  		return task->ptrace ? SIGCHLD : DEATH_REAP;
  
-@@ -550,6 +585,9 @@ static inline void tracehook_report_deat
+@@ -550,6 +585,20 @@ static inline void tracehook_report_deat
  					  int signal, void *death_cookie,
  					  int group_dead)
  {
++	/*
++	 * This barrier ensures that our caller's setting of
++	 * @task->exit_state precedes checking @task->utrace_flags here.
++	 * If utrace_set_events() was just called to enable
++	 * UTRACE_EVENT(DEATH), then we are obliged to call
++	 * utrace_report_death() and not miss it.  utrace_set_events()
++	 * uses tasklist_lock to synchronize enabling the bit with the
++	 * actual change to @task->exit_state, but we need this barrier
++	 * to be sure we see a flags change made just before our caller
++	 * took the tasklist_lock.
++	 */
 +	smp_mb();
 +	if (task_utrace_flags(task) & _UTRACE_DEATH_EVENTS)
 +		utrace_report_death(task, death_cookie, group_dead, signal);
  }
  
  #ifdef TIF_NOTIFY_RESUME
-@@ -579,10 +617,20 @@ static inline void set_notify_resume(str
+@@ -579,10 +628,20 @@ static inline void set_notify_resume(str
   * asynchronously, this will be called again before we return to
   * user mode.
   *
@@ -885,7 +915,7 @@ index b622498..6ff7277 100644
  
 diff --git a/include/linux/utrace.h b/include/linux/utrace.h
 new file mode 100644
-index ...f46cc0f 100644  
+index ...f877ec6 100644  
 --- /dev/null
 +++ b/include/linux/utrace.h
 @@ -0,0 +1,692 @@
@@ -1067,7 +1097,7 @@ index ...f46cc0f 100644
 + * that is developed concurrently with utrace API improvements before they
 + * are merged into the kernel, making LINUX_VERSION_CODE checks unwieldy.
 + */
-+#define UTRACE_API_VERSION	20090302
++#define UTRACE_API_VERSION	20090416
 +
 +/**
 + * enum utrace_resume_action - engine's choice of action for a traced task
@@ -1678,7 +1708,7 @@ index e4791b3..7bff724 100644
  obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
  obj-$(CONFIG_AUDIT_TREE) += audit_tree.o
 diff --git a/kernel/ptrace.c b/kernel/ptrace.c
-index c9cf48b..41e9542 100644  
+index dc3b98e..f897ef6 100644  
 --- a/kernel/ptrace.c
 +++ b/kernel/ptrace.c
 @@ -16,6 +16,7 @@
@@ -1729,10 +1759,10 @@ index c9cf48b..41e9542 100644
  		 */
 diff --git a/kernel/utrace.c b/kernel/utrace.c
 new file mode 100644
-index ...115be79 100644  
+index ...74b5fc5 100644  
 --- /dev/null
 +++ b/kernel/utrace.c
-@@ -0,0 +1,2348 @@
+@@ -0,0 +1,2357 @@
 +/*
 + * utrace infrastructure interface for debugging user processes
 + *
@@ -1949,6 +1979,11 @@ index ...115be79 100644
 + *
 + * UTRACE_ATTACH_MATCH_OPS: Only consider engines matching @ops.
 + * UTRACE_ATTACH_MATCH_DATA: Only consider engines matching @data.
++ *
++ * Calls with neither %UTRACE_ATTACH_MATCH_OPS nor %UTRACE_ATTACH_MATCH_DATA
++ * match the first among any engines attached to @target.  That means that
++ * %UTRACE_ATTACH_EXCLUSIVE in such a call fails with -%EEXIST if there
++ * are any engines on @target at all.
 + */
 +struct utrace_engine *utrace_attach_task(
 +	struct task_struct *target, int flags,
@@ -3181,6 +3216,7 @@ index ...115be79 100644
 +		return ops;
 +	}
 +
++	utrace->reporting = NULL;
 +	return NULL;
 +}
 +
@@ -3192,16 +3228,16 @@ index ...115be79 100644
 +#define REPORT(task, utrace, report, event, callback, ...)		      \
 +	do {								      \
 +		start_report(utrace);					      \
-+		REPORT_CALLBACKS(task, utrace, report, event, callback,	      \
++		REPORT_CALLBACKS(, task, utrace, report, event, callback,     \
 +				 (report)->action, engine, current,	      \
 +				 ## __VA_ARGS__);  	   		      \
 +		finish_report(report, task, utrace);			      \
 +	} while (0)
-+#define REPORT_CALLBACKS(task, utrace, report, event, callback, ...)	      \
++#define REPORT_CALLBACKS(rev, task, utrace, report, event, callback, ...)     \
 +	do {								      \
 +		struct utrace_engine *engine;				      \
 +		const struct utrace_engine_ops *ops;			      \
-+		list_for_each_entry(engine, &utrace->attached, entry) {	      \
++		list_for_each_entry##rev(engine, &utrace->attached, entry) {  \
 +			ops = start_callback(utrace, report, engine, task,    \
 +					     event);			      \
 +			if (!ops)					      \
@@ -3236,9 +3272,9 @@ index ...115be79 100644
 +	INIT_REPORT(report);
 +
 +	start_report(utrace);
-+	REPORT_CALLBACKS(task, utrace, &report, UTRACE_EVENT(SYSCALL_ENTRY),
-+			 report_syscall_entry, report.result | report.action,
-+			 engine, current, regs);
++	REPORT_CALLBACKS(_reverse, task, utrace, &report,
++			 UTRACE_EVENT(SYSCALL_ENTRY), report_syscall_entry,
++			 report.result | report.action, engine, current, regs);
 +	finish_report(&report, task, utrace);
 +
 +	if (report.action == UTRACE_STOP &&
@@ -3249,25 +3285,7 @@ index ...115be79 100644
 +		 */
 +		return true;
 +
-+	if (unlikely(report.result == UTRACE_SYSCALL_ABORT))
-+		return true;
-+
-+	if (signal_pending(task)) {
-+		/*
-+		 * Clear TIF_SIGPENDING if it no longer needs to be set.
-+		 * It may have been set as part of quiescence, and won't
-+		 * ever have been cleared by another thread.  For other
-+		 * reports, we can just leave it set and will go through
-+		 * utrace_get_signal() to reset things.  But here we are
-+		 * about to enter a syscall, which might bail out with an
-+		 * -ERESTART* error if it's set now.
-+		 */
-+		spin_lock_irq(&task->sighand->siglock);
-+		recalc_sigpending();
-+		spin_unlock_irq(&task->sighand->siglock);
-+	}
-+
-+	return false;
++	return report.result == UTRACE_SYSCALL_ABORT;
 +}
 +
 +/*
@@ -3304,7 +3322,7 @@ index ...115be79 100644
 +	start_report(utrace);
 +	utrace->cloning = child;
 +
-+	REPORT_CALLBACKS(task, utrace, &report,
++	REPORT_CALLBACKS(, task, utrace, &report,
 +			 UTRACE_EVENT(CLONE), report_clone,
 +			 report.action, engine, task, clone_flags, child);
 +
@@ -3454,7 +3472,7 @@ index ...115be79 100644
 +	utrace->interrupt = 0;
 +	spin_unlock(&utrace->lock);
 +
-+	REPORT_CALLBACKS(task, utrace, &report, UTRACE_EVENT(DEATH),
++	REPORT_CALLBACKS(, task, utrace, &report, UTRACE_EVENT(DEATH),
 +			 report_death, engine, task, group_dead, signal);
 +
 +	spin_lock(&utrace->lock);
@@ -3498,12 +3516,29 @@ index ...115be79 100644
 +			set_tsk_thread_flag(task, TIF_SIGPENDING);
 +		break;
 +
-+	case UTRACE_SINGLESTEP:
-+		user_enable_single_step(task);
-+		break;
-+
 +	case UTRACE_BLOCKSTEP:
-+		user_enable_block_step(task);
++		if (likely(arch_has_block_step())) {
++			user_enable_block_step(task);
++			break;
++		}
++
++		/*
++		 * This means some callback is to blame for failing
++		 * to check arch_has_block_step() itself.  Warn and
++		 * then fall through to treat it as SINGLESTEP.
++		 */
++		WARN_ON(1);
++
++	case UTRACE_SINGLESTEP:
++		if (likely(arch_has_single_step()))
++			user_enable_single_step(task);
++		else
++			/*
++			 * This means some callback is to blame for failing
++			 * to check arch_has_single_step() itself.  Spew
++			 * about it so the loser will fix his module.
++			 */
++			WARN_ON(1);
 +		break;
 +
 +	case UTRACE_REPORT:
@@ -3548,11 +3583,15 @@ index ...115be79 100644
 +	}
 +
 +	/*
-+	 * If UTRACE_INTERRUPT was just used, we don't bother with a
-+	 * report here.  We will report and stop in utrace_get_signal().
++	 * If UTRACE_INTERRUPT was just used, we don't bother with a report
++	 * here.  We will report and stop in utrace_get_signal().  In case
++	 * of a race with utrace_control(), make sure we don't momentarily
++	 * return to user mode because TIF_SIGPENDING was not set yet.
 +	 */
-+	if (unlikely(utrace->interrupt))
++	if (unlikely(utrace->interrupt)) {
++		set_thread_flag(TIF_SIGPENDING);
 +		return;
++	}
 +
 +	/*
 +	 * Do a simple reporting pass, with no callback after report_quiesce.
