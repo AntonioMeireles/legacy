@@ -17,7 +17,9 @@ class KernelPackageRecipe(CPackageRecipe):
     # instead.
     #
     # If you are trying to manage binary kernel module compatibility,
-    # you will need to set the serial string manually.
+    # you will need to set the serial string manually.  Be aware that
+    # this will conflict with pinned kernels unless all your serial
+    # numbers are unique.
     #
     # Every change that is expected to change interfaces requires
     # a change in serial string.  No two kernels of the same flavor
@@ -112,6 +114,7 @@ class KernelPackageRecipe(CPackageRecipe):
         if r.__class__.__name__ == 'KernelPackageRecipe':
             return
         r.setMacros()
+        r.setImageTargetMacro()
         r.unpackBase()
         r.fixPermissions()
         r.addNonInteractiveConfig()
@@ -128,24 +131,28 @@ class KernelPackageRecipe(CPackageRecipe):
         r.policy() # extra policy goes here
 
     def setMacros(r):
+        # set most custom macros; see setImageTargetMacro() for imagetarget
         r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
         r.macros.sublevel = r.version.split('.')[2].split('_')[0]
 
-        if 'serial' in r.__dict__:
+        # Versions of Conary since 1.2.6 print the methods that are
+        # called, but hasattr always returns a proxy function, so
+        # we have to check whether we're getting the real thing or not:
+        if hasattr(r, 'serial') and isinstance(r.serial, basestring):
             r.macros.serial = r.serial
         else:
-            if 'sourceVersion' in r.__dict__:
-                if hasattr(r.sourceVersion, 'trailingRevision'):
-                    # if r.sourceVersion is a NewVersion object, it may
-                    # not have a trailingRevision object
-                    r.macros.serial = str(r.sourceVersion.trailingRevision(
-                        ).getSourceCount())
-                else:
-                    r.macros.serial = ''
+            if 'sourceVersion' in r.__dict__ and hasattr(r.sourceVersion,
+                                                         'trailingRevision'):
+                    r.macros.serial = str(
+                        r.sourceVersion.trailingRevision().getSourceCount())
             else:
-                raise KernelPackageError(
-                    'no serial number set and source version is unavailable')
+                # If r.sourceVersion does not exist (rmake build from a
+                # recipe, for instance) or r.sourceVersion is a NewVersion
+                # object without a trailingRevision object, we'll set it
+                # to something unlikely to conflict
+                r.macros.serial = '0.NEW'
+
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
         r.macros.localversion = '-%(serial)s%(cfgver)s'
@@ -173,6 +180,18 @@ class KernelPackageRecipe(CPackageRecipe):
                 r.macros.archive_dir = 'testing/'
             else:
                 r.macros.archive_dir = ''
+
+    def setImageTargetMacro(r):
+        # The imagetarget macro might reasonably need to be overridden,
+        # so this is broken out from setMacros() for convenience
+        # We assume that building a Xen kernel with 2.6.29 or later,
+        # we have bzImage support in xen loader for domU and in the
+        # xen hypervisor for dom0.  Override this method if this
+        # heuristic is incorrect for your case.
+        if Use.xen and int(r.macros.sublevel) < 29:
+            r.macros.imagetarget = 'vmlinuz'
+        else:
+            r.macros.imagetarget = 'bzImage'
 
     def unpackBase(r):
         r.addArchive(
@@ -217,8 +236,14 @@ class KernelPackageRecipe(CPackageRecipe):
     def createLocalVersion(r):
         r.Create('localversion.rpl', contents='%(localversion)s')
 
-    def configure(r):
+    def addConfiguration(r):
+        # broken out from configure() to allow make nonint_oldconfig
+        # with custom complete configuration instead of config.* files
+        # by overriding this method
         r.extraSource(addConfigs(r))
+
+    def configure(r):
+        r.addConfiguration()
         r.Make('nonint_oldconfig 2>oc.err ||'
                ' { diff -u .config.old .config > config.changes;'
                '   cat config.changes ;'
@@ -228,15 +253,12 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Remove('oc.err')
 
     def buildBase(r):
-        if Use.xen:
-            r.Make('vmlinuz modules')
-        else:
-            r.Make('bzImage modules')
+        r.Make('%(imagetarget)s modules')
         r.Make('-s INSTALL_MOD_PATH=%(destdir)s modules_install'
                ' KERNELRELEASE=%(kver)s')
         r.Install('System.map', '/boot/System.map-%(kver)s', mode=0644)
         r.Install('.config', '/boot/config-%(kver)s', mode=0644)
-        if Use.xen:
+        if Use.xen and r.macros.imagetarget == 'vmlinuz':
             r.Install('vmlinuz', '/boot/vmlinuz-%(kver)s', mode=0644)
         # Unified arch leaves x86_64 with a symlink so */boot/bzImage doesnt work.
         elif Arch.x86_64 or Arch.x86 and int(r.macros.sublevel) > 23:
