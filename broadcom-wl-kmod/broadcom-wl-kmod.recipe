@@ -1,0 +1,36 @@
+#
+# Copyright (c) 2008 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('kernelmodulepackage')
+class BroadcomWlKmod(KernelModulePackageRecipe):
+    name = 'broadcom-wl-kmod'
+    version =  '5.10.91.9'
+
+    def unpack(r):
+        r.macros.version = r.version.replace('.', '_')
+
+        # http://www.broadcom.com/support/802.11/linux_sta.php
+        r.addArchive('http://www.broadcom.com/docs/linux_sta/hybrid-portsrc-x86_32-v%(version)s.tar.gz', use=Arch.x86, dir = '%(name)s-%(version)s')
+        r.addArchive('http://www.broadcom.com/docs/linux_sta/hybrid-portsrc-x86_64-v%(version)s.tar.gz', use=Arch.x86_64, dir = '%(name)s-%(version)s')
+        
+        # from http://www.broadcom.com/docs/linux_sta/5_10_91_9_patch_2_6_29_kernel.zip
+        r.addPatch('patch_2.6.29_kernels')
+        
+    def build(r):
+        r.Make("-C '/lib/modules/%(kver)s/build' M=`pwd`")
+
+    def install(r):
+        r.macros.moduledir = r.moduleDir
+        r.Install('*.ko', '/lib/modules/%(kver)s/%(moduledir)s/')
+
+    def policy(r):
+        # We want to make sure that the userspace code can require the
+        # matching kernel-space code
+        r.ComponentProvides('%(version)s')
+        r.ComponentSpec('runtime', '/lib/modules/')
+
+        r.Requires('broadcom-wl:runtime',
+                   '/lib/modules/%(kver)s/kernel/misc/ndiswrapper.ko')
