@@ -7,29 +7,32 @@
 class Guile(CPackageRecipe):
     name = 'guile'
     version = '1.8.6'
+    mver = '1.8'
 
     buildRequires = [
         'gettext:runtime', 'gmp:devel', 'gzip:runtime', 'install-info:runtime',
         'libtool:devel', 'ncurses:devel', 'patch:runtime', 'readline:devel',
-        'tar:runtime', 'texinfo:runtime', 'umb-scheme:data',
+        'tar:runtime', 'texinfo:runtime',
     ]
 
     def setup(r):
-        r.addSource('guile-slib.tagdescription',
-                    '%(tagdescriptiondir)s/guile-slib')
-        r.addSource('guile-slib.taghandler',
-                    '%(taghandlerdir)s/guile-slib', mode=0755)
-        r.disableParallelMake()
+        r.macros.mver = r.mver
         r.addArchive('mirror://gnu/guile/')
+        r.addSource('guile-slib.tagdescription',
+                    dest = '%(tagdescriptiondir)s/guile-slib',
+                    macros = True)
+        r.addSource('guile-slib.taghandler',
+                    dest = '%(taghandlerdir)s/guile-slib',
+                    mode=0755, macros=True)
+        r.addPatch('guile-1.8.4-multilib.patch')
+        r.addPatch('guile-1.8.4-testsuite.patch')
         r.addPatch('guile-1.8.6-deplibs.patch')
-        # We don't need to bail every time there's a warning in guile.
-        r.Replace('-Werror', '', 'configure')
-        r.Configure('--with-threads')
+        r.Configure('--with-threads --disable-static --disable-error-on-warning')
         r.Make()
         r.MakeInstall()
-        # symlink in the slib library from umb-scheme
-        for l in ('slib', 'slibcat'):
-            r.Symlink('%(datadir)s/umb-scheme/' + l, '%(datadir)s/guile/' + l)
-            r.Requires('umb-scheme:data', '%(datadir)s/guile/' + l)
-            r.DanglingSymlinks(exceptions='%(datadir)s/guile/' + l)
-
+        # symlinks for the slib library
+        r.Create('%(datadir)s/guile/%(mver)s/slibcat')
+        for l in ['slib', ]:
+            r.Symlink('../../' + l, '%(datadir)s/guile/%(mver)s/' + l)
+            r.Requires('slib:data', '%(datadir)s/guile/%(mver)s/' + l)
+            r.DanglingSymlinks(exceptions='%(datadir)s/guile/%(mver)s/' + l)
