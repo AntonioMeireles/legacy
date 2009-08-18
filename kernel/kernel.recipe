@@ -13,18 +13,16 @@ class Kernel(KernelPackageRecipe):
     def unpack(r):
         # VMware support
         r.addPatch('vmware_mptbase_workaround.patch')
-        r.macros.ovmtoolsver = '2009.01.21-142982'
+        r.macros.ovmtoolsver = '2009.07.22-179896'
         r.buildvmmodules = not Use.xen
         r.addArchive('mirror://sourceforge/open-vm-tools/'
                      'open-vm-tools-%(ovmtoolsver)s.tar.gz',
                      dir='linux-%(archive_version)s',
                      use=r.buildvmmodules)
-        r.addPatch('open-vm-tools-api.patch',
-                   dir='open-vm-tools-%(ovmtoolsver)s',
-                   use=r.buildvmmodules)
         # Security updates
         r.addPatch('CVE-2009-1895.patch')
         r.addPatch('no-delete-null-pointer-checks.patch')
+        r.addPatch('CVE-2009-2962.patch')
 
     def build(r):
         # Build VMware kernel modules
@@ -40,7 +38,12 @@ class Kernel(KernelPackageRecipe):
                       'fs/vmhgfs'):
                 module = os.path.basename(m)
                 modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
-                r.Make('HEADER_DIR=%(builddir)s/include', dir=modsrc)
+                r.Run('make -C %(builddir)s SUBDIRS=$PWD SRCROOT=$PWD/.'
+                      ' MODULEBUILDDIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s/modules/linux'
+                      ' OVT_SOURCE_DIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s',
+                      ' VM_KBUILD=26'
+                      ' modules',
+                      dir=modsrc)
                 kmod = module + '.ko'
                 r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod,
                           package=':vmware')
