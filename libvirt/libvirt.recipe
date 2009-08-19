@@ -44,17 +44,45 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
                       'module-init-tools:runtime',
                       'lvm2:runtime',
                       'info-kvm:group',
+                      'automake:runtime',
+                      'autoconf:runtime'
                       ]
 
     name = 'libvirt'
     version = '0.7.0'
-    rpmRelease = '2.fc12'
+    rpmRelease = '6.fc12'
     rpmPatches = [
+        # Make sure qemu can access kernel/initrd (bug #516034)
         'libvirt-0.7.0-chown-kernel-initrd-before-spawning-qemu.patch',
-        'libvirt-0.6.4-svirt-sound.patch'
+        # Don't fail to start network if ipv6 modules is not loaded (bug #516497)
+        'libvirt-0.7.0-handle-kernels-with-no-ipv6-support.patch',
+        # Policykit rewrite (bug #499970)
+        # NB remove autoreconf hack & extra BRs when this goes away
+        # 'libvirt-0.7.0-policy-kit-rewrite.patch',
+        # Log and ignore NUMA topology problems (rhbz #506590)
+        'libvirt-0.7.0-numa-ignore-fail.patch',
+        # Minor 'virsh nodedev-list --tree' annoyance, fix from upstream
+        'libvirt-add-space-to-nodedev-list-tree.patch',
+        # Fixes list corruption after disk hot-unplug
+        'libvirt-fix-device-list-update-after-detach.patch',
+        # Re-attach PCI host devices after guest shuts down (bug #499561)
+        'libvirt-reattach-pci-hostdevs-after-guest-shutdown.patch',
+        # Allow PM reset on multi-function PCI devices (bug #515689)
+        'libvirt-allow-pm-reset-on-multi-function-pci-devices.patch',
+        # Fix stupid PCI reset error message (#499678)
+        'libvirt-improve-pci-hostdev-reset-error-message.patch',
+        # Allow PCI bus reset to reset other devices (#499678)
+        'libvirt-allow-pci-hostdev-reset-to-reset-other-devices.patch',
+        # Add PCI host device hotplug support
+        'libvirt-add-pci-hostdev-hotplug-support.patch',
+        # Fix migration completion with newer versions of qemu (#516187)
+        'libvirt-fix-migration-completion-with-newer-qemu.patch',
+        # Temporary hack till PulseAudio autostart problems are sorted
+        'libvirt-0.6.4-svirt-sound.patch',
     ]
 
     def configure(r):
+
         r.Replace('with_init_scripts', 'with_init_script', 'configure')
 
         config =  ' --with-libvirtd --with-init-script=redhat --with-sasl'
@@ -71,10 +99,12 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
 
         for d in [ '%(localstatedir)s/run/%(name)s', 
                    '%(sysconfdir)s/libvirt/qemu/networks/autostart',
+                   '%(localstatedir)s/log/libvirt',
                    '%(localstatedir)s/log/libvirt/qemu',
                    '%(localstatedir)s/lib/%(name)s/images',
                    '%(localstatedir)s/lib/%(name)s/boot', 
                    '%(localstatedir)s/cache/%(name)s',
+                   '%(localstatedir)s/cache/%(name)s/qemu',
                    '%(sysconfdir)s/%(name)s',
                    ]:
             r.MakeDirs(d)
@@ -89,7 +119,12 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
         # set perms right
         r.SetModes('%(sysconfdir)s/%(name)s/', 0700)
 
-        r.SetModes('%(localstatedir)s/log/%(name)s/', 0700)
+        for d in ('libvirt/qemu', 'libvirt/qemu/networks', 'libvirt/qemu/autostart'):
+            dir = '%(sysconfdir)s/' + d
+            r.MakeDirs(dir)
+            r.SetModes(dir, 0700)
+
+        r.SetModes('%(localstatedir)s/log/%(name)s', 0700)
         r.SetModes('%(localstatedir)s/lib/%(name)s/images/', 0711)
         r.SetModes('%(localstatedir)s/lib/%(name)s/boot/', 0711)
         r.SetModes('%(localstatedir)s/lib/%(name)s/qemu/', 0700)
