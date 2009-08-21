@@ -1,0 +1,187 @@
+--- splashy-0.3.9/src/splashy_main.c.orig	2008-04-07 12:04:38.000000000 +0300
++++ splashy-0.3.9/src/splashy_main.c	2008-04-07 16:36:40.000000000 +0300
+@@ -39,7 +39,10 @@
+ #include "splashy_functions.h"
+ #include "splashycnf.h"
+ 
+-#define USAGE "usage: splashy <boot|shutdown|test> | splashy_chvt <N>"
++#define USAGE "usage: splashy [--print-errors] <boot|shutdown|test>" \
++                  " | splashy_chvt [--print-errors] <N>"
++
++int print_errors = 0;
+ 
+ int
+ main (int argc, char *argv[])
+@@ -48,6 +51,8 @@ main (int argc, char *argv[])
+          * we are a daemon ... no need for STDOUT or STDIN
+          */
+         FILE *fp;
++        int arg_i = 1;
++        
+         fp = freopen ("/dev/null", "r+", stdin);
+         fp = freopen ("/dev/null", "r+", stdout);
+         DEBUG_PRINT ("main() invoked %d", argc);
+@@ -68,9 +73,20 @@ main (int argc, char *argv[])
+                 return 1;
+         }
+ 
++        if (g_ascii_strncasecmp (argv[arg_i], "--print-errors", 14) == 0)
++        {
++                print_errors = 1;
++                arg_i++;
++                if (argc < 3)
++                {
++                        g_printerr ("%s\n", USAGE);
++                        return 1;
++                }
++        }
++
+         if (g_ascii_strncasecmp (basename (argv[0]), "splashy_chvt", 12) == 0)
+         {
+-                if (g_ascii_strncasecmp (argv[1], "auto", 4) == 0)
++                if (g_ascii_strncasecmp (argv[arg_i], "auto", 4) == 0)
+                 {
+                         /*
+                          * This is deprecated 
+@@ -79,8 +95,8 @@ main (int argc, char *argv[])
+                                     USAGE);
+                         return 1;
+                 }
+-                char *c = argv[1];
+-                for (c = argv[1]; *c != '\0'; c++)
++                char *c = argv[arg_i];
++                for (c = argv[arg_i]; *c != '\0'; c++)
+                 {
+                         if (!isdigit (*c))
+                         {
+@@ -91,7 +107,7 @@ main (int argc, char *argv[])
+                 /*
+                  * behave like chvt 
+                  */
+-                splashy_chvt (atoi (argv[1]));
++                splashy_chvt (atoi (argv[arg_i]));
+                 return 0;
+         }
+ 
+@@ -137,18 +153,18 @@ main (int argc, char *argv[])
+                 /*
+                  * handle arguments 
+                  */
+-                if (g_ascii_strncasecmp (argv[1], "boot", 4) == 0)
++                if (g_ascii_strncasecmp (argv[arg_i], "boot", 4) == 0)
+                 {
+                         DEBUG_PRINT ("Calling splashy_child_start()");
+                         splashy_child_start ();
+                 }
+-                else if (g_ascii_strncasecmp (argv[1], "shutdown", 8) == 0)
++                else if (g_ascii_strncasecmp (argv[arg_i], "shutdown", 8) == 0)
+                 {
+                         DEBUG_PRINT ("Calling splashy_child_stop()");
+                         splashy_child_stop ();
+                 }
+-                else if (g_ascii_strncasecmp (argv[1], "preview", 7) == 0
+-                         || g_ascii_strncasecmp (argv[1], "test", 4) == 0)
++                else if (g_ascii_strncasecmp (argv[arg_i], "preview", 7) == 0
++                         || g_ascii_strncasecmp (argv[arg_i], "test", 4) == 0)
+                 {
+                         DEBUG_PRINT ("Calling splashy_child_test()");
+                         splashy_child_test ();
+--- splashy-0.3.9/src/common_macros.h.orig	2008-04-07 11:54:02.000000000 +0300
++++ splashy-0.3.9/src/common_macros.h	2008-04-07 13:48:50.000000000 +0300
+@@ -22,8 +22,10 @@
+ 
+ #include <stdio.h>
+ 
++extern int print_errors;
+ #define ERROR_PRINT(format_string, args...) \
+-        fprintf(stderr, "Splashy ERROR: " format_string "\n", ## args)
++        if (print_errors) \
++                fprintf(stderr, "Splashy ERROR: " format_string "\n", ## args)
+ 
+ #ifdef DEBUG
+ #define DEBUG_PRINT(str, args...) \
+--- splashy-0.3.9/src/splashy_update.c.orig	2008-04-07 17:21:54.000000000 +0300
++++ splashy-0.3.9/src/splashy_update.c	2008-04-07 17:34:44.000000000 +0300
+@@ -44,6 +44,10 @@
+ 
+ #include "common_macros.h"
+ 
++#define USAGE "Usage: splashy_update: [--print-errors] <arg>"
++
++int print_errors = 0;
++
+ int
+ main (int argc, char **argv)
+ {
+@@ -51,19 +55,28 @@ main (int argc, char **argv)
+         struct sockaddr sock_addr = {AF_UNIX, SPL_SOCKET };
+         int buf_len=1024;
+         char buf[buf_len];
++        int arg_i = 1;
+ 
+-        if (argc != 2)
++        if (argc < 2)
++        {
++                ERROR_PRINT ("%s", USAGE);
++                exit (3);
++        }
++        if (!strcmp(argv[1], "--print-errors")) {
++                print_errors = 1;
++                arg_i++;
++        }
++        if (argc != 1 + arg_i)
+         {
+-                ERROR_PRINT ("%s","Invalid number of arguments");
+-                ERROR_PRINT ("%s","This program accepts a single argument");
++                ERROR_PRINT ("%s", USAGE);
+                 exit (3);
+         }
+-        if ( (len = strlen (argv[1]) + 1) > buf_len ) 
++        if ( (len = strlen (argv[arg_i]) + 1) > buf_len ) 
+         {
+                 ERROR_PRINT("Command string to big. Max size is %d",buf_len);
+                 return 3;
+         }
+-        strncpy(buf, argv[1], buf_len);
++        strncpy(buf, argv[arg_i], buf_len);
+ 
+         if ( (sock = socket(PF_UNIX, SOCK_STREAM, 0)) < 0) 
+         {
+--- splashy-0.3.9/src/splashy_config-main.c.orig	2008-04-07 17:17:54.000000000 +0300
++++ splashy-0.3.9/src/splashy_config-main.c	2008-04-07 17:31:06.000000000 +0300
+@@ -69,7 +69,7 @@ _("A Splashy Configuration Tool\n"\
+ _("usage: %s [option] arg \n"\
+ "[-h, --help][-s, --set-theme THEME][-i, --install-theme THEME.tar.gz]\n"\
+ "[-r, --remove-theme THEME][--info][-c, --create-theme  [args...]]\n"\
+-"[-g, --get-key XPATH]\n"\
++"[-g, --get-key XPATH][--print-errors]\n"\
+ "See --help for more information\n")
+ 
+ static struct option long_options[] = {
+@@ -77,6 +77,7 @@ static struct option long_options[] = {
+         {"install-theme", required_argument, 0, 'i'},
+         {"remove-theme", required_argument, 0, 'r'},
+         {"info", no_argument, 0, 'a'},
++        {"print-errors", no_argument, 0, 'b'},
+         {"create-theme", optional_argument, 0, 'c'},
+         {"help", no_argument, 0, 'h'},
+         {"get-key", required_argument, 0, 'k'},
+@@ -146,6 +147,8 @@ static struct option create_options[] = 
+         {0, 0, 0, 0}
+ };
+ 
++int print_errors = 0;
++
+ gint
+ main (gint argc, gchar * argv[])
+ {
+@@ -194,6 +197,9 @@ main (gint argc, gchar * argv[])
+         case 'a':
+                 ret = information ();
+                 break;
++        case 'b':
++                print_errors = 1;
++                break;
+         case 'c':
+                 if (argv[optind] == NULL)       // interactive mode */
+                         ret = create_theme (get_fields ());

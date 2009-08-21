@@ -1,0 +1,88 @@
+#
+# Copyright (c) 2007-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Splashy(AutoPackageRecipe):
+    name = 'splashy'
+    version = '0.3.13'
+
+    buildRequires = [ 'DirectFB:devel', 'file:devel', 'glib:devel',
+                      'pkgconfig:devel', 'zlib:devel', 'sysfsutils:devellib',
+                      'freetype:devel', 'libpng:devel',
+                      'automake:runtime', 'autoconf:runtime',
+                      'gettext:runtime', 'intltool:runtime',]
+
+    def unpack(r):
+
+        r.addArchive('%(name)s-%(version)s.tar.gz')
+        
+        r.addSource('splashy-theme.tagdescription', macros=True,
+                    dest='%(tagdescriptiondir)s/splashy-theme')
+        r.addSource('splashy-theme.taghandler', macros=True,
+                    dest='%(taghandlerdir)s/splashy-theme', mode=0755)
+        r.addSource('splashy-bootloader.conf',
+                    dest='%(sysconfdir)s/bootloader.d/')
+
+        r.macros.ldflags += (' %(libdir)s/libsysfs.a'
+                             ' %(libdir)s/libdirectfb.a'
+                             ' %(libdir)s/libdirect.a'
+                             ' %(libdir)s/libfusion.a')
+
+
+        # from Suse...
+        r.addPatch('splashy-0.3.8-fix-compiler-warnings.patch')
+        r.addPatch('splashy-0.3.8-glib.patch')
+        r.addPatch('splashy-disable-x11input.patch')
+        r.addPatch('splashy-0.3.13-fix-theme-path.patch')
+        #
+
+        # RPL-1776:
+        # - only check tty1 in F2 loop
+        # - create /dev/vcs1 if it doesn't exist (if removed by switchroot)
+        # - sleep after scanning screen to consume less CPU
+        # rewrite verbose_text_loop() (RPL-1844)
+
+        # FIXME!!!! update patch 
+        # r.addPatch('text_loop.patch', level=0)
+
+        # Enable static linking (RPL-2289)
+        r.Replace(' -lgcc_s ', ' ', 'src/Makefile.in')
+        r.macros.ldflags += ' -static'
+        r.addPatch('static.patch', level=1)
+
+        r.addPatch('splashy-0.3.9.default_quiet.patch', level=1) # RPL-2289
+        r.addPatch('quiet.patch') # RPL-2492
+
+
+        
+        # RPL-1840, RPL-1804
+        r.Replace(('@EXPANDED_SYSCONFDIR@\/splashy\/themes\/default',
+                   '%(datadir)s/splashy/themes/rpath'),
+                  ('@EXPANDED_SYSCONFDIR@\/splashy\/themes',
+                   '%(datadir)s/splashy/themes'),
+                  ('<current_theme>default</current_theme>',
+                   '<current_theme>rpath</current_theme>'),
+                  'doc/config.xml.in')
+  
+
+        # build gets confused on x86_64 because of this .la file
+        r.Remove('src/libglib-2.0.la')
+
+        r.Run("NOCONFIGURE=1 ./autogen.sh")
+
+    def policy(r):
+        # Package theme separately
+        r.Remove('%(sysconfdir)s/%(name)s/themes')
+        r.Remove('%(datadir)s/%(name)s/themes/default', recursive=True)
+        #r.MakeDirs('%(datadir)s/%(name)s/themes')
+        r.ExcludeDirectories(exceptions='%(datadir)s/%(name)s/themes')
+        r.Remove('%(initdir)s/splashy')
+        # RPL-2203 - we may need splashy_update before /usr is mounted
+        r.Move('%(sbindir)s/splashy_update', '%(essentialsbindir)s/')
+        r.Requires('%(name)s-theme:runtime', '%(sbindir)s/splashy')
+
+        r.Remove('%(sysconfdir)s/lsb-base-logging.sh')
+        r.Remove('%(sysconfdir)s/console-tools')
+        r.Remove('%(datadir)s/initramfs-tools')
