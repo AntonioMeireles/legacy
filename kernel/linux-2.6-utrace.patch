@@ -25,22 +25,8 @@ the utrace API.
 
 Signed-off-by: Roland McGrath <roland@redhat.com>
 ---
- Documentation/DocBook/Makefile    |    2 +-
- Documentation/DocBook/utrace.tmpl |  590 ++++++++++
- fs/proc/array.c                   |    3 +
- include/linux/init_task.h         |    1 +
- include/linux/sched.h             |    6 +
- include/linux/tracehook.h         |   61 +-
- include/linux/utrace.h            |  692 +++++++++++
- include/linux/utrace_struct.h     |   58 +
- init/Kconfig                      |    9 +
- kernel/Makefile                   |    1 +
- kernel/ptrace.c                   |   18 +-
- kernel/utrace.c                   | 2357 +++++++++++++++++++++++++++++++++++++
- 12 files changed, 3795 insertions(+), 3 deletions(-)
-
 diff --git a/Documentation/DocBook/Makefile b/Documentation/DocBook/Makefile
-index 1462ed8..f5da1b4 100644  
+index b1eb661..02851f6 100644
 --- a/Documentation/DocBook/Makefile
 +++ b/Documentation/DocBook/Makefile
 @@ -9,7 +9,7 @@
@@ -51,10 +37,10 @@ index 1462ed8..f5da1b4 100644
 +	    kernel-api.xml filesystems.xml lsm.xml usb.xml kgdb.xml utrace.xml \
  	    gadget.xml libata.xml mtdnand.xml librs.xml rapidio.xml \
  	    genericirq.xml s390-drivers.xml uio-howto.xml scsi.xml \
- 	    mac80211.xml debugobjects.xml sh.xml regulator.xml
+ 	    mac80211.xml debugobjects.xml sh.xml regulator.xml \
 diff --git a/Documentation/DocBook/utrace.tmpl b/Documentation/DocBook/utrace.tmpl
 new file mode 100644
-index ...6cc58a1 100644  
+index 0000000..6cc58a1
 --- /dev/null
 +++ b/Documentation/DocBook/utrace.tmpl
 @@ -0,0 +1,590 @@
@@ -649,7 +635,7 @@ index ...6cc58a1 100644
 +
 +</book>
 diff --git a/fs/proc/array.c b/fs/proc/array.c
-index 725a650..e299a63 100644  
+index 725a650..e299a63 100644
 --- a/fs/proc/array.c
 +++ b/fs/proc/array.c
 @@ -82,6 +82,7 @@
@@ -660,7 +646,7 @@ index 725a650..e299a63 100644
  
  #include <asm/pgtable.h>
  #include <asm/processor.h>
-@@ -188,6 +189,8 @@ static inline void task_state(struct seq
+@@ -188,6 +189,8 @@ static inline void task_state(struct seq_file *m, struct pid_namespace *ns,
  		cred->uid, cred->euid, cred->suid, cred->fsuid,
  		cred->gid, cred->egid, cred->sgid, cred->fsgid);
  
@@ -670,10 +656,10 @@ index 725a650..e299a63 100644
  	if (p->files)
  		fdt = files_fdtable(p->files);
 diff --git a/include/linux/init_task.h b/include/linux/init_task.h
-index e752d97..39eebc8 100644  
+index d87247d..0d0b55d 100644
 --- a/include/linux/init_task.h
 +++ b/include/linux/init_task.h
-@@ -181,6 +181,7 @@ extern struct cred init_cred;
+@@ -170,6 +170,7 @@ extern struct cred init_cred;
  		[PIDTYPE_SID]  = INIT_PID_LINK(PIDTYPE_SID),		\
  	},								\
  	.dirties = INIT_PROP_LOCAL_SINGLE(dirties),			\
@@ -682,7 +668,7 @@ index e752d97..39eebc8 100644
  	INIT_TRACE_IRQFLAGS						\
  	INIT_LOCKDEP							\
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index f8af167..454de2a 100644  
+index 03c6c36..fd11331 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -59,6 +59,7 @@ struct sched_param {
@@ -693,7 +679,7 @@ index f8af167..454de2a 100644
  
  #include <asm/system.h>
  #include <asm/page.h>
-@@ -1288,6 +1289,11 @@ struct task_struct {
+@@ -1291,6 +1292,11 @@ struct task_struct {
  #endif
  	seccomp_t seccomp;
  
@@ -706,7 +692,7 @@ index f8af167..454de2a 100644
     	u32 parent_exec_id;
     	u32 self_exec_id;
 diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
-index b622498..8def62a 100644  
+index 6a168b9..d59e159 100644
 --- a/include/linux/tracehook.h
 +++ b/include/linux/tracehook.h
 @@ -49,6 +49,7 @@
@@ -726,7 +712,7 @@ index b622498..8def62a 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -111,6 +114,9 @@ static inline void ptrace_report_syscall
+@@ -111,6 +114,9 @@ static inline void ptrace_report_syscall(struct pt_regs *regs)
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
  {
@@ -736,7 +722,7 @@ index b622498..8def62a 100644
  	ptrace_report_syscall(regs);
  	return 0;
  }
-@@ -134,6 +140,8 @@ static inline __must_check int tracehook
+@@ -134,6 +140,8 @@ static inline __must_check int tracehook_report_syscall_entry(
   */
  static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
  {
@@ -745,7 +731,7 @@ index b622498..8def62a 100644
  	ptrace_report_syscall(regs);
  }
  
-@@ -194,6 +202,8 @@ static inline void tracehook_report_exec
+@@ -194,6 +202,8 @@ static inline void tracehook_report_exec(struct linux_binfmt *fmt,
  					 struct linux_binprm *bprm,
  					 struct pt_regs *regs)
  {
@@ -754,7 +740,7 @@ index b622498..8def62a 100644
  	if (!ptrace_event(PT_TRACE_EXEC, PTRACE_EVENT_EXEC, 0) &&
  	    unlikely(task_ptrace(current) & PT_PTRACED))
  		send_sig(SIGTRAP, current, 0);
-@@ -211,6 +221,8 @@ static inline void tracehook_report_exec
+@@ -211,6 +221,8 @@ static inline void tracehook_report_exec(struct linux_binfmt *fmt,
   */
  static inline void tracehook_report_exit(long *exit_code)
  {
@@ -763,7 +749,7 @@ index b622498..8def62a 100644
  	ptrace_event(PT_TRACE_EXIT, PTRACE_EVENT_EXIT, *exit_code);
  }
  
-@@ -254,6 +266,7 @@ static inline int tracehook_prepare_clon
+@@ -254,6 +266,7 @@ static inline int tracehook_prepare_clone(unsigned clone_flags)
  static inline void tracehook_finish_clone(struct task_struct *child,
  					  unsigned long clone_flags, int trace)
  {
@@ -771,16 +757,16 @@ index b622498..8def62a 100644
  	ptrace_init_task(child, (clone_flags & CLONE_PTRACE) || trace);
  }
  
-@@ -280,6 +293,8 @@ static inline void tracehook_report_clon
+@@ -278,6 +291,8 @@ static inline void tracehook_report_clone(struct pt_regs *regs,
  					  unsigned long clone_flags,
  					  pid_t pid, struct task_struct *child)
  {
 +	if (unlikely(task_utrace_flags(current) & UTRACE_EVENT(CLONE)))
 +		utrace_report_clone(clone_flags, child);
- 	if (unlikely(trace) || unlikely(clone_flags & CLONE_PTRACE)) {
+ 	if (unlikely(task_ptrace(child))) {
  		/*
- 		 * The child starts up with an immediate SIGSTOP.
-@@ -311,6 +326,9 @@ static inline void tracehook_report_clon
+ 		 * It doesn't matter who attached/attaching to this
+@@ -310,6 +325,9 @@ static inline void tracehook_report_clone_complete(int trace,
  						   pid_t pid,
  						   struct task_struct *child)
  {
@@ -790,7 +776,7 @@ index b622498..8def62a 100644
  	if (unlikely(trace))
  		ptrace_event(0, trace, pid);
  }
-@@ -345,6 +363,7 @@ static inline void tracehook_report_vfor
+@@ -344,6 +362,7 @@ static inline void tracehook_report_vfork_done(struct task_struct *child,
   */
  static inline void tracehook_prepare_release_task(struct task_struct *task)
  {
@@ -798,7 +784,7 @@ index b622498..8def62a 100644
  }
  
  /**
-@@ -359,6 +378,7 @@ static inline void tracehook_prepare_rel
+@@ -358,6 +377,7 @@ static inline void tracehook_prepare_release_task(struct task_struct *task)
  static inline void tracehook_finish_release_task(struct task_struct *task)
  {
  	ptrace_release_task(task);
@@ -806,7 +792,7 @@ index b622498..8def62a 100644
  }
  
  /**
-@@ -380,6 +400,8 @@ static inline void tracehook_signal_hand
+@@ -379,6 +399,8 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
  					    const struct k_sigaction *ka,
  					    struct pt_regs *regs, int stepping)
  {
@@ -815,18 +801,18 @@ index b622498..8def62a 100644
  	if (stepping)
  		ptrace_notify(SIGTRAP);
  }
-@@ -400,6 +422,8 @@ static inline int tracehook_consider_ign
- 						    int sig,
- 						    void __user *handler)
+@@ -396,6 +418,8 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
+ static inline int tracehook_consider_ignored_signal(struct task_struct *task,
+ 						    int sig)
  {
 +	if (unlikely(task_utrace_flags(task) & UTRACE_EVENT(SIGNAL_IGN)))
 +		return 1;
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -421,6 +445,9 @@ static inline int tracehook_consider_fat
- 						  int sig,
- 						  void __user *handler)
+@@ -415,6 +439,9 @@ static inline int tracehook_consider_ignored_signal(struct task_struct *task,
+ static inline int tracehook_consider_fatal_signal(struct task_struct *task,
+ 						  int sig)
  {
 +	if (unlikely(task_utrace_flags(task) & (UTRACE_EVENT(SIGNAL_TERM) |
 +						UTRACE_EVENT(SIGNAL_CORE))))
@@ -834,7 +820,7 @@ index b622498..8def62a 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -435,6 +462,8 @@ static inline int tracehook_consider_fat
+@@ -429,6 +456,8 @@ static inline int tracehook_consider_fatal_signal(struct task_struct *task,
   */
  static inline int tracehook_force_sigpending(void)
  {
@@ -843,7 +829,7 @@ index b622498..8def62a 100644
  	return 0;
  }
  
-@@ -464,6 +493,8 @@ static inline int tracehook_get_signal(s
+@@ -458,6 +487,8 @@ static inline int tracehook_get_signal(struct task_struct *task,
  				       siginfo_t *info,
  				       struct k_sigaction *return_ka)
  {
@@ -852,7 +838,7 @@ index b622498..8def62a 100644
  	return 0;
  }
  
-@@ -491,6 +522,8 @@ static inline int tracehook_get_signal(s
+@@ -485,6 +516,8 @@ static inline int tracehook_get_signal(struct task_struct *task,
   */
  static inline int tracehook_notify_jctl(int notify, int why)
  {
@@ -861,16 +847,16 @@ index b622498..8def62a 100644
  	return notify ?: (current->ptrace & PT_PTRACED) ? why : 0;
  }
  
-@@ -514,6 +547,8 @@ static inline int tracehook_notify_jctl(
+@@ -508,6 +541,8 @@ static inline int tracehook_notify_jctl(int notify, int why)
  static inline int tracehook_notify_death(struct task_struct *task,
  					 void **death_cookie, int group_dead)
  {
 +	*death_cookie = task_utrace_struct(task);
 +
- 	if (task->exit_signal == -1)
+ 	if (task_detached(task))
  		return task->ptrace ? SIGCHLD : DEATH_REAP;
  
-@@ -550,6 +585,20 @@ static inline void tracehook_report_deat
+@@ -544,6 +579,20 @@ static inline void tracehook_report_death(struct task_struct *task,
  					  int signal, void *death_cookie,
  					  int group_dead)
  {
@@ -891,7 +877,7 @@ index b622498..8def62a 100644
  }
  
  #ifdef TIF_NOTIFY_RESUME
-@@ -579,10 +628,20 @@ static inline void set_notify_resume(str
+@@ -573,10 +622,20 @@ static inline void set_notify_resume(struct task_struct *task)
   * asynchronously, this will be called again before we return to
   * user mode.
   *
@@ -915,7 +901,7 @@ index b622498..8def62a 100644
  
 diff --git a/include/linux/utrace.h b/include/linux/utrace.h
 new file mode 100644
-index ...f877ec6 100644  
+index 0000000..f877ec6
 --- /dev/null
 +++ b/include/linux/utrace.h
 @@ -0,0 +1,692 @@
@@ -1613,7 +1599,7 @@ index ...f877ec6 100644
 +#endif	/* linux/utrace.h */
 diff --git a/include/linux/utrace_struct.h b/include/linux/utrace_struct.h
 new file mode 100644
-index ...aba7e09 100644  
+index 0000000..aba7e09
 --- /dev/null
 +++ b/include/linux/utrace_struct.h
 @@ -0,0 +1,58 @@
@@ -1676,10 +1662,10 @@ index ...aba7e09 100644
 +
 +#endif	/* linux/utrace_struct.h */
 diff --git a/init/Kconfig b/init/Kconfig
-index 6a5c5fe..4b5ab3e 100644  
+index 7be4d38..a6987df 100644
 --- a/init/Kconfig
 +++ b/init/Kconfig
-@@ -1060,6 +1060,15 @@ config STOP_MACHINE
+@@ -1149,6 +1149,15 @@ config STOP_MACHINE
  	help
  	  Need stop_machine() primitive.
  
@@ -1696,7 +1682,7 @@ index 6a5c5fe..4b5ab3e 100644
  
  config PREEMPT_NOTIFIERS
 diff --git a/kernel/Makefile b/kernel/Makefile
-index e4791b3..7bff724 100644  
+index 4242366..a79634e 100644
 --- a/kernel/Makefile
 +++ b/kernel/Makefile
 @@ -68,6 +68,7 @@ obj-$(CONFIG_IKCONFIG) += configs.o
@@ -1708,7 +1694,7 @@ index e4791b3..7bff724 100644
  obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
  obj-$(CONFIG_AUDIT_TREE) += audit_tree.o
 diff --git a/kernel/ptrace.c b/kernel/ptrace.c
-index dc3b98e..f897ef6 100644  
+index 42c3178..3ac97b9 100644
 --- a/kernel/ptrace.c
 +++ b/kernel/ptrace.c
 @@ -16,6 +16,7 @@
@@ -1719,8 +1705,8 @@ index dc3b98e..f897ef6 100644
  #include <linux/security.h>
  #include <linux/signal.h>
  #include <linux/audit.h>
-@@ -172,6 +173,14 @@ bool ptrace_may_access(struct task_struc
- 	return (!err ? true : false);
+@@ -174,6 +175,14 @@ bool ptrace_may_access(struct task_struct *task, unsigned int mode)
+ 	return !err;
  }
  
 +/*
@@ -1734,7 +1720,7 @@ index dc3b98e..f897ef6 100644
  int ptrace_attach(struct task_struct *task)
  {
  	int retval;
-@@ -210,6 +219,11 @@ repeat:
+@@ -212,6 +221,11 @@ repeat:
  		goto repeat;
  	}
  
@@ -1746,7 +1732,7 @@ index dc3b98e..f897ef6 100644
  	if (!task->mm)
  		goto bad;
  	/* the same process cannot be attached many times */
-@@ -515,7 +529,9 @@ int ptrace_traceme(void)
+@@ -590,7 +604,9 @@ int ptrace_traceme(void)
  	 */
  repeat:
  	task_lock(current);
@@ -1759,7 +1745,7 @@ index dc3b98e..f897ef6 100644
  		 */
 diff --git a/kernel/utrace.c b/kernel/utrace.c
 new file mode 100644
-index ...74b5fc5 100644  
+index 0000000..74b5fc5
 --- /dev/null
 +++ b/kernel/utrace.c
 @@ -0,0 +1,2357 @@

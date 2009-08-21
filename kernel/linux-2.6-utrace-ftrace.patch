@@ -32,16 +32,9 @@ processes will skip trace messages, but will still be slowed.
 
 Signed-off-by: Frank Ch. Eigler <fche@redhat.com>
 ---
- include/linux/processtrace.h |   41 +++
- kernel/trace/Kconfig         |    9 +
- kernel/trace/Makefile        |    1 +
- kernel/trace/trace.h         |    8 +
- kernel/trace/trace_process.c |  601 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 660 insertions(+), 0 deletions(-)
-
 diff --git a/include/linux/processtrace.h b/include/linux/processtrace.h
 new file mode 100644
-index ...f2b7d94 100644  
+index 0000000..f2b7d94
 --- /dev/null
 +++ b/include/linux/processtrace.h
 @@ -0,0 +1,41 @@
@@ -87,12 +80,12 @@ index ...f2b7d94 100644
 +
 +#endif /* PROCESSTRACE_H */
 diff --git a/kernel/trace/Kconfig b/kernel/trace/Kconfig
-index 34e707e..8a92d6f 100644  
+index 417d198..4b412e3 100644
 --- a/kernel/trace/Kconfig
 +++ b/kernel/trace/Kconfig
-@@ -150,6 +150,15 @@ config CONTEXT_SWITCH_TRACER
- 	  This tracer gets called from the context switch and records
- 	  all switching of tasks.
+@@ -189,6 +189,15 @@ config FTRACE_SYSCALLS
+ 	help
+ 	  Basic tracer to catch the syscall entry and exit events.
  
 +config PROCESS_TRACER
 +	bool "Trace process events via utrace"
@@ -105,20 +98,20 @@ index 34e707e..8a92d6f 100644
 +
  config BOOT_TRACER
  	bool "Trace boot initcalls"
- 	depends on DEBUG_KERNEL
+ 	select TRACING
 diff --git a/kernel/trace/Makefile b/kernel/trace/Makefile
-index 349d5a9..a774db2 100644  
+index 2630f51..c043a50 100644
 --- a/kernel/trace/Makefile
 +++ b/kernel/trace/Makefile
-@@ -33,5 +33,6 @@ obj-$(CONFIG_FUNCTION_GRAPH_TRACER) += t
- obj-$(CONFIG_TRACE_BRANCH_PROFILING) += trace_branch.o
- obj-$(CONFIG_HW_BRANCH_TRACER) += trace_hw_branches.o
- obj-$(CONFIG_POWER_TRACER) += trace_power.o
+@@ -46,5 +46,6 @@ obj-$(CONFIG_EVENT_TRACER) += trace_export.o
+ obj-$(CONFIG_FTRACE_SYSCALLS) += trace_syscalls.o
+ obj-$(CONFIG_EVENT_PROFILE) += trace_event_profile.o
+ obj-$(CONFIG_EVENT_TRACER) += trace_events_filter.o
 +obj-$(CONFIG_PROCESS_TRACER) += trace_process.o
  
  libftrace-y := ftrace.o
 diff --git a/kernel/trace/trace.h b/kernel/trace/trace.h
-index 4d3d381..c4d2e7f 100644  
+index e685ac2..323b174 100644
 --- a/kernel/trace/trace.h
 +++ b/kernel/trace/trace.h
 @@ -7,6 +7,7 @@
@@ -128,41 +121,50 @@ index 4d3d381..c4d2e7f 100644
 +#include <linux/processtrace.h>
  #include <linux/ftrace.h>
  #include <trace/boot.h>
- 
-@@ -30,6 +31,7 @@ enum trace_type {
- 	TRACE_USER_STACK,
- 	TRACE_HW_BRANCHES,
+ #include <trace/kmemtrace.h>
+@@ -37,6 +38,7 @@ enum trace_type {
+ 	TRACE_KMEM_FREE,
  	TRACE_POWER,
+ 	TRACE_BLK,
 +        TRACE_PROCESS,
  
- 	__TRACE_LAST_TYPE
+ 	__TRACE_LAST_TYPE,
  };
-@@ -170,6 +172,11 @@ struct trace_power {
- 	struct power_trace	state_data;
+@@ -218,6 +220,10 @@ struct syscall_trace_exit {
+ 	unsigned long		ret;
  };
  
 +struct trace_process {
 +	struct trace_entry		ent;
 +	struct process_trace_entry	event;
 +};
-+
+ 
  /*
   * trace_flag_type is an enumeration that holds different
-  * states when a trace occurs. These are:
-@@ -280,6 +287,7 @@ extern void __ftrace_bad_type(void);
+@@ -327,15 +333,16 @@ extern void __ftrace_bad_type(void);
+ 		IF_ASSIGN(var, ent, struct ftrace_graph_ret_entry,	\
  			  TRACE_GRAPH_RET);		\
  		IF_ASSIGN(var, ent, struct hw_branch_entry, TRACE_HW_BRANCHES);\
-  		IF_ASSIGN(var, ent, struct trace_power, TRACE_POWER); \
+-		IF_ASSIGN(var, ent, struct trace_power, TRACE_POWER); \
+ 		IF_ASSIGN(var, ent, struct kmemtrace_alloc_entry,	\
+ 			  TRACE_KMEM_ALLOC);	\
+ 		IF_ASSIGN(var, ent, struct kmemtrace_free_entry,	\
+ 			  TRACE_KMEM_FREE);	\
++		IF_ASSIGN(var, ent, struct trace_power, TRACE_POWER); \
+ 		IF_ASSIGN(var, ent, struct syscall_trace_enter,		\
+ 			  TRACE_SYSCALL_ENTER);				\
+ 		IF_ASSIGN(var, ent, struct syscall_trace_exit,		\
+ 			  TRACE_SYSCALL_EXIT);				\
 +		IF_ASSIGN(var, ent, struct trace_process, TRACE_PROCESS); \
  		__ftrace_bad_type();					\
  	} while (0)
  
 diff --git a/kernel/trace/trace_process.c b/kernel/trace/trace_process.c
 new file mode 100644
-index ...0820e56 100644  
+index 0000000..e877f95
 --- /dev/null
 +++ b/kernel/trace/trace_process.c
-@@ -0,0 +1,601 @@
+@@ -0,0 +1,599 @@
 +/*
 + * utrace-based process event tracing
 + * Copyright (C) 2009 Red Hat Inc.
@@ -181,6 +183,7 @@ index ...0820e56 100644
 +#include <asm/syscall.h>
 +
 +#include "trace.h"
++#include "trace_output.h"
 +
 +/* A process must match these filters in order to be traced. */
 +static char trace_taskcomm_filter[TASK_COMM_LEN]; /* \0: unrestricted */
@@ -235,19 +238,16 @@ index ...0820e56 100644
 +{
 +	struct ring_buffer_event *event;
 +	struct trace_process *entry;
-+	unsigned long irq_flags;
 +
-+	event	= ring_buffer_lock_reserve(tr->buffer, sizeof(*entry),
-+					   &irq_flags);
++	event	= ring_buffer_lock_reserve(tr->buffer, sizeof(*entry));
 +	if (!event)
 +		return;
 +	entry	= ring_buffer_event_data(event);
 +	tracing_generic_entry_update(&entry->ent, 0, preempt_count());
-+	entry->ent.cpu			= raw_smp_processor_id();
 +	entry->ent.type			= TRACE_PROCESS;
 +	strlcpy(ent->comm, current->comm, TASK_COMM_LEN);
 +	entry->event			= *ent;
-+	ring_buffer_unlock_commit(tr->buffer, event, irq_flags);
++	ring_buffer_unlock_commit(tr->buffer, event);
 +
 +	trace_wake_up();
 +}
@@ -301,9 +301,9 @@ index ...0820e56 100644
 +
 +	/* XXX: If print_lat_fmt() were not static, we wouldn't have
 +	   to duplicate this. */
-+	trace_seq_printf(s, "%16s %5d %3d %9lu.%06ld ",
++	trace_seq_printf(s, "%16s %5d %9lu.%06ld ",
 +			 field->event.comm,
-+			 entry->pid, entry->cpu,
++			 entry->pid,
 +			 secs,
 +			 usec_rem);
 +
