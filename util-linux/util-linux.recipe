@@ -7,49 +7,55 @@
 loadSuperClass('rpmpackage')
 class Utillinux(RPMPackageRecipe,CPackageRecipe):
     name = 'util-linux'
-    version = '2.14.1'
-    rpmRelease = '3.fc10'
+    version = '2.14.2'
+    rpmRelease = '9.fc11'
     rpmName = '%(name)s-ng'
     tarballName = '%(name)s-ng-%(version)s.tar.bz2'
-    rpmPatches = [
-        # 91174 - Patch to enabled remote service for login/pam
-        'util-linux-ng-2.13-login-pamstart.patch',
-        # RHEL/Fedora specific mount options
-        'util-linux-ng-2.14-mount-managed.patch',
-        # add note about ATAPI IDE floppy to fdformat.8
-        'util-linux-ng-2.13-fdformat-man-ide.patch',
-        # 151635 - makeing /var/log/lastlog
-        'util-linux-ng-2.13-login-lastlog.patch',
-        # 199745 - Non-existant simpleinit(8) mentioned in ctrlaltdel(8)
-        'util-linux-ng-2.13-ctrlaltdel-man.patch',
-        # 218915 - fdisk -b 4K (move to upstream?)
-        'util-linux-ng-2.13-fdisk-b-4096.patch',
-        # 231192 - ipcs is not printing correct values on pLinux
-        'util-linux-ng-2.13-ipcs-32bit.patch',
-        # remove partitions
-        'util-linux-ng-2.14-blockdev-rmpart.patch',
-        # 390691: mount should check selinux context on mount, and warn on file_t
-        'util-linux-ng-2.14-mount-file_t.patch',
-        # 465761: mount manpage is missing uid/gid mount options for tmpfs (upstream patch)
-        'util-linux-ng-2.14-mount-man-tmpfs.patch',
-        ]
-    rpmSources = [ 'nologin.c', 'nologin.8' ]
+    rpmPatches = [ # add note about ATAPI IDE floppy to fdformat.8
+                   'util-linux-ng-2.13-fdformat-man-ide.patch',
+                   # remove partitions
+                   'util-linux-ng-2.14-blockdev-rmpart.patch',
+
+                   'util-linux-ng-2.14-mount-managed.patch',
+                   # 199745 - Non-existant simpleinit(8) mentioned in ctrlaltdel(8)
+                   'util-linux-ng-2.13-ctrlaltdel-man.patch',
+                   ###
+                   # 231192 - ipcs is not printing correct values on pLinux
+                   'util-linux-ng-2.14-ipcs-32bit.patch',
+                   # 151635 - makeing /var/log/lastlog
+                   'util-linux-ng-2.13-login-lastlog.patch',
+                   ### Upstream patches (backported)
+                   ###
+                   # 91174 - Patch to enabled remote service for login/pam
+                   'util-linux-ng-2.14-login-remote.patch',
+                   # 218915, 487227 - fdisk 4KiB hw sectors support
+                   'util-linux-ng-2.14-fdisk-4k-I.patch',
+                   'util-linux-ng-2.14-fdisk-4k-II.patch',
+                   'util-linux-ng-2.14-fdisk-4k-III.patch',
+                   # Add -r options to dmesg (upstream patch)
+                   'util-linux-ng-2.14-dmesg-r.patch',
+                   # 489672 - flock segfaults when file name is not given
+                   'util-linux-ng-2.14-flock-segfaults.patch',
+                   # 477303 - renice doesn't support -n option
+                   'util-linux-ng-2.14-renice-n.patch',
+                   # 498984 - should man page for "mount" mention ext4?
+                   'util-linux-ng-2.14-mount-man-ext4.patch',
+                   ]
+    rpmSources = [ 'nologin.c', 'nologin.8', 'util-linux-ng-60-raw.rules', 'util-linux-ng-login.pamd',
+                   'util-linux-ng-remote.pamd', 'util-linux-ng-chsh-chfn.pamd']
     rpmArchives = ['floppy-0.16.tar.bz2']
     buildRequires = [ 'e2fsprogs:devel', 'install-info:runtime',
                       'libtermcap:devel', 'ncurses:devel', 'slang:devel', 'gettext:devel',
                       'texinfo:runtime', 'zlib:devel', 'audit:devel', 'perl:runtime',
                       'perl:lib', 'automake:runtime', 'autoconf:runtime', 'pam:devel',
                       'userspace-kernel-headers:devel', 'gettext:runtime',
-                      'e2fsprogs:runtime', 'intltool:runtime', 'udev:devel'
+                      'e2fsprogs:runtime', 'intltool:runtime', 'udev:devel',
+                      'udev:runtime',
                       ]
 
     def setup(r):
         RPMPackageRecipe.unpack(r)
         r.macros.upver = r.version.replace('_', '-')
-
-        r.addSource('util-linux-login.pamd', dest='%(sysconfdir)s/pam.d/login')
-        r.addSource('util-linux-remote.pamd', dest='%(sysconfdir)s/pam.d/remote')
-        r.addSource('util-linux-ng-chsh-chfn.pamd', rpm=r.srpm, dest='%(sysconfdir)s/pam.d/chsh-chfn')
 
         r.addSource('mkinstalldirs')
 
@@ -77,7 +83,11 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                           '--enable-login-utils '
                           '--enable-kill '
                           '--enable-raw '
-                          '--enable-write')
+                          '--enable-write '
+                          '--with-audit '
+                          '--with-fsprobe=blkid '
+                          '--disable-makeinstall-chown '
+                          )
         # note: we install to /bin and /usr/bin, so there's $bindir and $usrbindir in
         # util-linux build system. It's better follow package build-system than recipe
         # macros (where is prefix=/usr)
@@ -100,12 +110,27 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         r.Symlink('hwclock', '%(essentialsbindir)s/clock'),
         r.Symlink('%(essentialbindir)s/kill', '%(bindir)s/kill'),
 
+        for x in ['addpart', 'delpart', 'partx']:
+            r.Move('%(sbindir)s/' + x, '%(essentialsbindir)s/')
+
+        r.Move('%(bindir)s/taskset', '%(essentialbindir)s/')
+        r.Move('%(essentialsbindir)s/raw', '%(bindir)s/')
+
+        r.Install('util-linux-ng-60-raw.rules', '%(sysconfdir)s/udev/rules.d/60-raw.rules', mode = 0644)
+
+        r.Install('util-linux-ng-login.pamd', '%(sysconfdir)s/pam.d/login',  mode = 0644)
+        r.Install('util-linux-ng-remote.pamd', '%(sysconfdir)s/pam.d/remote',  mode = 0644)
+        r.Install('util-linux-ng-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chsh',  mode = 0644)
+        r.Install('util-linux-ng-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chfn', mode = 0644)
+
         # A few su/gid programs
         r.SetModes('%(bindir)s/{ch{fn,sh},newgrp}', 04755)
         r.SetModes('%(bindir)s/write', 02755)
         r.SetModes('%(essentialbindir)s/{mount,umount}', 04755)
+
         # maked "deprecated"
         r.Remove('%(bindir)s/{pg,line}', '%(mandir)s/man1/{pg,line}.1')
+
         # conflicts with schedutils
         r.Remove('/usr/bin/{chrt,taskset}')
         # mkcramfs link needed for anaconda:
@@ -126,3 +151,4 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # setarch as standalone package/recipe goes the way of the dodo...
         for x in ('setarch', 'linux32', 'linux64', 'i386'):
             r.PackageSpec('setarch', '.*%s.*'%x)
+
