@@ -1,0 +1,77 @@
+class Chromium(PackageRecipe):
+    name = 'chromium'
+    version = '24652'
+
+    buildRequires = ['depot_tools:runtime',
+                     'nss:devellib',
+                     'nspr:devellib',
+                     'gcc-c++:runtime',
+                     'gcc:runtime',
+                     'bison:runtime',
+                     'flex:runtime',
+                     'gperf:runtime',
+                     'pkgconfig:devel',
+                     'glib:devellib',
+                     'gtk:devellib',
+                     'msttcorefonts:data',
+                     'freetype:devellib',
+                     'freetype:devel',
+                     'freetype:devel[is:x86]',
+                     'cairo:devellib',
+                     'dbus:devellib',
+                     'subversion:runtime',
+                     'GConf:devellib',
+                     'gcc:devel',
+                     'xextproto:devel',
+                     'util-linux:runtime',
+                     'alsa-lib:devel',
+                     'libXext:devellib',
+                     'desktop-file-utils:runtime',
+                    ]
+
+    def setup(r):
+        r.addArchive('http://build.chromium.org/buildbot/archives/chromium.r23615.tgz')
+
+        r.addSource('no-Werror.patch')
+        r.addSource('v8-trunk.patch')
+
+
+        r.addPatch('no-Werror.patch')
+        r.addPatch('v8-trunk.patch')
+
+        # Updates the code that was extracted from the tarball to the latest
+        # from subversion using gclient.
+        r.Run('/opt/google/depot_tools/gclient update --revision=src@%s' % \
+              r.version, dir='chrome-svn/tarball/chromium/src')
+
+        # Build the scons files.
+        if Arch.x86_64:
+            r.Run('../tools/gyp/gyp all.gyp -Dtarget_arch=x64',
+                  dir='chrome-svn/tarball/chromium/src/build')
+        else:
+            r.Run('../tools/gyp/gyp all.gyp',
+                  dir='chrome-svn/tarball/chromium/src/build')
+
+        # Build using hammer. hammer is a wrapper around scons.
+        r.Run('/opt/google/depot_tools/hammer '
+              '--mode=Release chrome chrome_sandbox v8',
+              dir='chrome-svn/tarball/chromium/src/build')
+
+        # Install
+        r.addSource('chromium-browser')
+        r.Replace('@@LIBDIR@@', '%(libdir)s', 'chromium-browser')
+        r.Install('chromium-browser', '%(bindir)s/chromium-browser')
+
+        buildLoc = 'chrome-svn/tarball/chromium/src/sconsbuild/Release/'
+        artifacts = ['chrome.pak', 'locales', 'resources', 'themes',
+                     'xdg-settings', 'chrome', 'chrome_sandbox']
+
+        r.MakeDirs('%(libdir)s/chromium-browser')
+        for artifact in artifacts:
+            r.Install(buildLoc + artifact, '%(libdir)s/chromium-browser/')
+      
+        r.Doc(buildLoc + 'chromium-browser.1')
+        r.addSource('chromium-browser.desktop')
+        r.Desktopfile('chromium-browser.desktop')
+
+        r.Install('chrome-svn/tarball/chromium/src/sconsbuild/Release/product_logo_48.png', '%(datadir)s/pixmaps/chromium-browser.png')
