@@ -1,60 +1,94 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
+#               2009      Foresight Linux
+#
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Coreutils(CPackageRecipe):
     name = 'coreutils'
-    version = '6.9'
+    version = '7.2'
 
     buildRequires = [ 'automake:runtime', 'bison:runtime',
                       'autoconf:runtime', 'texinfo:runtime',
                       'gettext:runtime', 'libtool:runtime',
-                      'libtermcap:devel', 'perl:lib',
-                      'bash:runtime', 'perl:runtime',  ]
+                      'libtermcap:devel', 'bash:runtime', 
+                      # 'perl:lib', 'perl:devel', 'perl:runtime', 
+                      'attr:devel', 'gmp:devel', 'libcap:devel',  ]
     if not Use.bootstrap:
-        buildRequires += ['bash:runtime', 'acl:devel', 'pam:devel' ]
+        buildRequires += ['bash:runtime', 'acl:devel', 'pam:devel',
+                          'intltool:runtime', 'perl:devel',]
+
+    patches = ('coreutils-6.10-configuration.patch',
+               'coreutils-6.10-manpages.patch',
+               'sh-utils-2.0.11-dateman.patch',
+               'sh-utils-1.16-paths.patch',
+               'coreutils-i18n.patch',
+               'coreutils-getgrouplist.patch',
+               'coreutils-overflow.patch',
+               'coreutils-getfacl-exit-code.patch',               
+               'coreutils-silentmv.patch',)
+    if not Use.bootstrap:
+        patches += ('coreutils-pam.patch',
+                  'coreutils-4.5.3-langinfo.patch',
+                  'coreutils-4.5.3-sysinfo.patch',
+                  'coreutils-setsid.patch',
+                  'coreutils-5.2.1-runuser.patch',
+                  'coreutils-split-pam.patch',)
 
     def setup(r):
-        r.addArchive('mirror://gnu/%(name)s/', keyid='D333CBA1')
-
-        # glibc-2.6 started defining futimens, and this new defination differs
-        # from that of gnulib, which is shipped as part of many pieces of gnu
-        # software. presumably this will be fixed in the next release of this
-        # package, but for now we hack around the problem
-        r.Replace('futimens', 'gl_futimens',
-            'lib/utimens.c', 'lib/utimens.h', # in gnulib
-            'src/copy.c', 'src/touch.c') # in coreutils
-
-        # This patch is likely to require indefinite maintenance,
-        # because adding PAM support to coreutils does not accord
-        # with RMS's policy for the su utility.
-        r.addPatch('coreutils-pam.patch', use=not Use.bootstrap)
-        r.addSource('DIR_COLORS', dest='%(sysconfdir)s/', mode=0644)
-        r.addSource('DIR_COLORS.xterm', dest='%(sysconfdir)s/', mode=0644)
-        r.addSource('colorls.sh', dest='%(sysconfdir)s/profile.d/', mode=0755)
-        r.addSource('colorls.csh', dest='%(sysconfdir)s/profile.d/', mode=0755)
-        r.addSource('su.pamd', dest='%(sysconfdir)s/pam.d/su', mode=0644,
+        r.addArchive('mirror://gnu/%(name)s/')
+        
+        for p in r.patches:
+            r.addPatch(p)
+         
+        for f in ('su', 'runuser'):         
+            r.addSource('coreutils-%s.pamd' % f, dest='%(sysconfdir)s/pam.d/' + f, mode=0644,
                     use=not Use.bootstrap)
+            r.addSource('coreutils-%s-l.pamd' % f, dest='%%(sysconfdir)s/pam.d/%s-l' % f, mode=0644,
+                    use=not Use.bootstrap)
+        
+        for f in ('', '.lightbgcolor', '.256color'):
+            r.addSource('%(name)s-DIR_COLORS' + f, dest='%(sysconfdir)s/', mode=0644)
 
-        # programs which should be in /bin, not /usr/bin
-        r.macros.binprogs = (
-            'basename,cat,chgrp,chmod,chown,cp,cut,date,dd,echo,env,'
-            'false,link,ln,ls,mkdir,mknod,mv,nice,pwd,rm,rmdir,sleep,sort,'
-            'stty,sync,touch,true,uname,unlink')
-        if not Use.bootstrap:
-            # coreutils doesn't build df when cross-compiling
-            r.macros.binprogs += ',df'
+        for f in ('sh', 'csh'):
+            r.addSource('%(name)s-colorls.' + f, dest='%(sysconfdir)s/profile.d/', mode=0755)
+        
+        r.SetModes('tests/misc/sort-mb-tests', 0755)
+        r.Replace(('1.10a', '1.10.1'),
+                  ('dist-xz', 'dist-lzma'),
+                  'configure.ac')
+        #fix typos/mistakes in localized documentation(#439410, #440056)
+        r.Run(""" find ./po/ -name "*.p*" | xargs  sed -i  -e 's/-dpR/-cdpR/'  -e 's/commmand/command/' """)
 
-        extraConfig = '--enable-largefiles'
+        if Arch.s390 or Arch.s390x:
+            r.macros.cflags += ' -fno-strict-aliasing -fPIC -O1'
+        else:
+            r.macros.cflags += ' -fno-strict-aliasing -fpic'
+        
+        r.macros.cflags += ' -D_GNU_SOURCE=1'
+        
+        r.Run("""
+                  touch aclocal.m4 configure config.hin Makefile.in */Makefile.in
+                  aclocal -I m4
+                  autoconf --force
+                  automake --copy --add-missing
+              """)
+
+        extraConfig  = " --enable-install-program=su,hostname,arch " 
+        extraConfig += " DEFAULT_POSIX2_VERSION=200112 alternative=199209 --enable-largefiles "    
         extraMake = ''
         if not Use.bootstrap:
-            extraConfig += ' --enable-pam'
+            extraConfig += ' --with-afs --enable-pam'
             extraMake += ' su_LDFLAGS="-lpam -lpam_misc"'
             r.macros.cppflags += ' -DUSE_PAM'
         else:
-            extraMake += ' AR=%(target)s-ar'
+            # we don't want/need/care about having pam/xattr/libcap
+            # in group-bootstrap
+            extraConfig += ' --disable-xattr  --disable-libcap  '
+        
+        extraMake += ' AR=%(target)s-ar'
 
         if Use.bootstrap:
             # help2man (used to create the docs) requires that you be
@@ -64,20 +98,80 @@ class Coreutils(CPackageRecipe):
                       r'SUBDIRS = \1 \2', 'Makefile{.in,.am}')
 
         r.Configure(extraConfig)
+        if not Use.bootstrap:
+            # Regenerate manpages
+            r.Run('touch man/*.x')
+            
         r.Make(extraMake)
+
+        # XXX docs should say /var/run/[uw]tmp not /etc/[uw]tmp
+        r.Replace(('/etc/utmp', '/var/run/utmp'),
+                  ('/etc/wtmp', '/var/run/wtmp'),
+                  'doc/coreutils.texi')
+
+        r.TestSuite('tests', 'make check-TESTS', recursive=True, ignore=None)        
+        
         r.MakeInstall()
+        # man pages are not installed with make install
+        r.Make('mandir=%(mandir)s install-man')
+        
+        # fix japanese catalog file
+        r.Run("""
+        if [ -d %(destdir)s/%(datadir)s/locale/ja_JP.EUC/LC_MESSAGES ]; then
+   mkdir -p %(destdir)s/%(datadir)s/locale/ja/LC_MESSAGES
+   mv %(destdir)s/%(datadir)s/locale/ja_JP.EUC/LC_MESSAGES/*mo  %(destdir)s/%(datadir)s/locale/ja/LC_MESSAGES
+   rm -rf %(destdir)s/%(datadir)s/locale/ja_JP.EUC
+fi
+""")
+        
+        # programs which should be in /bin, not /usr/bin
+        binprogs = [ 'arch', 'basename', 'cat',
+                              'chgrp', 'chmod', 'chown',
+                              'cp', 'cut', 'date', 'dd',
+                              'echo', 'env', 'false',
+                              'link', 'ln', 'ls', 'mkdir',
+                              'mknod', 'mktemp', 'mv',
+                              'nice', 'pwd', 'rm',
+                              'rmdir', 'sleep', 'sort', 
+                              'stty', 'sync', 'touch', 
+                              'true', 'uname', 'unlink',
+                              ]                     
+        
+        if not Use.bootstrap:
+            # coreutils doesn't build df when cross-compiling
+            binprogs += ['df']
+        
+        for i in binprogs:
+            r.Move('%%(bindir)s/%s' % i, '%(essentialbindir)s/')
+        
+        r.Move('%(bindir)s/chroot', '%(sbindir)s/chroot')
+        
+        for i in ['env', 'cut']:
+            r.Symlink('%%(essentialbindir)s/%s' % i, '%%(bindir)s/%s' %i)
 
         r.Install('src/su', '%(essentialbindir)s/', mode=04755)
-        # if/when runuser makes it into upstream coreutils, change this symlink
-        r.Symlink('%(essentialbindir)s/su', '%(essentialsbindir)s/runuser')
-        r.Move('%(bindir)s/{%(binprogs)s}', '%(essentialbindir)s/')
-        r.Move('%(bindir)s/chroot', '%(sbindir)s/chroot')
-        r.Symlink('%(essentialbindir)s/cut', '%(bindir)s/cut')
-        r.Symlink('%(essentialbindir)s/env', '%(bindir)s/env')
-        r.Remove('%(bindir)s/uptime', '%(mandir)s/man1/uptime.1*')
-        r.Remove('%(bindir)s/kill', '%(mandir)s/man1/kill.1*')
-        r.Remove('%(bindir)s/hostname', '%(mandir)s/man1/hostname.1*')
+        r.Install('src/su', '%(essentialbindir)s/', mode=04755)
+
+
+        if not Use.bootstrap:
+            r.Install('src/runuser',  '%(essentialsbindir)s/',  mode = 0755) 
+            r.Remove('%(bindir)s/runuser')
+        
+        for i in ['uptime', 'kill', 'hostname']:
+            r.Remove('%%(bindir)s/%s' % i, '%%(mandir)s/man1/%s.1*' % i)
+            
+        # FIXME  Use hard links instead of symbolic links for LC_TIME files (RH bug #246729).
+        
         r.Symlink('test', '%(bindir)s/[')
         r.TagSpec('info-file', '%(infodir)s/coreutils.info.gz')
+        
+        # avoid an hard req in csh which may or not be around
+        r.Requires(exceptions = '/etc/profile.d/coreutils-colorls.csh')
 
-        r.TestSuite('tests', 'make check-TESTS', recursive=True, ignore=None)
+        # core utils now provides mktemp
+        # pkgSpec it in order not to break superclasses
+
+        for f in ['%(mandir)s/man1/mktemp.*',
+                  '%(essentialbindir)s/mktemp']:
+            r.PackageSpec('mktemp', f)
+                      
