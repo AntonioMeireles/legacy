@@ -1,0 +1,76 @@
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Fri, 21 Aug 2009 16:48:10 +0000 (-0700)
+Subject: x86: don't call '->send_IPI_mask()' with an empty mask
+X-Git-Tag: v2.6.31-rc7~4
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=b04e6373d694e977c95ae0ae000e2c1e2cf92d73
+
+x86: don't call '->send_IPI_mask()' with an empty mask
+
+As noted in 83d349f35e1ae72268c5104dbf9ab2ae635425d4 ("x86: don't send
+an IPI to the empty set of CPU's"), some APIC's will be very unhappy
+with an empty destination mask.  That commit added a WARN_ON() for that
+case, and avoided the resulting problem, but didn't fix the underlying
+reason for why those empty mask cases happened.
+
+This fixes that, by checking the result of 'cpumask_andnot()' of the
+current CPU actually has any other CPU's left in the set of CPU's to be
+sent a TLB flush, and not calling down to the IPI code if the mask is
+empty.
+
+The reason this started happening at all is that we started passing just
+the CPU mask pointers around in commit 4595f9620 ("x86: change
+flush_tlb_others to take a const struct cpumask"), and when we did that,
+the cpumask was no longer thread-local.
+
+Before that commit, flush_tlb_mm() used to create it's own copy of
+'mm->cpu_vm_mask' and pass that copy down to the low-level flush
+routines after having tested that it was not empty.  But after changing
+it to just pass down the CPU mask pointer, the lower level TLB flush
+routines would now get a pointer to that 'mm->cpu_vm_mask', and that
+could still change - and become empty - after the test due to other
+CPU's having flushed their own TLB's.
+
+See
+
+	http://bugzilla.kernel.org/show_bug.cgi?id=13933
+
+for details.
+
+Tested-by: Thomas BjÃ¶rnell <thomas.bjornell@gmail.com>
+Cc: stable@kernel.org
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/x86/mm/tlb.c b/arch/x86/mm/tlb.c
+index 821e970..c814e14 100644
+--- a/arch/x86/mm/tlb.c
++++ b/arch/x86/mm/tlb.c
+@@ -183,18 +183,17 @@ static void flush_tlb_others_ipi(const struct cpumask *cpumask,
+ 
+ 	f->flush_mm = mm;
+ 	f->flush_va = va;
+-	cpumask_andnot(to_cpumask(f->flush_cpumask),
+-		       cpumask, cpumask_of(smp_processor_id()));
+-
+-	/*
+-	 * We have to send the IPI only to
+-	 * CPUs affected.
+-	 */
+-	apic->send_IPI_mask(to_cpumask(f->flush_cpumask),
+-		      INVALIDATE_TLB_VECTOR_START + sender);
++	if (cpumask_andnot(to_cpumask(f->flush_cpumask), cpumask, cpumask_of(smp_processor_id()))) {
++		/*
++		 * We have to send the IPI only to
++		 * CPUs affected.
++		 */
++		apic->send_IPI_mask(to_cpumask(f->flush_cpumask),
++			      INVALIDATE_TLB_VECTOR_START + sender);
+ 
+-	while (!cpumask_empty(to_cpumask(f->flush_cpumask)))
+-		cpu_relax();
++		while (!cpumask_empty(to_cpumask(f->flush_cpumask)))
++			cpu_relax();
++	}
+ 
+ 	f->flush_mm = NULL;
+ 	f->flush_va = 0;

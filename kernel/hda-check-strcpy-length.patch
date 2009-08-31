@@ -1,0 +1,55 @@
+From: Takashi Iwai <tiwai@suse.de>
+Date: Thu, 16 Apr 2009 08:22:24 +0000 (+0200)
+Subject: ALSA: hda - Check strcpy length
+X-Git-Tag: v2.6.31-rc1~38^2~11^2~54
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=18cb7109d3e83195b605ff2905981020e86f72ca
+
+ALSA: hda - Check strcpy length
+
+Check the length to copy via strlen() beforehand to avoid the stack
+corruption, or use strlcpy() to be safe in HD-audio codes.
+
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+---
+
+diff --git a/sound/pci/hda/hda_codec.c b/sound/pci/hda/hda_codec.c
+index 37f24ce..48f0cea 100644
+--- a/sound/pci/hda/hda_codec.c
++++ b/sound/pci/hda/hda_codec.c
+@@ -1431,6 +1431,8 @@ _snd_hda_find_mixer_ctl(struct hda_codec *codec,
+ 	memset(&id, 0, sizeof(id));
+ 	id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+ 	id.index = idx;
++	if (snd_BUG_ON(strlen(name) >= sizeof(id.name)))
++		return NULL;
+ 	strcpy(id.name, name);
+ 	return snd_ctl_find_id(codec->bus->card, &id);
+ }
+diff --git a/sound/pci/hda/hda_intel.c b/sound/pci/hda/hda_intel.c
+index 21a3092..41db5d4 100644
+--- a/sound/pci/hda/hda_intel.c
++++ b/sound/pci/hda/hda_intel.c
+@@ -1830,7 +1830,7 @@ azx_attach_pcm_stream(struct hda_bus *bus, struct hda_codec *codec,
+ 			  &pcm);
+ 	if (err < 0)
+ 		return err;
+-	strcpy(pcm->name, cpcm->name);
++	strlcpy(pcm->name, cpcm->name, sizeof(pcm->name));
+ 	apcm = kzalloc(sizeof(*apcm), GFP_KERNEL);
+ 	if (apcm == NULL)
+ 		return -ENOMEM;
+@@ -2358,9 +2358,11 @@ static int __devinit azx_create(struct snd_card *card, struct pci_dev *pci,
+ 	}
+ 
+ 	strcpy(card->driver, "HDA-Intel");
+-	strcpy(card->shortname, driver_short_names[chip->driver_type]);
+-	sprintf(card->longname, "%s at 0x%lx irq %i",
+-		card->shortname, chip->addr, chip->irq);
++	strlcpy(card->shortname, driver_short_names[chip->driver_type],
++		sizeof(card->shortname));
++	snprintf(card->longname, sizeof(card->longname),
++		 "%s at 0x%lx irq %i",
++		 card->shortname, chip->addr, chip->irq);
+ 
+ 	*rchip = chip;
+ 	return 0;
