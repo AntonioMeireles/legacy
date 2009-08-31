@@ -1,0 +1,312 @@
+--- a/kvm/kernel/x86/x86.c
++++ b/kvm/kernel/x86/x86.c	
+@@ -77,10 +77,6 @@
+ #include <linux/iommu.h>
+ #include <linux/intel-iommu.h>
+ #include <linux/cpufreq.h>
+-#include <trace/events/kvm.h>
+-#undef TRACE_INCLUDE_FILE
+-#define CREATE_TRACE_POINTS
+-#include "trace.h"
+ 
+ #include <asm/uaccess.h>
+ #include <asm/msr.h>
+@@ -2486,8 +2482,6 @@ static int emulator_read_emulated(unsign
+ 
+ 	if (vcpu->mmio_read_completed) {
+ 		memcpy(val, vcpu->mmio_data, bytes);
+-		trace_kvm_mmio(KVM_TRACE_MMIO_READ, bytes,
+-			       vcpu->mmio_phys_addr, *(u64 *)val);
+ 		vcpu->mmio_read_completed = 0;
+ 		return X86EMUL_CONTINUE;
+ 	}
+@@ -2509,12 +2503,9 @@ mmio:
+ 	 * Is this MMIO handled locally?
+ 	 */
+ 	if (!vcpu_mmio_read(vcpu, gpa, bytes, val)) {
+-		trace_kvm_mmio(KVM_TRACE_MMIO_READ, bytes, gpa, *(u64 *)val);
+ 		return X86EMUL_CONTINUE;
+ 	}
+ 
+-	trace_kvm_mmio(KVM_TRACE_MMIO_READ_UNSATISFIED, bytes, gpa, 0);
+-
+ 	vcpu->mmio_needed = 1;
+ 	vcpu->mmio_phys_addr = gpa;
+ 	vcpu->mmio_size = bytes;
+@@ -2557,7 +2548,6 @@ static int emulator_write_emulated_onepa
+ 		return X86EMUL_CONTINUE;
+ 
+ mmio:
+-	trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, bytes, gpa, *(u64 *)val);
+ 	/*
+ 	 * Is this MMIO handled locally?
+ 	 */
+@@ -2944,9 +2934,6 @@ int kvm_emulate_pio(struct kvm_vcpu *vcp
+ 	vcpu->arch.pio.down = 0;
+ 	vcpu->arch.pio.rep = 0;
+ 
+-	trace_kvm_pio(vcpu->run->io.direction == KVM_EXIT_IO_OUT, port,
+-		      size, 1);
+-
+ 	val = kvm_register_read(vcpu, VCPU_REGS_RAX);
+ 	memcpy(vcpu->arch.pio_data, &val, 4);
+ 
+@@ -2976,9 +2963,6 @@ int kvm_emulate_pio_string(struct kvm_vc
+ 	vcpu->arch.pio.down = down;
+ 	vcpu->arch.pio.rep = rep;
+ 
+-	trace_kvm_pio(vcpu->run->io.direction == KVM_EXIT_IO_OUT, port,
+-		      size, count);
+-
+ 	if (!count) {
+ 		kvm_x86_ops->skip_emulated_instruction(vcpu);
+ 		return 1;
+@@ -3176,8 +3160,6 @@ int kvm_emulate_hypercall(struct kvm_vcp
+ 	a2 = kvm_register_read(vcpu, VCPU_REGS_RDX);
+ 	a3 = kvm_register_read(vcpu, VCPU_REGS_RSI);
+ 
+-	trace_kvm_hypercall(nr, a0, a1, a2, a3);
+-
+ 	if (!is_long_mode(vcpu)) {
+ 		nr &= 0xFFFFFFFF;
+ 		a0 &= 0xFFFFFFFF;
+@@ -3392,11 +3374,6 @@ void kvm_emulate_cpuid(struct kvm_vcpu *
+ 		kvm_register_write(vcpu, VCPU_REGS_RDX, best->edx);
+ 	}
+ 	kvm_x86_ops->skip_emulated_instruction(vcpu);
+-	trace_kvm_cpuid(function,
+-			kvm_register_read(vcpu, VCPU_REGS_RAX),
+-			kvm_register_read(vcpu, VCPU_REGS_RBX),
+-			kvm_register_read(vcpu, VCPU_REGS_RCX),
+-			kvm_register_read(vcpu, VCPU_REGS_RDX));
+ }
+ EXPORT_SYMBOL_GPL(kvm_emulate_cpuid);
+ 
+@@ -3593,7 +3570,6 @@ static int vcpu_enter_guest(struct kvm_v
+ 		set_debugreg(vcpu->arch.eff_db[3], 3);
+ 	}
+ 
+-	trace_kvm_entry(vcpu->vcpu_id);
+ 	kvm_x86_ops->run(vcpu, kvm_run);
+ 
+ 	if (unlikely(vcpu->arch.switch_db_regs)) {
+@@ -4902,9 +4878,3 @@ int kvm_arch_interrupt_allowed(struct kv
+ {
+ 	return kvm_x86_ops->interrupt_allowed(vcpu);
+ }
+-
+-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_exit);
+-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_inj_virq);
+-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_page_fault);
+-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_msr);
+-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_cr);
+--- a/kvm/kernel/x86/lapic.c	
++++ b/kvm/kernel/x86/lapic.c	
+@@ -415,8 +415,6 @@ static int __apic_accept_irq(struct kvm_
+ 			break;
+ 
+ 		result = !apic_test_and_set_irr(vector, apic);
+-		trace_kvm_apic_accept_irq(vcpu->vcpu_id, delivery_mode,
+-					  trig_mode, vector, result);
+ 		if (!result) {
+ 			if (trig_mode)
+ 				apic_debug("level trig mode repeatedly for "
+@@ -535,8 +533,6 @@ static void apic_send_ipi(struct kvm_lap
+ 	else
+ 		irq.dest_id = GET_APIC_DEST_FIELD(icr_high);
+ 
+-	trace_kvm_apic_ipi(icr_low, irq.dest_id);
+-
+ 	apic_debug("icr_high 0x%x, icr_low 0x%x, "
+ 		   "short_hand 0x%x, dest 0x%x, trig_mode 0x%x, level 0x%x, "
+ 		   "dest_mode 0x%x, delivery_mode 0x%x, vector 0x%x\n",
+@@ -647,8 +643,6 @@ static int apic_reg_read(struct kvm_lapi
+ 
+ 	result = __apic_read(apic, offset & ~0xf);
+ 
+-	trace_kvm_apic_read(offset, result);
+-
+ 	switch (len) {
+ 	case 1:
+ 	case 2:
+@@ -741,8 +735,6 @@ static int apic_reg_write(struct kvm_lap
+ {
+ 	int ret = 0;
+ 
+-	trace_kvm_apic_write(reg, val);
+-
+ 	switch (reg) {
+ 	case APIC_ID:		/* Local APIC ID */
+ 		if (!apic_x2apic_mode(apic))
+--- a/kvm/kernel/x86/svm.c	
++++ b/kvm/kernel/x86/svm.c	
+@@ -1202,7 +1202,6 @@ static int pf_interception(struct vcpu_s
+ 	fault_address  = svm->vmcb->control.exit_info_2;
+ 	error_code = svm->vmcb->control.exit_info_1;
+ 
+-	trace_kvm_page_fault(fault_address, error_code);
+ 	/*
+ 	 * FIXME: Tis shouldn't be necessary here, but there is a flush
+ 	 * missing in the MMU code. Until we find this bug, flush the
+@@ -2116,8 +2115,6 @@ static int rdmsr_interception(struct vcp
+ 	if (svm_get_msr(&svm->vcpu, ecx, &data))
+ 		kvm_inject_gp(&svm->vcpu, 0);
+ 	else {
+-		trace_kvm_msr_read(ecx, data);
+-
+ 		svm->vcpu.arch.regs[VCPU_REGS_RAX] = data & 0xffffffff;
+ 		svm->vcpu.arch.regs[VCPU_REGS_RDX] = data >> 32;
+ 		svm->next_rip = kvm_rip_read(&svm->vcpu) + 2;
+@@ -2198,8 +2195,6 @@ static int wrmsr_interception(struct vcp
+ 	u64 data = (svm->vcpu.arch.regs[VCPU_REGS_RAX] & -1u)
+ 		| ((u64)(svm->vcpu.arch.regs[VCPU_REGS_RDX] & -1u) << 32);
+ 
+-	trace_kvm_msr_write(ecx, data);
+-
+ 	svm->next_rip = kvm_rip_read(&svm->vcpu) + 2;
+ 	if (svm_set_msr(&svm->vcpu, ecx, data))
+ 		kvm_inject_gp(&svm->vcpu, 0);
+@@ -2297,8 +2292,6 @@ static int handle_exit(struct kvm_run *k
+ 	struct vcpu_svm *svm = to_svm(vcpu);
+ 	u32 exit_code = svm->vmcb->control.exit_code;
+ 
+-	trace_kvm_exit(exit_code, svm->vmcb->save.rip);
+-
+ 	if (is_nested(svm)) {
+ 		nsvm_printk("nested handle_exit: 0x%x | 0x%lx | 0x%lx | 0x%lx\n",
+ 			    exit_code, svm->vmcb->control.exit_info_1,
+@@ -2385,8 +2378,6 @@ static inline void svm_inject_irq(struct
+ {
+ 	struct vmcb_control_area *control;
+ 
+-	trace_kvm_inj_virq(irq);
+-
+ 	++svm->vcpu.stat.irq_injections;
+ 	control = &svm->vmcb->control;
+ 	control->int_vector = irq;
+--- a/kvm/kernel/x86/i8259.c	
++++ b/kvm/kernel/x86/i8259.c	
+@@ -231,8 +231,6 @@ int kvm_pic_set_irq(void *opaque, int ir
+ 	if (irq >= 0 && irq < PIC_NUM_PINS) {
+ 		ret = pic_set_irq1(&s->pics[irq >> 3], irq & 7, level);
+ 		pic_update_irq(s);
+-		trace_kvm_pic_set_irq(irq >> 3, irq & 7, s->pics[irq >> 3].elcr,
+-				      s->pics[irq >> 3].imr, ret == 0);
+ 	}
+ 	pic_unlock(s);
+ 
+--- a/kvm/kernel/x86/irq_comm.c	
++++ b/kvm/kernel/x86/irq_comm.c	
+@@ -140,8 +140,6 @@ static int kvm_set_msi(struct kvm_kernel
+ {
+ 	struct kvm_lapic_irq irq;
+ 
+-	trace_kvm_msi_set_irq(e->msi.address_lo, e->msi.data);
+-
+ 	irq.dest_id = (e->msi.address_lo &
+ 			MSI_ADDR_DEST_ID_MASK) >> MSI_ADDR_DEST_ID_SHIFT;
+ 	irq.vector = (e->msi.data &
+@@ -168,8 +166,6 @@ int kvm_set_irq(struct kvm *kvm, int irq
+ 	unsigned long *irq_state, sig_level;
+ 	int ret = -1;
+ 
+-	trace_kvm_set_irq(irq, level, irq_source_id);
+-
+ 	WARN_ON(!mutex_is_locked(&kvm->irq_lock));
+ 
+ 	if (irq < KVM_IOAPIC_NUM_PINS) {
+@@ -208,8 +204,6 @@ void kvm_notify_acked_irq(struct kvm *kv
+ 	struct hlist_node *n;
+ 	unsigned gsi = pin;
+ 
+-	trace_kvm_ack_irq(irqchip, pin);
+-
+ 	list_for_each_entry(e, &kvm->irq_routing, link)
+ 		if (e->irqchip.irqchip == irqchip &&
+ 		    e->irqchip.pin == pin) {
+--- a/kvm/kernel/x86/ioapic.c	
++++ b/kvm/kernel/x86/ioapic.c	
+@@ -234,7 +234,6 @@ int kvm_ioapic_set_irq(struct kvm_ioapic
+ 			    (!edge && !entry.fields.remote_irr))
+ 				ret = ioapic_service(ioapic, irq);
+ 		}
+-		trace_kvm_ioapic_set_irq(entry.bits, irq, ret == 0);
+ 	}
+ 	return ret;
+ }
+--- a/kvm/kernel/x86/vmx.c	
++++ b/kvm/kernel/x86/vmx.c	
+@@ -2599,8 +2599,6 @@ static void vmx_inject_irq(struct kvm_vc
+ 	uint32_t intr;
+ 	int irq = vcpu->arch.interrupt.nr;
+ 
+-	trace_kvm_inj_virq(irq);
+-
+ 	++vcpu->stat.irq_injections;
+ 	if (vmx->rmode.vm86_active) {
+ 		vmx->rmode.irq.pending = true;
+@@ -2800,7 +2798,6 @@ static int handle_exception(struct kvm_v
+ 		if (enable_ept)
+ 			BUG();
+ 		cr2 = vmcs_readl(EXIT_QUALIFICATION);
+-		trace_kvm_page_fault(cr2, error_code);
+ 
+ 		if (kvm_event_needs_reinjection(vcpu))
+ 			kvm_mmu_unprotect_page_virt(vcpu, cr2);
+@@ -2905,7 +2902,6 @@ static int handle_cr(struct kvm_vcpu *vc
+ 	switch ((exit_qualification >> 4) & 3) {
+ 	case 0: /* mov to cr */
+ 		val = kvm_register_read(vcpu, reg);
+-		trace_kvm_cr_write(cr, val);
+ 		switch (cr) {
+ 		case 0:
+ 			kvm_set_cr0(vcpu, val);
+@@ -2944,13 +2940,11 @@ static int handle_cr(struct kvm_vcpu *vc
+ 		switch (cr) {
+ 		case 3:
+ 			kvm_register_write(vcpu, reg, vcpu->arch.cr3);
+-			trace_kvm_cr_read(cr, vcpu->arch.cr3);
+ 			skip_emulated_instruction(vcpu);
+ 			return 1;
+ 		case 8:
+ 			val = kvm_get_cr8(vcpu);
+ 			kvm_register_write(vcpu, reg, val);
+-			trace_kvm_cr_read(cr, val);
+ 			skip_emulated_instruction(vcpu);
+ 			return 1;
+ 		}
+@@ -3071,8 +3065,6 @@ static int handle_rdmsr(struct kvm_vcpu
+ 		return 1;
+ 	}
+ 
+-	trace_kvm_msr_read(ecx, data);
+-
+ 	/* FIXME: handling of bits 32:63 of rax, rdx */
+ 	vcpu->arch.regs[VCPU_REGS_RAX] = data & -1u;
+ 	vcpu->arch.regs[VCPU_REGS_RDX] = (data >> 32) & -1u;
+@@ -3086,8 +3078,6 @@ static int handle_wrmsr(struct kvm_vcpu
+ 	u64 data = (vcpu->arch.regs[VCPU_REGS_RAX] & -1u)
+ 		| ((u64)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u) << 32);
+ 
+-	trace_kvm_msr_write(ecx, data);
+-
+ 	if (vmx_set_msr(vcpu, ecx, data) != 0) {
+ 		kvm_inject_gp(vcpu, 0);
+ 		return 1;
+@@ -3264,7 +3254,6 @@ static int handle_ept_violation(struct k
+ 	}
+ 
+ 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+-	trace_kvm_page_fault(gpa, exit_qualification);
+ 	return kvm_mmu_page_fault(vcpu, gpa & PAGE_MASK, 0);
+ }
+ 
+@@ -3448,8 +3437,6 @@ static int vmx_handle_exit(struct kvm_ru
+ 	u32 exit_reason = vmx->exit_reason;
+ 	u32 vectoring_info = vmx->idt_vectoring_info;
+ 
+-	trace_kvm_exit(exit_reason, kvm_rip_read(vcpu));
+-
+ 	/* If we need to emulate an MMIO from handle_invalid_guest_state
+ 	 * we just return 0 */
+ 	if (vmx->emulation_required && emulate_invalid_guest_state) {

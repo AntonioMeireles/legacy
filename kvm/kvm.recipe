@@ -7,20 +7,30 @@
 class Kvm(AutoPackageRecipe):
 
     name = 'kvm'
-    version = '84'
+    version = '88'
 
     buildRequires = [ 'SDL:devel', 'alsa-lib:devel', 'e2fsprogs:devel',
                       'zlib:devel', 'chkconfig:runtime', 'info-kvm:group',
                       'iasl:runtime', 'gnutls:devel', 'kernel:build-tree',
                       'dev86:runtime', 'pkgconfig:devel', 'ncurses:devel',
-                      'python:devel', 'esound:devel', 'git:runtime', 'rsync:runtime' ]
+                      'python:devel', 'esound:devel', 'git:runtime', 'rsync:runtime',
+                      'bluez:devel', 'curl:devel', 'cyrus-sasl:devel', 'libX11:devel',
+                      'openssl:devel', 'pulseaudio:devel', ]
 
     def unpack(r):
         r.addArchive('mirror://sourceforge/kvm/kvm-%(version)s.tar.gz')
-        rhPatches = [ 'kvm-62-block-rw-range-check.patch',
-                      ]
-        for p in rhPatches:
-            r.addPatch('http://cvs.fedoraproject.org/viewcvs/rpms/kvm/devel/' + p + '?view=co')
+
+        for p in [ 'kvm-qemu-default-memsize.patch',
+                   'kvm-qemu-no-fallback-if-open-kvm-fails.patch',
+                   # Post-release upstream patches
+                   'kvm-preXX-init-on-demand.patch',
+                   'kvm-preXX-fix-build-for-ESD-audio.patch',
+                   'kvm-preXX-fix-serious-regression.patch',
+                   'kvm-preXX-fix-virtio-hd.patch',
+                   'kvm-preXX-tracepoint-for-latest-kernel.patch',
+                   'kvm-remove-trace-calls.patch',
+                   'kvm-no-pp-directives-in-macros.patch']: 
+            r.addPatch(p)
 
     def configure(r):
         if Arch.x86:
@@ -31,48 +41,49 @@ class Kvm(AutoPackageRecipe):
         r.macros.securityflags = ''
 
         r.Replace('datasuffix=\"\/share\/qemu\"','datasuffix=\"/share/kvm\"',
-                  'qemu/configure')
+                  'configure')
         r.Create('kernel/.kernelrelease', contents = '%(name)s-%(version)s')
-        r.ManualConfigure( ' --with-patched-kernel '
-                           ' --disable-blobs '
-                           ' --prefix=%(prefix)s'
+        r.ManualConfigure( ' --prefix=%(prefix)s'
                            ' --kerneldir=$(pwd)/kernel '
-                           ' --audio-drv-list=sdl,oss,alsa '
+                           ' --audio-drv-list=sdl,oss,alsa,pa '
+                           ' --audio-card-list="ac97 adlib cs4231a gus es1370" '
+                           ' --extra-cflags="%(optflags)s" '
                           )
 
         r.Run(""" echo "DESTDIR=%(destdir)s" >> config.mak """)
         r.Run(""" echo "PREFIX=%(prefix)s" >> config.mak """)
         r.Run(""" echo "datadir=%(datadir)s/kvm/" >> config.mak """)
 
-        r.Replace('CFLAGS =', 'CFLAGS +=', 'user/Makefile')
-        r.Run(""" echo "CFLAGS = %(cflags)s" >> user/config.mak """)
+        r.Replace('CFLAGS =', 'CFLAGS +=', 'kvm/user/Makefile')
+        r.Run(""" echo "CFLAGS = %(cflags)s" >> kvm/user/config.mak """)
 
     def make(r):
-        r.Make('WANT_MODULE=""')
+        r.Make('KVM_KMOD="no"')
         # r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
 
-        r.Make('bios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
-        r.Make('vgabios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
+        r.Make('kvm/bios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
+        r.Make('kvm/vgabios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
 
     def makeinstall(r):
-        r.MakeInstall('WANT_MODULE=""')
+        r.MakeInstall('KVM_KMOD="no"')
 
-        r.Install('scripts/*.rules','%(sysconfdir)s/udev/rules.d/')
-        r.Install('scripts/qemu-ifup', '%(sysconfdir)s/kvm/')
+        r.Install('kvm/scripts/*.rules','%(sysconfdir)s/udev/rules.d/')
+        r.Install('kvm/scripts/qemu-ifup', '%(sysconfdir)s/kvm/')
 
-        r.Install('kvm_stat','%(bindir)s/')
-        r.Install('user/kvmtrace','%(bindir)s/')
-        r.Install('user/kvmtrace_format','%(bindir)s/')
+        r.Install('kvm/kvm_stat','%(bindir)s/')
+        # r.Install('kvm/user/kvmtrace','%(bindir)s/')
+        # r.Install('kvm/user/kvmtrace_format','%(bindir)s/')
 
         for i in ['bios', 'extboot', 'vgabios', 'vgabios-cirrus',
                   'pxe-e1000', 'pxe-ne2k_pci', 'pxe-pcnet',
                   'pxe-rtl8139']:
-            r.Install('qemu/pc-bios/' + i + '.bin', '%(datadir)s/%(name)s/', mode = 0644)
+            r.Install('pc-bios/' + i + '.bin', '%(datadir)s/%(name)s/', mode = 0644)
 
         r.addSource('kvm.modules', dest = '%(sysconfdir)s/sysconfig/modules/', mode = 0755)
 
         r.Remove('%(datadir)s/kvm/openbios-sparc32')
         r.Remove('%(datadir)s/kvm/openbios-sparc64')
+        r.Remove('%(datadir)s/kvm/openbios-ppc')
         r.Remove('%(datadir)s/kvm/video.x')
 
         # r.Move('%(mandir)s/man1/qemu.1', '%(mandir)s/man1/qemu-kvm.1')
