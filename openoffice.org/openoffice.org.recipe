@@ -7,7 +7,10 @@
 class OpenOffice(CPackageRecipe):
 
     name = 'openoffice.org'
-    version = '3.1.0+m11'
+    version = '3.1.0+m19'
+
+    go_oo_branch = 'ooo-build-3-1-1'
+    go_oo_tag = 'a9bb3ad78016bbd1e81a48489394ae04e1e8ff55'
 
     buildRequires = [
         'ant:java', 'ant:runtime', 'atk:devel', 'autoconf:runtime',
@@ -39,7 +42,7 @@ class OpenOffice(CPackageRecipe):
         'hsqldb:java'
     ]
 
-    use_kde = False
+    use_kde = True
     use_gnome = True
 
     def setup(r):
@@ -98,8 +101,17 @@ class OpenOffice(CPackageRecipe):
         # -------------------
 
         r.macros.site = 'http://download.go-oo.org'
-        #r.addGitSnapshot('git://anongit.freedesktop.org/git/ooo-build/ooo-build')
-        r.addArchive('http://download.go-oo.org/OOO310/ooo-build-3.1.0.5.tar.gz')
+        r.addGitSnapshot('git://anongit.freedesktop.org/git/ooo-build/ooo-build',
+            tag=r.go_oo_tag,
+            branch=r.go_oo_branch,
+        )
+        #r.addArchive('http://download.go-oo.org/OOO310/ooo-build-3.1.0.5.tar.gz')
+
+        # hot fixes
+        r.addSource(
+            'http://tinderbox.dev.gentoo.org/portage/app-office/openoffice/files/xulrunner-1.9.1.diff',
+            dir='patches/hotfixes/'
+        )
 
         r.addSource(
             'openoffice-extension.tag-description',
@@ -144,7 +156,7 @@ class OpenOffice(CPackageRecipe):
         for file in oooSupport:
             r.addSource('%%(site)s/SRC680/%s' % file, dir='src/')
 
-        for file in ('ooo-cli-prebuilt-3.0.tar.bz2', 'scsolver.2008-10-30.tar.bz2'):
+        for file in ('ooo-cli-prebuilt-3.0.tar.bz2', 'scsolver.2008-10-30.tar.bz2', 'ooo_oxygen_images-2009-06-17.tar.gz'):
             r.addSource('%%(site)s/DEV300/%s' % file, dir='src/')
 
         r.addSource('http://tools.openoffice.org/unowinreg_prebuild/680/unowinreg.dll', dir='src/')
@@ -202,6 +214,7 @@ class OpenOffice(CPackageRecipe):
                        ' --with-num-cpus=2'
                        ' --with-use-shell=bash'
                        ' --enable-gtk'
+                       ' --disable-kde'
                        ' --without-system-db'
                        ' --without-nas'
                        ' --with-system-libwpd'
@@ -268,9 +281,9 @@ class OpenOffice(CPackageRecipe):
 
         if r.use_kde:
             r.buildRequires.extend( [ 'kdelibs:devel', 'qt4:devel' ] )
-            extraConf += ' --enable-kde'
+            extraConf += ' --enable-kde4'
         else:
-            extraConf += ' --disable-kde'
+            extraConf += ' --disable-kde4'
 
         if r.use_gnome:
             r.buildRequires.extend([
@@ -285,7 +298,7 @@ class OpenOffice(CPackageRecipe):
                            ' --disable-gnome-vfs'
                            ' --disable-evolution2')
 
-        r.Configure(extraConf, preConfigure='PATH=$PATH:%(sbindir)s')
+        r.Configure(extraConf, preConfigure='PATH=$PATH:%(sbindir)s', configureName='autogen.sh')
 
         # Unpack OO upstream sources, must be done after configure so that the
         # makefile is there
@@ -295,6 +308,9 @@ class OpenOffice(CPackageRecipe):
         r.Make('patch.apply')
 
         r.Run('cat solenv-enable-soname.patch | patch -d build/%(tag)s-%(snapshot)s -p0')
+
+        # KDE4 fix
+        r.Replace('MOC4, moc', 'MOC4, moc-qt4', 'build/%(tag)s-%(snapshot)s/configure.in')
 
         # compile the program
         r.Make()
