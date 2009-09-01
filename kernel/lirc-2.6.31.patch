@@ -2,59 +2,40 @@ Linux Infrared Remote Control drivers -- http://www.lirc.org
 
 From http://git.wilsonet.com/linux-2.6-lirc.git/
 
-Refreshed 20090917
+Refreshed 20090901
 
 Signed-off-by: Jarod Wilson <jarod@redhat.com>
 
 ---
- MAINTAINERS                           |    9 +
  drivers/input/Kconfig                 |    2 +
  drivers/input/Makefile                |    2 +
- drivers/input/lirc/Kconfig            |  112 ++
- drivers/input/lirc/Makefile           |   20 +
+ drivers/input/lirc/Kconfig            |  119 ++
+ drivers/input/lirc/Makefile           |   21 +
  drivers/input/lirc/lirc.h             |  100 ++
  drivers/input/lirc/lirc_bt829.c       |  383 ++++++
- drivers/input/lirc/lirc_dev.c         |  851 ++++++++++++
+ drivers/input/lirc/lirc_dev.c         |  839 ++++++++++++
  drivers/input/lirc/lirc_dev.h         |  184 +++
- drivers/input/lirc/lirc_i2c.c         |  649 ++++++++++
+ drivers/input/lirc/lirc_ene0100.c     |  644 +++++++++
+ drivers/input/lirc/lirc_ene0100.h     |  169 +++
+ drivers/input/lirc/lirc_i2c.c         |  537 ++++++++
  drivers/input/lirc/lirc_igorplugusb.c |  556 ++++++++
- drivers/input/lirc/lirc_imon.c        | 2297 +++++++++++++++++++++++++++++++++
+ drivers/input/lirc/lirc_imon.c        | 2301 +++++++++++++++++++++++++++++++++
  drivers/input/lirc/lirc_it87.c        |  986 ++++++++++++++
  drivers/input/lirc/lirc_it87.h        |  116 ++
  drivers/input/lirc/lirc_ite8709.c     |  539 ++++++++
  drivers/input/lirc/lirc_mceusb.c      | 1225 ++++++++++++++++++
  drivers/input/lirc/lirc_parallel.c    |  709 ++++++++++
  drivers/input/lirc/lirc_parallel.h    |   26 +
- drivers/input/lirc/lirc_sasem.c       |  931 ++++++++++++++
+ drivers/input/lirc/lirc_sasem.c       |  931 +++++++++++++
  drivers/input/lirc/lirc_serial.c      | 1316 +++++++++++++++++++
  drivers/input/lirc/lirc_sir.c         | 1283 ++++++++++++++++++
- drivers/input/lirc/lirc_streamzap.c   |  777 +++++++++++
+ drivers/input/lirc/lirc_streamzap.c   |  794 ++++++++++++
  drivers/input/lirc/lirc_ttusbir.c     |  397 ++++++
- drivers/input/lirc/lirc_zilog.c       | 1374 ++++++++++++++++++++
- 24 files changed, 14844 insertions(+), 0 deletions(-)
+ drivers/input/lirc/lirc_zilog.c       | 1395 ++++++++++++++++++++
+ 25 files changed, 15574 insertions(+), 0 deletions(-)
 
-diff --git a/MAINTAINERS b/MAINTAINERS
-index 59fd2d1..ad1b16c 100644
---- a/MAINTAINERS
-+++ b/MAINTAINERS
-@@ -2749,6 +2749,15 @@ W:	http://www.pasemi.com/
- L:	linuxppc-dev@ozlabs.org
- S:	Supported
- 
-+LINUX INFRARED REMOTE CONTROL DRIVERS (LIRC)
-+P:	Jarod Wilson
-+M:	jarod@redhat.com
-+P:	Christoph Bartelmus
-+M:	lirc@bartelmus.de
-+W:	http://www.lirc.org/
-+L:	lirc-list@lists.sourceforge.net
-+S:	Maintained
-+
- LINUX SECURITY MODULE (LSM) FRAMEWORK
- P:	Chris Wright
- M:	chrisw@sous-sol.org
 diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
-index 5f9d860..2ba0904 100644
+index cd50c00..442f94f 100644
 --- a/drivers/input/Kconfig
 +++ b/drivers/input/Kconfig
 @@ -170,6 +170,8 @@ source "drivers/input/tablet/Kconfig"
@@ -78,10 +59,10 @@ index 4c9c745..99e2b5e 100644
 +obj-$(CONFIG_INPUT_LIRC)       += lirc/
 diff --git a/drivers/input/lirc/Kconfig b/drivers/input/lirc/Kconfig
 new file mode 100644
-index 0000000..6ef8622
+index 0000000..ab13cfe
 --- /dev/null
 +++ b/drivers/input/lirc/Kconfig
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,119 @@
 +#
 +# LIRC driver(s) configuration
 +#
@@ -105,6 +86,14 @@ index 0000000..6ef8622
 +	depends on LIRC_DEV
 +	help
 +	  Driver for the IR interface on BT829-based hardware
++
++config LIRC_ENE0100
++	tristate "ENE KB3924/ENE0100 CIR Port Reciever"
++	depends on LIRC_DEV
++	help
++	  This is a driver for CIR port handled by ENE KB3924 embedded
++	  controller found on some notebooks.
++	  It appears on PNP list as ENE0100.
 +
 +config LIRC_I2C
 +	tristate "I2C Based IR Receivers"
@@ -192,14 +181,13 @@ index 0000000..6ef8622
 +	help
 +	  Driver for the Zilog/Hauppauge IR Transmitter, found on
 +	  PVR-150/500, HVR-1200/1250/1700/1800, HD-PVR and other cards
-+
 +endif
 diff --git a/drivers/input/lirc/Makefile b/drivers/input/lirc/Makefile
 new file mode 100644
-index 0000000..7b1386e
+index 0000000..8da7aa9
 --- /dev/null
 +++ b/drivers/input/lirc/Makefile
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
 +# Makefile for the lirc drivers.
 +#
 +
@@ -207,6 +195,7 @@ index 0000000..7b1386e
 +
 +obj-$(CONFIG_LIRC_DEV)		+= lirc_dev.o
 +obj-$(CONFIG_LIRC_BT829)	+= lirc_bt829.o
++obj-$(CONFIG_LIRC_ENE0100)	+= lirc_ene0100.o
 +obj-$(CONFIG_LIRC_I2C)		+= lirc_i2c.o
 +obj-$(CONFIG_LIRC_IGORPLUGUSB)	+= lirc_igorplugusb.o
 +obj-$(CONFIG_LIRC_IMON)		+= lirc_imon.o
@@ -717,10 +706,10 @@ index 0000000..0485884
 +MODULE_PARM_DESC(debug, "Debug enabled or not");
 diff --git a/drivers/input/lirc/lirc_dev.c b/drivers/input/lirc/lirc_dev.c
 new file mode 100644
-index 0000000..0510b4e
+index 0000000..a23bfea
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.c
-@@ -0,0 +1,851 @@
+@@ -0,0 +1,839 @@
 +/*
 + * LIRC base driver
 + *
@@ -983,13 +972,6 @@ index 0000000..0510b4e
 +		}
 +	}
 +
-+	if (d->owner == NULL) {
-+		printk(KERN_ERR "lirc_dev: lirc_register_driver: "
-+				    "no module owner registered\n");
-+		err = -EBADRQC;
-+		goto out;
-+	}
-+
 +	mutex_lock(&lirc_dev_lock);
 +
 +	minor = d->minor;
@@ -1019,6 +1001,7 @@ index 0000000..0510b4e
 +	}
 +	init_irctl(ir);
 +	irctls[minor] = ir;
++	d->minor = minor;
 +
 +	if (d->sample_rate) {
 +		ir->jiffies_to_wait = HZ / d->sample_rate;
@@ -1100,8 +1083,8 @@ index 0000000..0510b4e
 +
 +	if (minor < 0 || minor >= MAX_IRCTL_DEVICES) {
 +		printk(KERN_ERR "lirc_dev: lirc_unregister_driver: "
-+		       "\"minor\" must be between 0 and %d!\n",
-+		       MAX_IRCTL_DEVICES-1);
++		       "\"minor (%d)\" must be between 0 and %d!\n",
++		       minor, MAX_IRCTL_DEVICES-1);
 +		return -EBADRQC;
 +	}
 +
@@ -1178,7 +1161,7 @@ index 0000000..0510b4e
 +		goto error;
 +	}
 +
-+	if (ir->d.owner != NULL && try_module_get(ir->d.owner)) {
++	if (try_module_get(ir->d.owner)) {
 +		++ir->open;
 +		retval = ir->d.set_use_inc(ir->d.data);
 +
@@ -1190,12 +1173,6 @@ index 0000000..0510b4e
 +		}
 +		if (ir->task)
 +			wake_up_process(ir->task);
-+	} else {
-+		if (ir->d.owner == NULL)
-+			dprintk(LOGHEAD "no module owner!!!\n",
-+				ir->d.name, ir->d.minor);
-+
-+		retval = -ENODEV;
 +	}
 +
 +error:
@@ -1762,12 +1739,837 @@ index 0000000..8eeffa2
 +			       unsigned long arg);
 +
 +#endif
+diff --git a/drivers/input/lirc/lirc_ene0100.c b/drivers/input/lirc/lirc_ene0100.c
+new file mode 100644
+index 0000000..e84368f
+--- /dev/null
++++ b/drivers/input/lirc/lirc_ene0100.c
+@@ -0,0 +1,644 @@
++/*
++ * driver for ENE KB3926 B/C/D CIR (also known as ENE0100)
++ *
++ * Copyright (C) 2009 Maxim Levitsky <maximlevitsky@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/pnp.h>
++#include <linux/io.h>
++#include <linux/interrupt.h>
++#include "lirc_ene0100.h"
++
++static int sample_period = 75;
++static int enable_idle = 1;
++static int enable_learning;
++
++static void ene_set_idle(struct ene_device *dev, int idle);
++static void ene_set_inputs(struct ene_device *dev, int enable);
++
++/* read a hardware register */
++static u8 ene_hw_read_reg(struct ene_device *dev, u16 reg)
++{
++	outb(reg >> 8, dev->hw_io + ENE_ADDR_HI);
++	outb(reg & 0xFF, dev->hw_io + ENE_ADDR_LO);
++	return inb(dev->hw_io + ENE_IO);
++}
++
++/* write a hardware register */
++static void ene_hw_write_reg(struct ene_device *dev, u16 reg, u8 value)
++{
++	outb(reg >> 8, dev->hw_io + ENE_ADDR_HI);
++	outb(reg & 0xFF, dev->hw_io + ENE_ADDR_LO);
++	outb(value, dev->hw_io + ENE_IO);
++}
++
++/* change specific bits in hardware register */
++static void ene_hw_write_reg_mask(struct ene_device *dev,
++				  u16 reg, u8 value, u8 mask)
++{
++	u8 regvalue;
++
++	outb(reg >> 8, dev->hw_io + ENE_ADDR_HI);
++	outb(reg & 0xFF, dev->hw_io + ENE_ADDR_LO);
++
++	regvalue = inb(dev->hw_io + ENE_IO) & ~mask;
++	regvalue |= (value & mask);
++	outb(regvalue, dev->hw_io + ENE_IO);
++}
++
++/* read irq status and ack it */
++static int ene_hw_irq_status(struct ene_device *dev, int *buffer_pointer)
++{
++	u8 irq_status;
++	u8 fw_flags1, fw_flags2;
++
++	fw_flags2 = ene_hw_read_reg(dev, ENE_FW2);
++
++	if (buffer_pointer)
++		*buffer_pointer = 4 * (fw_flags2 & ENE_FW2_BUF_HIGH);
++
++	if (dev->hw_revision < ENE_HW_C) {
++		irq_status = ene_hw_read_reg(dev, ENEB_IRQ_STATUS);
++
++		if (!irq_status & ENEB_IRQ_STATUS_IR)
++			return 0;
++		ene_hw_write_reg(dev, ENEB_IRQ_STATUS,
++				 irq_status & ~ENEB_IRQ_STATUS_IR);
++
++		/* rev B support only recieving */
++		return ENE_IRQ_RX;
++	}
++
++	irq_status = ene_hw_read_reg(dev, ENEC_IRQ);
++
++	if (!irq_status && ENEC_IRQ_STATUS)
++		return 0;
++
++	/* original driver does that twice - a workaround ? */
++	ene_hw_write_reg(dev, ENEC_IRQ, irq_status & ~ENEC_IRQ_STATUS);
++	ene_hw_write_reg(dev, ENEC_IRQ, irq_status & ~ENEC_IRQ_STATUS);
++
++	/* clear unknown flag in F8F9 */
++	if (fw_flags2 & ENE_FW2_IRQ_CLR)
++		ene_hw_write_reg(dev, ENE_FW2, fw_flags2 & ~ENE_FW2_IRQ_CLR);
++
++	/* check if this is a TX interrupt */
++	fw_flags1 = ene_hw_read_reg(dev, ENE_FW1);
++
++	if (fw_flags1 & ENE_FW1_TXIRQ) {
++		ene_hw_write_reg(dev, ENE_FW1, fw_flags1 & ~ENE_FW1_TXIRQ);
++		return ENE_IRQ_TX;
++	} else
++		return ENE_IRQ_RX;
++}
++
++static int ene_hw_detect(struct ene_device *dev)
++{
++	u8 chip_major, chip_minor;
++	u8 hw_revision, old_ver;
++	u8 tmp;
++	u8 fw_capabilities;
++
++	tmp = ene_hw_read_reg(dev, ENE_HW_UNK);
++	ene_hw_write_reg(dev, ENE_HW_UNK, tmp & ~ENE_HW_UNK_CLR);
++
++	chip_major = ene_hw_read_reg(dev, ENE_HW_VER_MAJOR);
++	chip_minor = ene_hw_read_reg(dev, ENE_HW_VER_MINOR);
++
++	ene_hw_write_reg(dev, ENE_HW_UNK, tmp);
++	hw_revision = ene_hw_read_reg(dev, ENE_HW_VERSION);
++	old_ver = ene_hw_read_reg(dev, ENE_HW_VER_OLD);
++
++	if (hw_revision == 0xFF) {
++
++		ene_printk(KERN_WARNING, "device seems to be disabled\n");
++		ene_printk(KERN_WARNING,
++			"send a mail to lirc-list@lists.sourceforge.net\n");
++		ene_printk(KERN_WARNING, "please attach output of acpidump\n");
++
++		return -ENODEV;
++	}
++
++	if (chip_major == 0x33) {
++		ene_printk(KERN_WARNING, "chips 0x33xx aren't supported yet\n");
++		return -ENODEV;
++	}
++
++	if (chip_major == 0x39 && chip_minor == 0x26 && hw_revision == 0xC0) {
++		dev->hw_revision = ENE_HW_C;
++		ene_printk(KERN_WARNING,
++		       "KB3926C detected, driver support is not complete!\n");
++
++	} else if (old_ver == 0x24 && hw_revision == 0xC0) {
++		dev->hw_revision = ENE_HW_B;
++		ene_printk(KERN_NOTICE, "KB3926B detected\n");
++	} else {
++		dev->hw_revision = ENE_HW_D;
++		ene_printk(KERN_WARNING,
++			"unknown ENE chip detected, assuming KB3926D\n");
++		ene_printk(KERN_WARNING, "driver support incomplete");
++
++	}
++
++	ene_printk(KERN_DEBUG, "chip is 0x%02x%02x - 0x%02x, 0x%02x\n",
++		chip_major, chip_minor, old_ver, hw_revision);
++
++
++	/* detect features hardware supports */
++
++	if (dev->hw_revision < ENE_HW_C)
++		return 0;
++
++	fw_capabilities = ene_hw_read_reg(dev, ENE_FW2);
++
++	dev->hw_gpio40_learning = fw_capabilities & ENE_FW2_GP40_AS_LEARN;
++	dev->hw_learning_and_tx_capable = fw_capabilities & ENE_FW2_LEARNING;
++
++	dev->hw_fan_as_normal_input = dev->hw_learning_and_tx_capable &&
++	    fw_capabilities & ENE_FW2_FAN_AS_NRML_IN;
++
++	ene_printk(KERN_NOTICE, "hardware features:\n");
++	ene_printk(KERN_NOTICE,
++		"learning and tx %s, gpio40_learn %s, fan_in %s\n",
++	       dev->hw_learning_and_tx_capable ? "on" : "off",
++	       dev->hw_gpio40_learning ? "on" : "off",
++	       dev->hw_fan_as_normal_input ? "on" : "off");
++
++	if (!dev->hw_learning_and_tx_capable && enable_learning)
++		enable_learning = 0;
++
++	if (dev->hw_learning_and_tx_capable) {
++		ene_printk(KERN_WARNING,
++		"Device supports transmitting, but the driver doesn't\n");
++		ene_printk(KERN_WARNING,
++		"due to lack of hardware to test against.\n");
++		ene_printk(KERN_WARNING,
++		"Send a mail to: lirc-list@lists.sourceforge.net\n");
++	}
++	return 0;
++}
++
++/* hardware initialization */
++static int ene_hw_init(void *data)
++{
++	u8 reg_value;
++	struct ene_device *dev = (struct ene_device *)data;
++	dev->in_use = 1;
++
++	if (dev->hw_revision < ENE_HW_C) {
++		ene_hw_write_reg(dev, ENEB_IRQ, dev->irq << 1);
++		ene_hw_write_reg(dev, ENEB_IRQ_UNK1, 0x01);
++	} else {
++		reg_value = ene_hw_read_reg(dev, ENEC_IRQ) & 0xF0;
++		reg_value |= ENEC_IRQ_UNK_EN;
++		reg_value &= ~ENEC_IRQ_STATUS;
++		reg_value |= (dev->irq & ENEC_IRQ_MASK);
++		ene_hw_write_reg(dev, ENEC_IRQ, reg_value);
++		ene_hw_write_reg(dev, ENE_TX_UNK1, 0x63);
++	}
++
++	ene_hw_write_reg(dev, ENE_CIR_CONF2, 0x00);
++	ene_set_inputs(dev, enable_learning);
++
++	/* set sampling period */
++	ene_hw_write_reg(dev, ENE_CIR_SAMPLE_PERIOD, sample_period);
++
++	/* ack any pending irqs - just in case */
++	ene_hw_irq_status(dev, NULL);
++
++	/* enter idle mode */
++	ene_set_idle(dev, 1);
++
++	/* enable firmware bits */
++	ene_hw_write_reg_mask(dev, ENE_FW1,
++			      ENE_FW1_ENABLE | ENE_FW1_IRQ,
++			      ENE_FW1_ENABLE | ENE_FW1_IRQ);
++	/* clear stats */
++	dev->sample = 0;
++	return 0;
++}
++
++/* this enables gpio40 signal, used if connected to wide band input*/
++static void ene_enable_gpio40(struct ene_device *dev, int enable)
++{
++	ene_hw_write_reg_mask(dev, ENE_CIR_CONF1, enable ?
++			      0 : ENE_CIR_CONF2_GPIO40DIS,
++			      ENE_CIR_CONF2_GPIO40DIS);
++}
++
++/* this enables the classic sampler */
++static void ene_enable_normal_recieve(struct ene_device *dev, int enable)
++{
++	ene_hw_write_reg(dev, ENE_CIR_CONF1, enable ? ENE_CIR_CONF1_ADC_ON : 0);
++}
++
++/* this enables recieve via fan input */
++static void ene_enable_fan_recieve(struct ene_device *dev, int enable)
++{
++	if (!enable)
++		ene_hw_write_reg(dev, ENE_FAN_AS_IN1, 0);
++	else {
++		ene_hw_write_reg(dev, ENE_FAN_AS_IN1, ENE_FAN_AS_IN1_EN);
++		ene_hw_write_reg(dev, ENE_FAN_AS_IN2, ENE_FAN_AS_IN2_EN);
++	}
++	dev->fan_input_inuse = enable;
++}
++
++/* determine which input to use*/
++static void ene_set_inputs(struct ene_device *dev, int learning_enable)
++{
++	ene_enable_normal_recieve(dev, 1);
++
++	/* old hardware doesn't support learning mode for sure */
++	if (dev->hw_revision <= ENE_HW_B)
++		return;
++
++	/* reciever not learning capable, still set gpio40 correctly */
++	if (!dev->hw_learning_and_tx_capable) {
++		ene_enable_gpio40(dev, !dev->hw_gpio40_learning);
++		return;
++	}
++
++	/* enable learning mode */
++	if (learning_enable) {
++		ene_enable_gpio40(dev, dev->hw_gpio40_learning);
++
++		/* fan input is not used for learning */
++		if (dev->hw_fan_as_normal_input)
++			ene_enable_fan_recieve(dev, 0);
++
++	/* disable learning mode */
++	} else {
++		if (dev->hw_fan_as_normal_input) {
++			ene_enable_fan_recieve(dev, 1);
++			ene_enable_normal_recieve(dev, 0);
++		} else
++			ene_enable_gpio40(dev, !dev->hw_gpio40_learning);
++	}
++
++	/* set few additional settings for this mode */
++	ene_hw_write_reg_mask(dev, ENE_CIR_CONF1, learning_enable ?
++			      ENE_CIR_CONF1_LEARN1 : 0, ENE_CIR_CONF1_LEARN1);
++
++	ene_hw_write_reg_mask(dev, ENE_CIR_CONF2, learning_enable ?
++			      ENE_CIR_CONF2_LEARN2 : 0, ENE_CIR_CONF2_LEARN2);
++}
++
++/* deinitialization */
++static void ene_hw_deinit(void *data)
++{
++	struct ene_device *dev = (struct ene_device *)data;
++
++	/* disable samplers */
++	ene_enable_normal_recieve(dev, 0);
++
++	if (dev->hw_fan_as_normal_input)
++		ene_enable_fan_recieve(dev, 0);
++
++	/* disable hardware IRQ and firmware flag */
++	ene_hw_write_reg_mask(dev, ENE_FW1, 0, ENE_FW1_ENABLE | ENE_FW1_IRQ);
++
++	ene_set_idle(dev, 1);
++	dev->in_use = 0;
++}
++
++/*  sends current sample to userspace */
++static void send_sample(struct ene_device *dev)
++{
++	int value = abs(dev->sample) & PULSE_MASK;
++
++	if (dev->sample > 0)
++		value |= PULSE_BIT;
++
++	if (!lirc_buffer_full(dev->lirc_driver->rbuf)) {
++		lirc_buffer_write(dev->lirc_driver->rbuf, (void *)&value);
++		wake_up(&dev->lirc_driver->rbuf->wait_poll);
++	}
++	dev->sample = 0;
++}
++
++/*  this updates current sample */
++static void update_sample(struct ene_device *dev, int sample)
++{
++	if (!dev->sample)
++		dev->sample = sample;
++	else if (same_sign(dev->sample, sample))
++		dev->sample += sample;
++	else {
++		send_sample(dev);
++		dev->sample = sample;
++	}
++}
++
++/* enable or disable idle mode */
++static void ene_set_idle(struct ene_device *dev, int idle)
++{
++	struct timeval now;
++	int disable = idle && enable_idle && (dev->hw_revision < ENE_HW_C);
++
++	ene_hw_write_reg_mask(dev, ENE_CIR_SAMPLE_PERIOD,
++			      disable ? 0 : ENE_CIR_SAMPLE_OVERFLOW,
++			      ENE_CIR_SAMPLE_OVERFLOW);
++	dev->idle = idle;
++
++	/* remember when we have entered the idle mode */
++	if (idle) {
++		do_gettimeofday(&dev->gap_start);
++		return;
++	}
++
++	/* send the gap between keypresses now */
++	do_gettimeofday(&now);
++
++	if (now.tv_sec - dev->gap_start.tv_sec > 16)
++		dev->sample = space(PULSE_MASK);
++	else
++		dev->sample = dev->sample +
++		    space(1000000ull * (now.tv_sec - dev->gap_start.tv_sec))
++		    + space(now.tv_usec - dev->gap_start.tv_usec);
++
++	if (abs(dev->sample) > PULSE_MASK)
++		dev->sample = space(PULSE_MASK);
++	send_sample(dev);
++}
++
++/* interrupt handler */
++static irqreturn_t ene_hw_irq(int irq, void *data)
++{
++	u16 hw_value;
++	int i, hw_sample;
++	int space;
++	int buffer_pointer;
++	int irq_status;
++
++	struct ene_device *dev = (struct ene_device *)data;
++	irq_status = ene_hw_irq_status(dev, &buffer_pointer);
++
++	if (!irq_status)
++		return IRQ_NONE;
++
++	/* TODO: only RX for now */
++	if (irq_status == ENE_IRQ_TX)
++		return IRQ_HANDLED;
++
++	for (i = 0; i < ENE_SAMPLES_SIZE; i++) {
++
++		hw_value = ene_hw_read_reg(dev,
++				ENE_SAMPLE_BUFFER + buffer_pointer + i);
++
++		if (dev->fan_input_inuse) {
++			/* read high part of the sample */
++			hw_value |= ene_hw_read_reg(dev,
++			    ENE_SAMPLE_BUFFER_FAN + buffer_pointer + i) << 8;
++
++			/* test for _space_ bit */
++			space = !(hw_value & ENE_FAN_SMPL_PULS_MSK);
++
++			/* clear space bit, and other unused bits */
++			hw_value &= ENE_FAN_VALUE_MASK;
++			hw_sample = hw_value * ENE_SAMPLE_PERIOD_FAN;
++
++		} else {
++			space = hw_value & ENE_SAMPLE_SPC_MASK;
++			hw_value &= ENE_SAMPLE_VALUE_MASK;
++			hw_sample = hw_value * sample_period;
++		}
++
++		/* no more data */
++		if (!(hw_value))
++			break;
++
++		if (space)
++			hw_sample *= -1;
++
++		/* overflow sample recieved, handle it */
++
++		if (!dev->fan_input_inuse && hw_value == ENE_SAMPLE_OVERFLOW) {
++
++			if (dev->idle)
++				continue;
++
++			if (dev->sample > 0 || abs(dev->sample) <= ENE_MAXGAP)
++				update_sample(dev, hw_sample);
++			else
++				ene_set_idle(dev, 1);
++
++			continue;
++		}
++
++		/* normal first sample recieved */
++		if (!dev->fan_input_inuse && dev->idle) {
++			ene_set_idle(dev, 0);
++
++			/* discard first recieved value, its random
++			   since its the time signal was off before
++			   first pulse if idle mode is enabled, HW
++			   does that for us */
++
++			if (!enable_idle)
++				continue;
++		}
++		update_sample(dev, hw_sample);
++		send_sample(dev);
++	}
++	return IRQ_HANDLED;
++}
++
++static int ene_probe(struct pnp_dev *pnp_dev,
++		     const struct pnp_device_id *dev_id)
++{
++	struct ene_device *dev;
++	struct lirc_driver *lirc_driver;
++	int error = -ENOMEM;
++
++	dev = kzalloc(sizeof(struct ene_device), GFP_KERNEL);
++
++	if (!dev)
++		goto err1;
++
++	dev->pnp_dev = pnp_dev;
++	pnp_set_drvdata(pnp_dev, dev);
++
++
++	/* prepare lirc interface */
++	error = -ENOMEM;
++	lirc_driver = kzalloc(sizeof(struct lirc_driver), GFP_KERNEL);
++
++	if (!lirc_driver)
++		goto err2;
++
++	dev->lirc_driver = lirc_driver;
++
++	strcpy(lirc_driver->name, ENE_DRIVER_NAME);
++	lirc_driver->minor = -1;
++	lirc_driver->code_length = sizeof(int) * 8;
++	lirc_driver->features = LIRC_CAN_REC_MODE2;
++	lirc_driver->data = dev;
++	lirc_driver->set_use_inc = ene_hw_init;
++	lirc_driver->set_use_dec = ene_hw_deinit;
++	lirc_driver->dev = &pnp_dev->dev;
++	lirc_driver->owner = THIS_MODULE;
++
++	lirc_driver->rbuf = kzalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
++
++	if (!lirc_driver->rbuf)
++		goto err3;
++
++	if (lirc_buffer_init(lirc_driver->rbuf, sizeof(int), sizeof(int) * 256))
++		goto err4;
++
++	error = -ENODEV;
++	if (lirc_register_driver(lirc_driver))
++		goto err5;
++
++	/* validate resources */
++	if (!pnp_port_valid(pnp_dev, 0) || pnp_port_len(pnp_dev, 0) < ENE_MAX_IO)
++		goto err6;
++
++	if (!pnp_irq_valid(pnp_dev, 0))
++		goto err6;
++
++	dev->hw_io = pnp_port_start(pnp_dev, 0);
++	dev->irq = pnp_irq(pnp_dev, 0);
++
++	/* claim the resources */
++	error = -EBUSY;
++	if (!request_region(dev->hw_io, ENE_MAX_IO, ENE_DRIVER_NAME))
++		goto err6;
++
++	if (request_irq(dev->irq, ene_hw_irq,
++			IRQF_SHARED, ENE_DRIVER_NAME, (void *)dev))
++		goto err7;
++
++	/* detect hardware version and features */
++	error = ene_hw_detect(dev);
++	if (error)
++		goto err8;
++
++	ene_printk(KERN_NOTICE, "driver has been succesfully loaded\n");
++	return 0;
++
++err8:
++	free_irq(dev->irq, dev);
++err7:
++	release_region(dev->hw_io, ENE_MAX_IO);
++err6:
++	lirc_unregister_driver(lirc_driver->minor);
++err5:
++	lirc_buffer_free(lirc_driver->rbuf);
++err4:
++	kfree(lirc_driver->rbuf);
++err3:
++	kfree(lirc_driver);
++err2:
++	kfree(dev);
++err1:
++	return error;
++}
++
++static void ene_remove(struct pnp_dev *pnp_dev)
++{
++	struct ene_device *dev = pnp_get_drvdata(pnp_dev);
++	ene_hw_deinit(dev);
++	free_irq(dev->irq, dev);
++	release_region(dev->hw_io, ENE_MAX_IO);
++	lirc_unregister_driver(dev->lirc_driver->minor);
++	lirc_buffer_free(dev->lirc_driver->rbuf);
++	kfree(dev->lirc_driver);
++	kfree(dev);
++}
++
++#ifdef CONFIG_PM
++
++/* TODO: make 'wake on IR' configurable and add .shutdown */
++/* currently impossible due to lack of kernel support */
++
++static int ene_suspend(struct pnp_dev *pnp_dev, pm_message_t state)
++{
++	struct ene_device *dev = pnp_get_drvdata(pnp_dev);
++	ene_hw_write_reg_mask(dev, ENE_FW1, ENE_FW1_WAKE, ENE_FW1_WAKE);
++	return 0;
++}
++
++static int ene_resume(struct pnp_dev *pnp_dev)
++{
++	struct ene_device *dev = pnp_get_drvdata(pnp_dev);
++	if (dev->in_use)
++		ene_hw_init(dev);
++
++	ene_hw_write_reg_mask(dev, ENE_FW1, 0, ENE_FW1_WAKE);
++	return 0;
++}
++
++#endif
++
++static const struct pnp_device_id ene_ids[] = {
++	{.id = "ENE0100",},
++	{},
++};
++
++static struct pnp_driver ene_driver = {
++	.name = ENE_DRIVER_NAME,
++	.id_table = ene_ids,
++	.flags = PNP_DRIVER_RES_DO_NOT_CHANGE,
++
++	.probe = ene_probe,
++	.remove = __devexit_p(ene_remove),
++
++#ifdef CONFIG_PM
++	.suspend = ene_suspend,
++	.resume = ene_resume,
++#endif
++};
++
++static int __init ene_init(void)
++{
++	if (sample_period < 5) {
++		ene_printk(KERN_ERR, "sample period must be at\n");
++		ene_printk(KERN_ERR, "least 5 us, (at least 30 recommended)\n");
++		return -EINVAL;
++	}
++	return pnp_register_driver(&ene_driver);
++}
++
++static void ene_exit(void)
++{
++	pnp_unregister_driver(&ene_driver);
++}
++
++module_param(sample_period, int, S_IRUGO);
++MODULE_PARM_DESC(sample_period, "Hardware sample period (75 us default)");
++
++module_param(enable_idle, bool, S_IRUGO | S_IWUSR);
++MODULE_PARM_DESC(enable_idle,
++	"Enables turning off signal sampling after long inactivity time; "
++	"if disabled might help detecting input signal (default: enabled)");
++
++module_param(enable_learning, bool, S_IRUGO);
++MODULE_PARM_DESC(enable_learning, "Use wide band (learning) reciever");
++
++MODULE_DEVICE_TABLE(pnp, ene_ids);
++MODULE_DESCRIPTION
++    ("LIRC driver for KB3926B/KB3926C/KB3926D (aka ENE0100) CIR port");
++MODULE_AUTHOR("Maxim Levitsky");
++MODULE_LICENSE("GPL");
++
++module_init(ene_init);
++module_exit(ene_exit);
+diff --git a/drivers/input/lirc/lirc_ene0100.h b/drivers/input/lirc/lirc_ene0100.h
+new file mode 100644
+index 0000000..01cffa2
+--- /dev/null
++++ b/drivers/input/lirc/lirc_ene0100.h
+@@ -0,0 +1,169 @@
++/*
++ * driver for ENE KB3926 B/C/D CIR (also known as ENE0100)
++ *
++ * Copyright (C) 2009 Maxim Levitsky <maximlevitsky@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
++ */
++
++#include "lirc.h"
++#include "lirc_dev.h"
++
++/* hardware address */
++#define ENE_STATUS		0	 /* hardware status - unused */
++#define ENE_ADDR_HI 		1	 /* hi byte of register address */
++#define ENE_ADDR_LO 		2	 /* low byte of register address */
++#define ENE_IO 			3	 /* read/write window */
++#define ENE_MAX_IO		4
++
++/* 8 bytes of samples, divided in 2 halfs*/
++#define ENE_SAMPLE_BUFFER 	0xF8F0	 /* regular sample buffer */
++#define ENE_SAMPLE_SPC_MASK 	(1 << 7) /* sample is space */
++#define ENE_SAMPLE_VALUE_MASK	0x7F
++#define ENE_SAMPLE_OVERFLOW	0x7F
++#define ENE_SAMPLES_SIZE	4
++
++/* fan input sample buffer */
++#define ENE_SAMPLE_BUFFER_FAN	0xF8FB	 /* this buffer holds high byte of */
++					 /* each sample of normal buffer */
++
++#define ENE_FAN_SMPL_PULS_MSK	0x8000	 /* this bit of combined sample */
++					 /* if set, says that sample is pulse */
++#define ENE_FAN_VALUE_MASK	0x0FFF   /* mask for valid bits of the value */
++
++/* first firmware register */
++#define ENE_FW1			0xF8F8
++#define	ENE_FW1_ENABLE		(1 << 0) /* enable fw processing */
++#define ENE_FW1_TXIRQ		(1 << 1) /* TX interrupt pending */
++#define ENE_FW1_WAKE		(1 << 6) /* enable wake from S3 */
++#define ENE_FW1_IRQ		(1 << 7) /* enable interrupt */
++
++/* second firmware register */
++#define ENE_FW2			0xF8F9
++#define ENE_FW2_BUF_HIGH	(1 << 0) /* which half of the buffer to read */
++#define ENE_FW2_IRQ_CLR		(1 << 2) /* clear this on IRQ */
++#define ENE_FW2_GP40_AS_LEARN	(1 << 4) /* normal input is used as */
++					 /* learning input */
++#define ENE_FW2_FAN_AS_NRML_IN	(1 << 6) /* fan is used as normal input */
++#define ENE_FW2_LEARNING	(1 << 7) /* hardware supports learning and TX */
++
++/* fan as input settings - only if learning capable */
++#define ENE_FAN_AS_IN1		0xFE30   /* fan init reg 1 */
++#define ENE_FAN_AS_IN1_EN	0xCD
++#define ENE_FAN_AS_IN2		0xFE31   /* fan init reg 2 */
++#define ENE_FAN_AS_IN2_EN	0x03
++#define ENE_SAMPLE_PERIOD_FAN   61	 /* fan input has fixed sample period */
++
++/* IRQ registers block (for revision B) */
++#define ENEB_IRQ		0xFD09	 /* IRQ number */
++#define ENEB_IRQ_UNK1		0xFD17	 /* unknown setting = 1 */
++#define ENEB_IRQ_STATUS		0xFD80	 /* irq status */
++#define ENEB_IRQ_STATUS_IR	(1 << 5) /* IR irq */
++
++/* IRQ registers block (for revision C,D) */
++#define ENEC_IRQ		0xFE9B	 /* new irq settings register */
++#define ENEC_IRQ_MASK		0x0F	 /* irq number mask */
++#define ENEC_IRQ_UNK_EN		(1 << 4) /* always enabled */
++#define ENEC_IRQ_STATUS		(1 << 5) /* irq status and ACK */
++
++/* CIR block settings */
++#define ENE_CIR_CONF1		0xFEC0
++#define ENE_CIR_CONF1_ADC_ON	0x7	 /* reciever on gpio40 enabled */
++#define ENE_CIR_CONF1_LEARN1	(1 << 3) /* enabled on learning mode */
++#define ENE_CIR_CONF1_TX_ON	0x30	 /* enabled on transmit */
++#define ENE_CIR_CONF1_TX_CARR	(1 << 7) /* send TX carrier or not */
++
++#define ENE_CIR_CONF2		0xFEC1	 /* unknown setting = 0 */
++#define ENE_CIR_CONF2_LEARN2	(1 << 4) /* set on enable learning */
++#define ENE_CIR_CONF2_GPIO40DIS	(1 << 5) /* disable normal input via gpio40 */
++
++#define ENE_CIR_SAMPLE_PERIOD	0xFEC8	 /* sample period in us */
++#define ENE_CIR_SAMPLE_OVERFLOW	(1 << 7) /* interrupt on overflows if set */
++
++
++/* transmitter - not implemented yet */
++/* KB3926C and higher */
++/* transmission is very similiar to recieving, a byte is written to */
++/* ENE_TX_INPUT, in same manner as it is read from sample buffer */
++/* sample period is fixed*/
++
++
++/* transmitter ports */
++#define ENE_TX_PORT1		0xFC01	 /* this enables one or both */
++#define ENE_TX_PORT1_EN		(1 << 5) /* TX ports */
++#define ENE_TX_PORT2		0xFC08
++#define ENE_TX_PORT2_EN		(1 << 1)
++
++#define ENE_TX_INPUT		0xFEC9	 /* next byte to transmit */
++#define ENE_TX_SPC_MASK 	(1 << 7) /* Transmitted sample is space */
++#define ENE_TX_UNK1		0xFECB	 /* set to 0x63 */
++#define ENE_TX_SMPL_PERIOD	50	 /* transmit sample period */
++
++
++#define ENE_TX_CARRIER		0xFECE	 /* TX carrier * 2 (khz) */
++#define ENE_TX_CARRIER_UNKBIT	0x80	 /* This bit set on transmit */
++#define ENE_TX_CARRIER_LOW	0xFECF	 /* TX carrier / 2 */
++
++/* Hardware versions */
++#define ENE_HW_VERSION		0xFF00	 /* hardware revision */
++#define ENE_HW_UNK 		0xFF1D
++#define ENE_HW_UNK_CLR		(1 << 2)
++#define ENE_HW_VER_MAJOR	0xFF1E	 /* chip version */
++#define ENE_HW_VER_MINOR	0xFF1F
++#define ENE_HW_VER_OLD		0xFD00
++
++#define same_sign(a, b) ((((a) > 0) && (b) > 0) || ((a) < 0 && (b) < 0))
++
++#define ENE_DRIVER_NAME 	"enecir"
++#define ENE_MAXGAP 		250000	 /* this is amount of time we wait
++					 before turning the sampler, chosen
++					 arbitry */
++
++#define space(len) 	       (-(len))	 /* add a space */
++
++/* software defines */
++#define ENE_IRQ_RX		1
++#define ENE_IRQ_TX		2
++
++#define  ENE_HW_B		1	/* 3926B */
++#define  ENE_HW_C		2	/* 3926C */
++#define  ENE_HW_D		3	/* 3926D */
++
++#define ene_printk(level, text, ...) \
++	printk(level ENE_DRIVER_NAME ": " text, ## __VA_ARGS__)
++
++struct ene_device {
++	struct pnp_dev *pnp_dev;
++	struct lirc_driver *lirc_driver;
++
++	/* hw settings */
++	unsigned long hw_io;
++	int irq;
++
++	int hw_revision;			/* hardware revision */
++	int hw_learning_and_tx_capable;		/* learning capable */
++	int hw_gpio40_learning;			/* gpio40 is learning */
++	int hw_fan_as_normal_input;	/* fan input is used as regular input */
++
++	/* device data */
++	int idle;
++	int fan_input_inuse;
++
++	int sample;
++	int in_use;
++
++	struct timeval gap_start;
++};
 diff --git a/drivers/input/lirc/lirc_i2c.c b/drivers/input/lirc/lirc_i2c.c
 new file mode 100644
-index 0000000..dedf415
+index 0000000..e27d937
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_i2c.c
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,537 @@
 +/*
 + * lirc_i2c.c
 + *
@@ -1938,15 +2740,18 @@ index 0000000..dedf415
 +	struct IR *ir = data;
 +	__u16 code;
 +	unsigned char codes[2];
++	int ret;
 +
 +	/* poll IR chip */
-+	if (size == i2c_master_recv(&ir->c, keybuf, size)) {
++	ret = i2c_master_recv(&ir->c, keybuf, size);
++	if (ret == size) {
 +		ir->b[0] = keybuf[offset];
 +		ir->b[1] = keybuf[offset+1];
 +		ir->b[2] = keybuf[offset+2];
-+		dprintk("key (0x%02x/0x%02x)\n", ir->b[0], ir->b[1]);
++		if (ir->b[0] != 0x00 && ir->b[1] != 0x00)
++			dprintk("key (0x%02x/0x%02x)\n", ir->b[0], ir->b[1]);
 +	} else {
-+		dprintk("read error\n");
++		dprintk("read error (ret=%d)\n", ret);
 +		/* keep last successful read buffer */
 +	}
 +
@@ -1961,6 +2766,7 @@ index 0000000..dedf415
 +	codes[1] = code & 0xff;
 +
 +	/* return it */
++	dprintk("sending code 0x%02x%02x to lirc\n", codes[0], codes[1]);
 +	lirc_buffer_write(buf, codes);
 +	return 0;
 +}
@@ -2093,6 +2899,8 @@ index 0000000..dedf415
 +{
 +	struct IR *ir = data;
 +
++	dprintk("%s called\n", __func__);
++
 +	/* lock bttv in memory while /dev/lirc is in use  */
 +	i2c_use_client(&ir->c);
 +
@@ -2102,6 +2910,8 @@ index 0000000..dedf415
 +static void set_use_dec(void *data)
 +{
 +	struct IR *ir = data;
++
++	dprintk("%s called\n", __func__);
 +
 +	i2c_release_client(&ir->c);
 +}
@@ -2114,45 +2924,64 @@ index 0000000..dedf415
 +	.owner		= THIS_MODULE,
 +};
 +
-+static int ir_attach(struct i2c_adapter *adap, int addr,
-+		      unsigned short flags, int kind);
-+static int ir_detach(struct i2c_client *client);
-+static int ir_probe(struct i2c_adapter *adap);
++static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id);
++static int ir_remove(struct i2c_client *client);
 +static int ir_command(struct i2c_client *client, unsigned int cmd, void *arg);
++
++static const struct i2c_device_id ir_receiver_id[] = {
++	/* Generic entry for any IR receiver */
++	{ "ir_video", 0 },
++	/* IR device specific entries could be added here */
++	{ }
++};
 +
 +static struct i2c_driver driver = {
 +	.driver = {
 +		.owner	= THIS_MODULE,
 +		.name	= "i2c ir driver",
 +	},
-+	.attach_adapter	= ir_probe,
-+	.detach_client	= ir_detach,
++	.probe		= ir_probe,
++	.remove		= ir_remove,
++	.id_table	= ir_receiver_id,
 +	.command	= ir_command,
 +};
 +
-+static struct i2c_client client_template = {
-+	.name		= "unset",
-+	.driver		= &driver
-+};
++static void pcf_probe(struct i2c_client *client, struct IR *ir)
++{
++	int ret1, ret2, ret3, ret4;
 +
-+static int ir_attach(struct i2c_adapter *adap, int addr,
-+		     unsigned short flags, int kind)
++	ret1 = i2c_smbus_write_byte(client, 0xff);
++	ret2 = i2c_smbus_read_byte(client);
++	ret3 = i2c_smbus_write_byte(client, 0x00);
++	ret4 = i2c_smbus_read_byte(client);
++
++	/* in the Asus TV-Box: bit 1-0 */
++	if (((ret2 & 0x03) == 0x03) && ((ret4 & 0x03) == 0x00)) {
++		ir->bits = (unsigned char) ~0x07;
++		ir->flag = 0x04;
++	/* in the Creative/VisionTek BreakOut-Box: bit 7-6 */
++	} else if (((ret2 & 0xc0) == 0xc0) && ((ret4 & 0xc0) == 0x00)) {
++		ir->bits = (unsigned char) ~0xe0;
++		ir->flag = 0x20;
++	}
++
++	return;
++}
++
++static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 +{
 +	struct IR *ir;
-+	int err, retval;
-+
-+	client_template.adapter = adap;
-+	client_template.addr = addr;
++	struct i2c_adapter *adap = client->adapter;
++	unsigned short addr = client->addr;
++	int retval;
 +
 +	ir = kzalloc(sizeof(struct IR), GFP_KERNEL);
 +	if (!ir)
 +		return -ENOMEM;
 +	memcpy(&ir->l, &lirc_template, sizeof(struct lirc_driver));
-+	memcpy(&ir->c, &client_template, sizeof(struct i2c_client));
++	memcpy(&ir->c, client, sizeof(struct i2c_client));
 +
-+	ir->c.adapter = adap;
-+	ir->c.addr    = addr;
-+	i2c_set_clientdata(&ir->c, ir);
++	i2c_set_clientdata(client, ir);
 +	ir->l.data    = ir;
 +	ir->l.minor   = minor;
 +	ir->l.sample_rate = 10;
@@ -2208,11 +3037,10 @@ index 0000000..dedf415
 +		break;
 +	case 0x21:
 +	case 0x23:
++		pcf_probe(client, ir);
 +		strlcpy(ir->c.name, "TV-Box IR", I2C_NAME_SIZE);
 +		ir->l.code_length = 8;
 +		ir->l.add_to_buf = add_to_buf_pcf8574;
-+		ir->bits = flags & 0xff;
-+		ir->flag = (flags >> 8) & 0xff;
 +		break;
 +	default:
 +		/* shouldn't happen */
@@ -2222,13 +3050,6 @@ index 0000000..dedf415
 +	}
 +	printk(KERN_INFO "lirc_i2c: chip 0x%x found @ 0x%02x (%s)\n",
 +	       adap->id, addr, ir->c.name);
-+
-+	/* register device */
-+	err = i2c_attach_client(&ir->c);
-+	if (err) {
-+		kfree(ir);
-+		return err;
-+	}
 +
 +	retval = lirc_register_driver(&ir->l);
 +
@@ -2243,147 +3064,16 @@ index 0000000..dedf415
 +	return 0;
 +}
 +
-+static int ir_detach(struct i2c_client *client)
++static int ir_remove(struct i2c_client *client)
 +{
 +	struct IR *ir = i2c_get_clientdata(client);
 +
 +	/* unregister device */
 +	lirc_unregister_driver(ir->l.minor);
-+	i2c_detach_client(&ir->c);
 +
 +	/* free memory */
 +	kfree(ir);
 +	return 0;
-+}
-+
-+static int ir_probe(struct i2c_adapter *adap)
-+{
-+	/*
-+	 * The external IR receiver is at i2c address 0x34 (0x35 for
-+	 * reads).  Future Hauppauge cards will have an internal
-+	 * receiver at 0x30 (0x31 for reads).  In theory, both can be
-+	 * fitted, and Hauppauge suggest an external overrides an
-+	 * internal.
-+	 *
-+	 * That's why we probe 0x1a (~0x34) first. CB
-+	 *
-+	 * The i2c address for the Hauppauge PVR-150 card is 0xe2,
-+	 * so we need to probe 0x71 as well.
-+	 */
-+
-+	static const int probe[] = {
-+		0x1a, /* Hauppauge IR external */
-+		0x18, /* Hauppauge IR internal */
-+		0x71, /* Hauppauge IR (PVR150) */
-+		0x4b, /* PV951 IR */
-+		0x64, /* Pixelview IR */
-+		0x30, /* KNC ONE IR */
-+		0x6b, /* Adaptec IR */
-+		-1};
-+
-+	static const int probe_cx88[] = {
-+		0x18, /* Leadtek Winfast PVR2000 */
-+		0x71, /* Hauppauge HVR-IR */
-+		-1};
-+
-+	struct i2c_client c;
-+	char buf;
-+	int i, rc;
-+	memset(&c, 0, sizeof(c));
-+
-+	if (adap->id == I2C_HW_B_BT848 ||
-+	    adap->id == I2C_HW_B_CX2341X) {
-+		c.adapter = adap;
-+		for (i = 0; -1 != probe[i]; i++) {
-+			c.addr = probe[i];
-+			rc = i2c_master_recv(&c, &buf, 1);
-+			dprintk("probe 0x%02x @ %s: %s\n",
-+				probe[i], adap->name,
-+				(1 == rc) ? "yes" : "no");
-+			if (1 == rc) {
-+				rc = ir_attach(adap, probe[i], 0, 0);
-+				if (rc < 0)
-+					goto attach_fail;
-+			}
-+		}
-+	}
-+
-+	/* Leadtek Winfast PVR2000 or Hauppauge HVR-1300 */
-+	else if (adap->id == I2C_HW_B_CX2388x) {
-+		c.adapter = adap;
-+		for (i = 0; -1 != probe_cx88[i]; i++) {
-+			c.addr = probe_cx88[i];
-+			rc = i2c_master_recv(&c, &buf, 1);
-+			dprintk("probe 0x%02x @ %s: %s\n",
-+				c.addr, adap->name,
-+				(1 == rc) ? "yes" : "no");
-+			if (1 == rc) {
-+				rc = ir_attach(adap, c.addr, 0, 0);
-+				if (rc < 0)
-+					goto attach_fail;
-+			}
-+		}
-+	}
-+
-+	/* Asus TV-Box and Creative/VisionTek BreakOut-Box (PCF8574) */
-+	else if (adap->id == I2C_HW_B_RIVA) {
-+		/*
-+		 * addresses to probe;
-+		 * leave 0x24 and 0x25 because SAA7113H possibly uses it
-+		 * 0x21 and 0x22 possibly used by SAA7108E
-+		 * Asus:      0x21 is a correct address (channel 1 of PCF8574)
-+		 * Creative:  0x23 is a correct address (channel 3 of PCF8574)
-+		 * VisionTek: 0x23 is a correct address (channel 3 of PCF8574)
-+		 */
-+		static const int pcf_probe[] = { 0x20, 0x21, 0x22, 0x23,
-+						 0x24, 0x25, 0x26, 0x27, -1 };
-+		int ret1, ret2, ret3, ret4;
-+		unsigned char bits = 0, flag = 0;
-+
-+		c.adapter = adap;
-+		for (i = 0; -1 != pcf_probe[i]; i++) {
-+			c.addr = pcf_probe[i];
-+			ret1 = i2c_smbus_write_byte(&c, 0xff);
-+			ret2 = i2c_smbus_read_byte(&c);
-+			ret3 = i2c_smbus_write_byte(&c, 0x00);
-+			ret4 = i2c_smbus_read_byte(&c);
-+
-+			/* ensure that the writable bitmask works correctly */
-+			rc = 0;
-+			if (ret1 != -1 && ret2 != -1 &&
-+			    ret3 != -1 && ret4 != -1) {
-+				/* in the Asus TV-Box: bit 1-0 */
-+				if (((ret2 & 0x03) == 0x03) &&
-+				    ((ret4 & 0x03) == 0x00)) {
-+					bits = (unsigned char) ~0x07;
-+					flag = 0x04;
-+					rc = 1;
-+				}
-+			/* in the Creative/VisionTek BreakOut-Box: bit 7-6 */
-+				if (((ret2 & 0xc0) == 0xc0) &&
-+				    ((ret4 & 0xc0) == 0x00)) {
-+					bits = (unsigned char) ~0xe0;
-+					flag = 0x20;
-+					rc = 1;
-+				}
-+			}
-+			dprintk("probe 0x%02x @ %s: %s\n",
-+				c.addr, adap->name, rc ? "yes" : "no");
-+			if (rc) {
-+				rc = ir_attach(adap, pcf_probe[i],
-+					       bits | (flag << 8), 0);
-+				if (rc < 0)
-+					goto attach_fail;
-+			}
-+		}
-+	}
-+
-+	return 0;
-+
-+attach_fail:
-+	printk(KERN_ERR "lirc_i2c: %s: ir_attach failed!\n", __func__);
-+	return rc;
-+
 +}
 +
 +static int ir_command(struct i2c_client *client, unsigned int cmd, void *arg)
@@ -2981,10 +3671,10 @@ index 0000000..ff49bdd
 +
 diff --git a/drivers/input/lirc/lirc_imon.c b/drivers/input/lirc/lirc_imon.c
 new file mode 100644
-index 0000000..05fe0c7
+index 0000000..93acb33
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_imon.c
-@@ -0,0 +1,2297 @@
+@@ -0,0 +1,2301 @@
 +/*
 + *   lirc_imon.c:  LIRC/VFD/LCD driver for SoundGraph iMON IR/VFD/LCD
 + *		   including the iMON PAD model
@@ -4067,8 +4757,12 @@ index 0000000..05fe0c7
 +		context->ir_protocol = IMON_IR_PROTOCOL_IMON;
 +		break;
 +	}
-+	memcpy(context->usb_tx_buf, &ir_proto_packet,
-+	       sizeof(ir_proto_packet));
++
++	/* Don't send config packet on devices w/o tx ctrl ep */
++	if (!context->tx_control)
++		return;
++
++	memcpy(context->usb_tx_buf, &ir_proto_packet, sizeof(ir_proto_packet));
 +	retval = send_packet(context);
 +	if (retval)
 +		printk(KERN_INFO "%s: failed to set remote type\n", __func__);
@@ -4281,10 +4975,10 @@ index 0000000..05fe0c7
 +	unsigned char mask;
 +	int i, chunk_num;
 +	int ts_input = 0;
-+	int mouse_input;
-+	int right_shift = 1;
 +	int dir = 0;
 +	u16 timeout, threshold;
++	int mouse_input;
++	int right_shift = 1;
 +	struct input_dev *mouse = NULL;
 +	struct input_dev *touch = NULL;
 +	const unsigned char toggle_button1[] = { 0x29, 0x91, 0x15, 0xb7 };
@@ -12469,10 +13163,10 @@ index 0000000..b497642
 +MODULE_PARM_DESC(debug, "Enable debugging messages");
 diff --git a/drivers/input/lirc/lirc_streamzap.c b/drivers/input/lirc/lirc_streamzap.c
 new file mode 100644
-index 0000000..d1ce354
+index 0000000..a5f3140
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_streamzap.c
-@@ -0,0 +1,777 @@
+@@ -0,0 +1,794 @@
 +/*
 + * Streamzap Remote Control driver
 + *
@@ -12548,7 +13242,7 @@ index 0000000..d1ce354
 +#define STREAMZAP_RESOLUTION 256
 +
 +/* number of samples buffered */
-+#define STREAMZAP_BUFFER_SIZE 128
++#define STREAMZAP_BUF_LEN 128
 +
 +enum StreamzapDecoderState {
 +	PulseSpace,
@@ -12596,9 +13290,8 @@ index 0000000..d1ce354
 +	struct urb		*urb_in;
 +
 +	/* lirc */
-+	struct lirc_driver	driver;
-+	struct lirc_buffer	delay_buf;
-+	struct lirc_buffer	lirc_buf;
++	struct lirc_driver	*driver;
++	struct lirc_buffer	*delay_buf;
 +
 +	/* timer used to support delay buffering */
 +	struct timer_list	delay_timer;
@@ -12674,18 +13367,18 @@ index 0000000..d1ce354
 +
 +	spin_lock_irqsave(&sz->timer_lock, flags);
 +
-+	if (!lirc_buffer_empty(&sz->delay_buf) &&
-+	    !lirc_buffer_full(&sz->lirc_buf)) {
-+		lirc_buffer_read(&sz->delay_buf, (unsigned char *) &data);
-+		lirc_buffer_write(&sz->lirc_buf, (unsigned char *) &data);
++	if (!lirc_buffer_empty(sz->delay_buf) &&
++	    !lirc_buffer_full(sz->driver->rbuf)) {
++		lirc_buffer_read(sz->delay_buf, (unsigned char *) &data);
++		lirc_buffer_write(sz->driver->rbuf, (unsigned char *) &data);
 +	}
-+	if (!lirc_buffer_empty(&sz->delay_buf)) {
-+		while (lirc_buffer_available(&sz->delay_buf) <
-+		      STREAMZAP_BUFFER_SIZE/2 &&
-+		      !lirc_buffer_full(&sz->lirc_buf)) {
-+			lirc_buffer_read(&sz->delay_buf,
++	if (!lirc_buffer_empty(sz->delay_buf)) {
++		while (lirc_buffer_available(sz->delay_buf) <
++		       STREAMZAP_BUF_LEN / 2 &&
++		       !lirc_buffer_full(sz->driver->rbuf)) {
++			lirc_buffer_read(sz->delay_buf,
 +					   (unsigned char *) &data);
-+			lirc_buffer_write(&sz->lirc_buf,
++			lirc_buffer_write(sz->driver->rbuf,
 +					    (unsigned char *) &data);
 +		}
 +		if (sz->timer_running) {
@@ -12696,8 +13389,8 @@ index 0000000..d1ce354
 +		sz->timer_running = 0;
 +	}
 +
-+	if (!lirc_buffer_empty(&sz->lirc_buf))
-+		wake_up(&sz->lirc_buf.wait_poll);
++	if (!lirc_buffer_empty(sz->driver->rbuf))
++		wake_up(&sz->driver->rbuf->wait_poll);
 +
 +	spin_unlock_irqrestore(&sz->timer_lock, flags);
 +}
@@ -12707,18 +13400,18 @@ index 0000000..d1ce354
 +	int data;
 +	int empty = 1;
 +
-+	while (!lirc_buffer_empty(&sz->delay_buf)) {
++	while (!lirc_buffer_empty(sz->delay_buf)) {
 +		empty = 0;
-+		lirc_buffer_read(&sz->delay_buf, (unsigned char *) &data);
-+		if (!lirc_buffer_full(&sz->lirc_buf)) {
-+			lirc_buffer_write(&sz->lirc_buf,
++		lirc_buffer_read(sz->delay_buf, (unsigned char *) &data);
++		if (!lirc_buffer_full(sz->driver->rbuf)) {
++			lirc_buffer_write(sz->driver->rbuf,
 +					    (unsigned char *) &data);
 +		} else {
-+			dprintk("buffer overflow", sz->driver.minor);
++			dprintk("buffer overflow", sz->driver->minor);
 +		}
 +	}
 +	if (!empty)
-+		wake_up(&sz->lirc_buf.wait_poll);
++		wake_up(&sz->driver->rbuf->wait_poll);
 +}
 +
 +static void push(struct usb_streamzap *sz, unsigned char *data)
@@ -12726,20 +13419,20 @@ index 0000000..d1ce354
 +	unsigned long flags;
 +
 +	spin_lock_irqsave(&sz->timer_lock, flags);
-+	if (lirc_buffer_full(&sz->delay_buf)) {
++	if (lirc_buffer_full(sz->delay_buf)) {
 +		int read_data;
 +
-+		lirc_buffer_read(&sz->delay_buf,
++		lirc_buffer_read(sz->delay_buf,
 +				   (unsigned char *) &read_data);
-+		if (!lirc_buffer_full(&sz->lirc_buf)) {
-+			lirc_buffer_write(&sz->lirc_buf,
++		if (!lirc_buffer_full(sz->driver->rbuf)) {
++			lirc_buffer_write(sz->driver->rbuf,
 +					    (unsigned char *) &read_data);
 +		} else {
-+			dprintk("buffer overflow", sz->driver.minor);
++			dprintk("buffer overflow", sz->driver->minor);
 +		}
 +	}
 +
-+	lirc_buffer_write(&sz->delay_buf, data);
++	lirc_buffer_write(sz->delay_buf, data);
 +
 +	if (!sz->timer_running) {
 +		sz->delay_timer.expires = jiffies + HZ/10;
@@ -12771,7 +13464,7 @@ index 0000000..d1ce354
 +					sz->signal_last.tv_usec);
 +			tmp -= sz->sum;
 +		}
-+		dprintk("ls %u", sz->driver.minor, tmp);
++		dprintk("ls %u", sz->driver->minor, tmp);
 +		push(sz, (char *)&tmp);
 +
 +		sz->idle = 0;
@@ -12783,7 +13476,7 @@ index 0000000..d1ce354
 +	sz->sum += pulse;
 +	pulse |= PULSE_BIT;
 +
-+	dprintk("p %u", sz->driver.minor, pulse & PULSE_MASK);
++	dprintk("p %u", sz->driver->minor, pulse & PULSE_MASK);
 +	push(sz, (char *)&pulse);
 +}
 +
@@ -12801,7 +13494,7 @@ index 0000000..d1ce354
 +	space = ((int) value)*STREAMZAP_RESOLUTION;
 +	space += STREAMZAP_RESOLUTION/2;
 +	sz->sum += space;
-+	dprintk("s %u", sz->driver.minor, space);
++	dprintk("s %u", sz->driver->minor, space);
 +	push(sz, (char *)&space);
 +}
 +
@@ -12843,10 +13536,10 @@ index 0000000..d1ce354
 +		break;
 +	}
 +
-+	dprintk("received %d", sz->driver.minor, urb->actual_length);
++	dprintk("received %d", sz->driver->minor, urb->actual_length);
 +	if (!sz->flush) {
 +		for (i = 0; i < urb->actual_length; i++) {
-+			dprintk("%d: %x", sz->driver.minor,
++			dprintk("%d: %x", sz->driver->minor,
 +				i, (unsigned char) sz->buf_in[i]);
 +			switch (sz->decoder_state) {
 +			case PulseSpace:
@@ -12918,14 +13611,18 @@ index 0000000..d1ce354
 +{
 +	struct usb_device *udev = interface_to_usbdev(interface);
 +	struct usb_host_interface *iface_host;
-+	int retval = -ENOMEM;
-+	struct usb_streamzap *sz = NULL;
++	struct usb_streamzap *sz;
++	struct lirc_driver *driver;
++	struct lirc_buffer *lirc_buf;
++	struct lirc_buffer *delay_buf;
 +	char buf[63], name[128] = "";
++	int retval = -ENOMEM;
++	int minor = 0;
 +
 +	/* Allocate space for device driver specific data */
 +	sz = kzalloc(sizeof(struct usb_streamzap), GFP_KERNEL);
 +	if (sz == NULL)
-+		goto error;
++		return -ENOMEM;
 +
 +	sz->udev = udev;
 +	sz->interface = interface;
@@ -12937,7 +13634,7 @@ index 0000000..d1ce354
 +		err("%s: Unexpected desc.bNumEndpoints (%d)", __func__,
 +		    iface_host->desc.bNumEndpoints);
 +		retval = -ENODEV;
-+		goto error;
++		goto free_sz;
 +	}
 +
 +	sz->endpoint = &(iface_host->endpoint[0].desc);
@@ -12946,7 +13643,7 @@ index 0000000..d1ce354
 +		err("%s: endpoint doesn't match input device 02%02x",
 +		    __func__, sz->endpoint->bEndpointAddress);
 +		retval = -ENODEV;
-+		goto error;
++		goto free_sz;
 +	}
 +
 +	if ((sz->endpoint->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK)
@@ -12954,13 +13651,13 @@ index 0000000..d1ce354
 +		err("%s: endpoint attributes don't match xfer 02%02x",
 +		    __func__, sz->endpoint->bmAttributes);
 +		retval = -ENODEV;
-+		goto error;
++		goto free_sz;
 +	}
 +
 +	if (sz->endpoint->wMaxPacketSize == 0) {
 +		err("%s: endpoint message size==0? ", __func__);
 +		retval = -ENODEV;
-+		goto error;
++		goto free_sz;
 +	}
 +
 +	/* Allocate the USB buffer and IRQ URB */
@@ -12969,36 +13666,43 @@ index 0000000..d1ce354
 +	sz->buf_in = usb_buffer_alloc(sz->udev, sz->buf_in_len,
 +				      GFP_ATOMIC, &sz->dma_in);
 +	if (sz->buf_in == NULL)
-+		goto error;
++		goto free_sz;
 +
 +	sz->urb_in = usb_alloc_urb(0, GFP_KERNEL);
 +	if (sz->urb_in == NULL)
-+		goto error;
++		goto free_sz;
 +
 +	/* Connect this device to the LIRC sub-system */
++	driver = kzalloc(sizeof(struct lirc_driver), GFP_KERNEL);
++	if (!driver)
++		goto free_sz;
 +
-+	if (lirc_buffer_init(&sz->lirc_buf, sizeof(int),
-+			     STREAMZAP_BUFFER_SIZE))
-+		goto error;
++	lirc_buf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
++	if (!lirc_buf)
++		goto free_driver;
++	if (lirc_buffer_init(lirc_buf, sizeof(int), STREAMZAP_BUF_LEN))
++		goto kfree_lirc_buf;
 +
-+	if (lirc_buffer_init(&sz->delay_buf, sizeof(int),
-+			     STREAMZAP_BUFFER_SIZE)) {
-+		lirc_buffer_free(&sz->lirc_buf);
-+		goto error;
-+	}
++	delay_buf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
++	if (!delay_buf)
++		goto free_lirc_buf;
++	if (lirc_buffer_init(delay_buf, sizeof(int), STREAMZAP_BUF_LEN))
++		goto kfree_delay_buf;
 +
-+	strcpy(sz->driver.name, DRIVER_NAME);
-+	sz->driver.minor = -1;
-+	sz->driver.sample_rate = 0;
-+	sz->driver.code_length = sizeof(int) * 8;
-+	sz->driver.features = LIRC_CAN_REC_MODE2 | LIRC_CAN_GET_REC_RESOLUTION;
-+	sz->driver.data = sz;
-+	sz->driver.rbuf = &sz->lirc_buf;
-+	sz->driver.set_use_inc = &streamzap_use_inc;
-+	sz->driver.set_use_dec = &streamzap_use_dec;
-+	sz->driver.fops = &streamzap_fops;
-+	sz->driver.dev = &interface->dev;
-+	sz->driver.owner = THIS_MODULE;
++	sz->driver = driver;
++	strcpy(sz->driver->name, DRIVER_NAME);
++	sz->driver->minor = -1;
++	sz->driver->sample_rate = 0;
++	sz->driver->code_length = sizeof(int) * 8;
++	sz->driver->features = LIRC_CAN_REC_MODE2 | LIRC_CAN_GET_REC_RESOLUTION;
++	sz->driver->data = sz;
++	sz->driver->rbuf = lirc_buf;
++	sz->delay_buf = delay_buf;
++	sz->driver->set_use_inc = &streamzap_use_inc;
++	sz->driver->set_use_dec = &streamzap_use_dec;
++	sz->driver->fops = &streamzap_fops;
++	sz->driver->dev = &interface->dev;
++	sz->driver->owner = THIS_MODULE;
 +
 +	sz->idle = 1;
 +	sz->decoder_state = PulseSpace;
@@ -13031,28 +13735,32 @@ index 0000000..d1ce354
 +		snprintf(name + strlen(name), sizeof(name) - strlen(name),
 +			 " %s", buf);
 +
-+	printk(KERN_INFO DRIVER_NAME "[%d]: %s on usb%d:%d attached\n",
-+	       sz->driver.minor, name,
-+	       udev->bus->busnum, sz->udev->devnum);
++	minor = lirc_register_driver(driver);
++
++	if (minor < 0)
++		goto free_delay_buf;
++
++	sz->driver->minor = minor;
 +
 +	usb_set_intfdata(interface, sz);
 +
-+	if (lirc_register_driver(&sz->driver) < 0) {
-+		lirc_buffer_free(&sz->delay_buf);
-+		lirc_buffer_free(&sz->lirc_buf);
-+		goto error;
-+	}
++	printk(KERN_INFO DRIVER_NAME "[%d]: %s on usb%d:%d attached\n",
++	       sz->driver->minor, name,
++	       udev->bus->busnum, sz->udev->devnum);
 +
 +	return 0;
 +
-+error:
-+
-+	/*
-+	 * Premise is that a 'goto error' can be invoked from inside the
-+	 * probe function and all necessary cleanup actions will be taken
-+	 * including freeing any necessary memory blocks
-+	 */
-+
++free_delay_buf:
++	lirc_buffer_free(sz->delay_buf);
++kfree_delay_buf:
++	kfree(delay_buf);
++free_lirc_buf:
++	lirc_buffer_free(sz->driver->rbuf);
++kfree_lirc_buf:
++	kfree(lirc_buf);
++free_driver:
++	kfree(driver);
++free_sz:
 +	if (retval == -ENOMEM)
 +		err("Out of memory");
 +
@@ -13073,10 +13781,10 @@ index 0000000..d1ce354
 +		dprintk("%s called with no context", -1, __func__);
 +		return -EINVAL;
 +	}
-+	dprintk("set use inc", sz->driver.minor);
++	dprintk("set use inc", sz->driver->minor);
 +
-+	lirc_buffer_clear(&sz->lirc_buf);
-+	lirc_buffer_clear(&sz->delay_buf);
++	lirc_buffer_clear(sz->driver->rbuf);
++	lirc_buffer_clear(sz->delay_buf);
 +
 +	sz->flush_timer.expires = jiffies + HZ;
 +	sz->flush = 1;
@@ -13085,7 +13793,7 @@ index 0000000..d1ce354
 +	sz->urb_in->dev = sz->udev;
 +	if (usb_submit_urb(sz->urb_in, GFP_ATOMIC)) {
 +		dprintk("open result = -EIO error submitting urb",
-+			sz->driver.minor);
++			sz->driver->minor);
 +		return -EIO;
 +	}
 +	sz->in_use++;
@@ -13101,7 +13809,7 @@ index 0000000..d1ce354
 +		dprintk("%s called with no context", -1, __func__);
 +		return;
 +	}
-+	dprintk("set use dec", sz->driver.minor);
++	dprintk("set use dec", sz->driver->minor);
 +
 +	if (sz->flush) {
 +		sz->flush = 0;
@@ -13152,13 +13860,13 @@ index 0000000..d1ce354
 +
 +	/* unregister from the LIRC sub-system */
 +
-+	errnum = lirc_unregister_driver(sz->driver.minor);
++	errnum = lirc_unregister_driver(sz->driver->minor);
 +	if (errnum != 0)
 +		dprintk("error in lirc_unregister: (returned %d)",
-+			sz->driver.minor, errnum);
++			sz->driver->minor, errnum);
 +
-+	lirc_buffer_free(&sz->delay_buf);
-+	lirc_buffer_free(&sz->lirc_buf);
++	lirc_buffer_free(sz->delay_buf);
++	lirc_buffer_free(sz->driver->rbuf);
 +
 +	/* unregister from the USB sub-system */
 +
@@ -13166,7 +13874,10 @@ index 0000000..d1ce354
 +
 +	usb_buffer_free(sz->udev, sz->buf_in_len, sz->buf_in, sz->dma_in);
 +
-+	minor = sz->driver.minor;
++	minor = sz->driver->minor;
++	kfree(sz->driver->rbuf);
++	kfree(sz->driver);
++	kfree(sz->delay_buf);
 +	kfree(sz);
 +
 +	printk(KERN_INFO DRIVER_NAME "[%d]: disconnected\n", minor);
@@ -13176,7 +13887,7 @@ index 0000000..d1ce354
 +{
 +	struct usb_streamzap *sz = usb_get_intfdata(intf);
 +
-+	printk(KERN_INFO DRIVER_NAME "[%d]: suspend\n", sz->driver.minor);
++	printk(KERN_INFO DRIVER_NAME "[%d]: suspend\n", sz->driver->minor);
 +	if (sz->in_use) {
 +		if (sz->flush) {
 +			sz->flush = 0;
@@ -13194,8 +13905,8 @@ index 0000000..d1ce354
 +{
 +	struct usb_streamzap *sz = usb_get_intfdata(intf);
 +
-+	lirc_buffer_clear(&sz->lirc_buf);
-+	lirc_buffer_clear(&sz->delay_buf);
++	lirc_buffer_clear(sz->driver->rbuf);
++	lirc_buffer_clear(sz->delay_buf);
 +
 +	if (sz->in_use) {
 +		sz->flush_timer.expires = jiffies + HZ;
@@ -13205,7 +13916,7 @@ index 0000000..d1ce354
 +		sz->urb_in->dev = sz->udev;
 +		if (usb_submit_urb(sz->urb_in, GFP_ATOMIC)) {
 +			dprintk("open result = -EIO error submitting urb",
-+				sz->driver.minor);
++				sz->driver->minor);
 +			return -EIO;
 +		}
 +	}
@@ -13655,10 +14366,10 @@ index 0000000..2955bad
 +module_exit(ttusbir_exit_module);
 diff --git a/drivers/input/lirc/lirc_zilog.c b/drivers/input/lirc/lirc_zilog.c
 new file mode 100644
-index 0000000..c532399
+index 0000000..f86db02
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_zilog.c
-@@ -0,0 +1,1374 @@
+@@ -0,0 +1,1395 @@
 +/*
 + * i2c IR lirc driver for devices with zilog IR processors
 + *
@@ -13828,7 +14539,7 @@ index 0000000..c532399
 +
 +		/*
 +		 * Send random "poll command" (?)  Windows driver does this
-+		 * and it  is a good point to detect chip failure.
++		 * and it is a good point to detect chip failure.
 +		 */
 +		ret = i2c_master_send(&ir->c_rx, sendbuf, 1);
 +		if (ret != 1) {
@@ -13866,11 +14577,20 @@ index 0000000..c532399
 +		}
 +
 +		/* key pressed ? */
++#ifdef I2C_HW_B_HDPVR
++		if (ir->c_rx.adapter->id == I2C_HW_B_HDPVR) {
++			if (got_data && (keybuf[0] == 0x80))
++				return 0;
++			else if (got_data && (keybuf[0] == 0x00))
++				return -ENODATA;
++		} else if ((ir->b[0] & 0x80) == 0)
++#else
 +		if ((ir->b[0] & 0x80) == 0)
++#endif
 +			return got_data ? 0 : -ENODATA;
 +
 +		/* look what we have */
-+		code = (((__u16)ir->b[0]&0x7f)<<6) | (ir->b[1]>>2);
++		code = (((__u16)ir->b[0] & 0x7f) << 6) | (ir->b[1] >> 2);
 +
 +		codes[0] = (code >> 8) & 0xff;
 +		codes[1] = code & 0xff;
@@ -13879,6 +14599,7 @@ index 0000000..c532399
 +		lirc_buffer_write(&ir->buf, codes);
 +		++got_data;
 +	} while (!lirc_buffer_full(&ir->buf));
++
 +	return 0;
 +}
 +
@@ -14491,6 +15212,16 @@ index 0000000..c532399
 +		return ret < 0 ? ret : -EFAULT;
 +	}
 +
++#ifdef I2C_HW_B_HDPVR
++	/*
++	 * The sleep bits aren't necessary on the HD PVR, and in fact, the
++	 * last i2c_master_recv always fails with a -5, so for now, we're
++	 * going to skip this whole mess and say we're done on the HD PVR
++	 */
++	if (ir->c_rx.adapter->id == I2C_HW_B_HDPVR)
++		goto done;
++#endif
++
 +	/*
 +	 * This bit NAKs until the device is ready, so we retry it
 +	 * sleeping a bit each time.  This seems to be what the windows
@@ -14523,6 +15254,7 @@ index 0000000..c532399
 +		return -EFAULT;
 +	}
 +
++done:
 +	/* Oh good, it worked */
 +	dprintk("sent code %u, key %u\n", code, key);
 +	return 0;
