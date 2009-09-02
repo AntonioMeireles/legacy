@@ -8,7 +8,7 @@ class EclipseSDK(PackageRecipe):
 
     name = 'eclipse-sdk'
     version = '3.5'
-    build_id = '22562'
+    build_id = '22826'
     timestamp = 'I20090611-1540'
 
     buildRequires = [
@@ -34,12 +34,12 @@ class EclipseSDK(PackageRecipe):
         r.macros.build_site = 'http://download.eclipse.org/technology/linuxtools/eclipse-build/'
         r.macros.build_repo = 'http://dev.eclipse.org/svnroot/technology/org.eclipse.linuxtools/eclipse-build/trunk'
 
-        r.macros.eclipsedir = '%(libdir)s/eclipse-%(major_version)s/'
+        r.macros.eclipsedir = '%(libdir)s/eclipse-%(major_version)s'
 
         r.addSvnSnapshot('%(build_repo)s/eclipse-build', revision=r.build_id)
         for d in ('config', 'feature'):
             r.addSvnSnapshot('%(build_repo)s/eclipse-build-'+d, revision=r.build_id)
-            r.Run('ln -s `pwd`/../eclipse-sdk--eclipse-build-%s eclipse-build-%s' % (d, d))
+            r.Run('ln -s `pwd`/../%%(name)s--eclipse-build-%s eclipse-build-%s' % (d, d))
 
         r.addSource('%(build_site)s/eclipse-%(timestamp)s-fetched-src.tar.bz2')
 
@@ -73,10 +73,83 @@ class EclipseSDK(PackageRecipe):
  
         r.Run('AWT_LIB_PATH=$JAVA_HOME/jre/lib/%s ant -DbuildArch=%s' % (awt_arch, arch))
 
-        r.Install(
-            'build/eclipse-%(timestamp)s-fetched-src/installation/*',
-            '%(eclipsedir)s/'
+        r.macros.sdkDir = '%(eclipsedir)s'
+        r.macros.installDir = '%(eclipsedir)s-SDK'
+        r.macros.metadataDir = '%(installDir)s/metadata-SDK'
+        r.macros.provisionDir = '%(installDir)s-provisioned'
+        r.macros.profileId = 'SDKProfile'
+
+        r.Install('build/eclipse-%(timestamp)s-fetched-src/installation/*', '%(installDir)s/')
+        r.Remove('%(installDir)s/p2', recursive=True)
+
+        # Generate metadata for the platform
+        r.Run('java'
+                ' -jar %(destdir)s%(installDir)s/plugins/org.eclipse.equinox.launcher_*.jar'
+                ' -application'
+                ' org.eclipse.equinox.p2.metadata.generator.EclipseGenerator'
+                ' -metadataRepository file:%(destdir)s%(metadataDir)s'
+                ' -artifactRepository file:%(destdir)s%(metadataDir)s'
+                ' -source %(destdir)s%(installDir)s'
+                ' -root "Eclipse SDK"'
+                ' -rootVersion %(version)s'
+                ' -flavor tooling'
+                ' -publishArtifacts'
+                ' -append'
+                ' -artifactRepositoryName "Eclipse SDK"'
+                ' -metadataRepositoryName "Eclipse SDK"'
         )
+
+        # Provision with director
+        r.Run('java'
+                ' -Declipse.p2.data.area=file:%(destdir)s%(provisionDir)s/p2'
+                ' -Declipse.p2.MD5Check=false'
+                ' -jar %(destdir)s%(installDir)s/plugins/org.eclipse.equinox.launcher_*.jar'
+                ' -application org.eclipse.equinox.p2.director'
+                ' -flavor tooling'
+                ' -installIU "Eclipse SDK"'
+                ' -p2.os linux'
+                ' -p2.ws gtk'
+                ' -p2.arch ' + arch +
+                ' -roaming'
+                ' -profile %(profileId)s'
+                ' -profileProperties org.eclipse.update.install.features=true'
+                ' -metadataRepository file:%(destdir)s%(metadataDir)s'
+                ' -artifactRepository file:%(destdir)s%(metadataDir)s'
+                ' -destination %(destdir)s%(provisionDir)s'
+                ' -bundlepool %(destdir)s%(provisionDir)s'
+        )
+
+        # Common stuff
+        for f in ('about.html', 'about_files', 'epl-v10.html', 'notice.html', 'readme'):
+            r.Move('%(installDir)s/'+f, '%(provisionDir)s/')
+
+        r.Remove('%(metadataDir)s', recursive=True)
+        r.Remove('%(installDir)s', recursive=True)
+        r.Remove('%(sdkDir)s', recursive=True)
+
+        r.Move('%(provisionDir)s', '%(sdkDir)s')
+
+        # Fix paths in p2 data
+        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.core/cache', recursive=True)
+        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/.settings/org.eclipse.equinox.p2.artifact.repository.prefs')
+        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/profileRegistry/%(profileId)s.profile/.data/.settings', recursive=True)
+
+        profileDir = '%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/profileRegistry'
+        r.Replace('%(provisionDir)s', '%(sdkDir)s', profileDir+'/%(profileId)s.profile/*')
+        r.Replace('%(destdir)s', '', profileDir+'/%(profileId)s.profile/*')
+        r.Replace('eclipse-SDK', 'eclipse', profileDir+'/%(profileId)s.profile/*', allowNoChange=True)
+
+        # Remove the unnecessary configuration data
+        r.Remove('%(sdkDir)s/configuration/org.eclipse.update', recursive=True)
+        r.Remove('%(sdkDir)s/configuration/org.eclipse.core.runtime', recursive=True)
+        r.Remove('%(sdkDir)s/configuration/org.eclipse.equinox.app', recursive=True)
+
+        r.Replace(
+            'eclipse.p2.data.area=.*', 'eclipse.p2.data.area=@config.dir/../p2/',
+            '%(eclipsedir)s/configuration/config.ini'
+        )
+
+        r.Copy('build/eclipse-%(timestamp)s-fetched-src/installation/eclipse.ini', '%(sdkDir)s/eclipse.ini')
 
         r.Symlink('%(eclipsedir)s/eclipse', '%(bindir)s/eclipse')
 
@@ -84,6 +157,12 @@ class EclipseSDK(PackageRecipe):
         r.Symlink('%(sysconfdir)s/eclipse/eclipse.ini', '%(eclipsedir)s/eclipse.ini')
 
         r.Replace('-Xmx256m','-Xmx512m', '%(sysconfdir)s/eclipse/eclipse.ini')
+
+        r.Install(
+            'build/eclipse-%(timestamp)s-fetched-src/plugins/org.eclipse.platform/eclipse48.png',
+            '%(eclipsedir)s/eclipse.png'
+        )
+
         r.AutoDoc(exceptions='.*')
 
         r.Requires(exceptDeps='java: org.apache.tools.ant.*')
