@@ -2,11 +2,12 @@ Linux Infrared Remote Control drivers -- http://www.lirc.org
 
 From http://git.wilsonet.com/linux-2.6-lirc.git/
 
-Refreshed 20090901
+Refreshed 20090902
 
 Signed-off-by: Jarod Wilson <jarod@redhat.com>
 
 ---
+ MAINTAINERS                           |    9 +
  drivers/input/Kconfig                 |    2 +
  drivers/input/Makefile                |    2 +
  drivers/input/lirc/Kconfig            |  119 ++
@@ -23,7 +24,7 @@ Signed-off-by: Jarod Wilson <jarod@redhat.com>
  drivers/input/lirc/lirc_it87.c        |  986 ++++++++++++++
  drivers/input/lirc/lirc_it87.h        |  116 ++
  drivers/input/lirc/lirc_ite8709.c     |  539 ++++++++
- drivers/input/lirc/lirc_mceusb.c      | 1225 ++++++++++++++++++
+ drivers/input/lirc/lirc_mceusb.c      | 1243 ++++++++++++++++++
  drivers/input/lirc/lirc_parallel.c    |  709 ++++++++++
  drivers/input/lirc/lirc_parallel.h    |   26 +
  drivers/input/lirc/lirc_sasem.c       |  931 +++++++++++++
@@ -32,8 +33,28 @@ Signed-off-by: Jarod Wilson <jarod@redhat.com>
  drivers/input/lirc/lirc_streamzap.c   |  794 ++++++++++++
  drivers/input/lirc/lirc_ttusbir.c     |  397 ++++++
  drivers/input/lirc/lirc_zilog.c       | 1395 ++++++++++++++++++++
- 25 files changed, 15574 insertions(+), 0 deletions(-)
+ 26 files changed, 15601 insertions(+), 0 deletions(-)
 
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 8dca9d8..f25dc26 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -3129,6 +3129,15 @@ W:	http://www.pasemi.com/
+ L:	linuxppc-dev@ozlabs.org
+ S:	Supported
+ 
++LINUX INFRARED REMOTE CONTROL DRIVERS (LIRC)
++P:	Jarod Wilson
++M:	jarod@redhat.com
++P:	Christoph Bartelmus
++M:	lirc@bartelmus.de
++W:	http://www.lirc.org/
++L:	lirc-list@lists.sourceforge.net
++S:	Maintained
++
+ LINUX SECURITY MODULE (LSM) FRAMEWORK
+ P:	Chris Wright
+ M:	chrisw@sous-sol.org
 diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
 index cd50c00..442f94f 100644
 --- a/drivers/input/Kconfig
@@ -706,7 +727,7 @@ index 0000000..0485884
 +MODULE_PARM_DESC(debug, "Debug enabled or not");
 diff --git a/drivers/input/lirc/lirc_dev.c b/drivers/input/lirc/lirc_dev.c
 new file mode 100644
-index 0000000..a23bfea
+index 0000000..48ab5af
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_dev.c
 @@ -0,0 +1,839 @@
@@ -1132,7 +1153,7 @@ index 0000000..a23bfea
 +int lirc_dev_fop_open(struct inode *inode, struct file *file)
 +{
 +	struct irctl *ir;
-+	int retval;
++	int retval = 0;
 +
 +	if (iminor(inode) >= MAX_IRCTL_DEVICES) {
 +		dprintk("lirc_dev [%d]: open result = -ENODEV\n",
@@ -7637,10 +7658,10 @@ index 0000000..3d53181
 +MODULE_PARM_DESC(debug, "Enable debugging messages");
 diff --git a/drivers/input/lirc/lirc_mceusb.c b/drivers/input/lirc/lirc_mceusb.c
 new file mode 100644
-index 0000000..58dfdd5
+index 0000000..8011a14
 --- /dev/null
 +++ b/drivers/input/lirc/lirc_mceusb.c
-@@ -0,0 +1,1225 @@
+@@ -0,0 +1,1243 @@
 +/*
 + * LIRC driver for Windows Media Center Edition USB Infrared Transceivers
 + *
@@ -7656,8 +7677,11 @@ index 0000000..58dfdd5
 + * supports the 1st-gen device now too. Transmitting on the 1st-gen device
 + * is as yet untested, but receiving definitely works.
 + *
-+ * Support for 1st-gen mceusb device added in June of 2009,
++ * Support for 1st-gen device added June 2009,
 + * by Jarod Wilson <jarod@wilsonet.com>
++ *
++ * Initial transmission support for 1st-gen device added August 2009,
++ * by Patrick Calhoun <phineas@ou.edu>
 + *
 + * Derived from ATI USB driver by Paul Miller and the original
 + * MCE USB driver by Dan Conti (and now including chunks of the latter
@@ -7824,6 +7848,8 @@ index 0000000..58dfdd5
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe017) },
 +	/* Formosa Industrial Computing / Beanbag Emulation Device */
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe018) },
++	/* Formosa21 / eHome Infrared Receiver */
++	{ USB_DEVICE(VENDOR_FORMOSA, 0xe03a) },
 +	/* Formosa Industrial Computing AIM IR605/A */
 +	{ USB_DEVICE(VENDOR_FORMOSA, 0xe03c) },
 +	/* Fintek eHome Infrared Transceiver */
@@ -8498,7 +8524,7 @@ index 0000000..58dfdd5
 +	memset(data, 0, 8);
 +
 +	ret = usb_control_msg(ir->usbdev, usb_rcvctrlpipe(ir->usbdev, 0),
-+			      5, USB_TYPE_VENDOR, 0, 0,
++			      USB_REQ_SET_ADDRESS, USB_TYPE_VENDOR, 0, 0,
 +			      data, 2, HZ * 3);
 +	dprintk("%s - ret = %d, devnum = %d\n",
 +		__func__, ret, ir->usbdev->devnum);
@@ -8511,6 +8537,18 @@ index 0000000..58dfdd5
 +			      0xc04e, 0x0000, NULL, 0, HZ * 3);
 +
 +	dprintk("%s - ret = %d\n", __func__, ret);
++
++	/* strange: bRequest == 4 */
++	ret = usb_control_msg(ir->usbdev, usb_sndctrlpipe(ir->usbdev, 0),
++			      4, USB_TYPE_VENDOR,
++			      0x0808, 0x0000, NULL, 0, HZ * 3);
++	dprintk("%s - retB = %d\n", __func__, ret);
++
++	/* strange: bRequest == 2 */
++	ret = usb_control_msg(ir->usbdev, usb_sndctrlpipe(ir->usbdev, 0),
++			      2, USB_TYPE_VENDOR,
++			      0x0000, 0x0100, NULL, 0, HZ * 3);
++	dprintk("%s - retC = %d\n", __func__, ret);
 +
 +	return ret;
 +
@@ -8753,19 +8791,10 @@ index 0000000..58dfdd5
 +		request_packet_async(ir, ep_in, NULL, maxp, MCEUSB_INBOUND);
 +		request_packet_async(ir, ep_out, pin_init3, sizeof(pin_init3),
 +				     MCEUSB_OUTBOUND);
-+		/* if we don't issue the correct number of receives
-+		 * (MCEUSB_INBOUND) for each outbound, then the first few ir
-+		 * pulses will be interpreted by the usb_async_callback routine
-+		 * - we should ensure we have the right amount OR less - as the
-+		 * mceusb_dev_recv routine will handle the control packets OK -
-+		 * they start with 0x9f - but the async callback doesn't handle
-+		 * ir pulse packets
-+		 */
-+		request_packet_async(ir, ep_in, NULL, maxp, 0);
-+	} else {
++	} else if (ir->flags.microsoft_gen1) {
 +		/* original ms mce device requires some additional setup */
-+		if (ir->flags.microsoft_gen1)
-+			mceusb_gen1_init(ir);
++		mceusb_gen1_init(ir);
++	} else {
 +
 +		request_packet_async(ir, ep_in, NULL, maxp, MCEUSB_INBOUND);
 +		request_packet_async(ir, ep_in, NULL, maxp, MCEUSB_INBOUND);
@@ -8774,8 +8803,18 @@ index 0000000..58dfdd5
 +		request_packet_async(ir, ep_in, NULL, maxp, MCEUSB_INBOUND);
 +		request_packet_async(ir, ep_out, init2,
 +				     sizeof(init2), MCEUSB_OUTBOUND);
-+		request_packet_async(ir, ep_in, NULL, maxp, 0);
 +	}
++
++	/*
++	 * if we don't issue the correct number of receives
++	 * (MCEUSB_INBOUND) for each outbound, then the first few ir
++	 * pulses will be interpreted by the usb_async_callback routine
++	 * - we should ensure we have the right amount OR less - as the
++	 * mceusb_dev_recv routine will handle the control packets OK -
++	 * they start with 0x9f - but the async callback doesn't handle
++	 * ir pulse packets
++	 */
++	request_packet_async(ir, ep_in, NULL, maxp, 0);
 +
 +	usb_set_intfdata(intf, ir);
 +

@@ -1,6 +1,6 @@
- drivers/input/lirc/lirc_i2c.c   |  216 ++++++++++++++++++++++++++++++---------
- drivers/input/lirc/lirc_zilog.c |   58 +++++----
- 2 files changed, 198 insertions(+), 76 deletions(-)
+ drivers/input/lirc/lirc_i2c.c   |  216 +++++++++++++++++++++++++++++----------
+ drivers/input/lirc/lirc_zilog.c |   60 +++++++-----
+ 2 files changed, 200 insertions(+), 76 deletions(-)
 
 diff --git a/drivers/input/lirc/lirc_i2c.c b/drivers/input/lirc/lirc_i2c.c
 index e27d937..dedf415 100644
@@ -317,12 +317,11 @@ index e27d937..dedf415 100644
  static int ir_command(struct i2c_client *client, unsigned int cmd, void *arg)
  {
  	/* nothing */
-
-diff --git b/drivers/input/lirc/lirc_zilog.c a/drivers/input/lirc/lirc_zilog.c
-index c532399..049c3da 100644
---- b/drivers/input/lirc/lirc_zilog.c
-+++ a/drivers/input/lirc/lirc_zilog.c
-@@ -1088,26 +1088,18 @@ static struct lirc_driver lirc_template = {
+diff --git a/drivers/input/lirc/lirc_zilog.c b/drivers/input/lirc/lirc_zilog.c
+index f86db02..26bdb18 100644
+--- a/drivers/input/lirc/lirc_zilog.c
++++ b/drivers/input/lirc/lirc_zilog.c
+@@ -1109,26 +1109,18 @@ static struct lirc_driver lirc_template = {
  };
  
  static int ir_attach(struct i2c_adapter *adap, int have_rx, int have_tx);
@@ -353,7 +352,7 @@ index c532399..049c3da 100644
  };
  
  static struct i2c_client client_template = {
-@@ -1128,8 +1120,20 @@ static struct file_operations lirc_fops = {
+@@ -1149,8 +1141,20 @@ static struct file_operations lirc_fops = {
  
  static int i2c_attach(struct i2c_client *client, struct IR *ir)
  {
@@ -374,7 +373,7 @@ index c532399..049c3da 100644
  	++ir->devs;
  	return 0;
  }
-@@ -1230,13 +1234,13 @@ static int ir_attach(struct i2c_adapter *adap, int have_rx, int have_tx)
+@@ -1251,13 +1255,13 @@ static int ir_attach(struct i2c_adapter *adap, int have_rx, int have_tx)
  err:
  	/* undo everything, hopefully... */
  	if (ir->c_rx.addr)
@@ -391,13 +390,15 @@ index c532399..049c3da 100644
  {
  	struct IR *ir = i2c_get_clientdata(client);
  	mutex_lock(&ir->lock);
-@@ -1257,17 +1261,21 @@ static int ir_remove(struct i2c_client *client)
+@@ -1278,17 +1282,23 @@ static int ir_remove(struct i2c_client *client)
  			ir->t_notify2 = NULL;
  		}
  
 +		/* unregister device */
++		i2c_release_client(&ir->c_rx);
 +		i2c_detach_client(&ir->c_rx);
 +	} else if (client == &ir->c_tx) {
++		i2c_release_client(&ir->c_tx);
 +		i2c_detach_client(&ir->c_tx);
  	} else {
  		mutex_unlock(&ir->lock);
@@ -416,7 +417,7 @@ index c532399..049c3da 100644
  		return -ENODEV;
  	} else if (ir->devs == 0) {
  		/* unregister lirc driver */
-@@ -1286,10 +1294,11 @@ static int ir_remove(struct i2c_client *client)
+@@ -1307,10 +1317,11 @@ static int ir_remove(struct i2c_client *client)
  	return 0;
  }
  
@@ -430,7 +431,7 @@ index c532399..049c3da 100644
  
  	if (adap->id == I2C_HW_B_BT848 ||
  #ifdef I2C_HW_B_HDPVR
-@@ -1302,10 +1311,11 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
+@@ -1323,10 +1334,11 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
  		 * The external IR receiver is at i2c address 0x71.
  		 * The IR transmitter is at 0x70.
  		 */
@@ -444,7 +445,7 @@ index c532399..049c3da 100644
  				have_rx = 1;
  			dprintk("probe 0x70 @ %s: %s\n",
  				adap->name,
-@@ -1313,8 +1323,8 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
+@@ -1334,8 +1346,8 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
  		}
  
  		if (!disable_tx) {
