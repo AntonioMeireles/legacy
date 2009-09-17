@@ -7,18 +7,19 @@
 loadSuperClass('rpmpackage')
 class Gtk2(RPMPackageRecipe,CPackageRecipe):
     name = 'gtk'
-    version = '2.16.6'
+    version = '2.17.11'
     rpmName = 'gtk2'
-    rpmRelease = '1.fc11'
+    rpmRelease = '3.fc12'
     tarballName = '%(name)s+-%(version)s.tar.bz2'
     rpmPatches = [
         # Biarch changes
         'gtk+-2.13.5-lib64.patch',
-        # http://bugzilla.redhat.com/show_bug.cgi?id=478400
-        'default_printer.patch', 
-        # http://bugzilla.gnome.org/show_bug.cgi?id=384940
-        'print_authentication.patch',
+        # from upstream
+        'gtk2-fix-install.patch',
+        'root-event-mask.patch',
+        'gtk-bell.patch',
         ]
+    rpmSources = [ 'im-cedilla.conf' ]
 
     buildRequires = [ 'atk:devel',
                       'pango:devel',
@@ -73,7 +74,6 @@ class Gtk2(RPMPackageRecipe,CPackageRecipe):
         RPMPackageRecipe.unpack(r)
 
         # make sure that gtkmarshalers.{c, h} get regenerated during the build
-        #  - caused by print_authentication.patch
         r.addAction('rm --force ./gtk/gtkmarshalers.c; rm --force ./gtk/gtkmarshalers.h')
 
         # setup some macros to make the taghandler work properly
@@ -101,13 +101,20 @@ class Gtk2(RPMPackageRecipe,CPackageRecipe):
         extraConfigure = ' --build=%(host)s --host=%(host)s'
         if not Use.builddocs:
             extraConfigure += ' --disable-gtk-doc '
-        r.Configure('--with-xinput=xfree  --disable-rebuilds --with-included-loaders=png ' + extraConfigure)
+        r.Configure('--with-xinput=xfree  --disable-rebuilds --with-libjasper '
+                    '--with-included-loaders=png --with-included-loaders=png ' + extraConfigure)
+        # fight unused direct deps
+        r.Replace(' -shared ', ' -Wl,-O1,--as-needed\0', 'libtool')
 
         r.Make()
 
         r.MakeInstall('RUN_QUERY_IMMODULES_TEST=false'
                       ' RUN_QUERY_LOADER_TEST=false')
         r.MakeDirs('%(sysconfdir)s/gtk-2.0')
+
+        # input methodes ...
+        r.MakeDirs('%(sysconfdir)s/X11/xinit/xinput.d')
+        r.Install('im-cedilla.conf', '%(sysconfdir)s/X11/xinit/xinput.d/')
 
         # set up HOST definition for gtk.modules location
         r.macros.host = r.macros.target
