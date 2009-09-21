@@ -1,0 +1,110 @@
+#
+# Copyright (c) 2004-2007 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Shadow(RPMPackageRecipe, CPackageRecipe):
+    name = 'shadow'
+    version = '4.1.4.2'
+    rpmName = 'shadow-utils'
+    rpmRelease = '1.fc12'
+
+    buildRequires = [ 'bison:runtime', 'gettext:runtime', 'pam:devel',
+                      'audit:devel',
+                      'intltool:runtime', 'util-linux:runtime']
+
+    # Multiple tools included in the distribution, and possibly
+    # third-party scripts, depend on the behavior provided in
+    # this patch.
+    rpmPatches = [ 'shadow-4.1.4.2-redhat.patch',
+
+                 ]
+
+    def setup(r):
+        r.unpack()
+        r.addSource('shadow-4.0.17-login.defs', rpm=r.srpm)
+        r.addSource('defaults.useradd')
+
+        r.addSource('usergroup-info.taghandler', mode=0755,
+                    dest='%(taghandlerdir)s/usergroup-info')
+        r.addSource('group-info.tagdescription',
+                    dest='%(tagdescriptiondir)s/group-info')
+        r.addSource('user-info.tagdescription',
+                    dest='%(tagdescriptiondir)s/user-info')
+
+        # Convert manpages with different encodings to UTF-8
+        encodedManPages = [ ('EUC-JP', 'man/ja/*.*'),
+                            ('ISO_8859-2', 'man/hu/* man/pl/* man/cs/*'),
+                            ('KOI8-U', 'man/ru/*'),
+                            ('EUC-KR', 'man/ko/*.*'),
+                            ('GB2312', 'man/zh_CN/*.*'),
+                            ('BIG5', 'man/zh_TW/*.*') ]
+        for encoding, manPageGroup in encodedManPages:
+            r.Run("""
+                    for page in %s ; do
+                        if ! iconv -f UTF-8 -t UTF-8 ${page} > /dev/null 2> /dev/null ; then
+                            if iconv -f %s -t UTF-8 ${page} > /dev/null 2> /dev/null ; then
+                                iconv -f %s -t UTF-8 ${page} > ${page}.conv
+                                mv ${page}.conv ${page}
+                            fi
+                        fi
+                    done """ % (manPageGroup, encoding, encoding))
+
+
+        r.addAction('rm po/*.gmo')
+        r.addAction('rm po/stamp-po')
+
+        r.Configure(' --enable-shadowgrp'
+                    ' --with-audit'
+                    ' --with-sha-crypt'
+                    ' --with-selinux=no'
+                    ' --without-libcrack'
+                    # --with-libcrypt'
+                    ' --disable-shared'
+                    ' --without-libpam' )
+
+        r.Make()
+        r.MakeInstall('gnulocaledir=%(destdir)s/%(datadir)s/locale'
+                      ' MKINSTALLDIRS=%(builddir)s/mkinstalldirs')
+
+        # These can not be installed as part of the source action, otherwise
+        # they will get overwitten by MakeInstall.
+        r.Install('shadow-4.0.17-login.defs',
+                  '%(sysconfdir)s/login.defs', mode=0644)
+        r.Install('defaults.useradd', '%(sysconfdir)s/default/useradd',
+                  mode=0600)
+
+        r.Symlink('useradd', '%(sbindir)s/adduser')
+
+        # Do not install /usr/lib/libshadow.a
+        r.Remove('%(libdir)s/libshadow.a')
+
+        # we explicitly intend chage to be setuid root so that users can
+        # check their own expiry information, and gpasswd for setting
+        # group password information, although that is rarely used.
+        r.SetModes('%(bindir)s/{chage,gpasswd}', 04755)
+
+        # Setup manpages to point to the right places
+        r.Symlink('%(mandir)s/man8/useradd.8', '%(mandir)s/man8/adduser.8')
+
+        # Files below are packaged in util-linux
+        r.Remove('%(bindir)s/'
+                 '{chfn,chsh,expiry,groups,login,newgrp,nologin,passwd,su,vipw}')
+        r.Remove('%(sbindir)s/{dpasswd,logoutd,mkpasswd,vipw,vigr}')
+        r.Remove('%(mandir)s/{*/,}man1/'
+                 '{chfn,chsh,expiry,groups,login,newgrp,passwd,su}.*')
+        r.Remove('%(mandir)s/{*/,}man5/'
+                 '{d_passwd,limits,login.{access,defs},passwd,porttime,suauth}.*')
+        r.Remove('%(mandir)s/{*/,}man8/{logoutd,mkpasswd,vipw,vigr,nologin}.*')
+
+        # sg is just shadow's name for newgrp, let this dangle
+        r.DanglingSymlinks(exceptions='%(bindir)s/sg')
+        r.Requires('%(bindir)s/newgrp', '%(bindir)s/sg')
+        r.UtilizeGroup('users', '%(sysconfdir)s/default/useradd')
+
+
+        for req in ('%(bindir)s/id', '%(essentialbindir)s/basename',
+            '/dev/null'):
+            r.Requires(req, '%(taghandlerdir)s/usergroup-info')
