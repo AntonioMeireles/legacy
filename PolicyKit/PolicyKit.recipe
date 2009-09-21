@@ -4,15 +4,14 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-#loadSuperClass('rpmpackage')
-#class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
-class PolicyKit(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class PolicyKit(RPMPackageRecipe,AutoPackageRecipe):
     name = 'PolicyKit'
-    version = '0.92'
-    #rpmRelease = '6.fc11'
-    #rpmPatches = [ 'pk-ck-api-change.patch',
-     #              'entry-leak.patch',
-     #              'polkit-0.8-dbus-policy.patch' ]
+    version = '0.95'
+    rpmName = 'polkit'
+    rpmRelease = '0.git20090913.2.fc12'
+    tarballName = 'polkit-%(version)s.git20090913.tar.gz'
+    rpmPatches = [ '0001-Fix-process-start-time-when-using-polkit_unix_proces.patch' ]
 
     buildRequires = [ 'libtool:runtime', 'automake:runtime',
                       'autoconf:runtime', 'dbus:devel', 'pkgconfig:devel',
@@ -20,64 +19,77 @@ class PolicyKit(AutoPackageRecipe):
                       'pam:devel', 'xmlto:runtime', 'expat:devel',
                       'gnome-doc-utils:devel', 'gnome-doc-utils:runtime',
                       'perl-XML-Parser:perl', 'gettext:runtime', 'intltool:runtime',
-                      'eggdbus:devel', 'eggdbus:runtime', 'gtk-doc:devel', 'gtk-doc:runtime', 'intltool:devel'
+                      'eggdbus:devel', 'eggdbus:runtime', 'gtk-doc:devel',
+                      'gtk-doc:runtime', 'intltool:devel', 'gobject-introspection:devel',
                       ]
 
+    # FIXME new upstream naming is polkit. keeping old one for now
+
     def configure(r):
-        r.addArchive("http://cgit.freedesktop.org/PolicyKit/snapshot/")
-        #r.addPatch('wheel.patch')
-        #    r.addPatch('setgid.patch')
-        return 
-        # this is _not_ ready for prime time
-        # did this just to avoid accidental build
-        r.Configure('--with-os-type=redhat --disable-selinux --disable-gtk-doc',configureName="autogen.sh")
+        r.Configure(' --disable-static --libexecdir=%(libexecdir)s/polkit-1 '
+                    ' --enable-introspection --enable-examples --disable-selinux --disable-gtk-doc')
 
     def policy(r):
         r.ExcludeDirectories(exceptions='%(datadir)s/PolicyKit/policy')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/PolicyKit-public')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/polkit-1')
 
-        # see upstream design specification for why these permissions are necessary
-        """
-        for d in [ 'polkit-set-default-helper',]:
-                    r.Ownership('polkituser', 'root', '%(libexecdir)s/' + d)
-                    r.SetModes('%(libexecdir)s/' + d, 04755)
-        
-        for d in [ 'polkit-read-auth-helper',
-                   'polkit-revoke-helper',
-                   'polkit-explicit-grant-helper',
-                   'polkit-grant-helper']:
-                    r.Ownership('root','polkituser','%(libexecdir)s/' + d)
-                    r.SetModes('%(libexecdir)s/' + d, 02755)
-
-        r.Ownership('root','polkituser','%(libexecdir)s/polkit-agent-helper-1')
-        r.SetModes('%(libexecdir)s/polkit-agent-helper-1', 04755)
-
-        r.Ownership('root','polkituser','/usr/bin/pkexec')
-        r.SetModes('/usr/bin/pkexec', 04755)
-
-        r.Ownership('root','polkituser','%(libexecdir)s/polkit-grant-helper-pam')
-        r.SetModes('%(libexecdir)s/polkit-grant-helper-pam', 04754)
-
-        r.Ownership('root','polkituser','%(libexecdir)s/polkit-resolve-exe-helper')
-        r.SetModes('%(libexecdir)s/polkit-resolve-exe-helper', 04755)
-
-        r.Ownership('root','polkituser','%(localstatedir)s/run/PolicyKit')
-        r.SetModes('%(localstatedir)s/run/PolicyKit', 0770)
-
-        r.Ownership('root','polkituser','%(localstatedir)s/lib/polkit-1')
         r.SetModes('%(localstatedir)s/lib/polkit-1', 0700)
+        r.SetModes('%(bindir)s/pkexec', 04755)
+        r.SetModes('%(libexecdir)s/polkit-1/polkit-agent-helper-1', 04755)
 
-        r.Ownership('root','polkituser','%(localstatedir)s/lib/PolicyKit')
-        r.SetModes('%(localstatedir)s/lib/PolicyKit', 0770)
+        for d in [ '%(localstatedir)s/lib/polkit-1/',
+                   '%(localstatedir)s/lib/polkit-1/localauthority',
+                   '%(localstatedir)s/lib/polkit-1/localauthority/10-vendor.d',
+                   '%(localstatedir)s/lib/polkit-1/localauthority/20-org.d',
+                   '%(localstatedir)s/lib/polkit-1/localauthority/30-site.d',
+                   '%(localstatedir)s/lib/polkit-1/localauthority/50-local.d',
+                   '%(localstatedir)s/lib/polkit-1/localauthority/90-mandatory.d']:
+            r.MakeDirs(d)
+            r.SetModes(d, 0700)
+            r.ExcludeDirectories(exceptions = d)
 
-        r.Ownership('polkituser','root','%(localstatedir)s/lib/PolicyKit-public')
-        r.SetModes('%(localstatedir)s/lib/PolicyKit-public', 0755)
+        r.Create('%(localstatedir)s/lib/polkit-1/localauthority/localauthority.conf.d/60-desktop-policy.conf',
+                 contents = """
+# This allows users in the desktop_admin_r group to authenticate as
+# the administrator.
+#
+# DO NOT EDIT THIS FILE, it will be overwritten on update.
 
-        r.Ownership('polkituser','polkituser','%(localstatedir)s/lib/misc/PolicyKit.reload')
-        r.SetModes('%(localstatedir)s/lib/misc/PolicyKit.reload', 0664)
+[Configuration]
+AdminIdentities=unix-group:desktop_admin_r
+""")
+        r.Create('%(localstatedir)s/lib/polkit-1/localauthority/10-vendor.d/10-desktop-policy.pkla',
+                 contents = """
+# Authorizations/policy for the desktop_admin_r and desktop_user_r groups.
+#
+# DO NOT EDIT THIS FILE, it will be overwritten on update.
 
-        """
+# Allow "standard users" to do some things without being interrupted by
+# password dialogs (TODO: not complete)
+#
+[Desktop User Permissions]
+Identity=unix-group:desktop_user_r
+Action=org.gnome.clockapplet.mechanism.settimezone
+ResultAny=no
+ResultInactive=no
+ResultActive=yes
+
+# Allow "administrative users" to do a lot of things without being interrupted by
+# password dialogs (TODO: not complete)
+#
+[Desktop Administrator Permissions]
+Identity=unix-group:desktop_admin_r
+Action=org.gnome.clockapplet.mechanism.*;org.freedesktop.devicekit.disks.*;org.freedesktop.RealtimeKit1.*
+ResultAny=no
+ResultInactive=no
+ResultActive=yes
+
+""")
+
+        r.UtilizeGroup('desktop_user_r', '%(bindir)s/pkexec')
+        r.UtilizeGroup('desktop_admin_r', '%(bindir)s/pkexec')
 
         # allows x86 and x86_64 :lib co-existence
         r.ComponentSpec(':runtime', '%(localstatedir)s/lib/misc/PolicyKit.reload')
+
