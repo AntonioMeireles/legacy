@@ -6,12 +6,12 @@
 loadSuperClass('rpmpackage')
 class E2fsprogs(RPMPackageRecipe,CPackageRecipe):
     name = 'e2fsprogs'
-    version = '1.41.6'
-    rpmRelease = '1.fc12'
-    rpmPatches = [ 'e2fsprogs-1.38-etcblkid.patch',
+    version = '1.41.9'
+    rpmRelease = '3.fc12'
+    rpmPatches = [ 'e2fsprogs-resize-minimum-fix.patch',
                    'e2fsprogs-1.40.4-sb_feature_check_ignore.patch',
                    ]
-    buildRequires = [ 'gettext:runtime', 'install-info:runtime',
+    buildRequires = [ 'gettext:runtime', 'install-info:runtime', 'udev:devel',
                       'perl:runtime', 'chkconfig:runtime', 'intltool:runtime',
                       'python:devel', 'texinfo:runtime', 'pkgconfig:devel' ]
 
@@ -20,23 +20,12 @@ class E2fsprogs(RPMPackageRecipe,CPackageRecipe):
 
         r.unpack()
 
-        r.Configure('--enable-elf-shlibs --enable-nls --disable-e2initrd-helper  --enable-blkid-devmapper')
-        r.Make()
+        r.Configure(' --enable-elf-shlibs --enable-nls --disable-uuidd '
+                    ' --disable-e2initrd-helper --disable-fsck  -disable-libblkid --disable-libuuid')
+        r.Make("V=1")
         r.MakeInstall('install-libs root_sbindir=%(essentialsbindir)s'
                          ' root_libdir=%(essentiallibdir)s')
-        for file in ('libcom_err.so', 'libe2p.so', 'libext2fs.so',
-                     'libss.so', 'libuuid.so'):
-            r.Symlink('%%(essentiallibdir)s/%s.2' %file, file)
 
-        # krb5 needs this to be in system include dirs
-        r.Copy('%(includedir)s/et/com_err.h', '%(includedir)s/')
-
-        r.addSource('uuidd.init', dest='%(initdir)s/uuidd', mode = 0755, rpm = r.srpm)
-        r.MakeDirs('/var/lib/libuuid')
-        r.SetModes('/var/lib/libuuid', 02775)
-        r.Ownership('uuidd', 'uuidd', '%(sbindir)s/uuidd')
-        r.ExcludeDirectories(exceptions = ['/var/lib/libuuid', '/etc/blkid'])
-        r.UtilizeUser('uuidd', '/var/lib/libuuid')
 
         # test files
         if Use.buildtests:
