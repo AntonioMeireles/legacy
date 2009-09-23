@@ -1,6 +1,6 @@
 class Chromium(PackageRecipe):
     name = 'chromium'
-    version = '25972'
+    version = '26956'
 
     buildRequires = ['depot_tools:runtime',
                      'nss:devellib',
@@ -16,7 +16,6 @@ class Chromium(PackageRecipe):
                      'msttcorefonts:data',
                      'freetype:devellib',
                      'freetype:devel',
-                     # 'freetype:devel[is:x86]',
                      'cairo:devellib',
                      'dbus:devellib',
                      'subversion:runtime',
@@ -27,43 +26,55 @@ class Chromium(PackageRecipe):
                      'alsa-lib:devel',
                      'libXext:devellib',
                      'desktop-file-utils:runtime',
-		     'mozilla-filesystem:runtime',
+                     'mozilla-filesystem:runtime',
+                     'make:runtime',
                     ]
 
     def setup(r):
-        r.addArchive('http://build.chromium.org/buildbot/archives/chromium.r23615.tgz')
+        r.addArchive('http://build.chromium.org/buildbot/archives/'
+                     'chromium.r26326.tgz')
 
         r.addSource('no-Werror.patch')
-        r.addSource('v8-trunk.patch')
-
-
         r.addPatch('no-Werror.patch')
-        r.addPatch('v8-trunk.patch')
 
-        # Updates the code that was extracted from the tarball to a specific
-        # svn revision.
+        # Updates the code that was extracted to a specific svn revision.
         r.Run('/opt/google/depot_tools/gclient update --revision=src@%s' % \
               r.version, dir='chrome-svn/tarball/chromium/src')
 
-        # Build the scons files.
+        r.MakeDirs('%(builddir)s/chrome-svn/tarball/chromium/src/out')
+
+        # Build the makefiles.
         if Arch.x86_64:
-            r.Run('../tools/gyp/gyp all.gyp -Dtarget_arch=x64',
-                  dir='chrome-svn/tarball/chromium/src/build')
+            r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
+                      '%(builddir)s/chrome-svn/tarball/chromium/src/out64')
+            r.Run("GYP_GENERATORS='make' GYP_DEFINES='target_arch=x64' "
+                  "python ./src/build/gyp_chromium",
+                  dir='chrome-svn/tarball/chromium')
         else:
-            r.Run('../tools/gyp/gyp all.gyp',
-                  dir='chrome-svn/tarball/chromium/src/build')
+            r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
+                      '%(builddir)s/chrome-svn/tarball/chromium/src/out32')
+            r.Run("GYP_GENERATORS='make' "
+                  "python ./src/build/gyp_chromium",
+                  dir='chrome-svn/tarball/chromium')
 
-        # Build using hammer. hammer is a wrapper around scons.
-        r.Run('/opt/google/depot_tools/hammer '
-              '--mode=Release chrome chrome_sandbox v8',
-              dir='chrome-svn/tarball/chromium/src/build')
+        # Workaround for:
+        # http://code.google.com/p/chromium/issues/detail?id=19854
+        r.Run('sed -e "/cmd_v8_snapshot_run_mksnapshot/ '
+                      's|\$(builddir)|\$(rootdir)/\\0|" '
+              '-i v8/tools/gyp/v8_snapshot.mk',
+              dir='chrome-svn/tarball/chromium/src')
 
-        # Install
+        # Make.
+        r.Run('/usr/bin/make -r -j8 chrome chrome_sandbox BUILDTYPE=Release '
+              'builddir="out/Release"',
+              dir='chrome-svn/tarball/chromium/src')
+
+        # Install.
         r.addSource('chromium-browser')
         r.Replace('@@LIBDIR@@', '%(libdir)s', 'chromium-browser')
         r.Install('chromium-browser', '%(bindir)s/chromium-browser')
 
-        buildLoc = 'chrome-svn/tarball/chromium/src/sconsbuild/Release/'
+        buildLoc = 'chrome-svn/tarball/chromium/src/out/Release/'
         artifacts = ['chrome.pak', 'locales', 'resources', 'themes',
                      'xdg-settings', 'chrome', 'chrome_sandbox']
 
@@ -71,13 +82,14 @@ class Chromium(PackageRecipe):
         for artifact in artifacts:
             r.Install(buildLoc + artifact, '%(libdir)s/chromium-browser/')
       
-        r.Doc(buildLoc + 'chromium-browser.1')
+        # r.Doc(buildLoc + 'chromium-browser.1')
         r.addSource('chromium-browser.desktop')
         r.Desktopfile('chromium-browser.desktop')
 
-        r.Install('chrome-svn/tarball/chromium/src/sconsbuild/Release/product_logo_48.png', '%(datadir)s/pixmaps/chromium-browser.png')
+        r.Install('chrome-svn/tarball/chromium/src/out/Release/'
+                  'product_logo_48.png', 
+                  '%(datadir)s/pixmaps/chromium-browser.png')
 
-        # Symlink to the mozilla plugins directory.  Chromium doesn't know to
-        # look there.
+        # Chromium doesn't look in the mozilla plugins dir by default.
         r.Symlink('%(libdir)s/mozilla/plugins',
                   '%(libdir)s/chromium-browser/plugins')
