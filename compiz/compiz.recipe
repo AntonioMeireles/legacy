@@ -20,7 +20,7 @@ class Compiz(CPackageRecipe):
                       'libbonoboui:devel', 'libgnomecanvas:devel', 'libgnomeui:devel',
                       'libpng:devel', 'librsvg:devel', 'libxml2:devel', 'Mesa:devellib',
                       'pango:devel', 'pkgconfig:devel', 'popt:devel',
-                      'startup-notification:devel', 'zlib:devel',
+                      'startup-notification:devel', 'zlib:devel', 'GConf:devel',
                       'gnome-control-center:devel', 'expat:devel', 'fuse:devel',
                       'libwnck:devel', 'metacity:devel', 'gettext:runtime', 
                       'autoconf:runtime', 'automake:runtime', 'intltool:devel',
@@ -28,28 +28,28 @@ class Compiz(CPackageRecipe):
                       'Mesa:devellib', 'libXinerama:devel', 'libxslt:runtime', 
                       'libxslt:devel', 'libXcursor:devel', 'libXft:devel',
                       'libXi:devel', 'libXmu:devel', 'libidn:devel',
-                      'libjpeg:devel', 'libstdc++:devel', 'pcre:devel', 'desktop-file-utils:runtime'
+                      'libjpeg:devel', 'libstdc++:devel', 'pcre:devel', 
+                      'desktop-file-utils:runtime',
+                      'automake:runtime', 'autoconf:runtime', 'libtool:runtime', 
                       ]
 
     def setup(r):
         r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d/ '
         r.addArchive('http://releases.compiz-fusion.org/%(version)s/')
-        ubuntuPatches = [ '018_use_metacity_settings.patch',
-                          '029_default_options',
-                          '099-autogen.patch',
-                          ]
-        for patch in ubuntuPatches:
-            r.addPatch('http://patches.ubuntu.com/c/compiz/extracted/'+patch)
-        r.Replace('\/usr\/share\/gdm\/themes\/Human\/ubuntu.png','freedesktop','metadata/cube.xml.in')
-        r.Replace('/usr/bin/compiz-decorator','%(bindir)s/gtk-window-decorator','metadata/decoration.xml.in')
+        for p in ['compiz-0.8.2-gconf-buildfix.patch',
+                  'compiz-0.8.2-gnome-terminal.patch',
+                  'compiz-0.8.2-pin-initial-plugins.patch',
+                  'composite-cube-logo.patch']: 
+            r.addPatch(p)
 
         r.addSource('foresight.png', dest='images/freedesktop.png')
-        r.addSource('compiz-wrapper')
+        r.addSource('compiz-gtk')
+        r.addSource('compiz-gtk.desktop')
+        r.Run('libtoolize; aclocal; autoconf; automake')
         r.Configure(
             ' DESTDIR=%(destdir)s'
             ' --disable-static '
             ' --enable-gconf '
-            ' --enable-gconf-dump '
             ' --enable-dbus '
             ' --enable-place '
             ' --enable-librsvg '
@@ -58,18 +58,15 @@ class Compiz(CPackageRecipe):
             ' --enable-gnome '
             ' --enable-gnome-keybindings '
             ' --enable-libsvg-cairo '
+#            ' --enable-kde4'
             # order is important!
-            ' --with-default-plugins="core,ccp,dbus,place,mousepoll,gnomecompat,move,resize,decoration,png,svg,imgjpeg,text,neg,video,wall,snap,animation,scale,scaleaddon,expo,staticswitcher,regex,resizeinfo,workarounds,ezoom,vpswitch,extrawm,fade,session" '
+            ' --with-default-plugins="core,glib,gconf,dbus,png,svg,video,screenshot,decoration,clone,place,fade,minimize,move,resize,switcher,scale,wall,obs" '
             )
 
-        r.Make()
+        r.Make('imagedir=%(datadir)s/pixmaps')
         r.MakeInstall()
         # check if we still need this...
         r.Symlink('%(libdir)s/window-manager-settings/libcompiz.so','%(libdir)s/libgnome-window-settings1/')
-        # avoid clash with compiz-manager
-        r.Move('%(bindir)s/compiz', '%(bindir)s/compiz.real')
-        # this wipes the need for the compiz-manager pkg
-        r.Install('compiz-wrapper', '%(bindir)s/compiz', mode = 0755)
 
         r.PackageSpec('compiz-gnome',
             '%(bindir)s/gtk-window-decorator',
@@ -79,3 +76,8 @@ class Compiz(CPackageRecipe):
 
         r.Requires('compiz:runtime', '%(bindir)s/gtk-window-decorator')
 
+        r.Install('compiz-gtk', '%(bindir)s/', mode = 0755)
+
+        # uncomment when we get confident enough that 
+        # we want to load it byDefault
+        #        r.Desktopfile('compiz-gtk.desktop')
