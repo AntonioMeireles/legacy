@@ -1,0 +1,46 @@
+Subject: [for-2.6.31] virtio_blk: revert QUEUE_FLAG_VIRT addition
+Date: Fri, 04 Sep 2009 20:44:42 -0000
+From: Christoph Hellwig <hch@lst.de>
+
+It seems like the addition of QUEUE_FLAG_VIRT caueses major performance
+regressions for Fedora users:
+
+	https://bugzilla.redhat.com/show_bug.cgi?id=509383
+	https://bugzilla.redhat.com/show_bug.cgi?id=505695
+
+while I can't reproduce those extreme regressions myself I think the flag
+is wrong.
+
+Rationale:
+
+  QUEUE_FLAG_VIRT expands to QUEUE_FLAG_NONROT which casus the queue
+  unplugged immediately.  This is not a good behaviour for at least
+  qemu and kvm where we do have significant overhead for every
+  I/O operations.  Even with all the latested speeups (native AIO,
+  MSI support, zero copy) we can only get native speed for up to 128kb
+  I/O requests we already are down to 66% of native performance for 4kb
+  requests even on my laptop running the Intel X25-M SSD for which the
+  QUEUE_FLAG_NONROT was designed.
+  If we ever get virtio-blk overhead low enough that this flag makes
+  sense it should only be set based on a feature flag set by the host.
+	
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Acked-by: Jeff Moyer <jmoyer@redhat.com>
+
+---
+To unsubscribe from this list: send the line "unsubscribe kvm" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+Index: linux-2.6/drivers/block/virtio_blk.c
+===================================================================
+--- linux-2.6.orig/drivers/block/virtio_blk.c	2009-09-04 17:33:48.802523987 -0300
++++ linux-2.6/drivers/block/virtio_blk.c	2009-09-04 17:33:56.186522158 -0300
+@@ -249,7 +249,6 @@ static int __devinit virtblk_probe(struc
+        goto out_mempool;
+ 	}
+ 
+-	queue_flag_set_unlocked(QUEUE_FLAG_VIRT, vblk->disk->queue);
+ 
+ 	if (index < 26) {
+ 		sprintf(vblk->disk->disk_name, "vd%c", 'a' + index % 26);
