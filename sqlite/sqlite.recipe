@@ -8,7 +8,7 @@
 
 class Sqlite(CPackageRecipe):
     name = 'sqlite'
-    version = '3.6.12'
+    version = '3.6.17'
 
     extraConfig = ' --enable-threadsafe  --enable-threads-override-locks --enable-load-extension '
 
@@ -23,11 +23,15 @@ class Sqlite(CPackageRecipe):
                           'tcl:runtime', 'tcl:devel', ]
         extraConfig += ' --enable-tcl'
 
-    patches = ('sqlite-3.6.12-libdl.patch',
-               # Avoid insecure sprintf(), use a system path for lempar.c, patch from Debian
-               'sqlite-3.6.6.2-lemon-snprintf.patch',
-               'sqlite-3.6.12-no-sqlite-doc.patch',
-               'sqlite-3.6.12-memalign.patch',)
+    patches = ( # Fix build with --enable-load-extension, upstream ticket #3137
+                'sqlite-3.6.12-libdl.patch',
+                # Avoid insecure sprintf(), use a system path for lempar.c, patch from Debian
+                'sqlite-3.6.6.2-lemon-snprintf.patch',
+                # Fixup io-test fsync expectations wrt SQLITE_DISABLE_DIRSYNC
+                'sqlite-3.6.13-iotest-nodirsync.patch',
+                # Disable two tests failing on at least on x86_64, ticket #3951
+                'sqlite-3.6.17-tkt3951.patch',
+                )
 
     def setup(r):
         r.disableParallelMake()
@@ -52,6 +56,11 @@ class Sqlite(CPackageRecipe):
         
         r.Run('autoconf')
         r.Configure(r.extraConfig)
+        # rpath / libtool mess
+        # rpath removal
+        r.Replace(('^hardcode_libdir_flag_spec=.*', 'hardcode_libdir_flag_spec=""'), 
+                  ('^runpath_var=LD_RUN_PATH', 'runpath_var=DIE_RPATH_DIE'),
+                  'libtool')
 
         if Use.bootstrap:
             mflags = 'READLINE_FLAGS= ' # Suppress readline.
