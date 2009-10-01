@@ -7,28 +7,23 @@
 loadSuperClass('rpmpackage')
 class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
     name = 'mkinitrd'
-    version = '6.0.87'
-    rpmRelease = '3.fc11'
+    version = '6.0.71'
+    rpmRelease = '3.fc10'
 
     buildRequires = [ 'popt:devel', 'device-mapper:devel', 'e2fsprogs:devel',
         'glib:devel', 'parted:devel', 'pkgconfig:devel', 'libdhcp:devel',
         'pump:devel', 'libdhcp:devel', 'openssl:devel', 'python:devel',
         'libdhcp4client:devel', 'libdhcp6client:devel', 'libnl:devel',
         'initscripts:runtime', # see discussion below of get_numeric_dev
-        'libelf:devel', 'elfutils:devel',
+        'libelf:devel', 'elfutils:devel', 'util-linux:devel',
         ]
 
     def setup(r):
         r.disableParallelMake()
-        
-        # MAKING things deliberately NOT to build, to avoid acidental mooks
-        # this is work in progress
-        # r.unpack()
-
-
+        r.unpack()
         # in the makefile - we override them by setting CFLAGS when calling make
         r.macros.cflags += ' -D_FORTIFY_SOURCE=2 -fPIC -std=gnu99 -D_GNU_SOURCE=1'
-        r.addPatch('disable-selinux-mkinitrd-6.0.87.patch')
+        r.addPatch('disable-selinux.patch')
         r.addSource('kernel.tagdescription', macros=True, dest='%(tagdescriptiondir)s/kernel')
         r.addSource('kernel.taghandler', macros=True, dest='%(taghandlerdir)s/kernel', mode=0755)
 
@@ -50,7 +45,7 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         r.addPatch('firmware-handling.patch')
 
         # Work around new [[ =~ ]] parsing rules in bash 3.2 (RPL-1478)
-        r.addPatch('mkinitrd-6.0.87-shell_regexp.patch')
+        r.addPatch('mkinitrd-6.0.25-shell_regexp.patch')
 
         # RPL-1068. Eliminate warning if /etc/ld.so.conf.d doesn't exist.
         r.addPatch('mkinitrd-ld.so.conf.d.patch', level=0)
@@ -58,27 +53,19 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         r.MakeDirs('%(sysconfdir)s/mkinitrd-firmware.d')
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/mkinitrd-firmware.d')
 
-        # Return error if interpreter is not found.
-        # FIXME - make sure this got redundant
-        # r.addPatch('interpreter-error-checking.patch')
-
-        # Add splashy support.
-        r.addPatch('splashy-6.0.87.patch')
-
         # Return error if fstab is not found (RPL-1959).
         r.addPatch('fstab.patch')
 
-        # RPL-2439
-        r.addPatch('mkinitrd-rh506189.patch', rpm=r.srpm)
+        r.addPatch('mkinitrd-6.0.40-RPL-2439.patch')
 
         # Include all PATA modules to facilitate libata migration
         r.addPatch('mkinitrd-modules.libata.patch')
 
         # Now only install the ones that are on the system
-        r.addPatch('mkinitrd-6.0.87-pcifilter.patch')
+#        r.addPatch('mkinitrd-6.0.45-pcifilter.patch')
 
         # If a *hci-hcd module gets added, add usb-storage, too
-        r.addPatch('mkinitrd-6.0.87-usbstorage.patch')
+#        r.addPatch('mkinitrd-6.0.45-usbstorage.patch')
 
         # Work around lost uevents (RPL-3047)
         r.addPatch('mkblkdevs-rescan-sysfs.patch')
@@ -95,7 +82,7 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         # change branding
         r.Replace(('redhat-release', 'distro-release'),
                   ('/redhat', '/rpath'),
-                  ('"Red Hat Linux', '"rPath Linux'),
+                  ('"Red Hat Linux', '"Foresight Linux'),
                   'grubby/{grubby.c,new-kernel-pkg,test.sh}')
         r.Replace('Red Hat ', '', 'nash/nash.c')
 
