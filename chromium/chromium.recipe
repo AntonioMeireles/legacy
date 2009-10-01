@@ -1,6 +1,6 @@
 class Chromium(PackageRecipe):
     name = 'chromium'
-    version = '27338'
+    version = '27768'
 
     buildRequires = ['depot_tools:runtime',
                      'nss:devellib',
@@ -28,18 +28,25 @@ class Chromium(PackageRecipe):
                      'desktop-file-utils:runtime',
                      'mozilla-filesystem:runtime',
                      'make:runtime',
+                     # For debugging...
+                     'vim:runtime',
                     ]
 
     def setup(r):
         r.addArchive('http://build.chromium.org/buildbot/archives/'
-                     'chromium.r26326.tgz')
+                     'chromium.r27703.tgz')
 
         r.addSource('no-Werror.patch')
         r.addPatch('no-Werror.patch')
 
+        # Need to update .gclient for svn urls.  Really don't want to have to
+        # check in a new 900+mb source tarball just to get this change.
+        # r.Run("sed -i 's/^.*native_client.*$//' .gclient",
+              # dir='chrome-svn/tarball/chromium')
+
         # Updates the code that was extracted to a specific svn revision.
         r.Run('/opt/google/depot_tools/gclient update --revision=src@%s' % \
-              r.version, dir='chrome-svn/tarball/chromium/src')
+              r.version, dir='chrome-svn/tarball/chromium')
 
         r.MakeDirs('%(builddir)s/chrome-svn/tarball/chromium/src/out')
 
@@ -63,6 +70,31 @@ class Chromium(PackageRecipe):
                       's|\$(builddir)|\$(rootdir)/\\0|g" '
               '-i v8/tools/gyp/v8_snapshot.mk',
               dir='chrome-svn/tarball/chromium/src')
+
+        r.Run('sed -e "/cmd_ncvalidate_ncdecode_table =/ '
+              's|\$(builddir)|\$(rootdir)/\\0|g" '
+              '-i  native_client/src/trusted/validator_x86/ncvalidate.mk',
+              dir='chrome-svn/tarball/chromium/src')
+        r.Run('sed -e "/cmd_ncvalidate_ncdecode_tablegen =/ '
+              's|\$(builddir)|\$(rootdir)/\\0|g" '
+              '-i  native_client/src/trusted/validator_x86/ncvalidate.mk',
+              dir='chrome-svn/tarball/chromium/src')
+        r.Run('sed -e "/cmd_ncvalidate_ncop_expr_node_flag/ '
+              's|\$(builddir)|\$(rootdir)/\\0|g" '
+              '-i  native_client/src/trusted/validator_x86/ncvalidate.mk',
+              dir='chrome-svn/tarball/chromium/src')
+
+        r.Run('sed -e "/cmd_service_runtime_x86_header_gen/ '
+              's|\$(builddir)|\$(rootdir)/\\0|g" '
+              '-i  native_client/src/trusted/service_runtime/arch/x86/'
+              'service_runtime_x86.mk ',
+              dir='chrome-svn/tarball/chromium/src')
+        r.Run('sed -e "/cmd_service_runtime_x86_sheader_gen/ '
+              's|\$(builddir)|\$(rootdir)/\\0|g" '
+              '-i  native_client/src/trusted/service_runtime/arch/x86/'
+              'service_runtime_x86.mk ',
+              dir='chrome-svn/tarball/chromium/src')
+
 
         # Make.
         r.Run('/usr/bin/make -r -j8 chrome chrome_sandbox BUILDTYPE=Release '
