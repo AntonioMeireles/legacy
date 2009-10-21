@@ -3,24 +3,47 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
-class Hplip(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Hplip(RPMPackageRecipe,CPackageRecipe):
     name = 'hplip'
-    version = '3.9.2'
+    version = '3.9.8'
+    rpmRelease = '14.fc11'
+    rpmPatches = [ 'hplip-hpcups-reorder.patch',
+                'hplip-strstr-const.patch',
+                'hplip-ui-optional.patch',
+                'hplip-no-asm.patch',
+                'hplip-clear-previous-state-reasons.patch',
+                'hplip-state-reasons-newline.patch',
+                'hplip-parenths.patch',
+                'hplip-non-scripts.patch',
+                'hplip-requirespageregion.patch',
+                'hplip-discovery-method.patch',
+                'hplip-device-reconnected.patch' ]
+    rpmSources = ['hplip.fdi']
 
     buildRequires = [ 'python:devel', 'sane-backends:runtime', 'cups:devel',
-        'libjpeg:devel', 'openssl:devel', 'file:runtime',
-        'desktop-file-utils:runtime', 'libusb:devel', 'libstdc++:devel',
-        'chkconfig:runtime', 'cups:runtime', 'python:tk',
-        'desktop-file-utils:runtime', 'pygtk:python', 'net-snmp:devel',
-        'sane-backends:devel', 'perl:runtime', 'PIL:python',
-        'dbus:devellib', 'pkgconfig:devel' ]
+                      'libjpeg:devel', 'openssl:devel', 'file:runtime',
+                      'desktop-file-utils:runtime', 'libusb:devel', 'libstdc++:devel',
+                      'chkconfig:runtime', 'cups:runtime', 'python:tk',
+                      'desktop-file-utils:runtime', 'pygtk:python', 'net-snmp:devel',
+                      'sane-backends:devel', 'perl:runtime', 'PIL:python',
+                      'dbus:devellib', 'pkgconfig:devel', 'autoconf:runtime',
+                      'automake:runtime', 'PyQt4:python', 'PyQt:python', 'dbus-python:python',
+                      'notify-python:python', 'perl:devel',
+                      ]
 
     def setup(r):
-        r.addArchive('http://prdownloads.sourceforge.net/%(name)s/%(name)s-%(version)s.tar.gz')
+        RPMPackageRecipe.unpack(r)
 
-        r.Configure(' --enable-foomatic-ppd-install'
+        r.Run(""" aclocal; automake --foreign --add-missing --copy; autoconf""")
+        r.Configure( '--enable-scan-build --enable-gui-build --enable-fax-build '
+                     ' --disable-foomatic-rip-hplip-install  --enable-pp-build '
+                     ' --enable-qt4 --enable-hpcups-install --enable-cups-drv-install '
+                     ' --enable-hpijs-install '
+                     ' --enable-foomatic-ppd-install'
                     ' --with-cupsbackenddir=%(libdir)s/cups/backend')
+        r.Run(""" sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool ; sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
+""")
         r.Make()
         r.MakeInstall()
 
@@ -33,6 +56,32 @@ class Hplip(CPackageRecipe):
         r.Remove('%(datadir)s/foomatic/db/source/printer/HP-LaserJet_1022.xml')
 
         r.Requires('foomatic-filters:runtime', '%(bindir)s/hpi(js|od)')
+        r.Requires('sip:runtime', '%(bindir)s/hpi(js|od)')
         r.Requires('libusb:devel', '%(bindir)s/hpi(js|od)')
         r.Requires('%(bindir)s/gs', '%(bindir)s/hpi(js|od)')
         r.Requires('PyQt:python', '%(bindir)s/hp-(align|check|clean|colorcal|devicesetup|fab|faxsetup|firmware|info|linefeedcal|makecopies|plugin|pqdiag|print|printsettings|sendfax|setup|testpage|toolbox)')
+
+        r.Install('hplip.fdi', '%(datadir)s/hal/fdi/policy/10osvendor/10-hplip.fdi', mode = 0644)
+
+        # remove cruft 
+        for x in ('%(sysconfdir)s/sane.d',
+                  '%(docdir)s',
+                  '%(sysconfdir)s/udev/rules.d/',
+                  # Remove files we don't want to package.
+                  '%(datadir)s/hplip/hpaio.desc',
+                  '%(datadir)s/hplip/hplip-install',
+                  '%(datadir)s/hplip/install.*',
+                  '%(datadir)s/hplip/hpijs.drv.in.template',
+
+                  # The systray applet doesn't work properly (displays icon as a
+                  # window), so don't ship the launcher yet.
+                  '%(sysconfdir)s/xdg/autostart/hplip-systray.desktop',
+                  # bellow should be uncommented *if* we had things right elsewhere
+                  # '%(datadir)s/ppd/HP/*.ppd',
+                  '%(datadir)s/hal/fdi/preprobe/10osvendor/20-hplip-devices.fdi',
+                  '%(datadir)s/applications/hplip.desktop'):
+            r.Remove(x, recursive = True, allowNoMatch = True)
+
+        
+
+
