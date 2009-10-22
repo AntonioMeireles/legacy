@@ -35,8 +35,35 @@ bootPrefix ()
 
 taghandler_error=
 
-run_bootman ()
+query_bootman () {
+    configKey=$1
+
+    if [ "$(run %(essentialsbindir)s/bommy get $configKey >/dev/null 2>&1)" = "" ] ; then
+        rc=0
+    else
+        rc=1
+    fi
+
+    return $rc
+}
+
+initial_setup ()
 {
+    # If there is a grub.conf and bootman has not been configured, this is
+    # probably the rpl1 -> rpl2 migration case.
+    if [ -f /boot/grub/grub.conf ] && \
+       [ "$(wc -l /etc/bootloader.conf | awk '{print $1}')" = "1" ] ; then
+        # backup old bootloader.conf
+        cp -f /etc/bootloader.conf /etc/bootloader.conf.old
+
+        # run grub to bootman to convert old config
+        run %(bindir)s/grubtobootman /boot/grub /etc/bootloader.d > /etc/bootloader.conf
+
+        # make sure config made it to disk
+        run %(essentialsbindir)s/ext3flush /etc/bootloader.conf
+    fi
+
+    # Do some initial configuration if it hasn't already been done.
     if [ ! -s /etc/bootloader.d/root.conf ] ; then
 	# first non-commented / entry is the one we want...
 	rootdev=
@@ -61,18 +88,33 @@ run_bootman ()
 	    return 1
 	fi
 
+
 	mkdir -p /etc/bootloader.tmp/etc
 	echo >/etc/bootloader.tmp/etc/bootloader.conf
-	ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set root \
-	    "${rootdev}"
-	ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set add_options ro
-	ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set timeout 50
+
+        # Only set variables if they are not already set in bootloader.conf
+        if $(query_bootman root) ; then
+            ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set root \
+                "${rootdev}"
+        fi
+
+        if $(query_bootman read_only) ; then
+            ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set read_only
+        fi
+
+        if $(query_bootman timeout) ; then
+            ROOT=/etc/bootloader.tmp %(essentialsbindir)s/bommy set timeout 50
+        fi
+
 	mv -f /etc/bootloader.tmp/etc/bootloader.conf \
 	    /etc/bootloader.d/root.conf
 	rm -fr /etc/bootloader.tmp
 	run %(essentialsbindir)s/ext3flush /etc/bootloader.d/root.conf
     fi
+}
 
+run_bootman ()
+{
     run %(essentialsbindir)s/bootman
     for f in /boot/grub/grub.conf /boot/extlinux/extlinux.conf
     do
@@ -102,7 +144,11 @@ run_bommy ()
 	    # xen label 'description' hypervisor dom0_kernel [initrd]
 	    run %(essentialsbindir)s/bommy add $kernel_type $version "$title" \
 		${multiboot} ${pre}vmlinuz-$version ${initrd}
-	    run %(essentialsbindir)s/bommy set default $version
+        rc=$?
+        # Don't set as default if adding failed.
+        if [ $rc -eq 0 ] ; then
+	        run %(essentialsbindir)s/bommy set default $version
+        fi
 	    ;;
 
 	remove)
@@ -130,6 +176,7 @@ case $type in
 
 	case $action in
 	    update)
+                initial_setup
                 for version in $moduleversionlist; do
 		    pre=$(bootPrefix $version)
                     run /sbin/depmod -ae -F "/boot/System.map-$version" \
