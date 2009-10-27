@@ -7,7 +7,7 @@
 class Kvm(AutoPackageRecipe):
 
     name = 'kvm'
-    version = '88'
+    version = '0.11.0'
 
     buildRequires = [ 'SDL:devel', 'alsa-lib:devel', 'e2fsprogs:devel',
                       'zlib:devel', 'chkconfig:runtime', 'info-kvm:group',
@@ -18,19 +18,27 @@ class Kvm(AutoPackageRecipe):
                       'openssl:devel', 'pulseaudio:devel', ]
 
     def unpack(r):
-        r.addArchive('mirror://sourceforge/kvm/kvm-%(version)s.tar.gz')
+        r.addArchive('mirror://sourceforge/kvm/qemu-kvm-%(version)s.tar.gz')
 
-        for p in [ 'kvm-qemu-default-memsize.patch',
+        for p in [ # common and X86 patches
+                   # 'qemu-datadir.diff',
+                   'kvm-qemu-default-memsize.patch',
                    'kvm-qemu-no-fallback-if-open-kvm-fails.patch',
+                   # Mac OS X patches
+                   'kvm-qemu-lpc.patch',
+                   'kvm-qemu-applesmc.patch',
+                   'kvm-qemu-ide-ich6.patch',
+                   'kvm-qemu-macmodel.patch',
+                   'kvm-qemu-rtl8139-link.patch',
                    # Post-release upstream patches
-                   'kvm-preXX-init-on-demand.patch',
-                   'kvm-preXX-fix-build-for-ESD-audio.patch',
-                   'kvm-preXX-fix-serious-regression.patch',
-                   'kvm-preXX-fix-virtio-hd.patch',
-                   'kvm-preXX-tracepoint-for-latest-kernel.patch',
-                   'kvm-remove-trace-calls.patch',
-                   'kvm-no-pp-directives-in-macros.patch']: 
+                   'kvm-no-pp-directives-in-macros.patch',
+                   'kvm-qemu-preXX-dictzip1.patch',
+                   'kvm-qemu-preXX-dictzip2.patch',
+                   'kvm-qemu-preXX-dictzip3.patch',
+                   'kvm-qemu-preXX-dirty-bitmap-alloc.patch',]: 
             r.addPatch(p)
+        r.addAction('cp -ar kvm/bios kvm/bios-mac')
+        r.addPatch('kvm-bios.patch')
 
     def configure(r):
         if Arch.x86:
@@ -61,13 +69,21 @@ class Kvm(AutoPackageRecipe):
         r.Make('KVM_KMOD="no"')
         # r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
 
-        r.Make('kvm/bios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
-        r.Make('kvm/vgabios    PREFIX=%(prefix)s DESTDIR=%(destdir)s')
+        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/bios')
+        r.Copy('kvm/bios/BIOS-bochs-latest', 'pc-bios/bios.bin')
+
+        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/vgabios')
+        r.Copy('kvm/vgabios/VGABIOS-lgpl-latest.cirrus.bin', 'pc-bios/vgabios-cirrus.bin')
+        r.Copy('kvm/vgabios/VGABIOS-lgpl-latest.bin', 'pc-bios/vgabios.bin')
+        r.Copy('pc-bios/optionrom/extboot.bin', 'pc-bios/')
+
+        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/bios-mac')
+
 
     def makeinstall(r):
         r.MakeInstall('KVM_KMOD="no"')
 
-        r.Install('kvm/scripts/*.rules','%(sysconfdir)s/udev/rules.d/')
+        r.Install('65-kvm.rules','%(sysconfdir)s/udev/rules.d/')
         r.Install('kvm/scripts/qemu-ifup', '%(sysconfdir)s/kvm/')
 
         r.Install('kvm/kvm_stat','%(bindir)s/')
@@ -78,6 +94,8 @@ class Kvm(AutoPackageRecipe):
                   'pxe-e1000', 'pxe-ne2k_pci', 'pxe-pcnet',
                   'pxe-rtl8139']:
             r.Install('pc-bios/' + i + '.bin', '%(datadir)s/%(name)s/', mode = 0644)
+
+        r.Install('kvm/bios-mac/BIOS-bochs-latest', '%(datadir)s/%(name)s/bios-mac.bin', mode = 0644)
 
         r.addSource('kvm.modules', dest = '%(sysconfdir)s/sysconfig/modules/', mode = 0755)
 

@@ -1,0 +1,294 @@
+
+#qemu-only -> submit upstream qemu, but improve first: 
+# undo rather hacky pci_enabled -> model > MODEL_ISA changes 
+# and replace checks wether to enable newer emulated Mac hardware 
+# depending in the bits in a bitfield which is passed pc_init1() 
+# like this: pc_init1(.... , ISA, ...) 
+#            pc_init1(.... , PCI | IOAPIC | PIIX, ..... 
+#            pc_init1(.... , PCI | ICH6, LPC, SMC , ...) 
+ 
+Index: qemu-kvm-0.11.0/hw/pc.c
+===================================================================
+--- qemu-kvm-0.11.0.orig/hw/pc.c
++++ qemu-kvm-0.11.0/hw/pc.c
+@@ -92,6 +92,12 @@ static void option_rom_setup_reset(targe
+     qemu_register_reset(option_rom_reset, rrd);
+ }
+ 
++enum pc_model {
++    MODEL_ISA = 0,
++    MODEL_PCI = 1,
++    MODEL_MAC = 2
++};
++
+ static void ioport80_write(void *opaque, uint32_t addr, uint32_t data)
+ {
+ }
+@@ -1116,7 +1122,7 @@ static void pc_init1(ram_addr_t ram_size
+                      const char *kernel_cmdline,
+                      const char *initrd_filename,
+                      const char *cpu_model,
+-                     int pci_enabled)
++                     int model)
+ {
+     char *filename;
+     int ret, linux_boot, i;
+@@ -1147,11 +1153,15 @@ static void pc_init1(ram_addr_t ram_size
+ 
+     /* init CPUs */
+     if (cpu_model == NULL) {
++        if(model == MODEL_MAC) {
++            cpu_model = "coreduo,vendor=GenuineIntel";
++        } else {
+ #ifdef TARGET_X86_64
+-        cpu_model = "qemu64";
++            cpu_model = "qemu64";
+ #else
+-        cpu_model = "qemu32";
++            cpu_model = "qemu32";
+ #endif
++        }
+     }
+ 
+     if (kvm_enabled()) {
+@@ -1184,8 +1194,16 @@ static void pc_init1(ram_addr_t ram_size
+ 
+ 
+     /* BIOS load */
+-    if (bios_name == NULL)
+-        bios_name = BIOS_FILENAME;
++    if (bios_name == NULL) {
++        switch(model) {
++            case MODEL_MAC:
++                bios_name = "bios-mac.bin";
++                break;
++            default:
++                bios_name = BIOS_FILENAME;
++                break;
++        }
++    }
+     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+     if (filename) {
+         bios_size = get_image_size(filename);
+@@ -1283,7 +1301,7 @@ static void pc_init1(ram_addr_t ram_size
+         i8259 = i8259_init(cpu_irq[0]);
+     ferr_irq = i8259[13];
+ 
+-    if (pci_enabled) {
++    if (model > MODEL_ISA) {
+         pci_bus = i440fx_init(&i440fx_state, i8259);
+         piix3_devfn = piix3_init(pci_bus, -1);
+     } else {
+@@ -1296,18 +1314,18 @@ static void pc_init1(ram_addr_t ram_size
+     register_ioport_write(0xf0, 1, 1, ioportF0_write, NULL);
+ 
+     if (cirrus_vga_enabled) {
+-        if (pci_enabled) {
++        if (model >= MODEL_PCI) {
+             pci_cirrus_vga_init(pci_bus);
+         } else {
+             isa_cirrus_vga_init();
+         }
+     } else if (vmsvga_enabled) {
+-        if (pci_enabled)
++        if (model >= MODEL_PCI)
+             pci_vmsvga_init(pci_bus);
+         else
+             fprintf(stderr, "%s: vmware_vga: no PCI bus\n", __FUNCTION__);
+     } else if (std_vga_enabled) {
+-        if (pci_enabled) {
++        if (model >= MODEL_PCI) {
+             pci_vga_init(pci_bus, 0, 0);
+         } else {
+             isa_vga_init();
+@@ -1321,8 +1339,13 @@ static void pc_init1(ram_addr_t ram_size
+     register_ioport_read(0x92, 1, 1, ioport92_read, NULL);
+     register_ioport_write(0x92, 1, 1, ioport92_write, NULL);
+ 
+-    if (pci_enabled) {
+-        ioapic = ioapic_init();
++    switch (model) {
++        case MODEL_MAC:
++            applesmc_init();
++            lpc_init(pci_bus, piix3_devfn, i8259);
++        case MODEL_PCI:
++            ioapic = ioapic_init();
++            break;
+     }
+ #ifdef USE_KVM_PIT
+     if (kvm_enabled() && qemu_kvm_pit_in_kernel())
+@@ -1334,7 +1357,7 @@ static void pc_init1(ram_addr_t ram_size
+     if (!no_hpet) {
+         hpet_init(i8259);
+     }
+-    if (pci_enabled) {
++    if (model > MODEL_ISA) {
+         pic_set_alt_irq_func(isa_pic, ioapic_set_irq, ioapic);
+     }
+ 
+@@ -1357,7 +1380,7 @@ static void pc_init1(ram_addr_t ram_size
+     for(i = 0; i < nb_nics; i++) {
+         NICInfo *nd = &nd_table[i];
+ 
+-        if (!pci_enabled || (nd->model && strcmp(nd->model, "ne2k_isa") == 0))
++        if (model == MODEL_ISA || (nd->model && strcmp(nd->model, "ne2k_isa") == 0))
+             pc_init_ne2k_isa(nd, i8259);
+         else
+             pci_nic_init(nd, "rtl8139", NULL);
+@@ -1378,19 +1401,25 @@ static void pc_init1(ram_addr_t ram_size
+ 	    hd[i] = NULL;
+     }
+ 
+-    if (pci_enabled) {
+-        pci_piix3_ide_init(pci_bus, hd, piix3_devfn + 1, i8259);
+-    } else {
+-        for(i = 0; i < MAX_IDE_BUS; i++) {
+-            isa_ide_init(ide_iobase[i], ide_iobase2[i], i8259[ide_irq[i]],
+-	                 hd[MAX_IDE_DEVS * i], hd[MAX_IDE_DEVS * i + 1]);
+-        }
++    switch(model) {
++        case MODEL_MAC:
++            pci_ich6_ide_init(pci_bus, hd, piix3_devfn + 1, i8259);
++            break;
++        case MODEL_PCI:
++            pci_piix3_ide_init(pci_bus, hd, piix3_devfn + 1, i8259);
++            break;
++        default:
++            for(i = 0; i < 2; i++) {
++                isa_ide_init(ide_iobase[i], ide_iobase2[i], i8259[ide_irq[i]],
++                             hd[MAX_IDE_DEVS * i], hd[MAX_IDE_DEVS * i + 1]);
++            }
++            break;
+     }
+ 
+     i8042_init(i8259[1], i8259[12], 0x60);
+     DMA_init(0);
+ #ifdef HAS_AUDIO
+-    audio_init(pci_enabled ? pci_bus : NULL, i8259);
++    audio_init((model > MODEL_ISA) ? pci_bus : NULL, i8259);
+ #endif
+ 
+     for(i = 0; i < MAX_FD; i++) {
+@@ -1404,11 +1433,11 @@ static void pc_init1(ram_addr_t ram_size
+ 
+     cmos_init(below_4g_mem_size, above_4g_mem_size, boot_device, hd);
+ 
+-    if (pci_enabled && usb_enabled) {
++    if ((model > MODEL_ISA) && usb_enabled) {
+         usb_uhci_piix3_init(pci_bus, piix3_devfn + 2);
+     }
+ 
+-    if (pci_enabled && acpi_enabled) {
++    if ((model > MODEL_ISA) && acpi_enabled) {
+         uint8_t *eeprom_buf = qemu_mallocz(8 * 256); /* XXX: make this persistent */
+         i2c_bus *smbus;
+ 
+@@ -1427,7 +1456,7 @@ static void pc_init1(ram_addr_t ram_size
+         i440fx_init_memory_mappings(i440fx_state);
+     }
+ 
+-    if (pci_enabled) {
++    if (model > MODEL_ISA) {
+ 	int max_bus;
+         int bus;
+ 
+@@ -1438,7 +1467,7 @@ static void pc_init1(ram_addr_t ram_size
+     }
+ 
+     /* Add virtio block devices */
+-    if (pci_enabled) {
++    if (model > MODEL_ISA) {
+         int index;
+         int unit_id = 0;
+ 
+@@ -1463,13 +1492,13 @@ static void pc_init1(ram_addr_t ram_size
+     }
+ 
+     /* Add virtio balloon device */
+-    if (pci_enabled && virtio_balloon) {
++    if ((model >= MODEL_PCI) && virtio_balloon) {
+         pci_dev = pci_create("virtio-balloon-pci", virtio_balloon_devaddr);
+         qdev_init(&pci_dev->qdev);
+     }
+ 
+     /* Add virtio console devices */
+-    if (pci_enabled) {
++    if (model >= MODEL_PCI) {
+         for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
+             if (virtcon_hds[i]) {
+                 pci_create_simple(pci_bus, -1, "virtio-console-pci");
+@@ -1485,6 +1514,19 @@ static void pc_init1(ram_addr_t ram_size
+ #endif /* USE_KVM_DEVICE_ASSIGNMENT */
+ }
+ 
++static void pc_init_mac(ram_addr_t ram_size,
++                        const char *boot_device,
++                        const char *kernel_filename,
++                        const char *kernel_cmdline,
++                        const char *initrd_filename,
++                        const char *cpu_model)
++{
++    pc_init1(ram_size, boot_device,
++             kernel_filename, kernel_cmdline,
++             initrd_filename, cpu_model,
++             MODEL_MAC);
++}
++
+ static void pc_init_pci(ram_addr_t ram_size,
+                         const char *boot_device,
+                         const char *kernel_filename,
+@@ -1494,7 +1536,7 @@ static void pc_init_pci(ram_addr_t ram_s
+ {
+     pc_init1(ram_size, boot_device,
+              kernel_filename, kernel_cmdline,
+-             initrd_filename, cpu_model, 1);
++             initrd_filename, cpu_model, MODEL_PCI);
+ }
+ 
+ static void pc_init_isa(ram_addr_t ram_size,
+@@ -1506,7 +1548,7 @@ static void pc_init_isa(ram_addr_t ram_s
+ {
+     pc_init1(ram_size, boot_device,
+              kernel_filename, kernel_cmdline,
+-             initrd_filename, cpu_model, 0);
++             initrd_filename, cpu_model, MODEL_ISA);
+ }
+ 
+ /* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
+@@ -1526,6 +1568,13 @@ static QEMUMachine pc_machine = {
+     .is_default = 1,
+ };
+ 
++static QEMUMachine mac_machine = {
++    .name = "mac",
++    .desc = "Intel-Mac",
++    .init = pc_init_mac,
++    .max_cpus = 255,
++};
++
+ static QEMUMachine pc_machine_v0_10 = {
+     .name = "pc-0.10",
+     .desc = "Standard PC, qemu 0.10",
+@@ -1561,6 +1610,7 @@ static void pc_machine_init(void)
+     qemu_register_machine(&pc_machine);
+     qemu_register_machine(&pc_machine_v0_10);
+     qemu_register_machine(&isapc_machine);
++    qemu_register_machine(&mac_machine);
+ }
+ 
+ machine_init(pc_machine_init);
+Index: qemu-kvm-0.11.0/vl.c
+===================================================================
+--- qemu-kvm-0.11.0.orig/vl.c
++++ qemu-kvm-0.11.0/vl.c
+@@ -5837,6 +5837,10 @@ int main(int argc, char **argv, char **e
+     if (kvm_enabled()) {
+         int ret;
+ 
++        if (machine == find_machine("mac")) {
++            kvm_pit = 0;
++        }
++
+         ret = kvm_init(smp_cpus);
+         if (ret < 0) {
+ #if defined(KVM_UPSTREAM) || defined(NO_CPU_EMULATION)
