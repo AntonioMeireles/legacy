@@ -1,0 +1,97 @@
+#
+# Copyright (c) 2006-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadInstalled('python', 'conary.rpath.com@rpl:1')
+class rAPA(BuildPackageRecipe):
+
+   buildRequires = [
+        'bash:runtime',
+        'chkconfig:runtime',
+        'ConfigObj:python',
+        'docbook-utils:runtime',
+        'elementtree:python',
+        'epdb:python',
+        'libuser:python',
+        'gettext:runtime',
+        'kid:python',
+        'kid:runtime',
+        'm2crypto:python',
+        'mercurial:runtime',
+        'newt:python',
+        'simplejson:python',
+        'pycrypto:python',
+        'PyPAM:python',
+        'xmlto:runtime',
+      ]
+
+   name = 'rapa'
+   version = '3.2.2'
+
+   def Packages(r):
+      pass
+
+   def setup(r):
+      r.macros.pyver = Python.majversion
+      r.macros.pypath = '%(libdir)s/python%(pyver)s/site-packages'
+      r.macros.pluginpath = '%(libdir)s/raa/'
+
+      r.macros.cherrypy_ver = '3.1.2'
+
+      # NOTE: If you wish to build this package yourself, you should replace
+      # scc.eng.rpath.com with hg.rpath.com below.
+      r.addArchive('ftp://download.rpath.com/raa/raa-%(version)s.tar.bz2')
+      r.addSource('EULA_Dual_License.txt')
+
+      r.MakeDirs('%(localstatedir)s/lib/raa','%(localstatedir)s/log/raa', '%(localstatedir)s/run/raa', mode=0770)
+      r.Create('%(sysconfdir)s/conary/config.d/httpProxy', contents = "# Placeholder for rAPA proxy settings for Conary; do not delete")
+
+      r.Make('VERSION=%(version)s')
+      r.MakeInstall('libdir=%(libdir)s')
+
+      r.Symlink('%(pypath)s/raaplugins','%(pluginpath)s')
+
+      r.Packages()
+      r.PackageSpec('rapa-console', '%(bindir)s/rapa-console')
+      r.Requires('info-nobody:user', '%(bindir)s/rapa-console')
+      r.Ownership('raa-web','raa-web','%(localstatedir)s/lib/raa','%(localstatedir)s/log/raa', '%(localstatedir)s/run/raa', '%(sysconfdir)s/conary/config.d/httpProxy')
+      r.InitialContents('%(sysconfdir)s/conary/config.d/httpProxy')
+
+      r.Requires('logrotate:runtime','%(sysconfdir)s/logrotate.d/raa')
+      r.Requires('PyPAM:python','%(pypath)s/raaplugins/auth/web/pamauth.py')
+      r.Requires('tar:runtime','%(pypath)s/raaplugins/collectiontool/ct.py')
+      #Backup plugin requires tools to mount remote shares
+      r.Requires('portmap:runtime', '%(pypath)s/raaplugins/backup/lib.py') # Required for locking
+      r.Requires('nfs-utils:runtime', '%(pypath)s/raaplugins/backup/lib.py')
+      r.Requires('file: /sbin/mount.cifs', '%(pypath)s/raaplugins/backup/lib.py')
+      r.Requires(exceptDeps='python: OpenSSL.*')
+
+      # install CherryPy for rAPA
+      r.macros.vendordir = '%(pypath)s/raa/vendor'
+      r.addArchive('http://download.cherrypy.org/CherryPy/%(cherrypy_ver)s/'
+        'CherryPy-%(cherrypy_ver)s.tar.gz',
+        dir='vendor', preserveOwnership=False)
+      r.addPatch('cherrypy-ssl-socket-close.patch', dir='../vendor/CherryPy-%(cherrypy_ver)s')
+      r.Copy('../vendor/CherryPy-%(cherrypy_ver)s/cherrypy', '%(vendordir)s/')
+      r.CompilePython('%(vendordir)s/cherrypy')
+      r.Provides(exceptions='%(vendordir)s/')
+
+      # We need to make a /usr/lib directory even in 64bit builds since we
+      # look for plugins there regardless.
+      r.Create('%(prefix)s/lib/raa/.keep.%(name)s')
+
+      r.Doc('README')
+      r.Doc('EULA_Dual_License.txt')
+
+      # Development files.
+      r.Doc('devel.tar.bz2')
+
+      # Sample theme.
+      r.Doc('samples/*.kid', dir='samples')
+      r.Doc('samples/*.css', dir='samples')
+
+      # Simple raa-lighttpd initscript so that rapa doesn't shut it down when migrating from 2.x
+      r.PackageSpec('raa-lighttpd', '%(sysconfdir)s/init.d/raa-lighttpd')
+      r.Requires('lighttpd:runtime', '%(sysconfdir)s/init.d/raa-lighttpd')
