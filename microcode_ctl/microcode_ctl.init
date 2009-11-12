@@ -1,0 +1,98 @@
+#!/bin/bash
+# chkconfig: 345 0 99
+# description: script to apply cpu microcode
+
+# vars:
+#
+# START			distribution specific way of kicking programs
+# END			distribution specific way of checking return status
+# PROGRAM		the executable to run
+# ARGUMENTS		the argument we're going to call PROGRAM with
+
+# Check that we're a priviledged user
+[ `id -u` = 0 ] || exit 0
+
+DEVICE=/dev/cpu/microcode
+ARGUMENTS=-Qu
+RETVAL=0
+PROGRAM=/sbin/microcode_ctl
+
+. /etc/init.d/functions
+
+RETVAL=0
+
+# perform the update
+function start ()
+{
+	RETVAL=1
+	# Make sure we are on an intel machine
+	vendor=`cat /proc/cpuinfo | grep "^vendor_id" | sort -u | awk -F ": " '{ print $2 }'`
+	[ "$vendor" != "GenuineIntel" ] && return
+
+	# Microcode wasn't available until 686's.
+	family=`cat /proc/cpuinfo | grep "^cpu family" | sort -u | awk -F ": " '{ print $2 }'`
+	[ $family -lt 6 ] && return
+
+	echo -n $"Applying Intel Microcode update: "
+
+	if [ ! -e /lib/firmware/microcode.dat ]; then 
+		echo $"$0: microcode datafile not present (/lib/firmware/microcode.dat)"
+		exit 1
+	fi
+
+	/sbin/modprobe microcode
+
+	lt=0
+	while [ ! -c $DEVICE ]; do
+		lt=$[lt+1];
+		[ $lt -gt 5 ] && break;
+		sleep 1;
+	done
+
+	# Lets just be sure we have a device file...
+	if [ ! -e $DEVICE ]; then
+		echo $"$0: microcode device $DEVICE doesn't exist?"
+		exit 1
+	elif [ ! -c $DEVICE ]; then
+		echo $"$0: $DEVICE not a character device?"
+		exit 1
+	fi
+
+	daemon $PROGRAM $ARGUMENTS
+	RETVAL=$?
+
+	# trap the most common case, errno 19 = no device
+	if [ $RETVAL -eq 19 ]; then
+		echo $"$0: kernel does not have microcode device support"
+	fi
+	/sbin/rmmod microcode
+	echo
+
+	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/microcode_ctl
+	return $RETVAL
+}
+
+stop()
+{
+	rm -f /var/lock/subsys/microcode_ctl
+}
+
+case "$1" in
+  start)
+	start
+	exit 0
+	;;
+  stop)
+	stop
+	;;
+  restart|reload|force-reload)
+    stop
+	start
+	;;
+  status)
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+exit $?
