@@ -17,17 +17,36 @@ class Seamonkey(CPackageRecipe):
         'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXt:devel',
         'libXext:devel', 'libXi:devel', 'libXinerama:devellib', 'libXft:devel',
         'libXrender:devel','libdmx:devel', 'libICE:devel', 'libSM:devel',
-        'expat:devel', 'alsa-lib:devel', 'dbus-glib:devel', 'wireless-tools:devel', 'nspr:devel', 'nss:devel', 'desktop-file-utils:runtime', 'curl:devel' ]
+        'expat:devel', 'alsa-lib:devel', 'dbus-glib:devel', 'wireless-tools:devel', 'nspr:devel', 'nss:devel', 'desktop-file-utils:runtime', 'curl:devel', 'unzip:runtime' ]
 
     def setup(r):
+	r.macros.MOZ_APP_DIR = '%(libdir)s/%(name)s-%(version)s'
+        r.macros.ldflags += ' -Wl,-rpath,%(MOZ_APP_DIR)s '
+
 	r.addArchive('http://releases.mozilla.org/pub/mozilla.org/seamonkey/releases/%(version)s/source/%(name)s-%(version)s.source.tar.bz2')
 	r.addSource('seamonkey.desktop')
 	r.addSource('seamonkey.png')
+	r.addSource('seamonkey-langpacks-2.0-20091027.tar.bz2')
 	r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d/ '
         r.Configure('--enable-application=suite --with-system-zlib --enable-canvas --with-system-nspr'
             ' --with-system-nss --with-system-jpeg --enable-default-toolkit=cairo-gtk2')
         r.Make()
         r.MakeInstall()
+
+	r.Install('seamonkey-langpacks-2.0-20091027.tar.bz2', '%(destdir)s/%(MOZ_APP_DIR)s/extensions/')
+	r.Run('tar xjf seamonkey-langpacks-2.0-20091027.tar.bz2', dir='%(destdir)s/%(MOZ_APP_DIR)s/extensions/')
+	r.Run(""" cd %(destdir)s/%(MOZ_APP_DIR)s/extensions/
+			for langpack in `ls seamonkey-langpacks/*.xpi`; do
+			  language=`basename $langpack .xpi`
+			  extensiondir=%(destdir)s/%(MOZ_APP_DIR)s/extensions/langpack-$language@seamonkey.mozilla.org
+			  mkdir  $extensiondir
+			  unzip $langpack -d $extensiondir
+			  find $extensiondir -type f | xargs chmod 644
+
+			done
+			rm -rf seamonkey-langpacks
+
+		""")
 
 	r.Install('seamonkey.png', '%(datadir)s/pixmaps/')
 	r.Desktopfile('seamonkey.desktop')
