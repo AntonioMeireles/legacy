@@ -22,7 +22,8 @@ class ImageMagick(CPackageRecipe):
         'mplayer:runtime', 'netpbm:runtime', 'p7zip:runtime',
         'pkgconfig:devel', 'sane-backends:runtime', 'tetex-dvips:runtime',
         'xdg-utils:runtime', 'xterm:runtime', 'zip:runtime', 'zlib:devel',
-#        'giflib:devel', 'glib:devel', 'gtk:devel', 'perl:devel',
+        'giflib:devel', 'glib:devel', 'gtk:devel', 'perl:devel',
+        'ghostscript:devel', 'lcms:devel', 'librsvg:devel'
         ]
 
     def setup(r):
@@ -31,15 +32,36 @@ class ImageMagick(CPackageRecipe):
         r.macros.archive_version = '%(mainver)s-%(patchlevel)s'
 
         r.addArchive('ftp://ftp.imagemagick.net/pub/ImageMagick/')
+        r.addPatch('ImageMagick-6.4.0-multilib.patch')
 
-        r.Configure(' --enable-shared --with-threads'
-                    ' --without-perl --with-x ')
+        r.Configure(' --enable-shared '
+                    ' --disable-static'
+                    ' --with-threads'
+                    ' --with-modules'
+                    ' --with-x '
+                    ' --with-threads '
+                    ' --with-magick_plus_plus '
+                    ' --with-gslib '
+                    ' --with-wmf '
+                    ' --with-lcms '
+                    ' --with-rsvg '
+                    ' --with-xml '
+                    ' --without-dps '
+                    ' --without-perl '
+                    )
+
+        # Disable rpath
+        r.Run(''' sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
+sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool ''')
+
+        # Do *NOT* use %%{?_smp_mflags}, this causes PerlMagick to be silently misbuild
+        r.disableParallelMake()
 
         r.Make()
         r.MakeInstall(preMake='DESTDIR=%(destdir)s')
 
         r.Run('find %(destdir)s -name "*.bs" |xargs rm -f')
-        r.Remove('%(libdir)s/ImageMagick-%(mainver)s')
+#        r.Remove('%(libdir)s/ImageMagick-%(mainver)s')
 
         # move magic.xml out of the way before we delete /usr/share/
         r.Move('%(datadir)s/%(name)s-%(mainver)s/config/*.xml',
