@@ -1,0 +1,69 @@
+#
+# Copyright (c) 2009 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class Autofs(CPackageRecipe):
+    name = 'autofs'
+    version = '5.0.5'
+
+    buildRequires = [ 'autoconf:runtime', 'procps:runtime', 'hesiod:devel',
+        'e2fsprogs:runtime', 'util-linux:runtime', 'flex:runtime',
+        'libxml2:devel', 'bison:runtime', 'module-init-tools:runtime',
+        'cyrus-sasl:devel', 'openssl:devel', 'zlib:devel', 'openldap:devel',
+        'krb5:devel', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.macros.majver = r.version.split('.')[0]
+        r.addArchive('http://ftp.kernel.org/pub/linux/daemons/%(name)s/v%(majver)s/',
+            keyid='517D0F0E')
+
+        # UPSTREAM PATCHES
+        # it is unfortunate that upstream has decided to name their patches so
+        # verbosely, as this lends to an inability to download them quickly,
+        # like in vim. however, here's a scriptlet to populate the patch list
+        # in uppatch (assuming you actually want to apply all the patches. if
+        # not, please include a comment as to which you've omitted for future
+        # editors). obviously, replace VERSION= with the correct value.
+        # VERSION="5.0.5" ; wget -O - 'http://ftp.kernel.org/pub/linux/daemons/autofs/v5/patch_order-'$VERSION 2> /dev/null | sed -e 's/.*"//' -e 's/>//g' -e 's/<.*//' -e "s/^/'/" -e "s/$/',/"
+        for uppatch in (
+		'autofs-5.0.5-fix-included-map-read-fail-handling.patch',
+		'autofs-5.0.5-refactor-ldap-sasl-bind.patch',
+		'autofs-5.0.4-add-mount-wait-parameter.patch',
+		'autofs-5.0.5-special-case-cifs-escapes.patch',
+		'autofs-5.0.5-fix-libxml2-workaround-configure.patch',
+		'autofs-5.0.5-more-code-analysis-corrections.patch',
+		'autofs-5.0.5-fix-backwards-ifndef-INET6.patch',
+		'autofs-5.0.5-fix-stale-init-for-file-map-instance.patch',
+		'autofs-5.0.5-fix-ext4-fsck-at-mount.patch',
+		'autofs-5.0.5-dont-use-master_lex_destroy-to-clear-parse-buffer.patch',
+		'autofs-5.0.5-make-documentation-for-set-log-priority-clearer.patch',
+		'autofs-5.0.5-fix-timeout-in-connect_nb.patch',
+		'autofs-5.0.5-fix-pidof-init-script-usage.patch',
+		'autofs-5.0.5-check-for-path-mount-location-in-generic-module.patch',
+		'autofs-5.0.5-dont-fail-mount-on-access-fail.patch',
+
+        ):
+            r.addPatch('http://ftp.kernel.org/pub/linux/daemons/%(name)s/v%(majver)s/' + uppatch)
+
+#        r.addPatch('autofs-5.0.0-chkconfigfix.patch')
+#        r.addPatch('autofs-5.0.1-init-script-logic-reversed.patch')
+
+        r.Configure('--with-hesiod --with-openldap')
+
+# Not needed anymore, its fixed in this version
+#        r.Replace(('.*#undef HAVE_LDAP_CREATE_PAGE_CONTROL.*', '#define HAVE_LDAP_CREATE_PAGE_CONTROL 1'),
+#                  ('.*#undef HAVE_LDAP_PARSE_PAGE_CONTROL.*', '#define HAVE_LDAP_PARSE_PAGE_CONTROL 1'),
+#                  'include/config.h')
+        r.Make('initdir=%(initdir)s')
+
+        r.MakeInstall('STRIP=: initdir=%(initdir)s', rootVar='INSTALLROOT')
+
+        r.Install('samples/rc.autofs', '%(initdir)s/autofs', mode=0755)
+        r.Install('samples/auto.master', '%(sysconfdir)s/', mode=0644)
+        r.Install('samples/auto.misc', '%(sysconfdir)s/', mode=0644)
+
+        r.ComponentSpec('lib', '%(libdir)s/autofs/.*')
+        r.TagSpec('initscript', '%(initdir)s/')
