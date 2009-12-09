@@ -7,81 +7,69 @@
 loadSuperClass('rpmpackage')
 class Udev(RPMPackageRecipe,CPackageRecipe):
     name = 'udev'
-    version = '141'
-    rpmRelease = '7.fc11'
+    version = '145'
+    rpmRelease = '14.fc12'
 
     buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
-                      'bison:runtime', 'pam:devel', 'chkconfig:runtime', 'libxslt:runtime' ]
+                      'bison:runtime', 'pam:devel', 'chkconfig:runtime', 'libxslt:runtime',
+                      'acl:devel', 'glib:devel', 'libusb:devel', 'autoconf:runtime', 
+                      'automake:runtime']
+    # until we rely on rRPL's glibc (2.5) 
+    buildRequires += ['kernel:build-tree']
 
-    rpmPatches = [ 
-        'udev.git-f907449eee.patch',
-        'udev.git-055e40edc647d8ccfc27c9cd3163ab5dbf63ed6c.patch',
-        'udev.git-0c37798916bc87d72f5f1399d9e050307901db84.patch',
-        'udev.git-b4fa1b67f86c9555cbb41c57774761730f6b8939.patch',
-        'udev.git-55d8f5e208396589476583dad8f2a7f2db3e2ef5.patch',
-        'udev.git-d6f0b22d574c6a5e5f3430be3fc619d4b2f46cd5.patch',
-        'udev.git-d3c8231e738dd286591c1becc2f327ed55ed89d1.patch',
-        'udev.git-f58a9099bb2b18f3f683615324a4382b95446305.patch',
-        'Prioritize-dmraid-formats-over-md-raid.patch',
-        'udev-141-max_short.patch',
-        'udev-118-sysconf.patch',
-        ]
+    rpmPatches = [ '0001-enumeration-move-ALSA-control-devices-to-the-end-of-.patch',
+                   '0002-udevd-add-timestamp-to-debug-output.patch',
+                   '0003-fix-wrong-parameter-size-on-ioctl-FIONREAD.patch',
+                   '0004-fix-single-session-CD-detection.patch',
+                   '0005-fix-previous-commit-for-CD-detection.patch',
+                   'ck-runseat.patch',
+                   'udev-141-cpu-online.patch',
+                   # https://bugzilla.redhat.com/show_bug.cgi?id=532628
+                   'udev-145-hid2hci-backport.patch',
+                   'udev-145-modem-modeswitch.patch',
+                   '0001-cdrom_id-Still-check-profiles-even-if-there-is-no-me.patch',
+                   ]
 
     rpmSources = [ 'udev-post.init',
                    'start_udev',
                    'fw_unit_symlinks.sh',
                    'udev.sysconfig'
                    ]
-    # FIXME udev versions _above_ this need glibc >= 2.7
+
 
     def setup(r):
         r.macros.debug = 'false'
 
         r.unpack()
-        # backport from 145 to fix remaining CD issues fixed
-        for p in [ '0001-cdrom_id-Still-check-profiles-even-if-there-is-no-me.patch',
-                   '0004-fix-single-session-CD-detection.patch',
-                   '0005-fix-previous-commit-for-CD-detection.patch',]:
-            r.addPatch(p)
+        # FIXME 
+        # http://article.gmane.org/gmane.linux.hotplug.devel/14081
+        # modded to fit our goals
+        r.addPatch('udev-old-glibc-hack.patch', macros=True)
 
         # addons and extra features
         
-        
-        r.Remove('rules/redhat/95-pam-console.rules')
-
         r.macros.udev_scriptdir='/lib/udev'
+        r.Run('autoreconf -i; automake; libtoolize -f -c')
 
         # Make the static binaries...
-        r.Configure(' --prefix=%(prefix)s --exec-prefix="" --sysconfdir=%(sysconfdir)s --with-libdir-name=%(lib)s  --sbindir="/sbin" --enable-static')
-        r.Make('LDFLAGS="-all-static"')
+        r.Configure(' --prefix=%(prefix)s --exec-prefix="" --sysconfdir=%(sysconfdir)s '
+                    ' --with-libdir-name=%(lib)s '
+                    ' --sbindir="%(essentialsbindir)s"'
+                    ' --with-rootlibdir=/%(lib)s'
+                    ' --enable-introspection --libexecdir=%(udev_scriptdir)s'
+                    '  --disable-rpath --enable-debug')
 
-        for t in [ 'udev/udevd',
-                   'udev/udevadm',
-                   'extras/scsi_id/scsi_id',
-                   'extras/ata_id/ata_id',
-                   'extras/edd_id/edd_id',
-                   'extras/usb_id/usb_id',
-                   'extras/cdrom_id/cdrom_id',
-                   'extras/volume_id/vol_id',
-                   'extras/floppy/create_floppy_devices',
-                   ]:
-            r.Move(t,t+'.static')
-
-        r.Make('clean')
         r.Make()
         r.MakeInstall()
-        for d in ( '%(sysconfdir)s/udev/udev.rules',
-                   '%(sysconfdir)s/init.d/udev',
-                   '%(sysconfdir)s/hotplug.d/default/10-udev.hotplug'):
-            r.Remove(d, recursive = True)
+
 
         # Deprecated, but keep the ownership
         r.MakeDirs('%(sysconfdir)s/udev/{rules.d,scripts,devices,makedev.d}')
         r.MakeDirs('%(sysconfdir)s/dev.d/')
+        r.Create('%(sysconfdir)s/scsi_id.config')
 
         # force relative symlinks
         r.Symlink('/lib/udev/scsi_id', '/sbin/scsi_id')
-        r.Symlink('%(essentiallibdir)s/libvolume_id.so.1', '%(libdir)s/libvolume_id.so')
 
         for x in [ 'udevinfo', 'udevtest']:
             r.Symlink('/sbin/udevadm', '%(bindir)s/' + x)
@@ -92,44 +80,24 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         for x in [ 'udevtrigger', 'udevsettle', 'udevcontrol']:
             r.Symlink('/sbin/udevadm', '/sbin/' + x)
 
-        for t in [
-                  'extras/scsi_id/scsi_id',
-                  'extras/ata_id/ata_id',
-                  'extras/edd_id/edd_id',
-                  'extras/usb_id/usb_id',
-                  'extras/volume_id/vol_id',
-                  'extras/floppy/create_floppy_devices']:
-            r.Install(t + '.static', '%(udev_scriptdir)s/' + t.rsplit('/')[-1] +'.static', mode = 0755)
-
-        for t in ['udev/udevd',
-                  'udev/udevadm', ]:
-            r.Install(t+'.static', '%(essentialsbindir)s/'+ t.rsplit('/')[-1] +'.static', mode = 0755)
 
         # These rules should do...
         for x in ( 'rules/redhat/40-redhat.rules',
-                   'rules/packages/40-alsa.rules',
                    'rules/packages/40-isdn.rules',
+                   'rules/packages/40-alsa.rules',
                    'rules/packages/64-md-raid.rules',
                    'rules/packages/64-device-mapper.rules'):
             r.Install( x , '%(udev_scriptdir)s/rules.d/', mode = 0644)
 
-
         r.MakeDirs('%(sysconfdir)s/udev/devices')
+        r.Install('fw_unit_symlinks.sh', '%(udev_scriptdir)s/fw_unit_symlinks.sh', mode=0755)
+
 
         r.MakeDirs('%(udev_scriptdir)s/{,devices}')
         r.MakeDirs('%(datadir)s/udev')
         r.MakeDirs('/lib/firmware', mode = 0755)
 
-        r.Install('fw_unit_symlinks.sh', '%(udev_scriptdir)s/fw_unit_symlinks.sh', mode=0755)
-
         r.Install('start_udev', '%(essentialsbindir)s/')
-
-        # short-term workaround
-        r.MakeDirs('%(sysconfdir)s/modprobe.d', mode = 0755)
-        r.Create('%(sysconfdir)s/modprobe.d/floppy-pnp.conf', contents = """
-alias pnp:dPNP0700 floppy
-alias acpi:PNP0700: floppy
-""")
 
         r.MakeDirs('%(initdir)s')
         r.MakeDirs('/var/lib/udev/makedev.d')
@@ -165,3 +133,5 @@ alias acpi:PNP0700: floppy
         r.ComponentSpec('data', '/lib/udev/rules.d/.*')
         r.ComponentSpec('runtime', '/lib/udev/.*')
 
+
+        r.NonBinariesInBindirs(exceptions='%(udev_scriptdir)s/.*')
