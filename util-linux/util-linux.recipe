@@ -8,7 +8,7 @@ loadSuperClass('rpmpackage')
 class Utillinux(RPMPackageRecipe,CPackageRecipe):
     name = 'util-linux'
     version = '2.16.2'
-    rpmRelease = '1.fc12'
+    rpmRelease = '4.fc12'
     rpmName = '%(name)s-ng'
     tarballName = '%(name)s-ng-%(version)s.tar.bz2'
     rpmPatches = [ # remove partitions
@@ -22,13 +22,16 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # 231192 - ipcs is not printing correct values on pLinux
         'util-linux-ng-2.15-ipcs-32bit.patch',
         # 531992 -  not prompted for passphrase
-        'util-linux-ng-2.16-blkid-crypto.path',
+        'util-linux-ng-2.16-blkid-crypto.patch',
+        # 536797 -  ntfs volume labels are not correct in hal
+        'util-linux-ng-2.16-blkid-ntfs.patch', 
         ]
     rpmSources = [ 'nologin.c', 'nologin.8', 'util-linux-ng-60-raw.rules', 
                    'uuidd.init',
                    #'util-linux-ng-login.pamd',
                    #'util-linux-ng-remote.pamd',
-                   'util-linux-ng-chsh-chfn.pamd'
+                   'util-linux-ng-chsh-chfn.pamd',
+                   'mount.tmpfs',
                    ]
     rpmArchives = ['floppy-0.16.tar.bz2']
     buildRequires = [ 'install-info:runtime',
@@ -110,16 +113,24 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
 
         r.Install('util-linux-ng-60-raw.rules', '%(sysconfdir)s/udev/rules.d/60-raw.rules', mode = 0644)
 
+        # install tmpfs mount helper
+        r.Install('mount.tmpfs', '%(essentialsbindir)s/mount.tmpfs', mode = 0755)
+
         # Our own initscript for uuidd
-        r.Install('uuidd.init', '%(initdir)s/uuidd')
-        r.MakeDirs('%(localstatedir)s/run/uuid')
+        r.Install('uuidd.init', '%(initdir)s/uuidd', mode = 0755)
+        r.MakeDirs('%(localstatedir)s/run/uuidd')
         r.MakeDirs('%(localstatedir)s/lib/libuuid')
-        r.MakeDirs('%(sysconfdir)s/blkid')
-        
-        r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/uuid', '%(localstatedir)s/lib/libuuid', '%(sysconfdir)s/blkid'])
 
         r.SetModes('%(localstatedir)s/lib/libuuid', 02775)
-        r.SetModes('%(localstatedir)s/run/uuid', 02775)
+        r.SetModes('%(localstatedir)s/run/uuidd', 02775)
+
+        r.Ownership('uuidd', 'uuidd', '%(localstatedir)s/lib/libuuid')
+        r.Ownership('uuidd', 'uuidd', '%(localstatedir)s/run/uuidd')
+
+        r.MakeDirs('%(sysconfdir)s/blkid')
+        
+        r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/uuidd', '%(localstatedir)s/lib/libuuid', '%(sysconfdir)s/blkid'])
+
         r.Ownership('uuidd', 'uuidd', '%(sbindir)s/uuidd')
         r.UtilizeUser('uuidd', '%(localstatedir)s/lib/libuuid')
 
