@@ -21,6 +21,12 @@ class ConsoleKit(RPMPackageRecipe,AutoPackageRecipe):
                       ]
 
     def configure(r):
+        # from gentoo
+        r.addPatch('consolekit-0.2.10-cleanup_console_tags.patch')
+        r.addPatch('consolekit-0.4.0-polkit-automagic.patch')
+        r.addPatch('consolekit-0.4.1-shutdown-reboot-without-policies.patch')
+
+
         r.Run('autoreconf -fi')
         r.Configure('--with-pid-file=%(localstatedir)s/run/'
                      'console-kit-daemon.pid --enable-pam-module '
@@ -36,15 +42,22 @@ class ConsoleKit(RPMPackageRecipe,AutoPackageRecipe):
 
         r.ExcludeDirectories(exceptions='%(localstatedir)s/run/ConsoleKit')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/log/ConsoleKit')
+        r.ExcludeDirectories(exceptions='/usr/lib/ConsoleKit/run-seat.d')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/ConsoleKit/run-seat.d')
+        r.ExcludeDirectories(exceptions='/usr/lib/ConsoleKit/run-session.d')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/ConsoleKit/run-session.d')
+        
         r.Ownership('root','root','%(localstatedir)s/log/ConsoleKit')
         r.SetModes('%(localstatedir)s/log/ConsoleKit', 0755)
 
-        r.ExcludeDirectories(exceptions='/usr/lib/ConsoleKit/run-session.d')
-        r.ExcludeDirectories(exceptions='%(sysconfdir)s/ConsoleKit/run-session.d')
 
         # allows x86 and x86_64 :lib co-existence
         r.ComponentSpec(':runtime', '/usr/lib/ConsoleKit/scripts/.*')
 
-        # The sample upstart files are good enough for us.
+        # early upstart hooks
         r.MakeDirs('%(sysconfdir)s/event.d')
         r.Copy('data/ck-log-system-{start,stop,restart}', '%(sysconfdir)s/event.d')
+
+        r.addSource('pam-foreground-compat.ck')
+        r.Install('pam-foreground-compat.ck', '/usr/lib/ConsoleKit/run-session.d/', mode = 0755)
+        
