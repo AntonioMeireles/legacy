@@ -1,5 +1,5 @@
 #
-#1;1704;0c Copyright (c) 2004-2008 rPath, Inc.
+# Copyright (c) 2004-2008 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -16,17 +16,38 @@ class PulseAudio(RPMPackageRecipe,AutoPackageRecipe):
     buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'alsa-lib:devel', 'avahi:devel', 'hal:devel', 'libcap:devel', 'liboil:devel', 'libsamplerate:devel', 'libsndfile:devel', 'libtool:devel', 'm4:runtime', 'tcp_wrappers:devel', 'libatomic_ops:devel', 'libtool:runtime', 'autoconf:runtime','automake:runtime', 'gettext:devel', 'polkit:devel', 'bluez:devel', 'gcc-fortran:runtime', 'jack:devel', 'libICE:devel', 'libSM:devel', 'pkgconfig:devel', 'lirc:devel', 'gcc-c++:runtime', 'gdbm:devel', 'speex:devel', 'perl-XML-Parser:perl' ,'intltool:runtime', 'intltool:devel', 'gettext:runtime',  'libXext:devel', 'libXtst:devel', 'openssl:devel', 'udev:devel', 'inputproto:devel' ]
 
     def configure(r):
-        # from debian, in order to get it to build 
-        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/pulseaudio/0.9.21-1/'
-                   '0001-Work-around-some-platforms-not-having-O_CLOEXEC.patch')
-        # more hacks
+        # from pulse git 
+        # core-util: introduce FD_CLOEXEC wrappers for open/socket/pipe/accept
+        # Lennart Poettering [Fri, 30 Oct 2009 02:30:42 +0000 (03:30 +0100)]
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=9c1a98953f25aff7f11af80a073c9c46dee2438c')
+
+        # use cloexec wrappers wherever applicable
+        # Lennart Poettering [Fri, 30 Oct 2009 02:32:38 +0000 (03:32 +0100)]
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=65e7bc18a9a7b89e55b87a74ae47d45269b51847')
+        # core-util: make sure to enable FD_CLOEXEC unconditionally to cope with kernels that...
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=a698ee3f52e9d61b378cb0dad2cfb1bcc31c708a')
+        # core-util: introduce pa_fopen_cloexec()
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=752727a13d2d55439aefe618677f7e932acc9862')
+        # tdb: use O_CLOEXEC if available
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=88b72958bebd1770e45a4af2dc9fec75aaf1f2de')
+        # use pa_fopen_cloexec() where applicable
+        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=168be3830ae291dd819abebec813f76151487bb3')
+
+        # doesn't work, but allows things to build ...
+        # ... we disable udeev bellow anyway 
         r.addPatch('buildHack.patch')
+
+
 
         extraConfig = (' --disable-static --disable-rpath '
                        ' --with-system-user=pulse '
                        ' --with-system-group=pulse '
                        ' --with-access-group=pulse-access '
-                       ' --disable-hal ')
+                       # our glibc has no inotify_init1() so we can't go thru
+                       # udev / rtkit ...
+                       # compat hal hooks are behaving for us
+                       # ' --disable-hal ')
+                       ' --disable-udev --enable-hal --enable-hal-compat ' )
         r.Configure(extraConfig)
 
     def make(r):
