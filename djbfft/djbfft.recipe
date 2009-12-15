@@ -18,5 +18,24 @@ class Djbfft(CPackageRecipe):
         r.Replace('/usr/local/djbfft', '%(destdir)s%(prefix)s', 'conf-home')
 
         r.Replace('auto', 'ppro', 'conf-opt') # optimize for pentium pro (valid for 64bit as well)
-	r.Make()
+        r.Run("""
+        echo "%(cc)s %(cflags)s -fPIC -DPIC" > conf-cc
+        echo "%(cc)s %(ldflags)s" > conf-ld
+""")
+        makeOpts = (
+            ' LIBDJBFFT="libdjbfft.so.%(version)s"'
+            ' LIBPERMS="0755"'
+            )
+        if Arch.x86_64:
+            r.Run("""sed -i 's@"lib@&64@' hier.c""") # prepare 64bit build
+
+        r.Make(makeOpts)
+        r.TestSuite('.', 'accuracy')
+        r.TestSuite('.', 'accuracy2')
+        r.TestSuite('.', 'speed')
 	r.Make('setup check')
+        r.Symlink('%(libdir)s/libdjbfft.so.%(version)s',
+                  '%(libdir)s/libdjbfft.so.0')
+        r.Symlink('%(libdir)s/libdjbfft.so.%(version)s',
+                  '%(libdir)s/libdjbfft.so')
+	r.FixupMultilibPaths(exceptions='.*')
