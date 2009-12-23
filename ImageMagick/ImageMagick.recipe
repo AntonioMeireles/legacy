@@ -6,8 +6,8 @@
 
 class ImageMagick(CPackageRecipe):
     name = 'ImageMagick'
-    mainver = '6.5.7'
-    patchlevel = '0'
+    mainver = '6.5.8'
+    patchlevel = '8'
     version = mainver + '.' + patchlevel
 
     buildRequires = [
@@ -23,16 +23,21 @@ class ImageMagick(CPackageRecipe):
         'pkgconfig:devel', 'sane-backends:runtime', 'tetex-dvips:runtime',
         'xdg-utils:runtime', 'xterm:runtime', 'zip:runtime', 'zlib:devel',
         'giflib:devel', 'glib:devel', 'gtk:devel', 'perl:devel',
-        'ghostscript:devel', 'lcms:devel', 'librsvg:devel'
+        'ghostscript:devel', 'lcms:devel', 'librsvg:devel', 'djvulibre:devel',
         ]
 
     def setup(r):
         r.macros.mainver = r.mainver
         r.macros.patchlevel = r.patchlevel
         r.macros.archive_version = '%(mainver)s-%(patchlevel)s'
+        # parallel making causes PerlMagick to be silently misbuild
+        r.disableParallelMake()
 
         r.addArchive('ftp://ftp.imagemagick.net/pub/ImageMagick/')
         r.addPatch('ImageMagick-6.4.0-multilib.patch')
+
+        r.Replace('libltdl.la', 'libltdl.so', 'configure')
+        r.Environment('LD_RUN_PATH', '%(libdir)s')
 
         r.Configure(' --enable-shared '
                     ' --disable-static'
@@ -46,8 +51,12 @@ class ImageMagick(CPackageRecipe):
                     ' --with-lcms '
                     ' --with-rsvg '
                     ' --with-xml '
+                    ' --with-djvu '
                     ' --without-dps '
+                    # FIXME get perl to build in a sane way
                     ' --without-perl '
+                    ' --without-included-ltdl --with-ltdl-include=%(includedir)s '
+                    ' --with-ltdl-lib=%(libdir)s '
                     )
 
         # Disable rpath
