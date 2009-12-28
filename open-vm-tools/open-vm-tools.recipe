@@ -6,7 +6,7 @@
 
 class OpenVmTools(CPackageRecipe):
     name = "open-vm-tools"
-    version = "2009.10.15_201664"
+    version = "2009.11.16_210370"
 
     buildRequires = [ 'atk:devel', 'cairo:devel', 'chkconfig:runtime',
                       'desktop-file-utils:runtime', 'expat:devel',
@@ -22,21 +22,26 @@ class OpenVmTools(CPackageRecipe):
                       'cairomm:devel', 'fuse:devel', 'glibmm:devel',
                       'gtkmm:devel', 'libXScrnSaver:devel', 'libsigc++:devel',
                       'pangomm:devel', 'doxygen:runtime', 'graphviz:runtime',
-                      'pam:devel']
+                      'pam:devel', 'expat:devel', 'inputproto:devel', 'libxcb:devel',
+                      'pixman:devel', 'xcb-util:devel'
+                      ]
 
     def setup(r):
         r.macros.version = r.macros.version.replace('_', '-')
-        # r.addArchive('mirror://sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
-        # sf mirrors mad atm :/
-        r.addArchive('http://superb-east.dl.sourceforge.net/sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
+        r.addArchive('http://downloads.sourceforge.net/%(name)s/%(name)s-%(version)s.tar.gz')
         r.addSource('xautostart.conf')
         r.addSource('vmware-guestd.init')
+        r.addSource('open-vm-tools-sysconfig.mouse')
+        r.addSource('vmware-toolbox.desktop')
+        r.addSource('open-vm-tools-modprobe.vmnics')
+
         r.Replace('CFLAGS -Werror"', 'CFLAGS"', 'configure')
         r.Configure(' --disable-static '
                     ' --without-dnet'
                     ' --disable-dependency-tracking'
                     ' --without-kernel-modules'
                     ' --without-root-privileges'
+                    '--without-procps '
                     ' --with-gtkmm')
 
         # Disable use of rpath
@@ -55,7 +60,21 @@ class OpenVmTools(CPackageRecipe):
 
         r.Install('xautostart.conf', '%(sysconfdir)s/vmware-tools/xautostart.conf',
                   mode=0644)
+        r.Install('open-vm-tools-sysconfig.mouse', '%(sysconfdir)s/sysconfig/mouse',
+                  mode=0644)
         r.Install('vmware-guestd.init', '%(initdir)s/vmware-guestd',
                   mode=0755)
+        # Install VMCI sockets header file 
+        r.Install('lib/include/vmci_sockets.h', '%(includedir)s/', mode=0644)
+        # Install desktop file and icon for toolbox 
+        r.Desktopfile('vmware-toolbox.desktop')
+        r.Install('toolbox/bigIcon.xpm', '%(datadir)s/pixmaps/vmware-toolbox.xpm', mode = 0644)
+        
+        # Setup module-init-tools file for vmxnet
+        r.Install('open-vm-tools-modprobe.vmnics', '%(sysconfdir)s/modprobe.d/vmnics.conf', mode = 0644)
+
+        # Set suid bit on vmware-user suid wrapper 
+        r.SetModes('%(bindir)s/vmware-user-suid-wrapper', 04755)
+
         r.ExcludeDirectories(exceptions='/mnt/hgfs')
 

@@ -61,9 +61,31 @@ OPTIONS='--background /var/run/vmware-guestd.pid'
 
 RETVAL=0
 
+DND_DIR="/tmp/VMwareDnD" 
+
+setup_modules()
+{
+    [ ! -d "$DND_DIR" ] && mkdir -m 1777 $DND_DIR
+    modprobe vmsync
+    modprobe vmci
+    modprobe vsock
+    modprobe vmmemctl
+    modprobe vmhgfs
+    modprobe vmblock
+    sleep 1
+    mount -t vmblock none /proc/fs/vmblock/mountPoint
+} 
+
+unmount_stuff()
+{
+    umount /proc/fs/vmblock/mountPoint
+    sleep 1
+    rmmod vmblock
+} 
+
 start() {
     echo -n $"Starting VMware tools daemon: "
-    modprobe -q vmmemctl
+
     $STARTPROC /usr/bin/vmtoolsd $OPTIONS
     RETVAL=$?
     showstatus $RETVAL
@@ -77,6 +99,9 @@ stop() {
 
     # handle upgrade by killing daemon under old name if it exists
     killproc vmware-guestd -TERM
+
+    unmount_stuff 
+
     # handle non-upgrade by using current name 
     killproc vmtoolsd -TERM
     RETVAL=$?
