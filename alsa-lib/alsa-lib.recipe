@@ -7,14 +7,13 @@
 loadSuperClass('rpmpackage')
 class AlsaLib(RPMPackageRecipe,AutoPackageRecipe):
     name = 'alsa-lib'
-    version = '1.0.21'
-    rpmRelease = '3.fc11'
+    version = '1.0.22'
+    rpmRelease = '1.fc12'
     rpmPatches = [ 'alsa-lib-1.0.17-config.patch',
                    'alsa-lib-1.0.14-glibc-open.patch',
                    'alsa-lib-1.0.16-no-dox-date.patch',
-                   'alsa-lib-1.0.21-weight.patch',
-                   'alsa-lib-1.0.21-revert-hook.patch',
-                   'alsa-lib-1.0.21-dmix-conf.patch', ]
+                   'alsa-lib-1.0.22-closetimer.patch',
+                   'alsa-lib-1.0.22-softvol.patch' ]
 
     rpmSources = [ 'asound.conf' ]
 
@@ -36,6 +35,10 @@ sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
 
     def makeinstall(r):
         r.MakeInstall()
+        # We need the library to be available even before /usr might be mounted
+        r.MakeDirs('/%(lib)s')
+        r.Move('%(libdir)s/libasound.s*', '/%(lib)s/')
+        r.Symlink('../../%(lib)s/libasound.so.2', '%(libdir)s/libasound.so')
 
         r.AutoDoc('doc/asoundrc.txt')
         if Use.builddocs:
@@ -44,10 +47,3 @@ sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
     def policy(r):
         # Install global configuration files
         r.Install('asound.conf', '%(sysconfdir)s/asound.conf', mode = 0644)
-
-        # these files are machine-managed and not generally
-        # amenable to diff/patch merge.  They do change from
-        # time to time and users should modify in ~/.asoundrc
-        # anyway
-        r.Transient('%(sysconfdir)s/alsa/')
-        r.Config(exceptions='%(sysconfdir)s/alsa/')
