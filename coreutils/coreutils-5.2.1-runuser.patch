@@ -1,14 +1,14 @@
 diff -urNp coreutils-7.0.orig/AUTHORS coreutils-7.0/AUTHORS
 --- coreutils-7.0.orig/AUTHORS	2008-08-24 22:58:15.000000000 +0200
 +++ coreutils-7.0/AUTHORS	2009-01-28 18:11:00.316247411 +0100
-@@ -63,6 +63,7 @@ pwd: Jim Meyering
- readlink: Dmitry V. Levin
+@@ -64,6 +64,7 @@ pwd: Jim Meyering
  rm: Paul Rubin, David MacKenzie, Richard M. Stallman, Jim Meyering
  rmdir: David MacKenzie
-+runuser: David MacKenzie, Dan Walsh
  runcon: Russell Coker
++runuser: David MacKenzie, Dan Walsh
  seq: Ulrich Drepper
  sha1sum: Ulrich Drepper, Scott Miller, David Madore
+ sha224sum: Ulrich Drepper, Scott Miller, David Madore
 diff -urNp coreutils-7.0.orig/man/Makefile.am coreutils-7.0/man/Makefile.am
 --- coreutils-7.0.orig/man/Makefile.am	2008-09-27 19:28:54.000000000 +0200
 +++ coreutils-7.0/man/Makefile.am	2009-01-28 18:11:00.317247417 +0100
@@ -32,9 +32,9 @@ diff -urNp coreutils-7.0.orig/man/runuser.x coreutils-7.0/man/runuser.x
 +.TP
 +More detailed Texinfo documentation could be found by command
 +.TP
-+\t\fBinfo su invocation\fR\t
++\t\fBinfo coreutils \(aqsu invocation\(aq\fR\t
 +.TP
-+since the command \fBrunuser\fR is trimmed down version of command \fBrunuser\fR.
++since the command \fBrunuser\fR is trimmed down version of command \fBsu\fR.
 +.br
 diff -urNp coreutils-7.0.orig/README coreutils-7.0/README
 --- coreutils-7.0.orig/README	2008-08-24 22:30:10.000000000 +0200
@@ -44,13 +44,13 @@ diff -urNp coreutils-7.0.orig/README coreutils-7.0/README
    link ln logname ls md5sum mkdir mkfifo mknod mktemp mv nice nl nohup
    od paste pathchk pinky pr printenv printf ptx pwd readlink rm rmdir
 -  runcon seq sha1sum sha224sum sha256sum sha384sum sha512sum shred shuf
--  sleep sort split stat stty su sum sync tac tail tee test timeout touch tr
--  true truncate tsort tty uname unexpand uniq unlink uptime users vdir wc who
--  whoami yes
+-  sleep sort split stat stdbuf stty su sum sync tac tail tee test timeout
+-  touch tr true truncate tsort tty uname unexpand uniq unlink uptime users
+-  vdir wc who whoami yes
 +  runcon runuser seq sha1sum sha224sum sha256sum sha384sum sha512sum shred
-+  shuf sleep sort split stat stty su sum sync tac tail tee test timeout touch
-+  tr true truncate tsort tty uname unexpand uniq unlink uptime users vdir wc
-+  who whoami yes
++  shuf sleep sort split stat stdbuf stty su sum sync tac tail tee test
++  timeout touch tr true truncate tsort tty uname unexpand uniq unlink uptime
++  users vdir wc who whoami yes
  
  See the file NEWS for a list of major changes in the current release.
  
@@ -121,11 +121,11 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
  
  static void run_shell (char const *, char const *, char **, size_t,
 -	const struct passwd *)
-+	const struct passwd *
++        const struct passwd *
 +#ifdef RUNUSER
-+		       , gid_t *groups, int num_groups
++                       , gid_t *groups, int num_groups
 +#endif
-+	)
++        )
  #ifdef USE_PAM
  	;
  #else
@@ -180,9 +180,9 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
 -change_identity (const struct passwd *pw)
 +change_identity (const struct passwd *pw
 +#ifdef RUNUSER
-+		 , gid_t *groups, int num_groups
++                 , gid_t *groups, int num_groups
 +#endif
-+	)
++        )
  {
  #ifdef HAVE_INITGROUPS
 +  int rc = 0;
@@ -202,12 +202,12 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
  
  static void
  run_shell (char const *shell, char const *command, char **additional_args,
--	   size_t n_additional_args, const struct passwd *pw)
-+	   size_t n_additional_args, const struct passwd *pw
+-           size_t n_additional_args, const struct passwd *pw)
++           size_t n_additional_args, const struct passwd *pw
 +#ifdef RUNUSER
-+	   , gid_t *groups, int num_groups
++           , gid_t *groups, int num_groups
 +#endif
-+	)
++        )
  {
    size_t n_args = 1 + fast_startup + 2 * !!command + n_additional_args + 1;
    char const **args = xnmalloc (n_args, sizeof *args);
@@ -218,22 +218,24 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
 -  change_identity (pw);
 +  change_identity (pw
 +#ifdef RUNUSER
-+		   , groups, num_groups
++                   , groups, num_groups
 +#endif
-+	  );
++          );
    pam_end(pamh, 0);
    if (!same_session)
      setsid ();
-@@ -620,6 +665,26 @@ usage (int status)
+@@ -620,6 +665,28 @@ usage (int status)
    else
      {
        printf (_("Usage: %s [OPTION]... [-] [USER [ARG]...]\n"), program_name);
 +#ifdef RUNUSER
-+      fputs (_("\
-+Change the effective user id and group id to that of USER.  No PAM hooks\n\
-+are run, and there will be no password prompt.  This command is useful\n\
++      printf (_("\
++Change the effective user id and group id to that of USER.  Only session PAM\n\
++hooks are run, and there is no password prompt.  This command is useful only\n\
 +when run as the root user.  If run as a non-root user without privilege\n\
-+to set user ID, the command will fail.\n\
++to set user ID, the command will fail as the binary is not setuid.\n\
++As %s doesn't run auth and account PAM hooks, it runs with lower overhead\n\
++than su.\n\
 +\n\
 +  -, -l, --login               make the shell a login shell, uses runuser-l\n\
 +                               PAM file instead of default one\n\
@@ -246,7 +248,7 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
 +  -m, --preserve-environment   do not reset environment variables\n\
 +  -p                           same as -m\n\
 +  -s, --shell=SHELL            run SHELL if /etc/shells allows it\n\
-+"), stdout);
++"), program_name);
 +#else
        fputs (_("\
  Change the effective user id and group id to that of USER.\n\
@@ -279,43 +281,43 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
 -  while ((optc = getopt_long (argc, argv, "c:flmps:", longopts, NULL)) != -1)
 +  while ((optc = getopt_long (argc, argv, "c:flmps:"
 +#ifdef RUNUSER
-+			      "g:G:"
++                              "g:G:"
 +#endif
-+			      , longopts, NULL)) != -1)
++                              , longopts, NULL)) != -1)
      {
        switch (optc)
- 	{
+         {
 @@ -697,6 +773,28 @@ main (int argc, char **argv)
- 	  shell = optarg;
- 	  break;
+           shell = optarg;
+           break;
  
 +#ifdef RUNUSER
-+	case 'g':
-+	  gr = getgrnam(optarg);
-+	  if (!gr)
-+	    error (EXIT_FAILURE, 0, _("group %s does not exist"), optarg);
-+	  use_gid = 1;
-+	  groups[0] = gr->gr_gid;
-+	  break;
++        case 'g':
++          gr = getgrnam(optarg);
++          if (!gr)
++            error (EXIT_FAILURE, 0, _("group %s does not exist"), optarg);
++          use_gid = 1;
++          groups[0] = gr->gr_gid;
++          break;
 +
-+	case 'G':
-+	  num_supp_groups++;
-+	  if (num_supp_groups >= NGROUPS_MAX)
-+	    error (EXIT_FAILURE, 0,
-+		   _("Can't specify more than %d supplemental groups"),
-+		   NGROUPS_MAX - 1);
-+	  gr = getgrnam(optarg);
-+	  if (!gr)
-+	    error (EXIT_FAILURE, 0, _("group %s does not exist"), optarg);
-+	  groups[num_supp_groups] = gr->gr_gid;
-+	  break;
++        case 'G':
++          num_supp_groups++;
++          if (num_supp_groups >= NGROUPS_MAX)
++            error (EXIT_FAILURE, 0,
++                   _("Can't specify more than %d supplemental groups"),
++                   NGROUPS_MAX - 1);
++          gr = getgrnam(optarg);
++          if (!gr)
++            error (EXIT_FAILURE, 0, _("group %s does not exist"), optarg);
++          groups[num_supp_groups] = gr->gr_gid;
++          break;
 +#endif
 +
- 	case_GETOPT_HELP_CHAR;
+         case_GETOPT_HELP_CHAR;
  
- 	case_GETOPT_VERSION_CHAR (PROGRAM_NAME, AUTHORS);
+         case_GETOPT_VERSION_CHAR (PROGRAM_NAME, AUTHORS);
 @@ -735,7 +833,20 @@ main (int argc, char **argv)
- 			  : DEFAULT_SHELL);
+                           : DEFAULT_SHELL);
    endpwent ();
  
 -  if (!correct_password (pw))
@@ -343,26 +345,39 @@ diff -urNp coreutils-7.0.orig/src/su.c coreutils-7.0/src/su.c
 -  change_identity (pw);
 +  change_identity (pw
 +#ifdef RUNUSER
-+		   , groups, num_supp_groups
++                   , groups, num_supp_groups
 +#endif
-+		   );
++                   );
  #endif
  
 -  run_shell (shell, command, argv + optind, MAX (0, argc - optind), pw);
 +  run_shell (shell, command, argv + optind, MAX (0, argc - optind), pw
 +#ifdef RUNUSER
-+	     , groups, num_supp_groups
++             , groups, num_supp_groups
 +#endif
-+	     );
++             );
  }
-diff -urNp coreutils-7.0.orig/tests/misc/help-version coreutils-7.0/tests/misc/help-version
---- coreutils-7.0.orig/tests/misc/help-version	2008-09-27 19:28:54.000000000 +0200
-+++ coreutils-7.0/tests/misc/help-version	2009-01-28 18:11:00.321247443 +0100
-@@ -148,6 +148,7 @@ printf_args=foo
- seq_args=10
+diff -urNp coreutils-7.5.orig/tests/misc/help-version coreutils-7.5/tests/misc/help-version
+--- coreutils-7.5.orig/tests/misc/help-version
++++ coreutils-7.5/tests/misc/help-version
+@@ -150,6 +150,7 @@ printf_args=foo
  sleep_args=0
  su_args=--version
+ stdbuf_args="-oL true"
 +runuser_args=--version
  timeout_args=--version
  
  # I'd rather not run sync, since it spins up disks that I've
+diff -urNp coreutils-7.6-orig/man/help2man coreutils-7.6/man/help2man
+--- coreutils-7.6-orig/man/help2man	2009-09-01 13:01:16.000000000 +0200
++++ coreutils-7.6/man/help2man	2009-09-22 15:15:01.000000000 +0200
+@@ -550,6 +550,9 @@ while (length)
+     $include{$sect} .= $content;
+ }
+ 
++# There is no info documentation for runuser (shared with su).
++$opt_no_info = 1 if $program eq 'runuser';
++
+ # Refer to the real documentation.
+ unless ($opt_no_info)
+ {
