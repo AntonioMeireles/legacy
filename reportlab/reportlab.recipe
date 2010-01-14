@@ -1,31 +1,30 @@
-#                                                                                                                            
-# Copyright (c) 2005-2008 rPath, Inc.                                                                                        
-# This file is distributed under the terms of the MIT License.                                                               
-# A copy is available at http://www.rpath.com/permanent/mit-license.html                                                     
+#
+# Copyright (c) 2005-2010 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
 #  
 
 class ReportLab(PackageRecipe):
-    buildRequires = ['PIL:python', 'PyYAML:python', 'python:devel'] 
+    buildRequires = ['PIL:python', 'PyYAML:python', 'python:devel',
+        'freetype:devel', 'python-cssutils:python']
     name = 'reportlab'
-    version = '1.20'
-    
+    upversion = '2_3'
+    version = upversion.replace('_', '.')
+
     def setup(r):
-	r.addArchive('http://www.reportlab.org/ftp/ReportLab_1_20.tgz')
+        r.macros.upversion = r.upversion
+        r.addArchive('http://www.reportlab.org/ftp/ReportLab_%(upversion)s.tar.gz')
+        # Fix python interpreter
+        r.Replace(r"^#!/usr/pkg/bin/python$", "#!/usr/bin/python",
+            "src/reportlab/graphics/barcode/test.py")
 
-        r.Run('python setup.py build', dir = 'reportlab')
-        r.Run('python setup.py install --root=%(destdir)s', dir = 'reportlab')
+        r.PythonSetup()
 
-        # move some of the docs and demos to the appropriate locations
-        # some of the demos don't work right out of the box from this spot,
-        # specifically the genAll.py demo script, but I thought that having
-        # the large chunk out of the /usr/lib/python2.6/ directories was
-        # worthwhile.
-        r.MakeDirs('%(thisdocdir)s/demos/')
-        r.Move('%(libdir)s/python*/site-packages/reportlab/docs/*', '%(thisdocdir)s/')
-        r.Move('%(libdir)s/python*/site-packages/reportlab/demos/*', '%(thisdocdir)s/demos/')
+        # build docs
+        r.Replace(r"os\.system\(cmd\)$",
+            "import subprocess; os.waitpid(subprocess.Popen(cmd, shell=True, env=dict(PYTHONPATH='%(destdir)s%(libdir)s/python2.6/site-packages')).pid, 0)",
+            "docs/genAll.py")
+        r.Run("PYTHONPATH=%(destdir)s%(libdir)s/python2.6/site-packages python docs/genAll.py")
 
-        # move all files into arch-specific python dirs
-        if Arch.x86_64:
-            r.Run('cp -ar %(destdir)s%(prefix)s/lib/python*/site-packages/* '
-                '%(destdir)s%(libdir)s/python*/site-packages/')
-            r.Remove('%(prefix)s/lib/python*/site-packages/', recursive=True)
+        r.Install("docs/*.pdf", "%(thisdocdir)s/")
+        r.Move('demos/*', '%(thisdocdir)s/demos/')
