@@ -24,6 +24,8 @@ class SblimSfcb(AutoPackageRecipe):
     ]
 
     def unpack(r):
+        r.macros.sfcbDir = '%(localstatedir)s/lib/sfcb'
+        r.macros.sfcbRegDir = '%(sfcbDir)s/registration'
         r.addArchive('mirror://sourceforge/sblim/')
         r.addSource('cim-mof.tagdescription',
                     dest='%(tagdescriptiondir)s/cim-mof', macros = True)
@@ -64,8 +66,8 @@ class SblimSfcb(AutoPackageRecipe):
     def makeinstall(r):
         r.MakeInstall()
         r.Install('sfcb.init-redhat', "%(initdir)s/sfcb", mode=0755)
-        r.Install('%(localstatedir)s/lib/sfcb/stage/default.reg',
-                  '%(localstatedir)s/lib/sfcb/registration/providerRegister')
+        r.Install('%(sfcbDir)s/stage/default.reg',
+                  '%(sfcbRegDir)s/providerRegister')
 
         r.Replace('sfcbmof', '$DESTDIR/usr/bin/sfcbmof', "sfcbrepos")
 
@@ -74,13 +76,16 @@ class SblimSfcb(AutoPackageRecipe):
             r.Install(f, "%(includedir)s/cmpi/")
 
         # Create the interop dir
-        r.MakeDirs("%(localstatedir)s/lib/sfcb/registration/repository/root/interop")
+        r.MakeDirs("%(sfcbRegDir)s/repository/root/interop")
 
     def policy(r):
-        r.ExcludeDirectories(exceptions="%(localstatedir)s/lib/sfcb/registration/repository/root/.*")
+        r.ExcludeDirectories(exceptions="%(sfcbRegDir)s/repository/root/.*")
         # .so gets put in :devellib, which makes the provider choke if we only
         # require :runtime plus :lib
         r.ComponentSpec("lib", "%(libdir)s/sfcb/.*\.so")
         # Package wbemcat separately, we don't want to carry perl deps
         r.PackageSpec("sblim-wbemcat", "wbemcat.*")
         r.PackageSpec("sblim-wbemcat", "xmltest.*")
+        # /var/lib/sfcb/registration/providerRegister gets created by
+        # provider-register.sh, which is run from tag scripts
+        r.InitialContents('%(sfcbRegDir)s/providerRegister')
