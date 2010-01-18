@@ -8,15 +8,47 @@ loadSuperClass('rpmpackage')
 class PulseAudio(RPMPackageRecipe,AutoPackageRecipe):
     name = 'pulseaudio'
     version  = '0.9.21'
-    rpmRelease = '1.fc12'
+    rpmRelease = '4.fc12'
 
-    rpmPatches = [  ]
+    rpmPatches = [  '0001-dbus-remove-filter-functions-only-if-they-were-actua.patch',
+                    '0002-native-fix-request-counter-miscalculations.patch',
+                    '0003-core-make-sure-we-always-return-a-valid-memblock-in-.patch',
+                    '0004-bluetooth-destruct-stream-only-if-it-is-not-already-.patch',
+                    '0005-bluetooth-don-t-hit-an-assert-if-latency-is-queried-.patch',
+                    '0006-client-detect-forking-in-sample-cache-API-too.patch',
+                    '0007-client-verify-connection-state-in-pa_stream_connect_.patch',
+                    '0008-udev-don-t-forget-to-unref-devices-we-are-not-intere.patch',
+                    '0009-once-make-once-related-variables-volatile.patch',
+                    '0010-bluetooth-fix-invalid-memory-access.patch',
+                    '0011-log-add-an-easy-way-to-disable-log-rate-limiting.patch',
+                    '0012-udev-make-sure-we-get-events-only-for-sound-devices.patch',
+                    '0013-alsa-ignore-volume-changes-from-the-hw-if-we-are-not.patch',
+                    '0014-cpu-check-for-CMOV-flag-before-using-this-intsructio.patch',
+                    '0015-alsa-cover-Input-Source-Int-Mic.patch',
+                    '0016-alsa-Cover-the-Int-Mic-Boost-element.patch',
+                    '0017-udev-handle-sound-cards-with-both-modem-and-audio-pr.patch',
+                    '0018-udev-rework-modem-detection-a-bit.patch',
+                    '0019-daemon-first-take-name-on-the-bus-then-return-in-sta.patch',
+                    '0020-alsa-cover-bass-boost-mixer-element.patch',
+                    '0021-Mark-shared-variables-as-volatile.patch',
+                    '0022-udev-use-ID_MODEL_ENC-instead-of-ID_MODEL-if-it-is-s.patch',
+                    '0023-pacat-allow-configuration-of-latency-in-msec.patch',
+                    '0024-client-implement-PULSE_LATENCY_MSEC.patch',
+                    '0025-client-include-dolby-channel-names-in-comments.patch',
+                    '0026-alsa-add-profile-set-for-M-Audio-FastTrack-Pro-USB.patch',
+                    '0027-threaded-mainloop-Properly-initialise-m-n_waiting_fo.patch',
+                    '0028-udev-Use-SOUND_CLASS-instead-of-SOUND_FORM_FACTOR-wh.patch',
+                    '0029-More-src-pulsecore-cpu-arm.c-FTBFS-fixes.patch',
+                    '0030-Fix-the-following-warnings-which-now-cause-buildd-fa.patch',
+                    '0031-libpulse-Store-pa_stream-pointers-to-hashmaps-instea.patch',
+                    '0001-native-rework-handling-of-seeks-that-depend-on-varia.patch', ]
     rpmSources = [ 'default.pa-for-gdm']
 
     buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'alsa-lib:devel', 'avahi:devel', 'hal:devel', 'libcap:devel', 'liboil:devel', 'libsamplerate:devel', 'libsndfile:devel', 'libtool:devel', 'm4:runtime', 'tcp_wrappers:devel', 'libatomic_ops:devel', 'libtool:runtime', 'autoconf:runtime','automake:runtime', 'gettext:devel', 'polkit:devel', 'bluez:devel', 'gcc-fortran:runtime', 'jack:devel', 'libICE:devel', 'libSM:devel', 'pkgconfig:devel', 'lirc:devel', 'gcc-c++:runtime', 'gdbm:devel', 'speex:devel', 'perl-XML-Parser:perl' ,'intltool:runtime', 'intltool:devel', 'gettext:runtime',  'libXext:devel', 'libXtst:devel', 'openssl:devel', 'udev:devel', 'inputproto:devel' ]
 
     def configure(r):
         # from pulse git 
+
         # core-util: introduce FD_CLOEXEC wrappers for open/socket/pipe/accept
         # Lennart Poettering [Fri, 30 Oct 2009 02:30:42 +0000 (03:30 +0100)]
         r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=9c1a98953f25aff7f11af80a073c9c46dee2438c')
@@ -32,9 +64,9 @@ class PulseAudio(RPMPackageRecipe,AutoPackageRecipe):
         r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=88b72958bebd1770e45a4af2dc9fec75aaf1f2de')
         # use pa_fopen_cloexec() where applicable
         r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=168be3830ae291dd819abebec813f76151487bb3')
-        # Asynchonous changes to n_waiting_for_accept may be missed
-        # http://www.pulseaudio.org/ticket/738
-        r.addPatch('http://git.0pointer.de/?p=pulseaudio.git;a=patch;h=978d33b')
+
+        r.addPatch('inotifyCompat.hack')
+
 
         extraConfig = (' --disable-static --disable-rpath '
                        ' --with-system-user=pulse '
@@ -43,7 +75,7 @@ class PulseAudio(RPMPackageRecipe,AutoPackageRecipe):
                        # our glibc has no inotify_init1() so we can't go thru
                        # udev / rtkit ...
                        # compat hal hooks are behaving for us
-                       # ' --disable-hal ')
+                       #' --disable-hal ')
                        ' --disable-udev --enable-hal --enable-hal-compat ' )
         r.Configure(extraConfig)
 
@@ -62,6 +94,14 @@ class PulseAudio(RPMPackageRecipe,AutoPackageRecipe):
         r.Remove('%(sysconfdir)s/xdg/autostart/pulseaudio-kde.desktop')
 
     def policy(r):
+        # configure --disable-static had no effect; delete manually.
+        r.Remove('%(libdir)s/*.a')
+        r.Remove('%(libdir)s/pulse-%(version)s/modules/*.a')
+        for mod in [ 'liboss-util', 'module-oss', 
+                     'module-detect', 'module-pipe-sink', 
+                     'module-pipe-source']:
+                    r.Remove('%(libdir)s/pulse-%(version)s/modules/' + mod + '.so')
+
         r.Symlink('%(bindir)s/esdcompat','%(bindir)s/esd')
         r.UtilizeGroup('pulse', '%(bindir)s/pulseaudio')
         r.UtilizeGroup('pulse-access', '%(bindir)s/pulseaudio')
