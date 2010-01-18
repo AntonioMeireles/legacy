@@ -12,6 +12,7 @@ class SblimSfcb(AutoPackageRecipe):
         'chkconfig:runtime',
         'curl:devel',
         'flex:runtime',
+        'info-sfcb:user',
         'openslp:devel',
         'pam:devel',
         'perl:devel',
@@ -45,6 +46,11 @@ class SblimSfcb(AutoPackageRecipe):
         r.Replace("doBasicAuth:.*",
                   "doBasicAuth:    false",
                   "sfcb.cfg.pre.in")
+        # Run http component as user sfcb
+        r.Replace(r"^#httpUserSFCB:true$", "httpUserSFCB: false",
+            "sfcb.cfg.pre.in")
+        r.Replace(r"^#httpUser:.*$", "httpUser: sfcb",
+            "sfcb.cfg.pre.in")
 
         # Create certs
         r.Replace(
@@ -59,6 +65,14 @@ class SblimSfcb(AutoPackageRecipe):
 
         # Fix init script
         r.Replace(r"&& restart", "&& ( stop && start )", "sfcb.init-redhat.in")
+
+        # Fix bug related to optimization
+        r.Replace(r"char \*dir,\*provuser;$",
+            "char *dir, *provuser = NULL;",
+            "providerRegister.c")
+        r.Replace(r"info->user=strdup\(provuser\);",
+            "info->user=provuid ? NULL : strdup(provuser);",
+            "providerRegister.c")
 
     def configure(r):
         r.Configure("--enable-ssl --enable-pam --enable-uds --enable-ipv6 --enable-slp")
@@ -89,3 +103,5 @@ class SblimSfcb(AutoPackageRecipe):
         # /var/lib/sfcb/registration/providerRegister gets created by
         # provider-register.sh, which is run from tag scripts
         r.InitialContents('%(sfcbRegDir)s/providerRegister')
+
+        r.Requires('info-sfcb:user', '/usr/sbin/sfcbd')
