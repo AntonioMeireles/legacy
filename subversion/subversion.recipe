@@ -21,7 +21,14 @@ class Subversion(CPackageRecipe):
                       'perl:runtime', 'util-linux:devel',
                       'openssl:devel', 'sqlite:devel', 'cyrus-sasl:devel',
                       'pkgconfig:devel', 'ruby:runtime',
-                      'util-linux:devel' ]
+                      'util-linux:devel',
+                      'dbus:devel', 'fontconfig:devel', 'freetype:devel',
+                      'glib:devel', 'gnome-keyring:devel', 'kdelibs:devel',
+                      'libICE:devel', 'libSM:devel', 'libX11:devel',
+                      'libXext:devel', 'libXinerama:devel', 'libXrandr:devel',
+                      'libXrender:devel', 'libpng:devel', 'libstdc++:devel',
+                      'qt4-core:devellib', 'qt4-gui:devellib'
+                      ]
 
     if Use.builddocs:
         buildRequires.extend(['texinfo:runtime', 'docbook-xsl:data'])
@@ -38,6 +45,11 @@ class Subversion(CPackageRecipe):
         r.macros.swigdirs = "swig_pydir=%(pydir)s/libsvn swig_pydir_extra=%(pydir)s/svn"
 
         r.addArchive('http://subversion.tigris.org/downloads/')
+        # from RH
+        r.addPatch('subversion-1.6.6-kwallet.patch')
+        r.addPatch('subversion-1.6.1-rpath.patch')
+        r.addPatch('subversion-1.6.0-deplibs.patch')
+
         r.addSource('subversion.conf', dest='%(sysconfdir)s/httpd/conf.d/subversion.conf')
         r.addSource('useraccess', dest='%(svnconfdir)s/useraccess')
 
@@ -46,15 +58,18 @@ class Subversion(CPackageRecipe):
                   '%(svnconfdir)s/useraccess')
 
         r.Create('%(svnconfdir)s/users')
+        r.Run('./autogen.sh --release ')
         r.Configure('--with-neon=%(prefix)s '
                     '--with-apr=%(prefix)s '
                     '--with-apr-util=%(prefix)s '
                     '--with-berkeley-db '
                     '--disable-mod-activation '
+                    ' --with-gnome-keyring '
+                    ' --with-kwallet '
                     '--with-sasl=%(prefix)s')
         # For some annoying reason, LDFLAGS will contain /usr/lib even on
         # 64-bit systems
-        r.Make('LIBTOOL=%(bindir)s/libtool LDFLAGS=')
+        r.Make(' LDFLAGS=')
         r.MakeInstall('LDFLAGS=')
         r.Make('swig-py %(swigdirs)s LDFLAGS=')
         r.Make('install-swig-py %(swigdirs)s', preMake='DESTDIR=%(destdir)s')
@@ -71,6 +86,12 @@ class Subversion(CPackageRecipe):
         r.MakeInstall(dir='subversion/bindings/swig/perl/native')
 
         r.MakeDirs('%(svnparentpath)s')
+        
+        # pkgSpec gnome/kde stuff 
+        for a,b in [('gnome_keyring', 'gnome'),
+                    ('kwallet', 'kde')]:
+            r.ComponentSpec('%(name)s-' + b + ':lib',
+                          '%(libdir)s/libsvn_auth_'+ a + '-.*.so.*')
 
         r.PackageSpec('mod_dav_svn',
                       '%(sysconfdir)s/httpd/conf.d/subversion.conf',
