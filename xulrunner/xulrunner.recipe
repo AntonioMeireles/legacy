@@ -6,8 +6,8 @@
 loadSuperClass('rpmpackage')
 class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
     name = 'xulrunner'
-    version = '1.9.1.6'
-    rpmRelease = '1.fc12'
+    version = '1.9.2.1'
+    rpmRelease = '1.fc13'
     tarballName = '%(name)s-%(version)s.source.tar.bz2'
 
     buildRequires = [
@@ -37,12 +37,13 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
     rpmPatches = [ 'xulrunner-version.patch',
                    'mozilla-build.patch',
-                   'mozilla-191-path.patch',
                    'mozilla-jemalloc.patch',
                    'mozilla-about-firefox-version.patch',
-                   'xulrunner-gtk-include.patch',
-                   'mozilla-libnotify.patch',
-                   'mozilla-191-pkgconfig.patch',
+                   'mozilla-jemalloc-526152.patch',
+                   'xulrunner-1.9.2.1-build.patch',
+                   'mozilla-plugin.patch',
+                   'mozilla-build-sbrk.patch',
+                   'mozilla-192-pkgconfig.patch',
                    'mozilla-ps-pdf-simplify-operators.patch',
                    ]
 
@@ -53,7 +54,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
     def configure(r):
         r.macros.longVersion =  r.macros.version
-        r.macros.version = '1.9.1'
+        r.macros.version = '1.9.2'
         r.Replace('__RPM_VERSION_INTERNAL__', '%(version)s', 'xulrunner/installer/Makefile.in')
         r.Environment('INTERNAL_GECKO','%(version)s')
         r.Environment('MOZ_APP_DIR','%(libdir)s/%(name)s-%(version)s')
@@ -95,11 +96,12 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
                      ' --enable-canvas'
                      ' --enable-application=xulrunner'
                      ' --disable-javaxpcom'
-                     ' --enable-extensions=default,python/xpcom'
+                     ' --enable-extensions=default'
                      ' --enable-libnotify'
                      ' --enable-safe-browsing'
                      ' --disable-crashreporter'
                      ' --enable-startup-notification'
+                     ' --disable-necko-wifi '
                      )
 
 
@@ -133,8 +135,11 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
         # Prepare our devel package
         r.Run('cp -rL dist/include/*   %(destdir)s/%(includedir)s/%(INTERNAL_APP_SDK_NAME)s')
-        # Copy mozilla-config to stable include dir
-        r.Copy('dist/include/mozilla-config.h', '%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/stable/')
+        # Copy pc files (for compatibility with 1.9.1)
+        r.Copy('%(libdir)s/pkgconfig/libxul.pc',
+               '%(libdir)s/pkgconfig/libxul-unstable.pc')
+        r.Copy('%(libdir)s/pkgconfig/libxul-embedding.pc',
+               '%(libdir)s/pkgconfig/libxul-embedding-unstable.pc')
 
         # Fix multilib devel conflicts...
         if Arch.x86_64:
@@ -143,10 +148,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
             mozbits = '32'
 
         for target in ['mozilla-config', 'jsautocfg']:
-            if target.endswith('cfg'):
-                subDir = ['js', 'unstable']
-            else:
-                subDir = ['', 'stable', 'unstable']
+            subDir = ['']
 
             for d in subDir:
                 dir = '%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/' + d + '/'
@@ -171,16 +173,20 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
         r.Remove('%(datadir)s/idl/%(name)s-%(version)s', recursive = True)
 
         r.Remove('%(MOZ_APP_SDK_DIR)s/include', recursive = True)
-        r.Symlink('%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/unstable', '%(MOZ_APP_SDK_DIR)s/include')
+        r.Symlink('%(includedir)s/%(INTERNAL_APP_SDK_NAME)s',
+                  '%(MOZ_APP_SDK_DIR)s/include')
 
         r.Remove('%(MOZ_APP_SDK_DIR)s/idl', recursive = True)
-        r.Symlink('%(datadir)s/idl/%(INTERNAL_APP_SDK_NAME)s/unstable', '%(MOZ_APP_SDK_DIR)s/idl')
+        r.Symlink('%(datadir)s/idl/%(INTERNAL_APP_SDK_NAME)s',
+                  '%(MOZ_APP_SDK_DIR)s/idl')
 
         r.Remove('%(MOZ_APP_SDK_DIR)s/sdk/include', recursive = True)
-        r.Symlink('%(includedir)s/%(INTERNAL_APP_SDK_NAME)s/stable', '%(MOZ_APP_SDK_DIR)s/sdk/include')
+        r.Symlink('%(includedir)s/%(INTERNAL_APP_SDK_NAME)s',
+                  '%(MOZ_APP_SDK_DIR)s/sdk/include')
 
         r.Remove('%(MOZ_APP_SDK_DIR)s/sdk/idl', recursive = True)
-        r.Symlink('%(datadir)s/idl/%(INTERNAL_APP_SDK_NAME)s/stable', '%(MOZ_APP_SDK_DIR)s/sdk/idl')
+        r.Symlink('%(datadir)s/idl/%(INTERNAL_APP_SDK_NAME)s',
+                  '%(MOZ_APP_SDK_DIR)s/sdk/idl')
 
         r.Remove('%(MOZ_APP_SDK_DIR)s/sdk/lib/*.so')
 
