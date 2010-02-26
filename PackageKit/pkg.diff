@@ -1,0 +1,109 @@
+diff --git a/backends/conary/conaryBackend.py b/backends/conary/conaryBackend.py
+index 4089680..d351cbd 100755
+--- a/backends/conary/conaryBackend.py
++++ b/backends/conary/conaryBackend.py
+@@ -320,7 +320,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+ 
+         pkgFilter = ConaryFilter(filters)
+         # if filter install exist only do a conary q
+-        trovesList = self.client.db.findTroves( None ,specList, allowMissing = True)
++        trovesList = self.conary.db.findTroves( None ,specList, allowMissing = True)
+         log.info("Packages installed .... %s " % len(trovesList))
+         for trove in specList:
+             if trove in trovesList:
+@@ -341,7 +341,9 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+             name,version,flavor = pkg.get("trove")
+             trove = name, version, self.conary.flavor
+             specList.append(trove)
+-        trovelist = self.client.repos.findTroves(self.conary.default_label, specList, allowMissing=True)
++	log.info("doing a repos.findTroves")
++	r = self.client.getRepos()
++        trovelist = r.findTroves(self.conary.default_label, specList, allowMissing=True)
+ 
+         list_available = []
+         for trove in specList:
+@@ -376,13 +378,14 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+ 
+         filter = ConaryFilter(filters)
+         trove = None
+-    
++   	log.info("doing query") 
+         trove_installed = self.conary.query( pkg_dict.get("name") )
+         if trove_installed:
+             pkg = self._convert_package( trove_installed[0], pkg_dict )
+             log.info( pkg)
+             filter.add_installed( [ pkg ] )
+             
++   	log.info("doing rquery") 
+         trove_available = self.conary.request_query( pkg_dict.get("name") )
+         if trove_available:
+             pkg = self._convert_package( trove_available[0], pkg_dict )
+@@ -946,6 +949,8 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         Implement the {backend}-repo-enable functionality
+         '''
+         pass
++    def __del__(self):
++	self.cli.close()
+ 
+ from pkConaryLog import pdb
+ 
+@@ -954,6 +959,8 @@ def main():
+     log.info("======== argv =========== ")
+     log.info(sys.argv)
+     backend.dispatcher(sys.argv[1:])
++    log.info("backend close")
++    del backend
+ 
+ if __name__ == "__main__":
+     main()
+diff --git a/backends/conary/conarypk.py b/backends/conary/conarypk.py
+index 7a8628e..ed999bb 100644
+--- a/backends/conary/conarypk.py
++++ b/backends/conary/conarypk.py
+@@ -37,10 +37,11 @@ class ConaryPk:
+         # for client
+         self.cli = cli
+         # for query on system (database)
+-        self.db = cli.db
++        self.db = cli.getDatabase()
+         # for request query on repository (repos)
+-        self.repos = cli.repos
++        self.repos = cli.getRepos()
+     def _exist_network(self):
++	return
+         if not os.environ.get("NETWORK"):
+             Pk = PackageKitBaseBackend("")
+             Pk.error(ERROR_NO_NETWORK,"Not exist network conection")
+@@ -81,7 +82,7 @@ class ConaryPk:
+             return []
+         db = self._get_db()
+         try:
+-            troves = db.findTrove( None ,(name , None, None ))
++            troves = self.db.findTrove( None ,(name , None, None ))
+             #return db.getTroves(troves)
+             return troves
+         except TroveNotFound:
+@@ -93,7 +94,7 @@ class ConaryPk:
+         label = self.label( installLabel )
+         repos = self._get_repos()
+         try:
+-            troves = repos.findTrove( label ,( name, None ,self.flavor ) )
++            troves = self.repos.findTrove( label ,( name, None ,self.flavor ) )
+             #return repos.getTroves(troves)
+             return troves
+         except TroveNotFound:
+@@ -132,10 +133,12 @@ class ConaryPk:
+ 
+ if __name__ == "__main__":
+     conary = ConaryPk()
+-    print conary.search_path("/usr/bin/vim")
++    conary2 = ConaryPk()
++    #print conary.search_path("/usr/bin/vim")
+     #print conary.query("gimpasdas")
+     #print conary.request_query("dpaster",'zodyrepo.rpath.org@rpl:devel')
+-    #print conary.request_query("gimp")
++    print conary.request_query("gimp")
++    print conary2.request_query("emesene")
+     #print conary.request_query("gimpasdasd")
+     #print conary.update("amsn")
+     #print conary.remove("amsn")
