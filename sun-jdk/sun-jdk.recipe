@@ -1,43 +1,51 @@
 #
-# Copyright (c) 2006-2008 rPath, Inc.
+# Copyright (c) 2006-2010 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('javapackage')
-class SunJava(JavaPackageRecipe, CPackageRecipe):
+class SunJava(CPackageRecipe):
     name = 'sun-jdk'
-    version = '6u17'
+    version = '6u18'
 
-    JavaPackageRecipe.buildRequires = []
-    buildRequires = [ 'desktop-file-utils:runtime', ]
+    buildRequires = [ 'unzip:runtime', ]
 
     jdkhome = '%%(jvmdir)s/sun-java-%s' % version
     javahome = '%s/jre' % jdkhome
 
+    def setup(r):
+        if Use.gcj:
+            # this is just to keep the flavor consistent
+            # with previous releases
+            pass
+
+        r.upstreamUnpack()
+
+        r.Environment('JAVA_HOME', '%(javahome)s')
+
+        r.upstreamSetup()
+        del r.EnforceSonameBuildRequirements
+        del r.EnforceJavaBuildRequirements
+
+        r.ComponentSpec('java', '%(javadir)s/.*')
+        r.ComponentSpec('java', '.*\.jar')
+
+
     def upstreamUnpack(r):
         r.macros.jrename = 'sun-jre'
         r.macros.jdkhome = r.jdkhome
-        r.macros.desktopfile = 'jre/plugin/desktop/sun_java.desktop'
+        r.macros.javahome = r.javahome
         upver = r.version.replace('.', '_')
         site = 'http://download.java.net/dlj/binaries/'+'jdk-'+upver+'-dlj-linux-'
         arch32 = 'i586.bin'
         arch64 = 'amd64.bin'
-        r.addSource(site+arch32, use=(Arch.x86 and not Use.gcj))
-        r.addSource(site+arch64, use=(Arch.x86_64 and not Use.gcj))
+        r.addSource(site+arch32, use=Arch.x86)
+        r.addSource(site+arch64, use=Arch.x86_64)
         r.Run('sh *.bin --accept-license --unpack')
         r.Run('mv jdk*/* .')
 
     def upstreamSetup(r):
         if Arch.x86:
-            r.Replace( ('X-Sun-Supported;', ''),
-                       ('X-Red-Hat-Base;', ''),
-                       ('X-Ximian-Settings;', ''),
-                       ('Application;', ''),
-                       '%(desktopfile)s')
-
-            r.Desktopfile('%(desktopfile)s')
-
             r.Install('jre/plugin', '%(javahome)s')
 
             # Create symlink for firefox plugin
