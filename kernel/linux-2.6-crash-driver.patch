@@ -95,24 +95,105 @@ index 0000000..541af84
 +
 +#endif /* _ASM_IA64_CRASH_H */
 diff --git a/arch/ia64/kernel/ia64_ksyms.c b/arch/ia64/kernel/ia64_ksyms.c
-index 6da1f20..2984fb3 100644
+index 14d39e3..cf3d040 100644
 --- a/arch/ia64/kernel/ia64_ksyms.c
 +++ b/arch/ia64/kernel/ia64_ksyms.c
-@@ -86,6 +86,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
+@@ -84,6 +84,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
  #include <asm/unwind.h>
  EXPORT_SYMBOL(unw_init_running);
  
 +#include <linux/efi.h>
 +EXPORT_SYMBOL_GPL(efi_mem_type);
 +
- #ifdef ASM_SUPPORTED
- # ifdef CONFIG_SMP
- #  if (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
+ #if defined(CONFIG_IA64_ESI) || defined(CONFIG_IA64_ESI_MODULE)
+ extern void esi_call_phys (void);
+ EXPORT_SYMBOL_GPL(esi_call_phys);
+diff --git a/arch/x86/include/asm/crash.h b/arch/x86/include/asm/crash.h
+new file mode 100644
+index 0000000..dfcc006
+--- /dev/null
++++ b/arch/x86/include/asm/crash.h
+@@ -0,0 +1,75 @@
++#ifndef _ASM_I386_CRASH_H
++#define _ASM_I386_CRASH_H
++
++/*
++ * linux/include/asm-i386/crash.h
++ *
++ * Copyright (c) 2004 Red Hat, Inc. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#ifdef __KERNEL__
++
++#include <linux/mm.h>
++#include <linux/highmem.h>
++#include <asm/mmzone.h>
++
++extern int page_is_ram(unsigned long);
++
++static inline void *
++map_virtual(u64 offset, struct page **pp)
++{
++	struct page *page;
++	unsigned long pfn;
++	void *vaddr;
++
++	pfn = (unsigned long)(offset >> PAGE_SHIFT);
++
++	if (!page_is_ram(pfn)) {
++		printk(KERN_INFO
++		    "crash memory driver: !page_is_ram(pfn: %lx)\n", pfn);
++		return NULL;
++	}
++
++	if (!pfn_valid(pfn)) {
++		printk(KERN_INFO
++		    "crash memory driver: invalid pfn: %lx )\n", pfn);
++		return NULL;
++	}
++
++	page = pfn_to_page(pfn);
++
++	vaddr = kmap(page);
++	if (!vaddr) {
++		printk(KERN_INFO
++		    "crash memory driver: pfn: %lx kmap(page: %lx) failed\n", 
++			pfn, (unsigned long)page);
++		return NULL;
++	}
++
++	*pp = page;
++	return (vaddr + (offset & (PAGE_SIZE-1)));
++}
++
++static inline void unmap_virtual(struct page *page) 
++{ 
++	kunmap(page);
++}
++
++#endif /* __KERNEL__ */
++
++#endif /* _ASM_I386_CRASH_H */
 diff --git a/arch/x86/mm/ioremap.c b/arch/x86/mm/ioremap.c
-index d4c4307..d1c968f 100644
+index 334e63c..8e1ccbc 100644
 --- a/arch/x86/mm/ioremap.c
 +++ b/arch/x86/mm/ioremap.c
-@@ -133,6 +133,7 @@ int page_is_ram(unsigned long pagenr)
+@@ -60,6 +60,7 @@ int page_is_ram(unsigned long pagenr)
  	}
  	return 0;
  }
@@ -121,10 +202,10 @@ index d4c4307..d1c968f 100644
  /*
   * Fix up the linear direct mapping of the kernel to avoid cache attribute
 diff --git a/drivers/char/Kconfig b/drivers/char/Kconfig
-index 43d6ba8..0d81c9a 100644
+index 08a6f50..8bc5e9a 100644
 --- a/drivers/char/Kconfig
 +++ b/drivers/char/Kconfig
-@@ -460,6 +460,8 @@ config LEGACY_PTYS
+@@ -484,6 +484,8 @@ config LEGACY_PTYS
  	  security.  This option enables these legacy devices; on most
  	  systems, it is safe to say N.
  
@@ -134,10 +215,10 @@ index 43d6ba8..0d81c9a 100644
  config LEGACY_PTY_COUNT
  	int "Maximum number of legacy PTY in use"
 diff --git a/drivers/char/Makefile b/drivers/char/Makefile
-index 438f713..1b7767b 100644
+index 19a79dd..0bee860 100644
 --- a/drivers/char/Makefile
 +++ b/drivers/char/Makefile
-@@ -109,6 +109,8 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
+@@ -112,6 +112,8 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
  obj-$(CONFIG_JS_RTC)		+= js-rtc.o
  js-rtc-y = rtc.o
  
@@ -280,84 +361,3 @@ index 0000000..e5437de
 +module_exit(crash_cleanup_module);
 +
 +MODULE_LICENSE("GPL");
-diff --git a/include/asm-x86/crash.h b/include/asm-x86/crash.h
-new file mode 100644
-index 0000000..dfcc006
---- /dev/null
-+++ b/include/asm-x86/crash.h
-@@ -0,0 +1,75 @@
-+#ifndef _ASM_I386_CRASH_H
-+#define _ASM_I386_CRASH_H
-+
-+/*
-+ * linux/include/asm-i386/crash.h
-+ *
-+ * Copyright (c) 2004 Red Hat, Inc. All rights reserved.
-+ *
-+ * This program is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2, or (at your option)
-+ * any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-+ *
-+ */
-+
-+#ifdef __KERNEL__
-+
-+#include <linux/mm.h>
-+#include <linux/highmem.h>
-+#include <asm/mmzone.h>
-+
-+extern int page_is_ram(unsigned long);
-+
-+static inline void *
-+map_virtual(u64 offset, struct page **pp)
-+{
-+	struct page *page;
-+	unsigned long pfn;
-+	void *vaddr;
-+
-+	pfn = (unsigned long)(offset >> PAGE_SHIFT);
-+
-+	if (!page_is_ram(pfn)) {
-+		printk(KERN_INFO
-+		    "crash memory driver: !page_is_ram(pfn: %lx)\n", pfn);
-+		return NULL;
-+	}
-+
-+	if (!pfn_valid(pfn)) {
-+		printk(KERN_INFO
-+		    "crash memory driver: invalid pfn: %lx )\n", pfn);
-+		return NULL;
-+	}
-+
-+	page = pfn_to_page(pfn);
-+
-+	vaddr = kmap(page);
-+	if (!vaddr) {
-+		printk(KERN_INFO
-+		    "crash memory driver: pfn: %lx kmap(page: %lx) failed\n", 
-+			pfn, (unsigned long)page);
-+		return NULL;
-+	}
-+
-+	*pp = page;
-+	return (vaddr + (offset & (PAGE_SIZE-1)));
-+}
-+
-+static inline void unmap_virtual(struct page *page) 
-+{ 
-+	kunmap(page);
-+}
-+
-+#endif /* __KERNEL__ */
-+
-+#endif /* _ASM_I386_CRASH_H */
