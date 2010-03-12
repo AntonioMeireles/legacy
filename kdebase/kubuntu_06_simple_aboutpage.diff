@@ -1,0 +1,138 @@
+diff -Nur kdebase-4.2.1/apps/konqueror/about/konq_aboutpage.cc kdebase-4.2.1.new/apps/konqueror/about/konq_aboutpage.cc
+--- kdebase-4.2.1/apps/konqueror/about/konq_aboutpage.cc	2009-03-06 12:32:50.000000000 +0100
++++ kdebase-4.2.1.new/apps/konqueror/about/konq_aboutpage.cc	2009-03-06 13:25:13.000000000 +0100
+@@ -15,6 +15,10 @@
+ #include <ksavefile.h>
+ #include <kstandarddirs.h>
+ #include <ktoolinvocation.h>
++#include <kurifilter.h>
++#include <ktrader.h>
++#include <kconfig.h>
++#include <kurifilter.h>
+ 
+ K_PLUGIN_FACTORY(KonqAboutPageFactory, registerPlugin<KonqAboutPage>();)
+ K_EXPORT_PLUGIN(KonqAboutPageFactory("konqaboutpage"))
+@@ -76,6 +80,13 @@
+   else
+     res = res.arg( "" );
+ 
++  KConfig config( "kuriikwsfilterrc" );
++  KConfigGroup group = config.group( "General" );
++  QString name = group.readEntry("DefaultSearchEngine", "google");
++  if (name.isEmpty() || name.isNull())
++    name = "google";
++  KService::Ptr service = KService::serviceByDesktopPath(QString("searchproviders/%1.desktop").arg(name));
++
+   res = res.arg( i18nc("KDE 4 tag line, see http://kde.org/img/kde40.png", "Be free.") )
+       .arg( i18n( "Konqueror" ) )
+       .arg( i18nc("KDE 4 tag line, see http://kde.org/img/kde40.png", "Be free.") )
+@@ -84,7 +95,10 @@
+       .arg( i18n( "Introduction" ) )
+       .arg( i18n( "Tips" ) )
+       .arg( i18n( "Specifications" ) )
+-      .arg( home_folder )
++      .arg( service->name() )
++      .arg( service->property("Keys").toStringList()[0] )
++      .arg(iconSize ).arg( iconSize )
++/*      .arg( home_folder )
+       .arg( home_icon_path )
+       .arg(iconSize).arg(iconSize)
+       .arg( home_folder )
+@@ -98,13 +112,14 @@
+       .arg(iconSize).arg(iconSize)
+       .arg( i18n( "Network Folders" ) )
+       .arg( i18n( "Shared files and folders" ) )
++      */
+       .arg( bookmarks_icon_path )
+       .arg(iconSize).arg(iconSize)
+-      .arg( i18n( "My Bookmarks" ) )
+-      .arg( i18n( "Quick access to your bookmarks" ) )
++      .arg( i18n( "Bookmarks" ) )
++      /*.arg( i18n( "Quick access to your bookmarks" ) )
+       .arg( continue_icon_path )
+       .arg( KIconLoader::SizeSmall ).arg( KIconLoader::SizeSmall )
+-      .arg( i18n( "Next: An Introduction to Konqueror" ) )
++      .arg( i18n( "Next: An Introduction to Konqueror" ) )*/
+       ;
+   i18n("Search the Web");//i18n for possible future use
+ 
+@@ -283,6 +298,7 @@
+     else
+ 	res = res.arg( "" );
+ 
++
+     res = res.arg( i18nc("KDE 4 tag line, see http://kde.org/img/kde40.png", "Be free.") )
+ 	.arg( i18n( "Konqueror" ) )
+ 	.arg( i18nc("KDE 4 tag line, see http://kde.org/img/kde40.png", "Be free.") )
+@@ -376,16 +392,25 @@
+ bool KonqAboutPage::openUrl(const KUrl &u)
+ {
+     emit started(0);
+-    if (u.url() == "about:plugins")
++    if ( u.url() == "about:plugins" ) {
+         serve(s_staticData->plugins(), "plugins");
+-    else if (u.url() == "about:konqueror/intro")
++    } else if ( !u.query().isEmpty() ) {
++        QMap< QString, QString > queryItems = u.queryItems( 0 );
++        QMap< QString, QString >::ConstIterator query = queryItems.begin();
++        QString newUrl;
++        newUrl = KUriFilter::self()->filteredUri( query.key() + ":" + query.data() );
++        kdDebug(1202) << "going" << query.key() << query.data() << endl;
++        kdDebug(1202) << "scheduleRedirection( 0, \"" << newUrl << "\" )" << endl;
++        scheduleRedirection( 0, newUrl );
++    } else if (u.url() == "about:konqueror/intro") {
+         serve(s_staticData->intro(), "konqueror/intro");
+-    else if (u.url() == "about:konqueror/specs")
++    } else if (u.url() == "about:konqueror/specs") {
+         serve(s_staticData->specs(), "konqueror/specs");
+-    else if (u.url() == "about:konqueror/tips")
++    } else if (u.url() == "about:konqueror/tips") {
+         serve(s_staticData->tips(), "konqueror/tips");
+-    else
++    } else {
+         serve(s_staticData->launch(), "konqueror");
++    }
+     emit completed();
+     return true;
+ }
+diff -Nur kdebase-4.2.1/apps/konqueror/about/launch.html kdebase-4.2.1.new/apps/konqueror/about/launch.html
+--- kdebase-4.2.1/apps/konqueror/about/launch.html	2009-03-06 12:32:50.000000000 +0100
++++ kdebase-4.2.1.new/apps/konqueror/about/launch.html	2009-03-06 13:23:58.000000000 +0100
+@@ -59,6 +59,23 @@
+       <div id="boxR">
+         <div id="boxCenter">
+ 	<table border="0" align="center">
++        
++<!--search bar argument replacement is performed between the "search bar splitter" lines-->
++<!--search bar splitter-->
++
++        <tr>
++        <form action="about:konqueror">
++        <td style="text-align:right;"><label id="searchbarlabel" for="searchbarinput">%11: </label></td>
++        <td><input id="searchbarinput" name="%12" type="text"></td>
++        </form>
++        </tr>
++        <tr>
++        <td colspan="2"><div style="width:%13px; height:%14px;"/></td>
++        </tr>
++
++<!--search bar splitter-->
++
++        <!--
+ 	  <tr>
+ 	      <td valign="bottom">
+ 		<a href="%11"><img src="%12" height="%13" width="%14" /></a>
+@@ -91,10 +108,9 @@
+ 		      </td>
+ 		</tr>
+               <tr><td colspan="5" height=".25em">&nbsp;</td></tr>
+-		    </table>
+-		    <p id="nextlink"><a href="about:konqueror/intro"><img src="%33" width="%34" height="%35">&nbsp;%36
+-			<!-- Continue --></a></p>
+-
++              -->
++                    <tr><td colspan="2" align="center"><a href="bookmarks:/"><img src="%15" height="%16" width="%17" /></a><a href="bookmarks:/">%18</a></td></tr>
++                    </table>
+         </div>
+       </div>
+     </div>
