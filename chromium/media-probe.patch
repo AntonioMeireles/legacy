@@ -1,0 +1,152 @@
+Index: chrome-svn/tarball/chromium/src/net/base/mime_util.cc
+===================================================================
+--- chrome-svn/tarball/chromium/src/net/base/mime_util.cc	(revision 37686)
++++ chrome-svn/tarball/chromium/src/net/base/mime_util.cc	(working copy)
+@@ -12,6 +12,9 @@
+ #include "base/singleton.h"
+ #include "base/string_util.h"
+ 
++#include "base/path_service.h"
++#include <dlfcn.h>
++
+ using std::string;
+ 
+ namespace net {
+@@ -180,41 +183,39 @@
+   "image/x-xbitmap"  // xbm
+ };
+ 
++struct format_info {
++  const char* name;
++  const char* symbol;
++};
++
+ // A list of media types: http://en.wikipedia.org/wiki/Internet_media_type
+ // A comprehensive mime type list: http://plugindoc.mozdev.org/winmime.php
+-static const char* const supported_media_types[] = {
++static const format_info supported_media_types[] = {
+   // Ogg.
+-  "video/ogg",
+-  "audio/ogg",
+-  "application/ogg",
+-
+-#if defined(GOOGLE_CHROME_BUILD)
+-  // MPEG-4.
+-  "video/mp4",
+-  "video/x-m4v",
+-  "audio/mp4",
+-  "audio/x-m4a",
+-
+-  // MP3.
+-  "audio/mp3",
+-  "audio/x-mp3",
+-  "audio/mpeg",
+-#endif
++   { "video/ogg"      , "ogg_demuxer" },
++   { "audio/ogg"      , "ogg_demuxer" },
++   { "application/ogg", "ogg_demuxer" },
++   { "video/mp4"      , "mov_demuxer" },
++   { "video/x-m4v"    , "mov_demuxer" },
++   { "audio/mp4"      , "mov_demuxer" },
++   { "audio/x-m4a"    , "mov_demuxer" },
++   { "audio/mp3"      , "mp3_demuxer" },
++   { "audio/x-mp3"    , "mp3_demuxer" },
++   { "audio/mpeg"     , "mp3_demuxer" },
+ };
+ 
+ // List of supported codecs when passed in with <source type="...">.
+ //
+ // Refer to http://wiki.whatwg.org/wiki/Video_type_parameters#Browser_Support
+ // for more information.
+-static const char* const supported_media_codecs[] = {
+-#if defined(GOOGLE_CHROME_BUILD)
+-  "avc1",
+-  "mp4a",
+-#endif
+-  "theora",
+-  "vorbis",
++ static const format_info supported_media_codecs[] = {
++   { "avc1"  , "h264_decoder"   },
++   { "mp4a"  , "aac_decoder"    },
++   { "theora", "theora_decoder" },
++   { "vorbis", "vorbis_decoder" },
+ };
+ 
++
+ // Note: does not include javascript types list (see supported_javascript_types)
+ static const char* const supported_non_image_types[] = {
+   "text/html",
+@@ -271,7 +272,43 @@
+   "image/svg+xml"
+ };
+ 
++#if defined(OS_MACOSX)
++#define DSO_NAME(MODULE, VERSION) ("lib" MODULE "." #VERSION ".dylib")
++#elif defined(OS_POSIX)
++#define DSO_NAME(MODULE, VERSION) ("lib" MODULE ".so." #VERSION)
++#else
++#error "Do not know how to construct DSO name for this OS."
++#endif
++
++static void* GetHandle(const FilePath& module_dir, const char* library) {
++  FilePath path = module_dir.Append(library);
++  return dlopen(path.value().c_str(), RTLD_LAZY);
++}
++
++static void DumpHandle(void* dlhandle) {
++  if (dlhandle)
++    dlclose(dlhandle);
++}
++
++static bool ProbeFormat(void* dlhandle, const char* symbol) {
++#if defined(OS_MACOSX) || defined (OS_POSIX)
++  return dlhandle && dlsym(dlhandle, symbol);
++#else
++  return false;
++#endif
++}
++
+ void MimeUtil::InitializeMimeTypeMaps() {
++  FilePath module_path;
++#if defined(OS_MACOSX)
++  module_path = mac_util::MainAppBundlePath().Append("Libraries");
++#else
++  PathService::Get(base::DIR_MODULE, &module_path);
++#endif
++  void* h_avutil   = GetHandle(module_path, DSO_NAME("avutil"  , 50));
++  void* h_avcodec  = GetHandle(module_path, DSO_NAME("avcodec" , 52));
++  void* h_avformat = GetHandle(module_path, DSO_NAME("avformat", 52));
++
+   for (size_t i = 0; i < arraysize(supported_image_types); ++i)
+     image_map_.insert(supported_image_types[i]);
+ 
+@@ -281,11 +318,13 @@
+   for (size_t i = 0; i < arraysize(supported_javascript_types); ++i)
+     non_image_map_.insert(supported_javascript_types[i]);
+   for (size_t i = 0; i < arraysize(supported_media_types); ++i)
+-    non_image_map_.insert(supported_media_types[i]);
++    if (ProbeFormat(h_avformat, supported_media_types[i].symbol))
++    non_image_map_.insert(supported_media_types[i].name);
+ 
+   // Initialize the supported media types.
+   for (size_t i = 0; i < arraysize(supported_media_types); ++i)
+-    media_map_.insert(supported_media_types[i]);
++    if (ProbeFormat(h_avformat, supported_media_types[i].symbol))
++    media_map_.insert(supported_media_types[i].name);
+ 
+   for (size_t i = 0; i < arraysize(supported_javascript_types); ++i)
+     javascript_map_.insert(supported_javascript_types[i]);
+@@ -294,7 +333,12 @@
+     view_source_map_.insert(view_source_types[i]);
+ 
+   for (size_t i = 0; i < arraysize(supported_media_codecs); ++i)
+-    codecs_map_.insert(supported_media_codecs[i]);
++    if (ProbeFormat(h_avcodec, supported_media_codecs[i].symbol))
++    codecs_map_.insert(supported_media_codecs[i].name);
++
++  DumpHandle(h_avformat);
++  DumpHandle(h_avcodec);
++  DumpHandle(h_avutil);
+ }
+ 
+ bool MimeUtil::IsSupportedImageMimeType(const char* mime_type) const {

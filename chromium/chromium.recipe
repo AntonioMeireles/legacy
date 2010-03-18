@@ -1,6 +1,6 @@
 class Chromium(PackageRecipe):
     name = 'chromium'
-    version = '37968'
+    version = '41952'
 
     buildRequires = ['depot_tools:runtime',
                      'nss:devellib',
@@ -28,22 +28,24 @@ class Chromium(PackageRecipe):
                      'desktop-file-utils:runtime',
                      'mozilla-filesystem:runtime',
                      'make:runtime',
+                     'gettext:runtime', 
+                     'intltool:runtime',
+                     'bzip2:devel', 
+                     'libjpeg:devel',
+                     'scrnsaverproto:devel',
+                     'Mesa:devel',
+                     'libXScrnSaver:devel',
+                     'dbus-glib:devellib',
                      'vim:runtime', # For debugging...
-		     'gettext:runtime', 
-		     'intltool:runtime',
-		     'bzip2:devel', 
-		     'libjpeg:devel',
                     ]
 
     def setup(r):
         r.addArchive('http://build.chromium.org/buildbot/archives/'
-                     'chromium.r28096.tgz')
-
-        r.addSource('no-Werror.patch')
-        r.addPatch('no-Werror.patch')
+                     'chromium.r37686.tgz')
 
         # Updates the code that was extracted to a specific svn revision.
-        r.Run('/opt/google/depot_tools/gclient update --revision=src@%s' % \
+        r.Run("GYP_GENERATORS=make GYP_DEFINES='werror=' " + \
+              "/opt/google/depot_tools/gclient update --force --revision=src@%s" % \
               r.version, dir='chrome-svn/tarball/chromium')
 
         r.MakeDirs('%(builddir)s/chrome-svn/tarball/chromium/src/out')
@@ -52,18 +54,15 @@ class Chromium(PackageRecipe):
         if Arch.x86_64:
             r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
                       '%(builddir)s/chrome-svn/tarball/chromium/src/out64')
-            r.Run("GYP_GENERATORS='make' GYP_DEFINES='target_arch=x64' "
-                  "python ./src/build/gyp_chromium",
+            r.Run("GYP_GENERATORS=make GYP_DEFINES='werror= target_arch=x64' "
+                  "/opt/google/depot_tools/gclient runhooks --force",
                   dir='chrome-svn/tarball/chromium')
         else:
             r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
                       '%(builddir)s/chrome-svn/tarball/chromium/src/out32')
-            r.Run("GYP_GENERATORS='make' "
-                  "python ./src/build/gyp_chromium",
-                  dir='chrome-svn/tarball/chromium')
 
         # Make.
-        r.Run('/usr/bin/make -r -j8 chrome chrome_sandbox BUILDTYPE=Release',
+        r.Run('/usr/bin/make -j5 chrome BUILDTYPE=Release',
               dir='chrome-svn/tarball/chromium/src')
 
         # Install.
@@ -73,7 +72,7 @@ class Chromium(PackageRecipe):
 
         buildLoc = 'chrome-svn/tarball/chromium/src/out/Release/'
         artifacts = ['chrome.pak', 'locales', 'resources', 
-                     'xdg-settings', 'chrome', 'chrome_sandbox']
+                     'xdg-settings', 'chrome']
 
         r.MakeDirs('%(libdir)s/chromium-browser')
         for artifact in artifacts:
