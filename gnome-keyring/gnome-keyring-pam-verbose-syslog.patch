@@ -1,0 +1,125 @@
+diff -r 933fb5f8a612 pam/gkr-pam-module.c
+--- a/pam/gkr-pam-module.c	Tue Mar 23 22:08:43 2010 +0100
++++ b/pam/gkr-pam-module.c	Tue Mar 23 22:24:52 2010 +0100
+@@ -548,6 +548,7 @@
+ 	inp[READ_END] = outp[WRITE_END] = errp[WRITE_END] = -1; 
+ 
+ 	if (password) {
++		syslog (GKR_LOG_INFO, "gkr-pam: start_daemon() - writing login keyring password");
+ 		/* Write the login keyring password */
+ 		write_string (inp[WRITE_END], password);
+ 		close (inp[WRITE_END]);
+@@ -616,6 +617,7 @@
+ 	/* See if it's already running, and transfer env variables */
+ 	control = get_any_env (ph, ENV_CONTROL);
+ 	if (control) {
++		syslog (GKR_LOG_INFO, "gkr-pam: start_daemon_if_necessary() - transferring env variables");
+ 		ret = setup_pam_env (ph, ENV_CONTROL, control);
+ 		if (ret != PAM_SUCCESS) {
+ 			syslog (GKR_LOG_ERR, "gkr-pam: couldn't set environment variables: %s",
+@@ -848,14 +850,14 @@
+ 	/* Figure out and/or prompt for the user name */
+ 	ret = pam_get_user (ph, &user, NULL);
+ 	if (ret != PAM_SUCCESS) {
+-		syslog (GKR_LOG_ERR, "gkr-pam: couldn't get the user name: %s", 
++		syslog (GKR_LOG_ERR, "gkr-pam: (auth) couldn't get the user name: %s", 
+ 		        pam_strerror (ph, ret));
+ 		return PAM_SERVICE_ERR;
+ 	}
+ 	
+ 	pwd = getpwnam (user);
+ 	if (!pwd) {
+-		syslog (GKR_LOG_ERR, "gkr-pam: error looking up user information for: %s", user);
++		syslog (GKR_LOG_ERR, "gkr-pam: (auth) error looking up user information for: %s", user);
+ 		return PAM_SERVICE_ERR;
+ 	}
+ 		
+@@ -864,26 +866,27 @@
+ 	if (ret != PAM_SUCCESS || password == NULL) {
+ 		if (args & ARG_USE_AUTHTOK) {
+ 			if (ret == PAM_SUCCESS)
+-				syslog (GKR_LOG_WARN, "gkr-pam: no password is available for user");
++				syslog (GKR_LOG_WARN, "gkr-pam: (auth) no password is available for user (it's NULL!)");
+ 			else
+-				syslog (GKR_LOG_WARN, "gkr-pam: no password is available for user: %s",
++				syslog (GKR_LOG_WARN, "gkr-pam: (auth) no password is available for user: %s",
+ 					pam_strerror (ph, ret));
+ 			return PAM_SUCCESS;
+ 		}
+ 
+ 		ret = prompt_password (ph);
+ 		if (ret != PAM_SUCCESS) {
+-			syslog (GKR_LOG_ERR, "gkr-pam: couldn't get the password from user: %s",
++			syslog (GKR_LOG_ERR, "gkr-pam: (auth) couldn't get the password from user: %s",
+ 			        pam_strerror (ph, ret));
+ 			return PAM_AUTH_ERR;
+ 		}
+ 		ret = pam_get_item (ph, PAM_AUTHTOK, (const void**)&password);
+ 		if (ret != PAM_SUCCESS || password == NULL) {
+-			syslog (GKR_LOG_ERR, "gkr-pam: couldn't get the password from user: %s",
++			syslog (GKR_LOG_ERR, "gkr-pam: (auth) couldn't get the password from user: %s",
+ 				ret == PAM_SUCCESS ? "password was null" : pam_strerror (ph, ret));
+ 			return PAM_AUTH_ERR;
+ 		}
+ 	}
++	syslog (GKR_LOG_INFO, "gkr-pam: (auth) successfully looked up password for %s", user);
+ 
+ 	started_daemon = 0;
+ 
+@@ -909,9 +912,10 @@
+ 	} else {
+ 		if (pam_set_data (ph, "gkr_system_authtok", strdup (password),
+ 		                  cleanup_free_password) != PAM_SUCCESS) {
+-			syslog (GKR_LOG_ERR, "gkr-pam: error storing authtok");
++			syslog (GKR_LOG_ERR, "gkr-pam: (auth) error storing authtok");
+ 			return PAM_AUTHTOK_RECOVER_ERR;
+ 		}
++		syslog (GKR_LOG_INFO, "gkr-pam: (auth) not starting daemon now, successfully stored authtok for later use in (session)");
+  	}
+ 
+ 	return PAM_SUCCESS;
+@@ -934,14 +938,14 @@
+ 	/* Figure out the user name */
+ 	ret = pam_get_user (ph, &user, NULL);
+ 	if (ret != PAM_SUCCESS) {
+-		syslog (GKR_LOG_ERR, "gkr-pam: couldn't get the user name: %s", 
++		syslog (GKR_LOG_ERR, "gkr-pam: (session) couldn't get the user name: %s", 
+ 		        pam_strerror (ph, ret));
+ 		return PAM_SERVICE_ERR;
+ 	}
+ 
+ 	pwd = getpwnam (user);
+ 	if (!pwd) {
+-		syslog (GKR_LOG_ERR, "gkr-pam: error looking up user information for: %s", user);
++		syslog (GKR_LOG_ERR, "gkr-pam: (session) error looking up user information for: %s", user);
+ 		return PAM_SERVICE_ERR;
+ 	}
+ 
+@@ -955,12 +959,14 @@
+ 		 * No use complaining
+ 		 */
+ 		password = NULL;
++		syslog (GKR_LOG_INFO, "gkr-pam: (session) error retrieving stored authtok");
+ 	}
+ 	
+ 	started_daemon = 0;
+ 	
+ 	/* Should we start the daemon? */
+ 	if ((args & ARG_AUTO_START) && starting_supported_desktop (ph)) {
++		syslog (GKR_LOG_INFO, "gkr-pam: (session) calling start_daemon_if_necessary()");
+ 		ret = start_daemon_if_necessary (ph, pwd, password, &started_daemon);
+ 		if (ret != PAM_SUCCESS)
+ 			return ret;
+@@ -969,8 +975,11 @@
+ 	/* If gnome keyring is running, but we didn't start it here, then unlock now */
+ 	if (get_any_env (ph, ENV_CONTROL) != NULL) {
+ 		if (!started_daemon && password != NULL) {
+-			if (unlock_keyring (ph, pwd, password) != PAM_SUCCESS)
++			if (unlock_keyring (ph, pwd, password) != PAM_SUCCESS) {
++				syslog (GKR_LOG_INFO , "gkr-pam: (session) daemon was started previously, but cannot be unlocked (and password is !NULL");			
+ 				return PAM_SERVICE_ERR;
++			}
++		syslog (GKR_LOG_INFO, "gkr-pam: (session) successfully unlocked login keyring");
+ 		}
+ 	}
+ 	
