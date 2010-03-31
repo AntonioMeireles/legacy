@@ -1,0 +1,71 @@
+Index: kdebase-runtime-4.4.1/nepomuk/server/servicecontroller.cpp
+===================================================================
+--- kdebase-runtime-4.4.1.orig/nepomuk/server/servicecontroller.cpp	2010-03-20 20:40:50.888975522 -0400
++++ kdebase-runtime-4.4.1/nepomuk/server/servicecontroller.cpp	2010-03-21 11:03:23.216976089 -0400
+@@ -28,6 +28,8 @@
+ #include <KConfigGroup>
+ #include <KDebug>
+ 
++// Added by Kubuntu Strigi-RAM patch
++#include <unistd.h>
+ 
+ namespace {
+     QString dbusServiceName( const QString& serviceName ) {
+@@ -51,6 +53,7 @@
+     bool autostart;
+     bool startOnDemand;
+     bool runOnce;
++    bool stopForRam;
+ 
+     ProcessControl* processControl;
+     OrgKdeNepomukServiceControlInterface* serviceControlInterface;
+@@ -76,6 +79,26 @@
+     KConfigGroup cg( Server::self()->config(), QString("Service-%1").arg(service->desktopEntryName()) );
+     autostart = cg.readEntry( "autostart", autostart );
+ 
++    // Kubuntu patch; We don't want strigi running on systems with too little RAM
++    if (service->desktopEntryName() == "nepomukstrigiservice") {
++        int memorySize = sysconf(_SC_PHYS_PAGES);
++        memorySize *= sysconf(_SC_PAGESIZE) / 1024;
++
++        // 1GB in bytes divided by 1024
++        if (memorySize <= 1048576) {
++           kDebug() << "Not enough ram, scotty!";
++           // Don't start in the future unless set in nepomuk KCM
++           cg.writeEntry( "autostart", false);
++           if (cg.readEntry( "First start", false) == true) {
++               // So we know to quit it later
++               stopForRam = true;
++           }
++           cg.writeEntry( "First start", false);
++           cg.sync();
++        }
++    }
++
++
+     QVariant p = service->property( "X-KDE-Nepomuk-start-on-demand", QVariant::Bool );
+     startOnDemand = ( p.isValid() ? p.toBool() : false );
+ 
+@@ -169,6 +192,14 @@
+     else {
+         kDebug() << "Starting" << name();
+ 
++        // Kubuntu "stop strigi if not enough ram" patch
++        if (name() == "nepomukstrigiservice") {
++            if (d->stopForRam) {
++                d->stopForRam = false;
++                return false;
++            }
++        }
++
+         if( !d->processControl ) {
+             d->processControl = new ProcessControl( this );
+             connect( d->processControl, SIGNAL( finished( bool ) ),
+@@ -181,6 +212,7 @@
+                  SLOT( slotServiceOwnerChanged( const QString&, const QString&, const QString& ) ) );
+ 
+         d->processControl->setCrashPolicy( ProcessControl::RestartOnCrash );
++
+         return d->processControl->start( KGlobal::dirs()->locate( "exe", "nepomukservicestub" ),
+                                          QStringList() << name() );
+     }
