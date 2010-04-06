@@ -1,0 +1,411 @@
+=== modified file 'src/Makefile.am'
+--- src/Makefile.am	2009-09-09 17:02:23 +0000
++++ src/Makefile.am	2010-03-01 12:06:20 +0000
+@@ -7,7 +7,6 @@
+ plugin_LTLIBRARIES = liborg-freedesktop-evolution-indicator.la
+ 
+ liborg_freedesktop_evolution_indicator_la_SOURCES = \
+-	e-shell.h \
+ 	evolution-indicator.c \
+   xutils.c \
+   xutils.h
+
+=== removed file 'src/e-shell.h'
+--- src/e-shell.h	2009-02-04 10:46:04 +0000
++++ src/e-shell.h	1970-01-01 00:00:00 +0000
+@@ -1,113 +0,0 @@
+-/*
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2 of the License, or (at your option) version 3.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with the program; if not, see <http://www.gnu.org/licenses/>  
+- *
+- *
+- * Authors:
+- *		Michel Zucchi <notzed@ximian.com>
+- *		Neil Jagdish Patel <neil.patel@canonical.com> (copy-and-paste counts too!)
+- *
+- * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
+- *
+- */
+-
+-/*
+- *
+- * THIS IS A MAJOR HACK -- DO NOT EMAIL ME ABOUT HOW MAJOR OF A HACK IT REALLY
+- * IS. I'M ALREADY LOSING SLEEP OVER IT.
+- *
+- * IF YOU HAVE ISSUES WITH THIS CODE, FEEL FREE TO ADD _PROPER_ PLUGIN SUPPORT
+- * TO EVOLUTION, OR AT LEAST A DBUS INTERFACE.
+- *
+- * -- 
+- * this message was brought to you by Holiday Inn coffee and a cold
+- * Berlin morning 
+- *
+- */
+-
+-#ifndef _MY_HACKY_E_SHELL_H_
+-#define _MY_HACKY_E_SHELL_H_
+-
+-#include <e-util/e-config.h>
+-#include <mail/em-utils.h>
+-#include <mail/em-event.h>
+-#include <mail/em-folder-tree-model.h>
+-#include <shell/evolution-config-control.h>
+-#include <shell/e-component-view.h>
+-#include <shell/es-event.h>
+-
+-typedef struct _EShell EShell;
+-typedef struct _EShellPrivate EShellPrivate;
+-typedef enum _EShellLineStatus EShellLineStatus;
+-
+-enum _EShellLineStatus {
+-	E_SHELL_LINE_STATUS_ONLINE,
+-	E_SHELL_LINE_STATUS_GOING_OFFLINE, /* NB: really means changing state in either direction */
+-	E_SHELL_LINE_STATUS_OFFLINE,
+-	E_SHELL_LINE_STATUS_FORCED_OFFLINE
+-};
+-
+-struct _EShellPrivate {
+-	/* IID for registering the object on OAF.  */
+-	char *iid;
+-
+-	GList *windows;
+-
+-	/* EUriSchemaRegistry *uri_schema_registry; FIXME */
+-	void *component_registry;
+-
+-	/* Names for the types of the folders that have maybe crashed.  */
+-	/* FIXME TODO */
+-	GList *crash_type_names; /* char * */
+-
+-	/* Line status and controllers  */
+-	EShellLineStatus line_status;
+-	int line_status_pending;
+-	EShellLineStatus line_status_working;
+-	void *line_status_listener;
+-
+-	/* Settings Dialog */
+-	union {
+-		GtkWidget *widget;
+-		gpointer pointer;
+-	} settings_dialog;
+-
+-	/* If we're quitting and things are still busy, a timeout handler */
+-	guint quit_timeout;
+-
+-	/* Whether the shell is succesfully initialized.  This is needed during
+-	   the start-up sequence, to avoid CORBA calls to do make wrong things
+-	   to happen while the shell is initializing.  */
+-	unsigned int is_initialized : 1;
+-
+-	/* Wether the shell is working in "interactive" mode or not.
+-	   (Currently, it's interactive IIF there is at least one active
+-	   view.)  */
+-	unsigned int is_interactive : 1;
+-
+-	/* Whether quit has been requested, and the shell is now waiting for
+-	   permissions from all the components to quit.  */
+-	unsigned int preparing_to_quit : 1;
+-
+-	/* Whether we are recovering from a crash in the previous session. */
+-	unsigned int crash_recovery : 1;
+-};
+-
+-struct _EShell {
+-	BonoboObject parent;
+-
+-	EShellPrivate *priv;
+-};
+-
+-#endif
+
+=== modified file 'src/evolution-indicator.c'
+--- src/evolution-indicator.c	2010-03-29 21:41:44 +0000
++++ src/evolution-indicator.c	2010-03-30 22:47:10 +0000
+@@ -39,15 +39,13 @@
+ #include <mail/em-utils.h>
+ #include <mail/em-event.h>
+ #include <mail/em-folder-tree-model.h>
+-#include <shell/evolution-config-control.h>
+-#include <shell/e-component-view.h>
+ #include <shell/es-event.h>
++#include <shell/e-shell-view.h>
+ 
+ #include <libindicate/server.h>
+ #include <libindicate/indicator.h>
+ #include <libindicate/indicator-messages.h>
+ 
+-#include "e-shell.h"
+ #include "xutils.h"
+ 
+ #define CONF_DIR          "/apps/evolution/eplugin/evolution_indicator"
+@@ -66,7 +64,6 @@
+ #define  USER_BLACKLIST_DIR      "indicators/messages/applications-blacklist"
+ #define  USER_BLACKLIST_FILENAME "evolution"
+ 
+-static EShell       *evo_shell   = NULL;
+ static GStaticMutex  mlock       = G_STATIC_MUTEX_INIT;
+ static GConfClient  *client      = NULL;
+ 
+@@ -95,10 +92,9 @@
+ 
+ void org_gnome_mail_new_notify    (EPlugin *ep, EMEventTargetFolder *t);
+ void org_gnome_mail_read_notify   (EPlugin *ep, EMEventTargetMessage *t);
+-void org_gnome_shell_started_done (EPlugin *ep, ESEventTargetShell *t);
+ 
+-int         e_plugin_lib_enable               (EPluginLib *ep, int enable);
+-GtkWidget * e_plugin_lib_get_configure_widget (EPlugin *epl);
++int         e_plugin_lib_enable               (EPlugin *ep, int enable);
++GtkWidget * e_plugin_lib_get_configure_widget (EPlugin *ep);
+ 
+ static void show_evolution (gpointer arg0, guint timestamp, gpointer arg1);
+ 
+@@ -143,6 +139,9 @@
+   static GdkWindow *root = NULL;
+   gboolean          res = FALSE;
+   Window            xwindow;
++  GList *list;
++  EShell *evo_shell;
++  EShellWindow *shell_window;
+   
+   /* Try and do a match through X, by grabbing the current active window and
+      checking to see if it's an evolution window */
+@@ -173,22 +172,24 @@
+     g_free (res_name);
+   }
+ 
+-  if (evo_shell)
++  evo_shell = e_shell_get_default ();
++  list = e_shell_get_watched_windows (evo_shell);
++
++  /* Find the first EShellWindow in the list. */
++  while (list != NULL && !E_IS_SHELL_WINDOW (list->data))
++    list = g_list_next (list);
++
++  g_return_if_fail (list != NULL);
++
++  /* Get the shell window. */
++  shell_window = E_SHELL_WINDOW (list->data);
++
++  if (GTK_IS_WINDOW (shell_window))
+   {
+-    GList *w;
+-    
+-    for (w = evo_shell->priv->windows; w; w = w->next)
+-    {
+-      GtkWindow *window = w->data;
+-
+-      if (GTK_IS_WINDOW (window))
++      if (gtk_window_is_active (GTK_WINDOW (shell_window)))
+       {
+-        if (gtk_window_is_active (GTK_WINDOW (window)))
+-        {
+-          return TRUE;
+-        }
++        return TRUE;
+       }
+-    }
+   }
+   return FALSE;
+ }
+@@ -220,7 +221,7 @@
+ org_gnome_mail_new_notify (EPlugin *ep, EMEventTargetFolder *t)
+ {
+ 	g_return_if_fail (t != NULL);
+-	
++
+   if (!t->new)
+ 		return;
+ 
+@@ -338,10 +339,10 @@
+ void
+ org_gnome_mail_read_notify (EPlugin *ep, EMEventTargetMessage *t)
+ {
+-  GSList *i;
+-  
+   g_return_if_fail (t != NULL);
+ 
++  GSList *i;
++
+ 	g_static_mutex_lock (&mlock);
+ 
+   g_debug ("EI: mail_read_notify");
+@@ -685,7 +686,7 @@
+ }
+ 
+ int
+-e_plugin_lib_enable (EPluginLib *ep, int enable)
++e_plugin_lib_enable (EPlugin *ep, int enable)
+ {
+   is_active = enable;
+ 
+@@ -789,7 +790,8 @@
+     gconf_client_notify_remove (client, show_count_id);
+     gconf_client_notify_remove (client, accounts_id);
+ 
+-    g_object_unref (client);      client = NULL;
++    g_object_unref (client);
++    client = NULL;
+     
+     /* Free indicators */
+     g_slist_foreach (indicators, (GFunc)g_object_unref, NULL);
+@@ -811,33 +813,12 @@
+ }
+ 
+ GtkWidget *
+-e_plugin_lib_get_configure_widget (EPlugin *epl)
++e_plugin_lib_get_configure_widget (EPlugin *ep)
+ {
+   g_debug ("EI: Get Configure Widget");
+ 	return get_cfg_widget ();
+ }
+ 
+-/*
+- *
+- * THIS IS A MAJOR HACK -- DO NOT EMAIL ME ABOUT HOW MAJOR OF A HACK IT REALLY
+- * IS. I'M ALREADY LOSING SLEEP OVER IT.
+- *
+- * IF YOU HAVE ISSUES WITH THIS CODE, FEEL FREE TO ADD _PROPER_ PLUGIN SUPPORT
+- * TO EVOLUTION, OR AT LEAST A DBUS INTERFACE.
+- *
+- * -- 
+- * this message was brought to you by Holiday Inn coffee and a cold
+- * Berlin morning 
+- *
+- */
+-void 
+-org_gnome_shell_started_done (EPlugin *ep, ESEventTargetShell *t)
+-{
+-  g_debug ("EI: SHELL STARTUP");
+-  
+-  evo_shell = t->shell;
+-}
+-
+ static void
+ on_combo_changed (GtkComboBox *combo, gpointer null)
+ {
+@@ -869,7 +850,7 @@
+ }
+ 
+ GtkWidget *
+-org_gnome_get_prefs (EPlugin *epl, EConfigHookItemFactoryData *data)
++org_gnome_get_prefs (EPlugin *ep, EConfigHookItemFactoryData *data)
+ {
+   GtkWidget *vbox, *frame=NULL, *check;
+   
+@@ -978,44 +959,40 @@
+ show_evolution (gpointer arg0, guint timestamp, gpointer arg1)
+ {
+ #define MAIL_ICON "evolution-mail"
+-  EShell *shell = evo_shell;
++  EShell *shell = e_shell_get_default ();
+ 
+   g_debug ("Showing Evolution to user");
+ 
+   if (shell)
+   {
+     GSList    *i;
+-    GList     *w;
++    GList     *list;
+     GtkWindow *mail_window = NULL;
+-
+-    for (w = shell->priv->windows; w; w = w->next)
+-    {
+-      GtkWindow *window = w->data;
+-
+-      if (GTK_IS_WINDOW (window))
+-      {
+-        if (g_strcmp0 (MAIL_ICON, gtk_window_get_icon_name (window)) == 0)
+-        {
+-          mail_window = window;
+-        }
+-      }
+-      else
+-      {
+-        g_warning ("No open windows: Wait, we're not a mac :-/");
+-        return;
+-      }
+-    }
+-
+-    if (!GTK_IS_WINDOW (mail_window))
+-    {
+-      if (shell->priv->windows && shell->priv->windows->data)
+-        mail_window = shell->priv->windows->data;
+-      else
+-        return;
+-    }
+-
+-    gtk_window_present_with_time (mail_window, timestamp);
+-
++    EShellWindow *shell_window;
++    EShellView *shell_view;
++    GtkAction *action;
++
++    list = e_shell_get_watched_windows (shell);
++
++    /* Find the first EShellWindow in the list. */
++    while (list != NULL && !E_IS_SHELL_WINDOW (list->data))
++        list = g_list_next (list);
++
++    g_return_if_fail (list != NULL);
++
++    /* Present the shell window. */
++    shell_window = E_SHELL_WINDOW (list->data);
++    if (!evolution_is_focused ())
++    {
++        gtk_window_present_with_time (GTK_WINDOW (shell_window), timestamp);
++    }
++
++    /* Switch to the mail view. */
++    shell_view = e_shell_window_get_shell_view (shell_window, "mail");
++    action = e_shell_view_get_action (shell_view);
++    gtk_action_activate (action);
++
++    /* Setup the indicators */
+     for (i = indicators; i; i = i->next)
+     {
+       IndicateIndicator *indicator = i->data;
+
+=== modified file 'src/org-freedesktop-evolution-indicator.eplug.in'
+--- src/org-freedesktop-evolution-indicator.eplug.in	2009-02-04 14:47:40 +0000
++++ src/org-freedesktop-evolution-indicator.eplug.in	2010-03-02 19:34:48 +0000
+@@ -8,23 +8,21 @@
+ 
+ 		<description>Shows new mail count in a message indicator.</description>
+ 		<author name="Neil Jagdish Patel" email="neil.patel@canonical.com"/>
+-    <hook class="org.gnome.evolution.mail.events:1.0">
++
++		<hook class="org.gnome.evolution.mail.events:1.0">
+ 			<event target="folder" id="folder.changed" handle="org_gnome_mail_new_notify" enable="newmail"/>
+ 		</hook>
+ 
+ 		<hook class="org.gnome.evolution.mail.events:1.0">
+ 			<event target="message" id="message.reading" handle="org_gnome_mail_read_notify"/>
+ 		</hook>
+-    <hook class="org.gnome.evolution.shell.events:1.0">
+-      <event id="started.done" handle="org_gnome_shell_started_done" target="shell"/>
+-    </hook>
+-    		
++
+ 		<hook class="org.gnome.evolution.mail.config:1.0">
+-		        <group target="prefs" id="org.gnome.evolution.mail.prefs">
++			<group target="prefs" id="org.gnome.evolution.mail.prefs">
+ 				<item type="section_table" path="00.general/30.options" label="When New Mail Arrives"></item>
+ 				<item type="item_table" path="00.general/40.options" factory="org_gnome_get_prefs"/>
+-		        </group>
+-			    </hook>
++			</group>
++		</hook>
+ 
+ 	</e-plugin>
+ </e-plugin-list>
+
