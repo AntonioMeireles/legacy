@@ -1,0 +1,163 @@
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Wed, 4 Feb 2009 20:13:34 +0000 (+0100)
+Subject: FIX: nash unable to find dm devs by uuid or label (#480667)
+X-Git-Tag: 6.0.76-1~3
+X-Git-Url: http://git.fedorahosted.org/git/?p=mkinitrd;a=commitdiff_plain;h=c6d2fed59cec24e298aa35ca93fd7d33c1d92549
+
+FIX: nash unable to find dm devs by uuid or label (#480667)
+
+There was some ambigity in the return value of nashGetUEventPoll() causing
+problems when getting events with a timeout of 0 (a timeout would be seen when
+no timeout has happened). This patch fixes this, thereby fixing #480667.
+---
+
+diff --git a/nash/block.c b/nash/block.c
+index 809e0ff..d9eea72 100644
+--- a/nash/block.c
++++ b/nash/block.c
+@@ -280,20 +280,20 @@ static int block_process_one_uevent(nashContext *nc,
+     struct nash_dev_node *node = NULL;
+     nashUEvent uevent;
+     struct nash_block_dev *dev = NULL;
+-    int rc = -1;
++    int rc;
++
++    if (nodep)
++        *nodep = NULL;
+ 
+     memset(&uevent, '\0', sizeof (uevent));
+ 
+-    if (nashGetUEvent(nc, timeout, &uevent) < 0)
+-        return -1;
+-    if (!uevent.msg)
+-        return 0;
++    if ((rc = nashGetUEvent(nc, timeout, &uevent)) <= 0)
++        return rc;
+ 
+-    rc = 0;
+     if (block_try_uevent(nc, &uevent, &dev) >= 0) {
+         node = nash_dev_tree_process_bdev(nc, dev);
+-        *nodep = node;
+-        rc = 1;
++        if (nodep)
++            *nodep = node;
+     }
+     if (uevent.msg)
+         free(uevent.msg);
+@@ -306,13 +306,11 @@ static int block_process_one_uevent(nashContext *nc,
+ 
+ static void block_process_pending_uevents(nashContext *nc)
+ {
+-    struct nash_dev_node *node;
+     struct timespec timeout;
+ 
+     do {
+         usectospec(1, &timeout);
+-        node = NULL;
+-    } while (block_process_one_uevent(nc, &timeout, &node) >= 0 && node);
++    } while (block_process_one_uevent(nc, &timeout, NULL) > 0);
+ }
+ 
+ nashBdevIter
+@@ -366,6 +364,7 @@ nashBdevIterNext(nashBdevIter *iterp, struct nash_block_dev **dev)
+ {
+     nashBdevIter iter;
+     struct timespec timeout;
++    int rc;
+ 
+     if (!iterp || !*iterp)
+         return 0;
+@@ -393,12 +392,12 @@ nashBdevIterNext(nashBdevIter *iterp, struct nash_block_dev **dev)
+                 continue;
+             case POLLING:
+                 timeout = iter->timeout;
+-                if (block_process_one_uevent(iter->nc, &timeout, &node) > 0
+-                        && node) {
++                rc = block_process_one_uevent(iter->nc, &timeout, &node);
++                if (rc > 0 && node) {
+                     *dev = node->bdev;
+                     return 1;
+                 }
+-                if (speczero(&timeout))
++                if (rc <= 0)
+                     iter->state = DONE;
+                 continue;
+             case DONE:
+diff --git a/nash/hotplug.c b/nash/hotplug.c
+index 5b5836e..9111021 100644
+--- a/nash/hotplug.c
++++ b/nash/hotplug.c
+@@ -482,22 +482,22 @@ handle_events(nashContext *nc)
+     };
+     int doexit = 0;
+ 
+-    memset(&uevent, '\0', sizeof (uevent));
+-
+     while (1) {
+         usectospec(-1, &timeout);
++        memset(&uevent, '\0', sizeof (uevent));
+         ret = nashGetUEventPoll(nc, &timeout, &uevent, &pd, 1);
+         if (doexit || ret < 0)
+             break;
+ 
+-        seqnum = handle_single_uevent(nc, &uevent, seqnum);
+-        if (uevent.msg)
+-            free(uevent.msg);
+-        if (uevent.path)
+-            free(uevent.path);
+-        while (uevent.envz)
+-            argz_delete(&uevent.envz, &uevent.envz_len, uevent.envz);
+-        memset(&uevent, '\0', sizeof (uevent));
++        if (ret) {
++            seqnum = handle_single_uevent(nc, &uevent, seqnum);
++            if (uevent.msg)
++                free(uevent.msg);
++            if (uevent.path)
++                free(uevent.path);
++            while (uevent.envz)
++                argz_delete(&uevent.envz, &uevent.envz_len, uevent.envz);
++        }
+ 
+         if (pd.revents) {
+             char buf[32] = {'\0'};
+diff --git a/nash/uevent.c b/nash/uevent.c
+index 2e0476e..a05bd98 100644
+--- a/nash/uevent.c
++++ b/nash/uevent.c
+@@ -175,8 +175,15 @@ err:
+ }
+ 
+ /*
+- * Minor dragon here -- success is return of >= 0; timeout is return of
+- * 0 and speczero(timeout).
++ * Note the return value only indicates if an uevent was gotten or not, to
++ * check the status of the (optional) additional pollfd's passed in check their
++ * revent members (which must be cleared to 0 by the caller beforehand)
++ *
++ * Return value
++ * < 0: error
++ * 0: timeout or woken up because of events on the additional pollfd's to
++ *    monitor (iow we did not get an uevent)
++ * 1: We got an uevent and stored it in the uevent parameter
+  */
+ int 
+ nashGetUEventPoll(nashContext *nc, struct timespec *timeout,
+@@ -203,12 +210,16 @@ nashGetUEventPoll(nashContext *nc, struct timespec *timeout,
+ 
+     if (rc > 0) {
+         int i;
++
++        rc = 0;
+         for (i = 0; i <= npfds; i++) {
+             if (pds[i].fd == handler->socket && pds[i].revents) {
+                 if (get_netlink_msg(handler->socket, uevent) < 0) {
++                    errnum = errno;
+                     nashLogger(nc, NASH_ERROR, "get_netlink_msg returned %m\n");
+-                }
+-                rc--;
++                    rc = -1;
++                } else
++                    rc = 1;
+             }
+         }
+         if (npfds)
