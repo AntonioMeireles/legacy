@@ -1,23 +1,25 @@
-class Privoxy(CPackageRecipe):
+class Privoxy(AutoPackageRecipe):
     name = 'privoxy'
     version = '3.0.16'
 
-    buildRequires = [ 'autoconf', 'info-privoxy', 'man:runtime', 'pcre:devel', 'docbook-utils:runtime', 'gdb:runtime', 'lynx:runtime', 'openjade:runtime', 'chkconfig:runtime', 'zlib:devel' ]
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime', 'info-privoxy', 'man:runtime', 'pcre:devel', 'docbook-utils:runtime', 'gdb:runtime', 'lynx:runtime', 'openjade:runtime', 'chkconfig:runtime', 'zlib:devel' ]
 
-    def setup(r):
+    def unpack(r):
         r.macros.ver = r.version.replace('_', '-')
-	r.addArchive('http://downloads.sourceforge.net/project/ijbswa/Sources/3.0.16 (stable)/%(name)s-%(version)s-stable-src.tar.gz')
-        r.addSource('privoxy.init')
-	r.Run('autoheader')
-        r.Run('autoconf')
-        r.ManualConfigure('--with-user=privoxy --with-group=privoxy --prefix=%(prefix)s')
-        r.Make()
-        r.MakeInstall()
+	r.addArchive('mirror://sourceforge/project/ijbswa/Sources/%(name)s-%(version)s-stable-src.tar.gz')
+        r.addPatch('privoxy-3.0.16-chkconfig.patch')
+	r.addPatch('privoxy-3.0.16-configdir.patch')
 
-	r.Remove('%(sysconfdir)s/%(name)s/config')
-        r.Install('privoxy.init', '%(initdir)s/privoxy', mode = 0755)
-	r.UtilizeUser('privoxy', '%(initdir)s/privoxy')
-        r.UtilizeGroup('privoxy', '%(initdir)s/privoxy')
+    def configure(r):
+	r.Run('autoreconf')
+        r.ManualConfigure('--prefix=%(prefix)s --sbindir=%(sbindir)s --localstatedir=%(localstatedir)s --datadir=%(datadir)s --mandir=%(mandir)s --sysconfdir=%(sysconfdir)s/privoxy --docdir=%(docdir)s --enable-dynamic-pcre')
 
-	r.NonBinariesInBindirs(exceptions='/etc/init.d/privoxy')
+    def makeinstall(r):
+	r.MakeInstall()
+	r.Install('%(name)s-generic.init', '%(sysconfdir)s/rc.d/init.d/%(name)s', mode=0755)
+
+    def policy(r):
+	r.UtilizeUser('privoxy', '%(initdir)s/%(name)s')
+        r.UtilizeGroup('privoxy', '%(initdir)s/%(name)s')
+	r.Ownership('privoxy', 'privoxy', '%(sysconfdir)s/%(name)s/')
 
