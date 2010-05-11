@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2010 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -30,49 +30,28 @@ class Python(CPackageRecipe):
     # access to the mixin.
     VersionMixIn = PythonVersionMixInClass
 
-    buildRequires = [ ]
-    if Use.bootstrap:
-        clearBuildReqs()
-        buildRequires.extend(['cross-gcc', 'glibc'])
-    else:
-        if Use.readline:
-            buildRequires.append('readline:devel')
-        if Use.tk:
-            buildRequires.append('tk:devel')
-        if Use.tcl:
-            buildRequires.append('tcl:devel')
-
-        buildRequires.extend([
-                              'db:devel', 'gdbm:devel', 'ncurses:devel',
-                              'libtermcap:devel', 'gcc:devel',
-                              'libstdc++:devel', 'sqlite:devel',
-                              'expat:devel', 'subversion:runtime',
-                              ])
-    if Use.ssl:
-        buildRequires.append('openssl:devel')
-
-    buildRequires.extend(['zlib:devel', 'bzip2:devel'])
+    buildRequires = [
+        'bzip2:devel',
+        'db:devel',
+        'expat:devel',
+        'gcc:devel',
+        'gdbm:devel',
+        'libstdc++:devel',
+        'libtermcap:devel',
+        'ncurses:devel',
+        'openssl:devel',
+        'readline:devel',
+        'sqlite:devel',
+        'subversion:runtime',
+        'tcl:devel',
+        'tk:devel',
+        'zlib:devel',
+    ]
 
     # the following two are for other python recipes to use with
     # loadInstalled('python.recipe') to have a consistent system
     majversion = '.'.join(version.split('.')[0:2])
     sitepkgs = ''.join(('%(libdir)s/python', majversion, '/site-packages'))
-
-    def applyUse(r, path):
-        """build a sed command to uncomment the appropriate use lines in
-        a file like Setup.dist"""
-        substs = []
-        s = "sed -i"
-        for flag in ('readline', 'ssl', 'tcl', 'tk', 'bootstrap'):
-            if Use[flag]:
-                substs.append(('#\(use %s\)' % flag, ''))
-            else:
-                substs.append(('#\(not use %s\)' % flag, ''))
-        substs.append(path)
-        # it's possible that applying these substitutions does nothing,
-        # if all the Use flags are set to false
-        kw = {'allowNoChange' : True}
-        r.Replace(*substs, **kw)
 
     def setup(r):
         r.macros.cflags += ' -fPIC'
@@ -85,7 +64,6 @@ class Python(CPackageRecipe):
         # for anything -- don't include /usr/local/include or search
         # /usr/local/lib when linking
         r.Replace('/usr/local', '%(prefix)s', 'setup.py')
-        #        r.applyUse('Modules/Setup.dist')
 
         # get the version of libdb from the db recipe
         dbversion = '.'.join(Db.version.split('.')[0:2])
@@ -125,32 +103,7 @@ class Python(CPackageRecipe):
 
         # arguments to pass to r.Make() and r.MakeInstall()
         makeargs = ''
-        conf = '--enable-unicode=ucs4 --enable-shared'
-        if Use.ipv6:
-            conf += ' --enable-ipv6'
-        if Use.bootstrap:
-            # first build a python for the $HOST platform
-            buildconf = conf
-            buildconf += ' --with-cxx=%(buildcxx)s'
-            r.Configure(buildconf, bootstrapFlags='',
-                        preConfigure='CC=%(buildcc)s CXX=%(buildcxx)s')
-            r.Make('"OPT=%(cflags)s" sysroot=%(sysroot)s python Parser/pgen')
-            r.Run('mv python hostpython')
-            r.Run('mv Parser/pgen Parser/hostpgen')
-            r.Make('distclean')
-            # set up the environment for cross compiling
-            r.Environment('RANLIB', '%(target)s-ranlib' %r.macros)
-            r.Environment('AR', '%(target)s-ar' %r.macros)
-            r.Environment('CROSS_COMPILING', 'yes')
-            # make sure that we don't look in the native environment
-            # for header files
-            r.Replace('/usr/include', '%(headerpath)s', 'setup.py')
-            r.Environment('INCDIR', '%(headerpath)s')
-            r.Environment('LIBDIR', '%(sysroot)s/%(libdir)s')
-            conf += ' --with-cxx=%(target)s-g++'
-            # set up the native python -- need to be able to run
-            # python during the build
-            makeargs = 'sysroot=%(sysroot)s HOSTPYTHON=./hostpython HOSTPGEN=./Parser/hostpgen'
+        conf = '--enable-unicode=ucs4 --enable-shared --enable-ipv6'
 
         r.Configure(conf)
         r.Make('"OPT=%(cflags)s"', makeargs)
@@ -199,4 +152,3 @@ class Python(CPackageRecipe):
         # are not really supported. (RPL-2977)
         r.ComponentProvides('%(targetarch)s')
         r.Requires('python:lib(%(targetarch)s)', '%(bindir)s/python')
-
