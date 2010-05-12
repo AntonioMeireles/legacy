@@ -1,0 +1,410 @@
+--- libxml2/libxml2-2.6.30/entities.c	2007-01-03 07:07:52.000000000 -0600
++++ libxml2-2.6.30/entities.c	2008-11-18 12:34:08.000000000 -0600
+@@ -102,7 +102,7 @@ xmlFreeEntity(xmlEntityPtr entity)
+         dict = entity->doc->dict;
+ 
+ 
+-    if ((entity->children) && (entity->owner == 1) &&
++    if ((entity->children) && (entity->owner != 0) &&
+         (entity == (xmlEntityPtr) entity->children->parent))
+         xmlFreeNodeList(entity->children);
+     if (dict != NULL) {
+--- libxml2/libxml2-2.6.30/include/libxml/parser.h	2007-01-03 07:07:30.000000000 -0600
++++ libxml2-2.6.30/include/libxml/parser.h	2008-11-18 12:34:08.000000000 -0600
+@@ -297,6 +297,8 @@ struct _xmlParserCtxt {
+      */
+     xmlError          lastError;
+     xmlParserMode     parseMode;    /* the parser mode */
++    unsigned long    nbentities;    /* number of entities references */
++    unsigned long  sizeentities;    /* size of parsed entities */
+ };
+ 
+ /**
+--- libxml2/libxml2-2.6.30/parser.c	2007-08-14 08:43:11.000000000 -0500
++++ libxml2-2.6.30/parser.c	2008-11-18 12:34:12.000000000 -0600
+@@ -80,6 +80,95 @@
+ #include <zlib.h>
+ #endif
+ 
++static void
++xmlFatalErr(xmlParserCtxtPtr ctxt, xmlParserErrors error, const char *info);
++
++/************************************************************************
++ *									*
++ *	Arbitrary limits set in the parser.				*
++ *									*
++ ************************************************************************/
++
++#define XML_PARSER_BIG_ENTITY 1000
++#define XML_PARSER_LOT_ENTITY 5000
++
++/*
++ * XML_PARSER_NON_LINEAR is the threshold where the ratio of parsed entity
++ *    replacement over the size in byte of the input indicates that you have
++ *    and eponential behaviour. A value of 10 correspond to at least 3 entity
++ *    replacement per byte of input.
++ */
++#define XML_PARSER_NON_LINEAR 10
++
++/*
++ * xmlParserEntityCheck
++ *
++ * Function to check non-linear entity expansion behaviour
++ * This is here to detect and stop exponential linear entity expansion
++ * This is not a limitation of the parser but a safety
++ * boundary feature.
++ */
++static int
++xmlParserEntityCheck(xmlParserCtxtPtr ctxt, unsigned long size,
++                     xmlEntityPtr ent)
++{
++    unsigned long consumed = 0;
++
++    if (ctxt == NULL)
++        return (0);
++    if (ctxt->lastError.code == XML_ERR_ENTITY_LOOP)
++        return (1);
++    if (size != 0) {
++        /*
++         * Do the check based on the replacement size of the entity
++         */
++        if (size < XML_PARSER_BIG_ENTITY)
++	    return(0);
++
++        /*
++         * A limit on the amount of text data reasonably used
++         */
++        if (ctxt->input != NULL) {
++            consumed = ctxt->input->consumed +
++                (ctxt->input->cur - ctxt->input->base);
++        }
++        consumed += ctxt->sizeentities;
++
++        if ((size < XML_PARSER_NON_LINEAR * consumed) &&
++	    (ctxt->nbentities * 3 < XML_PARSER_NON_LINEAR * consumed))
++            return (0);
++    } else if (ent != NULL) {
++        /*
++         * use the number of parsed entities in the replacement
++         */
++        size = ent->owner;
++
++        /*
++         * The amount of data parsed counting entities size only once
++         */
++        if (ctxt->input != NULL) {
++            consumed = ctxt->input->consumed +
++                (ctxt->input->cur - ctxt->input->base);
++        }
++        consumed += ctxt->sizeentities;
++
++        /*
++         * Check the density of entities for the amount of data
++	 * knowing an entity reference will take at least 3 bytes
++         */
++        if (size * 3 < consumed * XML_PARSER_NON_LINEAR)
++            return (0);
++    } else {
++        /*
++         * strange we got no data for checking just return
++         */
++        return (0);
++    }
++
++    xmlFatalErr(ctxt, XML_ERR_ENTITY_LOOP, NULL);
++    return (1);
++}
++
+ /**
+  * xmlParserMaxDepth:
+  *
+@@ -2218,6 +2307,10 @@ xmlStringLenDecodeEntities(xmlParserCtxt
+ 			"String decoding Entity Reference: %.30s\n",
+ 			str);
+ 	    ent = xmlParseStringEntityRef(ctxt, &str);
++	    if (ctxt->lastError.code == XML_ERR_ENTITY_LOOP)
++	        goto int_error;
++	    if (ent != NULL)
++	        ctxt->nbentities += ent->owner;
+ 	    if ((ent != NULL) &&
+ 		(ent->etype == XML_INTERNAL_PREDEFINED_ENTITY)) {
+ 		if (ent->content != NULL) {
+@@ -2242,6 +2335,10 @@ xmlStringLenDecodeEntities(xmlParserCtxt
+ 			buffer[nbchars++] = *current++;
+ 			if (nbchars >
+ 		            buffer_size - XML_PARSER_BUFFER_SIZE) {
++			    if (xmlParserEntityCheck(ctxt, nbchars, ent)) {
++			        xmlFree(rep);
++			        goto int_error;
++			    }
+ 			    growBuffer(buffer);
+ 			}
+ 		    }
+@@ -2264,6 +2361,10 @@ xmlStringLenDecodeEntities(xmlParserCtxt
+ 		xmlGenericError(xmlGenericErrorContext,
+ 			"String decoding PE Reference: %.30s\n", str);
+ 	    ent = xmlParseStringPEReference(ctxt, &str);
++	    if (ctxt->lastError.code == XML_ERR_ENTITY_LOOP)
++	        goto int_error;
++	    if (ent != NULL)
++	        ctxt->nbentities += ent->owner;
+ 	    if (ent != NULL) {
+ 		xmlChar *rep;
+ 
+@@ -2277,6 +2378,10 @@ xmlStringLenDecodeEntities(xmlParserCtxt
+ 			buffer[nbchars++] = *current++;
+ 			if (nbchars >
+ 		            buffer_size - XML_PARSER_BUFFER_SIZE) {
++			    if (xmlParserEntityCheck(ctxt, nbchars, ent)) {
++			        xmlFree(rep);
++			        goto int_error;
++			    }
+ 			    growBuffer(buffer);
+ 			}
+ 		    }
+@@ -2300,6 +2405,9 @@ xmlStringLenDecodeEntities(xmlParserCtxt
+ 
+ mem_error:
+     xmlErrMemory(ctxt, NULL);
++int_error:
++    if (buffer != NULL)
++        xmlFree(buffer);
+     return(NULL);
+ }
+ 
+@@ -3109,6 +3217,9 @@ xmlParseAttValueComplex(xmlParserCtxtPtr
+ 		}
+ 	    } else {
+ 		ent = xmlParseEntityRef(ctxt);
++		ctxt->nbentities++;
++		if (ent != NULL)
++		    ctxt->nbentities += ent->owner;
+ 		if ((ent != NULL) &&
+ 		    (ent->etype == XML_INTERNAL_PREDEFINED_ENTITY)) {
+ 		    if (len > buf_size - 10) {
+@@ -4391,6 +4502,7 @@ xmlParseEntityDecl(xmlParserCtxtPtr ctxt
+     int isParameter = 0;
+     xmlChar *orig = NULL;
+     int skipped;
++    unsigned long oldnbent = ctxt->nbentities;
+     
+     /* GROW; done in the caller */
+     if (CMP8(CUR_PTR, '<', '!', 'E', 'N', 'T', 'I', 'T', 'Y')) {
+@@ -4600,6 +4712,11 @@ xmlParseEntityDecl(xmlParserCtxtPtr ctxt
+ 		}
+ 	    }
+             if (cur != NULL) {
++	        if ((cur->owner != 0) || (cur->children == NULL)) {
++		    cur->owner = ctxt->nbentities - oldnbent;
++		    if (cur->owner ==  0)
++		        cur->owner = 1;
++		}
+ 	        if (cur->orig != NULL)
+ 		    xmlFree(orig);
+ 		else
+@@ -6029,7 +6146,8 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 			    (ent->children == NULL)) {
+ 			    ent->children = list;
+ 			    ent->last = list;
+-			    ent->owner = 1;
++			    if (ent->owner == 0)
++				ent->owner = 1;
+ 			    list->parent = (xmlNodePtr) ent;
+ 			} else {
+ 			    xmlFreeNodeList(list);
+@@ -6038,6 +6156,7 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 			xmlFreeNodeList(list);
+ 		    }
+ 		} else {
++		    unsigned long oldnbent = ctxt->nbentities;
+ 		    /*
+ 		     * 4.3.2: An internal general parsed entity is well-formed
+ 		     * if its replacement text matches the production labeled
+@@ -6060,6 +6179,7 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 			ret = xmlParseBalancedChunkMemoryInternal(ctxt,
+ 					   value, user_data, &list);
+ 			ctxt->depth--;
++
+ 		    } else if (ent->etype ==
+ 			       XML_EXTERNAL_GENERAL_PARSED_ENTITY) {
+ 			ctxt->depth++;
+@@ -6072,6 +6192,24 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 			xmlErrMsgStr(ctxt, XML_ERR_INTERNAL_ERROR,
+ 				     "invalid entity type found\n", NULL);
+ 		    }
++		    /*
++		     * Store the number of entities needing parsing for entity
++		     * content and do checkings
++		     */
++		    if ((ent->owner != 0) || (ent->children == NULL)) {
++			ent->owner = ctxt->nbentities - oldnbent;
++			if (ent->owner == 0)
++			    ent->owner = 1;
++		    }
++		    if (ret == XML_ERR_ENTITY_LOOP) {
++			xmlFatalErr(ctxt, XML_ERR_ENTITY_LOOP, NULL);
++			xmlFreeNodeList(list);
++			return;
++		    }
++		    if (xmlParserEntityCheck(ctxt, 0, ent)) {
++			xmlFreeNodeList(list);
++			return;
++		    }
+ 		    if (ret == XML_ERR_ENTITY_LOOP) {
+ 			xmlFatalErr(ctxt, XML_ERR_ENTITY_LOOP, NULL);
+ 			return;
+@@ -6090,7 +6228,8 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 				    (ctxt->parseMode == XML_PARSE_READER)) {
+ 				    list->parent = (xmlNodePtr) ent;
+ 				    list = NULL;
+-				    ent->owner = 1;
++				    if (ent->owner == 0)
++					ent->owner = 1;
+ 				} else {
+ 				    ent->owner = 0;
+ 				    while (list != NULL) {
+@@ -6107,7 +6246,8 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ #endif /* LIBXML_LEGACY_ENABLED */
+ 				}
+ 			    } else {
+-				ent->owner = 1;
++			        if (ent->owner == 0)
++				    ent->owner = 1;
+ 				while (list != NULL) {
+ 				    list->parent = (xmlNodePtr) ent;
+ 				    if (list->next == NULL)
+@@ -6284,7 +6424,8 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 				break;
+ 			    cur = next;
+ 			}
+-			ent->owner = 1;
++			if (ent->owner == 0)
++			    ent->owner = 1;
+ #ifdef LIBXML_LEGACY_ENABLED
+ 			if (ent->etype == XML_EXTERNAL_GENERAL_PARSED_ENTITY)			      
+ 			  xmlAddEntityReference(ent, firstChild, nw);
+@@ -6315,6 +6456,8 @@ xmlParseReference(xmlParserCtxtPtr ctxt)
+ 		    ctxt->nodelen = 0;
+ 		    return;
+ 		}
++	    } else if (ent->owner != 1) {
++		ctxt->nbentities += ent->owner;
+ 	    }
+ 	} else {
+ 	    val = ent->content;
+@@ -6374,6 +6517,11 @@ xmlParseEntityRef(xmlParserCtxtPtr ctxt)
+ 	    if (RAW == ';') {
+ 	        NEXT;
+ 		/*
++		 * Increase the number of entity references parsed
++		 */
++		ctxt->nbentities++;
++
++		/*
+ 		 * Ask first SAX for entity resolution, otherwise try the
+ 		 * predefined set.
+ 		 */
+@@ -6545,6 +6693,10 @@ xmlParseStringEntityRef(xmlParserCtxtPtr
+ 	    if (*ptr == ';') {
+ 	        ptr++;
+ 		/*
++		 * Increase the number of entity references parsed
++		 */
++		ctxt->nbentities++;
++		/*
+ 		 * Ask first SAX for entity resolution, otherwise try the
+ 		 * predefined set.
+ 		 */
+@@ -6706,6 +6858,11 @@ xmlParsePEReference(xmlParserCtxtPtr ctx
+         } else {
+             if (RAW == ';') {
+                 NEXT;
++		/*
++		 * Increase the number of entity references parsed
++		 */
++		ctxt->nbentities++;
++
+                 if ((ctxt->sax != NULL) &&
+                     (ctxt->sax->getParameterEntity != NULL))
+                     entity = ctxt->sax->getParameterEntity(ctxt->userData,
+@@ -6836,6 +6993,11 @@ xmlParseStringPEReference(xmlParserCtxtP
+ 	    if (cur == ';') {
+ 		ptr++;
+ 		cur = *ptr;
++		/*
++		 * Increase the number of entity references parsed
++		 */
++		ctxt->nbentities++;
++
+ 		if ((ctxt->sax != NULL) &&
+ 		    (ctxt->sax->getParameterEntity != NULL))
+ 		    entity = ctxt->sax->getParameterEntity(ctxt->userData,
+@@ -11492,11 +11654,31 @@ xmlParseExternalEntityPrivate(xmlDocPtr 
+ 	}
+ 	ret = XML_ERR_OK;
+     }
++
++    /*
++     * Record in the parent context the number of entities replacement
++     * done when parsing that reference.
++     */
++    oldctxt->nbentities += ctxt->nbentities;
++    /*
++     * Also record the size of the entity parsed
++     */
++    if (ctxt->input != NULL) {
++	oldctxt->sizeentities += ctxt->input->consumed;
++	oldctxt->sizeentities += (ctxt->input->cur - ctxt->input->base);
++    }
++    /*
++     * And record the last error if any
++     */
++    if (ctxt->lastError.code != XML_ERR_OK)
++        xmlCopyError(&ctxt->lastError, &oldctxt->lastError);
++
+     if (sax != NULL) 
+ 	ctxt->sax = oldsax;
+     oldctxt->node_seq.maximum = ctxt->node_seq.maximum;
+     oldctxt->node_seq.length = ctxt->node_seq.length;
+     oldctxt->node_seq.buffer = ctxt->node_seq.buffer;
++    oldctxt->nbentities += ctxt->nbentities;
+     ctxt->node_seq.maximum = 0;
+     ctxt->node_seq.length = 0;
+     ctxt->node_seq.buffer = NULL;
+@@ -11721,6 +11903,17 @@ xmlParseBalancedChunkMemoryInternal(xmlP
+         ctxt->myDoc->last = last;
+     }
+ 	
++    /*
++     * Record in the parent context the number of entities replacement
++     * done when parsing that reference.
++     */
++    oldctxt->nbentities += ctxt->nbentities;
++    /*
++     * Also record the last error if any
++     */
++    if (ctxt->lastError.code != XML_ERR_OK)
++        xmlCopyError(&ctxt->lastError, &oldctxt->lastError);
++
+     ctxt->sax = oldsax;
+     ctxt->dict = NULL;
+     ctxt->attsDefault = NULL;
+@@ -13032,6 +13225,8 @@ xmlCtxtReset(xmlParserCtxtPtr ctxt)
+     ctxt->depth = 0;
+     ctxt->charset = XML_CHAR_ENCODING_UTF8;
+     ctxt->catalogs = NULL;
++    ctxt->nbentities = 0;
++    ctxt->sizeentities = 0;
+     xmlInitNodeInfoSeq(&ctxt->node_seq);
+ 
+     if (ctxt->attsDefault != NULL) {
+--- libxml2/libxml2-2.6.30/parserInternals.c	2008-11-18 12:34:52.000000000 -0600
++++ libxml2-2.6.30/parserInternals.c	2008-11-18 12:34:08.000000000 -0600
+@@ -1669,6 +1669,7 @@ xmlInitParserCtxt(xmlParserCtxtPtr ctxt)
+     ctxt->depth = 0;
+     ctxt->charset = XML_CHAR_ENCODING_UTF8;
+     ctxt->catalogs = NULL;
++    ctxt->nbentities = 0;
+     xmlInitNodeInfoSeq(&ctxt->node_seq);
+     return(0);
+ }
