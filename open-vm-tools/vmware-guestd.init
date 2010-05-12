@@ -1,142 +1,98 @@
-#!/bin/sh
+#!/bin/bash
 #
-# vmware-guestd:   VMware guestd
+# Init file for open-vm-tools vmtoolsd daemon
 #
-# chkconfig: 345 98 02
-# description: vmware-guestd is responsible for automatically starting vmware-user
+# chkconfig: 345 80 20
+# description: open-vm-tools guest daemon
 #
-# servicename: vmware-guestd
-### BEGIN INIT INFO
-# Provides: vmware-guestd
-# Required-Start: $local_fs
-# Should-Start: 
-# Required-Stop: 
-# Default-Start: 3 4 5
-# Default-Stop: 0 1 2 6
-# Short-Description: Starts the VMware Guest Daemon
-# Description: VMware Guest Daemon
-### END INIT INFO
-#
+# processname: vmtoolsd
+# pidfile: /var/run/vmtoolsd.pid
 
-# N.B. even though the daemon changed name from vmware-guestd to vmtoolsd,
-# we have to keep the same name for the init script so that an update does
-# not shut down the service and so that the chkconfig settings are
-# preserved over update.
-
-# Use RPL as default
-DISTRO=rpl
-STARTPROC=daemon
-
-if [ -f "/etc/init.d/functions" ]; then
-    DISTRO=rpl
-    STARTPROC=daemon
-    source /etc/init.d/functions
-elif [ -f /etc/rc.status ]; then
-    DISTRO=sles
-    STARTPROC=startproc
-    source /etc/rc.status
-fi
-if [ "$DISTRO" = "rpl" ]; then
-showstatus() {
-    [ $1 = 0 ] && success || failure
-    echo
-}
-checkstatus() {
-    status $1
-}
-elif [ "$DISTRO" = "sles" ]; then
-showstatus() {
-    [ $1 = 0 ] && true || false
-    rc_status -v
-}
-checkstatus() {
-    echo -n "Checking for $1: "
-    checkproc $1
-    rc_status -v
-}
-fi
-
-servicename=vmware-guestd
-OPTIONS='--background /var/run/vmware-guestd.pid'
+# source function library
+. /etc/rc.d/init.d/functions
 
 RETVAL=0
+prog="vmtoolsd"
 
-DND_DIR="/tmp/VMwareDnD" 
+CHECKVM=/usr/bin/vmware-checkvm
+GUESTD=/usr/bin/vmtoolsd
+PID_FILE=/var/run/vmtoolsd.pid
+LOCK_FILE=/var/lock/subsys/vmtoolsd
+OPTIONS="-b $PID_FILE"
+DND_DIR="/tmp/VMwareDnD"
 
 setup_modules()
 {
-    [ ! -d "$DND_DIR" ] && mkdir -m 1777 $DND_DIR
-    modprobe vmsync
-    modprobe vmci
-    modprobe vsock
-    modprobe vmmemctl
-    modprobe vmhgfs
-    modprobe vmblock
-    sleep 1
-    mount -t vmblock none /proc/fs/vmblock/mountPoint
-} 
+	[ ! -d "$DND_DIR" ] && mkdir -m 1777 $DND_DIR
+	modprobe vmsync
+	modprobe vmci
+	modprobe vsock
+	modprobe vmmemctl
+	modprobe vmhgfs
+	modprobe vmblock
+	sleep 1
+	mount -t vmblock none /proc/fs/vmblock/mountPoint
+}
 
 unmount_stuff()
 {
-    umount /proc/fs/vmblock/mountPoint
-    sleep 1
-    rmmod vmblock
-} 
-
-start() {
-    echo -n $"Starting VMware tools daemon: "
-
-    $STARTPROC /usr/bin/vmtoolsd $OPTIONS
-    RETVAL=$?
-    showstatus $RETVAL
-    echo
-    [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$servicename
-    return $RETVAL
+	umount /proc/fs/vmblock/mountPoint
+	sleep 1
+	rmmod vmblock
 }
 
-stop() {
-    echo -n $"Stopping VMware tools daemon: "
+start()
+{
+	# Check if we are running inside a VM
+	$CHECKVM >/dev/null 2>&1 || return
 
-    # handle upgrade by killing daemon under old name if it exists
-    killproc vmware-guestd -TERM
-
-    unmount_stuff 
-
-    # handle non-upgrade by using current name 
-    killproc vmtoolsd -TERM
-    RETVAL=$?
-    showstatus $RETVAL
-    echo
-    if [ $RETVAL -eq 0 ]; then
-        rm -f /var/lock/subsys/$servicename
-    fi
-    return $RETVAL
+	echo -n $"Starting Open-vm-tools guest daemon: "
+	setup_modules
+	$GUESTD $OPTIONS && success || failure
+	RETVAL=$?
+	[ "$RETVAL" = 0 ] && touch $LOCK_FILE
+	echo
 }
 
-# See how we were called.
+stop()
+{
+	# Check if we are running inside a VM
+	$CHECKVM >/dev/null 2>&1 || return
+
+	echo -n $"Stopping Open-vm-tools guest daemon: "
+	killall vmware-user 2>/dev/null
+	unmount_stuff
+	killproc $GUESTD
+	RETVAL=$?
+	[ "$RETVAL" = 0 ] && rm -f $LOCK_FILE
+	[ "$RETVAL" = 0 ] && rm -f $PID_FILE
+	echo
+}
+
 case "$1" in
-    start)
-        start
-        ;;
-    stop)
-        stop
-        ;;
-    status)
-        checkstatus vmtoolsd
-        RETVAL=$?
-        ;;
-    restart)
-        stop
-        start
-        ;;
-    condrestart)
-        if [ -f /var/lock/subsys/$servicename ]; then
-            stop
-            start
-        fi
-        ;;
-    *)
-        echo $"Usage: $0 {start|stop|status|restart|condrestart}"
-        ;;
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	condrestart)
+		if [ -f "$LOCK_FILE" ]; then
+			stop
+			start
+		fi
+		;;
+	status)
+		status $GUESTD
+		RETVAL=$?
+		;;
+	*)
+		echo $"Usage: $0 {start|stop|restart|condrestart|status}"
+		RETVAL=1
+		;;
 esac
 exit $RETVAL
