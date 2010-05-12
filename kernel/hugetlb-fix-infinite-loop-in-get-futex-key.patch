@@ -1,0 +1,155 @@
+From: Avi Kivity <avi@qumranet.com>
+Date: Sun, 10 Jan 2010 14:28:09 +0000 (+0200)
+Subject: core, x86: make LIST_POISON less deadly
+X-Git-Tag: v2.6.33-rc4~19
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=a29815a333c6c6e677294bbe5958e771d0aad3fd
+
+core, x86: make LIST_POISON less deadly
+
+The list macros use LIST_POISON1 and LIST_POISON2 as undereferencable
+pointers in order to trap erronous use of freed list_heads.  Unfortunately
+userspace can arrange for those pointers to actually be dereferencable,
+potentially turning an oops to an expolit.
+
+To avoid this allow architectures (currently x86_64 only) to override
+the default values for these pointers with truly-undereferencable values.
+This is easy on x86_64 as the virtual address space is large and contains
+areas that cannot be mapped.
+
+Other 64-bit architectures will likely find similar unmapped ranges.
+
+[ingo: switch to 0xdead000000000000 as the unmapped area]
+[ingo: add comments, cleanup]
+[jaswinder: eliminate sparse warnings]
+
+Acked-by: Linus Torvalds <torvalds@linux-foundation.org>
+Signed-off-by: Jaswinder Singh Rajput <jaswinderrajput@gmail.com>
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+Signed-off-by: Avi Kivity <avi@redhat.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 6bf1f1a..cbcbfde 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -1247,6 +1247,11 @@ config ARCH_MEMORY_PROBE
+ 	def_bool X86_64
+ 	depends on MEMORY_HOTPLUG
+ 
++config ILLEGAL_POINTER_VALUE
++       hex
++       default 0 if X86_32
++       default 0xdead000000000000 if X86_64
++
+ source "mm/Kconfig"
+ 
+ config HIGHPTE
+diff --git a/include/linux/poison.h b/include/linux/poison.h
+index 7fc194a..2110a81 100644
+--- a/include/linux/poison.h
++++ b/include/linux/poison.h
+@@ -2,13 +2,25 @@
+ #define _LINUX_POISON_H
+ 
+ /********** include/linux/list.h **********/
++
++/*
++ * Architectures might want to move the poison pointer offset
++ * into some well-recognized area such as 0xdead000000000000,
++ * that is also not mappable by user-space exploits:
++ */
++#ifdef CONFIG_ILLEGAL_POINTER_VALUE
++# define POISON_POINTER_DELTA _AC(CONFIG_ILLEGAL_POINTER_VALUE, UL)
++#else
++# define POISON_POINTER_DELTA 0
++#endif
++
+ /*
+  * These are non-NULL pointers that will result in page faults
+  * under normal circumstances, used to verify that nobody uses
+  * non-initialized list entries.
+  */
+-#define LIST_POISON1  ((void *) 0x00100100)
+-#define LIST_POISON2  ((void *) 0x00200200)
++#define LIST_POISON1  ((void *) 0x00100100 + POISON_POINTER_DELTA)
++#define LIST_POISON2  ((void *) 0x00200200 + POISON_POINTER_DELTA)
+ 
+ /********** include/linux/timer.h **********/
+ /*
+From: Mel Gorman <mel@csn.ul.ie>
+Date: Fri, 23 Apr 2010 17:17:56 +0000 (-0400)
+Subject: hugetlb: fix infinite loop in get_futex_key() when backed by huge pages
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=23be7468e8802a2ac1de6ee3eecb3ec7f14dc703
+
+hugetlb: fix infinite loop in get_futex_key() when backed by huge pages
+
+If a futex key happens to be located within a huge page mapped
+MAP_PRIVATE, get_futex_key() can go into an infinite loop waiting for a
+page->mapping that will never exist.
+
+See https://bugzilla.redhat.com/show_bug.cgi?id=552257 for more details
+about the problem.
+
+This patch makes page->mapping a poisoned value that includes
+PAGE_MAPPING_ANON mapped MAP_PRIVATE.  This is enough for futex to
+continue but because of PAGE_MAPPING_ANON, the poisoned value is not
+dereferenced or used by futex.  No other part of the VM should be
+dereferencing the page->mapping of a hugetlbfs page as its page cache is
+not on the LRU.
+
+This patch fixes the problem with the test case described in the bugzilla.
+
+[akpm@linux-foundation.org: mel cant spel]
+Signed-off-by: Mel Gorman <mel@csn.ul.ie>
+Acked-by: Peter Zijlstra <peterz@infradead.org>
+Acked-by: Darren Hart <darren@dvhart.com>
+Cc: <stable@kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/include/linux/poison.h b/include/linux/poison.h
+index 2110a81..34066ff 100644
+--- a/include/linux/poison.h
++++ b/include/linux/poison.h
+@@ -48,6 +48,15 @@
+ #define POISON_FREE	0x6b	/* for use-after-free poisoning */
+ #define	POISON_END	0xa5	/* end-byte of poisoning */
+ 
++/********** mm/hugetlb.c **********/
++/*
++ * Private mappings of hugetlb pages use this poisoned value for
++ * page->mapping. The core VM should not be doing anything with this mapping
++ * but futex requires the existence of some page->mapping value even though it
++ * is unused if PAGE_MAPPING_ANON is set.
++ */
++#define HUGETLB_POISON	((void *)(0x00300300 + POISON_POINTER_DELTA + PAGE_MAPPING_ANON))
++
+ /********** arch/$ARCH/mm/init.c **********/
+ #define POISON_FREE_INITMEM	0xcc
+ 
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index 6034dc9..ffbdfc8 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -546,6 +546,7 @@ static void free_huge_page(struct page *page)
+ 
+ 	mapping = (struct address_space *) page_private(page);
+ 	set_page_private(page, 0);
++	page->mapping = NULL;
+ 	BUG_ON(page_count(page));
+ 	INIT_LIST_HEAD(&page->lru);
+ 
+@@ -2447,8 +2448,10 @@ retry:
+ 			spin_lock(&inode->i_lock);
+ 			inode->i_blocks += blocks_per_huge_page(h);
+ 			spin_unlock(&inode->i_lock);
+-		} else
++		} else {
+ 			lock_page(page);
++			page->mapping = HUGETLB_POISON;
++		}
+ 	}
+ 
+ 	/*
