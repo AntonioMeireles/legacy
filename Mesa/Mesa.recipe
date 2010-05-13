@@ -1,0 +1,177 @@
+#
+# Copyright (c) 2005-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class Mesa(RPMPackageRecipe,AutoPackageRecipe):
+    name = 'Mesa'
+    version = '7.8.1'
+    rpmRelease = '14.1'
+    isOPENsuse = True
+    isXOrgFactory = True
+    tarballName = 'MesaLib-%(version)s.tar.bz2'
+    # file is needed for the mklib script, which seems to be an alternative to
+    # the ever-so-loved libtool
+    buildRequires = [ 'file:runtime', 'libX11:devel', 'libXau:devel',
+                      'libXdamage:devel', 'libXdmcp:devel', 'libXext:devel', 'libXxf86vm:devel',
+                      'libxcb:devel', 'libXfixes:devel', 'libXt:devel',
+                      'libstdc++:devel', 'makedepend:runtime', 'pkgconfig:devel',
+                      'userspace-kernel-headers:devel', 'imake:runtime', 'ed:runtime',
+                      'gccmakedep:runtime', 'xorg-cf-files:data', 'dri2proto:devel', 
+                      'automake:runtime', 'autoconf:runtime', 'openmotif:devel', 
+                      'printproto:devel',]
+
+    # DRI
+    buildRequires.extend([ 'expat:devel', 'glproto:devel', 'libXxf86vm:devellib',
+                           'libdrm:devel', 'userspace-kernel-headers:devel' ])
+
+    rpmPatches = [
+        'dri_driver_dir.diff',
+        'egl-buildfix.diff',
+        ]
+    
+    rpmSources = ['drirc']
+
+    def setup(r):
+        r.unpack()
+
+        r.macros.version = r.version.replace('_','-')
+        r.macros.optflags += ' -fno-strict-aliasing '
+        r.macros.cflags += ' -I%(includedir)s/Xm -DNDEBUG '
+	r.macros.cxxflags += r.macros.optflags 
+	# 
+        r.addArchive('manual-pages.tar.bz2', dir='%(name)s-%(version)s', rpm=r.srpm)
+        r.addArchive('MesaDemos-%(version)s.tar.bz2', dir='%(name)s-%(version)s', rpm=r.srpm)
+
+        r.addAction(' cp -ar %(name)s-%(version)s/* .; rm -rf %(name)s-%(version)s')
+
+        r.Run(""" sed -i 's/REPLACE/%(lib)s/g' src/glx/Makefile """)
+        r.Run(""" sed -i 's/REPLACE/%(lib)s/g' src/egl/drivers/dri2/Makefile """)
+
+        r.addSource('README.updates', rpm=r.srpm)
+
+        # no need to build GLUT and (GLUT-)Demos
+        # we (will) use freeglut
+
+        r.Remove('src/glut', recursive=True)
+        r.Move('progs/xdemos','progs/xxdemos')
+
+        r.Remove('include/GL/{glut.h,uglglutshapes.h,glutf90.h}')
+	r.Remove('progs/{demos,redbook,samples,glsl}', recursive = True)
+
+        r.macros.mesaArch = ''
+
+        if Arch.x86:
+            r.macros.mesaArch = '-x86'
+            r.macros._lib = 'lib'
+        elif Arch.x86_64:
+            r.macros.mesaArch = '-x86-64'
+            r.macros._lib = 'lib64'
+
+        #
+        r.Remove('src/mesa/depend')
+        r.Run('autoreconf -fi')
+        r.Configure(' --with-driver=dri  '
+                    ' --with-dri-drivers=i810,i915,i965,mach64,r128,r200,r300,r600,radeon,sis,tdfx,unichrome,swrast'
+                    ' --disable-glut '
+                    ' --enable-gallium-nouveau'
+	  	    ' --with-state-trackers=dri,glx'
+                    ' --disable-gallium' 
+                    # glw stuff
+                    ' --enable-glw --enable-motif',
+                    preConfigure = 'MOTIF_CONFIG=/bin/true MOTIF_CFLAGS="-I%(includedir)s/Xm" MOTIF_LIBS="-lXm"')
+        r.Make()
+        r.MakeInstall()
+
+        #
+        r.Make('glxgears glxinfo', dir = 'progs/xxdemos')
+        r.Install('progs/xxdemos/glxgears', '%(bindir)s/', mode = 0755, package = 'glx-utils')
+        r.Install('progs/xxdemos/glxinfo', '%(bindir)s/', mode = 0755, package = 'glx-utils')
+        # build and install Indirect Rendering only libGL
+        r.Make('realclean')
+        r.Configure(' --with-driver=xlib'
+                    ' --disable-glu'
+                    ' --disable-glw'
+                    ' --disable-glut'
+                    ' --disable-gallium')
+        r.Run("""  sed -i 's/GL_LIB = .*/GL_LIB = IndirectGL/g' configs/autoconf """)
+        r.Make()
+
+        r.Install('%(lib)s/libIndirectGL.so.?.*', '%(libdir)s/')
+        r.Install('%(lib)s/libOSMesa.so.?.*', '%(libdir)s/')
+
+        manPages = [ 'GL/gl', 'GL/glx', 'GLU']
+        for d in manPages:
+            r.Run('xmkmf -a', dir = 'xc/doc/man/' + d)
+            r.Make(dir = 'xc/doc/man/' + d)
+            r.Make('install.man DESTDIR=%(destdir)s MANPATH=%(mandir)s LIBMANSUFFIX=3gl', dir = 'xc/doc/man/' + d)
+
+
+        # global drirc file
+        r.Install('drirc', '%(sysconfdir)s/', mode = 0644)
+
+        r.Install('README.updates', '%(libdir)s/dri/updates/')
+
+        r.SharedLibrary(subtrees='%(libdir)s/dri/')
+
+        # when using closed drivers we want their libGL to appear first in LD_PATH
+        # than the one of mesa...
+
+        r.Move('%(libdir)s/lib*', '%(libdir)s/xorg.mesa.3d/')
+        # r.Symlink('%(libdir)s/xorg.mesa.3d/libGL.a', '%(libdir)s/xorg.mesa.3d/libMesaGL.a')
+
+         # NOTE: we need to make sure that x86 bits also
+         # get 3D accel in x86_64...
+
+        if Arch.x86_64:
+            r.Create('%(sysconfdir)s/ld.so.conf.d/xorg.libGL.conf', contents = """
+%(libdir)s/xorg.nvidia.3d/tls
+%(libdir)s/xorg.nvidia.3d
+%(libdir)s/xorg.fglrx.3d
+%(libdir)s/xorg.mesa.3d
+
+%(libdir)s/xorg/modules/updates
+%(libdir)s/xorg/modules/updates/extensions
+
+/usr/lib/xorg.nvidia.3d/tls
+/usr/lib/xorg.nvidia.3d/
+/usr/lib/xorg.fglrx.3d
+/usr/lib/xorg.mesa.3d
+""")
+        else:
+            r.Create('%(sysconfdir)s/ld.so.conf.d/xorg.libGL.conf', contents = """
+%(libdir)s/xorg.nvidia.3d
+%(libdir)s/xorg.nvidia.3d/tls
+%(libdir)s/xorg.fglrx.3d
+%(libdir)s/xorg.mesa.3d
+
+%(libdir)s/xorg/modules/updates
+%(libdir)s/xorg/modules/updates/extensions
+ """)
+
+        # due to the above it could be argued that the bellow should not be needed...
+        # it is because we _really_ want soname: ELF64/libmesa_private.so.1(SysV x86_64)
+        # and not soname: ELF64/usr/lib64/xorg.mesa.3d/libmesa_private.so.1(SysV x86_64)
+
+        r.SharedLibrary(subtrees='%(libdir)s/xorg.mesa.3d')
+
+        r.Replace('libdir=/usr/%(lib)s',
+                  'libdir=%(libdir)s/xorg.mesa.3d/',
+                  '%(libdir)s/pkgconfig/gl.pc')
+        r.Replace('libdir=/usr/%(lib)s',
+                  'libdir=%(libdir)s/xorg.mesa.3d/',
+                  '%(libdir)s/pkgconfig/glu.pc')
+
+
+        # GLw
+        r.PackageSpec('MesaGLw', '%(includedir)s/GL/GLw.*.h') 
+        r.PackageSpec('MesaGLw', '%(libdir)s/xorg.mesa.3d/libGLw.s.*')
+        r.Doc('src/glw/README', package = 'MesaGLw')
+        
+
+        # Glew is in glew pkg
+        r.Remove('%(includedir)s/GL/glew.h')
+        r.Remove('%(includedir)s/GL/glxew.h')
+        r.Remove('%(includedir)s/GL/wglew.h')
