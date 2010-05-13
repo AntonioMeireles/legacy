@@ -7,11 +7,9 @@
 loadSuperClass('rpmpackage')
 class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
     name = 'mkinitrd'
-    version = '6.0.87'
-    rpmRelease = '4.fc11'
-    rpmPatches = [ # RPL-2439
-                   'mkinitrd-rh506189.patch',
-                   '0001-mkinitrd-move-hotplug-run-to-before-gpu-driver-probi.patch']
+    version = '6.0.93'
+    rpmRelease = '1.fc12'
+    rpmPatches = [ ]
 
     buildRequires = [ 'popt:devel', 'device-mapper:devel', 'e2fsprogs:devel',
         'glib:devel', 'parted:devel', 'pkgconfig:devel', 'libdhcp:devel',
@@ -24,6 +22,11 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
     def setup(r):
         r.disableParallelMake()
         r.unpack()
+        # upstream split grubby from mkinitrd sources
+        # we keep bot hin same pks for now for simplicity
+        grubbyUpVersion = '7.0.13'
+        r.addArchive('grubby-%s.tar.bz2'% grubbyUpVersion)
+
         # in the makefile - we override them by setting CFLAGS when calling make
         r.macros.cflags += ' -D_FORTIFY_SOURCE=2 -fPIC -std=gnu99 -D_GNU_SOURCE=1'
         r.addPatch('disable-selinux-mkinitrd-6.0.87.patch')
@@ -87,16 +90,22 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
         r.addSource('get_numeric_dev.sh')
         r.extraBuild(Add_get_numeric_dev(r))
 
+        r.Replace('Red Hat ', '', 'nash/nash.c')
+
+        r.Make('LIB=%(lib)s')
+        r.MakeInstall('LIB=%(lib)s mandir=%(mandir)s')
+
+        # grubby
         # change branding
+        grubbyDir = '../grubby-' + grubbyUpVersion
         r.Replace(('redhat-release', 'distro-release'),
                   ('/redhat', '/rpath'),
                   ('"Red Hat Linux', '"rPath Linux'),
-                  'grubby/{grubby.c,new-kernel-pkg,test.sh}')
-        r.Replace('Red Hat ', '', 'nash/nash.c')
+                   grubbyDir + '/{grubby.c,new-kernel-pkg,test.sh}')
 
-        r.Make()
-        r.MakeInstall('mandir=%(mandir)s')
-
+        r.Make(dir = grubbyDir)
+        r.MakeInstall('mandir=%(mandir)s', dir = grubbyDir)
+        
         for req in ('%(essentialbindir)s/awk', '%(essentialsbindir)s/dmsetup',
                     '%(essentialsbindir)s/ip', '%(essentialsbindir)s/modprobe',
                     '%(essentialsbindir)s/lvm',
@@ -140,6 +149,7 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
                     '%(essentialsbindir)s/depmod',
                     'initscripts:runtime',
                     ):
+
             r.Requires(req, '%(essentialsbindir)s/mkinitrd')
 
         for req in ('%(essentialsbindir)s/bootman',
@@ -150,7 +160,7 @@ class Mkinitrd(RPMPackageRecipe, CPackageRecipe):
                     '%(essentialbindir)s/awk',
                     'bootman:runtime(bommy-get)',):
             r.Requires(req, '%(taghandlerdir)s/kernel')
-
+                
 
 # unfortunatly, it is difficult to do these actions efficiently in shell, and
 # doing them in python requires a build action
