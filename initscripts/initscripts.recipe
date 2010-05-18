@@ -3,17 +3,18 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
-class Initscripts(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Initscripts(RPMPackageRecipe,CPackageRecipe):
     name = 'initscripts'
-    version = '8.81.2'
+    version = '9.12'
+    rpmRelease = '1.fc13'
 
     if Use.bootstrap:
         clearBuildRequires()
         buildRequires = [ 'setup:runtime' ]
     else:
         buildRequires = [ 'glib:devel', 'popt:devel', 'gettext:runtime',
-                          'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel', ]
+                          'pkgconfig:devel', 'kudzu:devel', 'pciutils:devel', 'usbutils:devellib']
         buildRequires.extend(['mercurial:runtime'])
 
     # Add sysvinit:runtime to work around rMake bug RMK-580
@@ -30,17 +31,15 @@ class Initscripts(CPackageRecipe):
             r.RequireChkconfig(exceptions='%(initdir)s/functions')
             return
 
-        r.addMercurialSnapshot('http://hg.rpath.com/initscripts-upstart',
-                               tag='rpl-'+r.version)
+        RPMPackageRecipe.unpack(r)
 
-        #r.addPatch('RPL-2442-persistent-dhclient.patch')
-        #r.addSource('README.persistent-dhclient')
-        r.addPatch('prefdm_after_dbus.patch')
-        # r.addPatch('prefdm-splashy.patch')
-
-        # Honour the /etc/sysconfig/clock $UTC variable on setting the
-        # hardware clock (/sbin/hwclock) on halt (#FL-1588) - /ermo
         r.addPatch('foresight_hwclock.patch')
+
+        # rPL / foresight baseline 
+        # FIXME revise creafully in order to make sure we do not end
+        # missing functionality/rPath specific features when rebasing
+        # from old rPL baseline to upstream
+        r.addPatch('foresight.initscripts.patch')
         
         r.Make()
         r.MakeInstall('SUPERUSER=$(id -un) SUPERGROUP=$(id -gn)'
@@ -54,27 +53,18 @@ class Initscripts(CPackageRecipe):
         # we are not using upstart yet... so
 
         r.Move('%(sysconfdir)s/inittab.sysv', '%(sysconfdir)s/inittab')
-        r.Remove('%(sysconfdir)s/event.d', recursive = True)
-
-        # r.Move('%(sysconfdir)s/inittab.upstart', '%(sysconfdir)s/inittab')
-        # r.Remove('%(sysconfdir)s/rc.d/rc1.d/S99single',
-        #         '%(sysconfdir)s/rc.d/init.d/single',)
+        r.Remove('%(sysconfdir)s/init', recursive = True)
+        r.Remove('%(sysconfdir)s/inittab.*', recursive = True)
 
         r.Replace('id:3:initdefault:', 'id:5:initdefault:', '%(sysconfdir)s/inittab')
 
-        r.Remove('/etc/inittab.*')
-
-
         r.Doc('sysconfig.txt', 'sysvinitfiles', 'static-routes-ipv6',
             'ipv6-tunnel.howto', 'ipv6-6to4.howto', 'changes.ipv6',
-            'README-event.d')
+            )
         r.SetModes('%(sbindir)s/usernetctl', 04755)
         r.SetModes('%(essentialsbindir)s/netreport', 02755)
         r.SetModes('%(localstatedir)s/run/netreport', 0775)
 
-        # avoid prefdm from checkings stuff every 4 seconds:
-        # https://issues.rpath.com/browse/RPL-334
-        # r.Remove('%(sysconfdir)s/X11/prefdm', '%(sysconfdir)s/event.d/prefdm')
 
         if r.macros.initdir != r.macros.sysconfdir+'/init.d':
             # Using something other than FHS standard, add compat symlinks
@@ -97,9 +87,6 @@ class Initscripts(CPackageRecipe):
                 r.Remove('%(sysconfdir)s/'+file)
                 r.Move('%(sysconfdir)s/rc.d/'+file, '%(sysconfdir)s/')
                 r.Symlink('%(sysconfdir)s/'+file, '%(sysconfdir)s/rc.d/'+file)
-
-            #r.Run("sed -i 's,/etc/rc.d/rc.sysinit,%(sysconfdir)s/rc.sysinit,g'"
-            #      " %(destdir)s/%(sysconfdir)s/event.d/rcS")
 
         r.SetModes('%(localstatedir)s/{log/wtmp,run/utmp}', 0644)
         r.SetModes('%(localstatedir)s/log/btmp', 0600)
@@ -198,3 +185,6 @@ class Initscripts(CPackageRecipe):
         if not Use.bootstrap:
             r.Requires('%(sbindir)s/NetworkManager',
                        '%(sysconfdir)s/init.d/netfs')
+
+        r.NonBinariesInBindirs(exceptions='/etc/init.d/functions')
+
