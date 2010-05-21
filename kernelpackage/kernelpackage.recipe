@@ -254,6 +254,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Remove('/lib/modules/%(kver)s/build', recursive=True)
         r.MakeDirs('/lib/modules/%(kver)s/build')
         r.extraBuild(CreateBuildTree(r))
+        r.Create('/lib/modules/%(kver)s/build/include/linux/autoconf.h')
         r.Remove('/lib/modules/%(kver)s/source', recursive=True)
         r.Symlink('build', '/lib/modules/%(kver)s/source')
         r.Install('configs/*', '/lib/modules/%(kver)s/configs/')
@@ -333,10 +334,9 @@ class CreateBuildTree(build.BuildAction):
         destdir = '%(destdir)s/lib/modules/%(kver)s/build/' %macros
         destincdir = '%(destdir)s/lib/modules/%(kver)s/build/include/' %macros
 
-        # get the kernel's idea of the architecture we have selected
-        asmarch = os.readlink('%(builddir)s/include/asm' %macros)
-        arch = asmarch.split('-')[1]
-
+        if Arch.x86 or Arch.x86_64:
+            arch = 'x86'
+        
         # Copy config, dependency files, and Makefiles
         os.path.walk(builddir, self.copyDepinfo,
                      (destdir, len(builddir), self.time.time(), arch,
@@ -356,20 +356,10 @@ class CreateBuildTree(build.BuildAction):
 
         # Create and populate include directories -- do this last to make
         # timestamps work out for dependencies when building against this tree
-        util.mkdirChain(destincdir)
-        for entry in os.listdir(bldincdir):
-            dir = util.joinPaths(destincdir, entry)
-            if entry in ('asm-generic', asmarch) or not entry.startswith('asm'):
-                srcpath = util.joinPaths(bldincdir, entry)
-                util.copytree(srcpath, destincdir)
-        os.symlink(asmarch, destincdir+'/asm')
-        if os.path.isdir('arch/%s/include' % arch):
-            util.copytree('arch/%s/include' % arch,
-                    util.joinPaths(destdir, 'arch/%s' % arch))
-        if Arch.x86_64:
-            srcpath = util.joinPaths(bldincdir, 'asm-i386')
-            if os.path.exists(srcpath):
-                util.copytree(srcpath, destincdir)
+
+        util.copytree(bldincdir, destdir)
+        util.copytree('arch/%s/include/asm' % arch, destincdir)
+        os.symlink(destincdir +'/asm', 'asm-%s' % arch)
 
     def copyDepinfo(self, data, dirname, names):
         destdir, srclen, timestamp, arch, regex = data
