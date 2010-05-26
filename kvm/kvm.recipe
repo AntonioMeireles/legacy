@@ -7,7 +7,7 @@
 class Kvm(AutoPackageRecipe):
 
     name = 'kvm'
-    version = '0.11.1'
+    version = '0.12.3'
 
     buildRequires = [ 'SDL:devel', 'alsa-lib:devel', 'e2fsprogs:devel',
                       'zlib:devel', 'chkconfig:runtime', 'info-kvm:group',
@@ -16,33 +16,32 @@ class Kvm(AutoPackageRecipe):
                       'python:devel', 'esound:devel', 'git:runtime', 'rsync:runtime',
                       'bluez:devel', 'curl:devel', 'cyrus-sasl:devel', 'libX11:devel',
                       'openssl:devel', 'pulseaudio:devel', 'texi2html:runtime',
-                      'pciutils:devel', 'which:runtime' ]
+                      'pciutils:devel', 'which:runtime', 'util-linux:devel' ]
 
     def unpack(r):
         r.addArchive('mirror://sourceforge/kvm/qemu-kvm-%(version)s.tar.gz')
 
-        for p in [ # common and X86 patches
-                   # 'qemu-datadir.diff',
-                   'kvm-qemu-default-memsize.patch',
-                   'kvm-qemu-no-fallback-if-open-kvm-fails.patch',
-                   # Mac OS X patches
-                   'kvm-qemu-lpc.patch',
-                   'kvm-qemu-applesmc.patch',
-                   'kvm-qemu-ide-ich6.patch',
-                   'kvm-qemu-macmodel.patch',
-                   'kvm-qemu-rtl8139-link.patch',
-                   # Post-release upstream patches
-                   'kvm-no-pp-directives-in-macros.patch',
-                   'kvm-qemu-preXX-dictzip1.patch',
-                   'kvm-qemu-preXX-dictzip2.patch',
-                   'kvm-qemu-preXX-dictzip3.patch',
-                   'kvm-qemu-preXX-dirty-bitmap-alloc.patch',
-                   # Our ifup scripts are in /etc/kvm
-                   'kvm-default-network-script.patch',]: 
+        for p in [ '0001-block-avoid-creating-too-large-iovecs-in-multiwrite_.patch',
+                   '0002-migration-Clear-fd-also-in-error-cases.patch',
+                   '0003-raw-posix-Detect-CDROM-via-ioctl-on-linux.patch',
+                   '0004-usb-linux-increase-buffer-for-USB-control-requests.patch',
+                   '0005-net-remove-NICInfo.bootable-field.patch',
+                   '0006-net-remove-broken-net_set_boot_mask-boot-device-vali.patch',
+                   '0007-boot-remove-unused-boot_devices_bitmap-variable.patch', 
+            
+                   ]:
             r.addPatch(p)
-        r.addAction('cp -ar kvm/bios kvm/bios-mac')
-        r.addPatch('kvm-bios.patch')
-        r.addSource('65-kvm.rules')
+
+        for src in [ 'kvm.modules',
+                   # Creates /dev/kvm
+                   '80-kvm.rules',
+                   # KSM control scripts
+                   'ksm.init',
+                   'ksm.sysconfig',
+                   'ksmtuned.init',
+                   'ksmtuned',
+                   'ksmtuned.conf',]:
+            r.addSource(src)
 
     def configure(r):
         if Arch.x86:
@@ -52,70 +51,52 @@ class Kvm(AutoPackageRecipe):
 
         r.macros.securityflags = ''
 
-        r.Replace('datasuffix=\"\/share\/qemu\"','datasuffix=\"/share/kvm\"',
-                  'configure')
-        r.Create('kernel/.kernelrelease', contents = '%(name)s-%(version)s')
-        r.ManualConfigure( ' --prefix=%(prefix)s'
+        r.ManualConfigure( '--target-list=x86_64-softmmu '
+                           ' --prefix=%(prefix)s'
                            ' --kerneldir=$(pwd)/kernel '
                            ' --audio-drv-list=sdl,oss,alsa,pa '
-                           ' --audio-card-list="ac97 adlib cs4231a gus es1370" '
+                           ' --disable-strip '
+                           ' --disable-xen '
                            ' --extra-cflags="%(optflags)s" '
                           )
 
-        r.Run(""" echo "DESTDIR=%(destdir)s" >> config.mak """)
-        r.Run(""" echo "PREFIX=%(prefix)s" >> config.mak """)
-        r.Run(""" echo "datadir=%(datadir)s/kvm/" >> config.mak """)
-
-        r.Replace('CFLAGS =', 'CFLAGS +=', 'kvm/user/Makefile')
-        r.Run(""" echo "CFLAGS = %(cflags)s" >> kvm/user/config.mak """)
 
     def make(r):
-        r.Make('KVM_KMOD="no"')
-        # r.Replace('gcc -m32', 'gcc', 'bios/Makefile')
-
-        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/bios')
-        r.Copy('kvm/bios/BIOS-bochs-latest', 'pc-bios/bios.bin')
-
-        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/vgabios')
-        r.Copy('kvm/vgabios/VGABIOS-lgpl-latest.cirrus.bin', 'pc-bios/vgabios-cirrus.bin')
-        r.Copy('kvm/vgabios/VGABIOS-lgpl-latest.bin', 'pc-bios/vgabios.bin')
-        r.Copy('pc-bios/optionrom/extboot.bin', 'pc-bios/')
-
-        r.Make('PREFIX=%(prefix)s DESTDIR=%(destdir)s', dir = 'kvm/bios-mac')
+        r.Make('V=1')
+        r.ManualConfigure('--prefix=%(prefix)s --kerneldir=$(pwd)/../kernel/', dir = 'kvm/user')
+        r.Make('kvmtrace', dir = 'kvm/user')
 
 
     def makeinstall(r):
-        r.MakeInstall('KVM_KMOD="no"')
+        r.MakeInstall()
+        # upstream Makefiles _features_ ...
+        r.Install('kvm/scripts/qemu-ifup', '%(sysconfdir)s/qemu-ifup', mode = 0755)
+        
+        r.Install('kvm/user/kvmtrace', '%(bindir)s/', mode = 0755)
+        r.Install('kvm/user/kvmtrace_format', '%(bindir)s/', mode = 0755)
+        r.Install('kvm/kvm_stat', '%(bindir)s/', mode = 0755)
 
-        r.Install('65-kvm.rules','%(sysconfdir)s/udev/rules.d/')
-        r.Install('kvm/scripts/qemu-ifup', '%(sysconfdir)s/kvm/')
 
-        r.Install('kvm/kvm_stat','%(bindir)s/')
-        # r.Install('kvm/user/kvmtrace','%(bindir)s/')
-        # r.Install('kvm/user/kvmtrace_format','%(bindir)s/')
+        r.Install('kvm.modules', '%(sysconfdir)s/sysconfig/modules/kvm.modules', mode = 0755)
+        r.Install('80-kvm.rules', '%(sysconfdir)s/udev/rules.d/', mode = 0644)
 
-        for i in ['bios', 'extboot', 'vgabios', 'vgabios-cirrus',
-                  'pxe-e1000', 'pxe-ne2k_pci', 'pxe-pcnet',
-                  'pxe-rtl8139']:
-            r.Install('pc-bios/' + i + '.bin', '%(datadir)s/%(name)s/', mode = 0644)
+        r.Install('ksm.init', '%(initdir)s/ksm', mode = 0755)
+        r.Install('ksm.sysconfig', '%(sysconfdir)s/sysconfig/ksm', mode = 0644)
 
-        r.Install('kvm/bios-mac/BIOS-bochs-latest', '%(datadir)s/%(name)s/bios-mac.bin', mode = 0644)
+        r.Install('ksmtuned.init', '%(initdir)s/ksmtuned', mode = 0755)
+        r.Install('ksmtuned', '%(sbindir)s/ksmtuned', mode = 0755)
+        r.Install('ksmtuned.conf', '%(sysconfdir)s/ksmtuned.conf', mode = 0644)
 
-        r.addSource('kvm.modules', dest = '%(sysconfdir)s/sysconfig/modules/', mode = 0755)
+        r.Install('qemu.sasl', '%(sysconfdir)s/sasl2/qemu.conf', mode = 0644)
 
-        r.Remove('%(datadir)s/kvm/openbios-sparc32')
-        r.Remove('%(datadir)s/kvm/openbios-sparc64')
-        r.Remove('%(datadir)s/kvm/openbios-ppc')
-        r.Remove('%(datadir)s/kvm/video.x')
 
-        r.Move('%(mandir)s/man1/qemu.1', '%(mandir)s/man1/qemu-kvm.1')
+        r.Remove('%(datadir)s/qemu/openbios-sparc32')
+        r.Remove('%(datadir)s/qemu/openbios-sparc64')
+        r.Remove('%(datadir)s/qemu/openbios-ppc')
 
-        r.Move('%(bindir)s/qemu-system-x86_64', '%(bindir)s/qemu-kvm')
-        # keep upstream naming too
-        r.Symlink('%(bindir)s/qemu-kvm', '%(bindir)s/qemu-system-x86_64')
 
-        # no shared lib, static libs'
-        r.Remove('%(includedir)s', recursive = True)
-        # r.Remove('%(libdir)s', recursive = True)
+        r.Symlink('%(mandir)s/man1/qemu.1', '%(mandir)s/man1/qemu-kvm.1')
+
+        r.Symlink('%(bindir)s/qemu-system-x86_64', '%(bindir)s/qemu-kvm')
 
         r.Requires('info-kvm:group', '%(bindir)s/qemu-kvm')
