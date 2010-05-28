@@ -1,0 +1,60 @@
+#
+# Copyright (C) 2010 rPath, Inc.
+#
+
+class XeGuestUtilities(CPackageRecipe):
+    name = "xe-guest-utilities"
+    version = "5.5.0"
+
+    minver = "458"
+
+    buildRequires = [ 'chkconfig:runtime', 'zlib:devel', ]
+    srcrpm = "http://updates.vmd.citrix.com/XenServer/5.5.0/rhel5x/SRPMS/%(name)s-%(version)s-%(minver)s.src.rpm"
+
+    def setup(r):
+        r.macros.minver = r.minver
+        r.addArchive('xenstore-sources.tar.bz2', rpm = r.srcrpm)
+
+        # We can't install everything directly in the destination, because
+        # make install will fail trying to re-create /usr/sbin
+        r.addSource('xe-update-guest-attrs', rpm = r.srcrpm)
+        r.addSource('xe-daemon', rpm = r.srcrpm)
+        r.addSource('xen-vbd-cdrom.rules', rpm = r.srcrpm)
+        r.addSource('xen-vcpu-hotplug.rules', rpm = r.srcrpm)
+        r.addSource('xen-vbd-device-type', rpm = r.srcrpm)
+        # Add license files
+        r.addSource('COPYING', rpm = r.srcrpm)
+        r.addSource('COPYING.LGPL', rpm = r.srcrpm)
+        r.Doc('COPYING.LGPL')
+        # Add xe-linux-distribution and the init script
+        r.addSource('xe-linux-distribution', rpm = r.srcrpm,
+            dest = '%(sbindir)s/', mode = 0755)
+        r.addSource('xe-linux-distribution.init', rpm = r.srcrpm,
+            dest = '%(initdir)s/xe-linux-distribution', mode = 0755)
+        # Make the init script source a configuration file, so we can control
+        # the rate of running xe-update-guest-attrs
+        r.Replace(r'^start',
+            '[ -f %(sysconfdir)s/sysconfig/xe-guest-utilities ] && . /etc/sysconfig/xe-guest-utilities\n\nstart',
+            '%(initdir)s/xe-linux-distribution')
+        # Uncomment the following lines if we need the rate changed from the
+        # default 60 seconds
+        #r.Create('%(sysconfdir)s/sysconfig/xe-guest-utilities',
+        #    contents = 'export XE_DAEMON_RATE=60\n')
+        #r.InitialContents('%(sysconfdir)s/sysconfig/xe-guest-utilities')
+
+        r.Make(dir = "tools/include")
+        r.Make(dir = "tools/libxc")
+        r.Make(dir = "tools/xenstore")
+
+        r.MakeInstall(dir = "tools/include")
+        r.MakeInstall(dir = "tools/libxc")
+        r.MakeInstall(dir = "tools/xenstore")
+
+        r.Install('xe-update-guest-attrs', "%(sbindir)s/", mode = 0755)
+        r.Install('xe-daemon', "%(sbindir)s/", mode = 0755)
+        r.Install('xen-vbd-cdrom.rules', "%(sysconfdir)s/udev/rules.d/")
+        r.Install('xen-vcpu-hotplug.rules', "%(sysconfdir)s/udev/rules.d/")
+        r.Install('xen-vbd-device-type', "%(lib)s/udev/rules.d/")
+
+        # xenstored is only useful in dom0
+        r.Remove('%(sbindir)s/xenstored')
