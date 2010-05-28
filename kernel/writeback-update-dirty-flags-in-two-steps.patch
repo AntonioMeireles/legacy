@@ -1,0 +1,55 @@
+From: Dmitry Monakhov <dmonakhov@openvz.org>
+Date: Fri, 7 May 2010 09:35:44 +0000 (+0400)
+Subject: writeback: Update dirty flags in two steps
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Faxboe%2Flinux-2.6-block.git;a=commitdiff_plain;h=5547e8aac6f71505d621a612de2fca0dd988b439
+
+writeback: Update dirty flags in two steps
+
+[ 2.6.33 backport ]
+
+Filesystems with delalloc support may dirty inode during writepages.
+As result inode will have dirty metadata flags even after write_inode.
+In fact we have two dedicated functions for proper data and metadata
+writeback. It is reasonable to separate flags updates in two stages.
+
+https://bugzilla.kernel.org/show_bug.cgi?id=15906
+
+Signed-off-by: Dmitry Monakhov <dmonakhov@openvz.org>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Jens Axboe <jens.axboe@oracle.com>
+---
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index 67db897..0f62957 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -460,11 +460,9 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
+ 
+ 	BUG_ON(inode->i_state & I_SYNC);
+ 
+-	/* Set I_SYNC, reset I_DIRTY */
+-	dirty = inode->i_state & I_DIRTY;
++	/* Set I_SYNC, reset I_DIRTY_PAGES */
+ 	inode->i_state |= I_SYNC;
+-	inode->i_state &= ~I_DIRTY;
+-
++	inode->i_state &= ~I_DIRTY_PAGES;
+ 	spin_unlock(&inode_lock);
+ 
+ 	ret = do_writepages(mapping, wbc);
+@@ -480,6 +478,15 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
+
+	ret = do_writepages(mapping, wbc);
+
++	/*
++	 * Some filesystems may redirty the inode during the writeback
++	 * due to delalloc, clear dirty metadata flags right before
++	 * write_inode()
++	 */
++	spin_lock(&inode_lock);
++	dirty = inode->i_state & I_DIRTY;
++	inode->i_state &= ~(I_DIRTY_SYNC | I_DIRTY_DATASYNC);
++	spin_unlock(&inode_lock);
+ 	/* Don't write the inode if only I_DIRTY_PAGES was set */
+ 	if (dirty & (I_DIRTY_SYNC | I_DIRTY_DATASYNC)) {
+ 		int err = write_inode(inode, wbc);
