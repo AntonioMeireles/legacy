@@ -7,39 +7,69 @@
 class LLVM(AutoPackageRecipe):
 
     name = 'llvm'
-    version = '2.5'
+    version = '2.6'
 
     buildRequires = [
         'bison:runtime', 'byacc:runtime', 'flex:devel', 'flex:runtime',
-        'groff:runtime', 'libelf:devel', 'libstdc++:devel', 'perl:runtime'
+        'groff:runtime', 'libelf:devel', 'libstdc++:devel', 'perl:runtime', 
+        'dejagnu:runtime', 'doxygen:runtime', 'graphviz:runtime',  'tcl:runtime', 'zip:runtime'
     ]
 
     def unpack(r):
 
-        r.addArchive('http://www.llvm.org/releases/%(major_version)s/')
+        r.addArchive('http://ftp.de.debian.org/debian/pool/main/l/llvm/llvm_2.6.orig.tar.gz')
 
-        # wrong rpath
-        r.Replace('-rpath \$\(ToolDir\)', '', 'Makefile.rules')
+        # Fix install dirs
+        r.Replace(('^PROJ_docsdir.*',
+                   'PROJ_docsdir := $(DESTDIR)$(PROJ_prefix)/share/doc/'
+                   '%(name)s-%(version)s'),
+                  ('^PROJ_etcdir.*', 'PROJ_etcdir := $(DESTDIR)/%(sysconfdir)s/llvm'),
+                  ('^PROJ_libdir.*', 'PROJ_libdir := $(DESTDIR)/%(libdir)s'),
+                  'Makefile.config.in')
 
-        # multilib issues
-        r.Replace(
-            ('\$\(PROJ_prefix\)/lib', '%(libdir)s'),
-            ('\$\(PROJ_prefix\)/docs/llvm', '%(thisdocdir)s'),
-            'Makefile.config.in'
-        )
+        # Fix gccld and gccas
+        r.Replace('^TOOLDIR.*', 'TOOLDIR=%(bindir)s',
+                  'tools/gccld/gccld.sh',
+                  'tools/gccas/gccas.sh')
+
+        # Fix rpath
+        r.Replace(('\$\(RPATH\) -Wl,\$\(ToolDir\)', ''),
+                  ('\$\(RPATH\) -Wl,\$\(LibDir\)', ''),
+                  'Makefile.rules')
+
+        # Fix docs installation
+        r.Replace('\$',
+                  '$(DST_MAN_DIR)tblgen.1 $(DST_MAN_DIR)llvmgcc.1 $(DST_MAN_DIR)llvmgxx.1',
+                  'docs/CommandGuide/Makefile',
+                  lines='^NO_INSTALL_MANS')
+
 
     def configure(r):
+        extraConfig = (
+            ' --enable-optimized'
+            ' --disable-assertions'
+            ' --disable-expensive-checks'
+            ' --enable-targets=host-only'
+            )
 
-        r.macros.cflags += ' -fPIC '
-        r.Configure('--enable-optimized --enable-assertions')
+        if Arch.x86_64:
+            extraConfig += ' --enable-pic'
+
+        extraConfig += (
+            ' --enable-bindings=none' # Add ocaml bindings if ocaml is built
+            ' --enable-libffi'
+            )
+
+        r.Configure(extraConfig)
 
     def make(r):
+        r.Make('VERBOSE=1 KEEP_SYMBOLS=1')
 
-        r.Make('tools-only')
+    def makeinstall(r):
+        r.MakeInstall('KEEP_SYMBOLS=1')
 
-    def policy(r):
-
-        r.AutoDoc(exceptions='/.*/')
-
-        r.Replace('/lib', '/%(lib)s', '%(bindir)s/llvm-config')
+        # Fix llvm-config if libs are not in /usr/lib
+        if r.macros.lib != 'lib':
+            r.Replace('ABS_RUN_DIR/lib', 'ABS_RUN_DIR/%(lib)s',
+                      '%(bindir)s/llvm-config')
 
