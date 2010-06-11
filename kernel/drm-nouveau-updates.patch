@@ -1,4 +1,4 @@
-From 9e776eefa1dc0513515c34a715b3362b868c0324 Mon Sep 17 00:00:00 2001
+From a4cbb7f1379aa9817c85840c6d079dd222641dbd Mon Sep 17 00:00:00 2001
 From: Marcin Slusarz <marcin.slusarz@gmail.com>
 Date: Wed, 17 Feb 2010 19:04:00 +0100
 Subject: [PATCH] drm-nouveau-updates
@@ -440,6 +440,10 @@ since the default state in the GPIO table was off.
 Fixes rh#582621
 
 Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: fix iommu errors caused by device reading from address 0
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
 ---
  drivers/gpu/drm/nouveau/Makefile            |    7 +-
  drivers/gpu/drm/nouveau/nouveau_bios.c      |  672 +++++---
@@ -478,7 +482,7 @@ Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
  drivers/gpu/drm/nouveau/nv50_dac.c          |    4 +-
  drivers/gpu/drm/nouveau/nv50_display.c      |  111 +-
  drivers/gpu/drm/nouveau/nv50_display.h      |    1 +
- drivers/gpu/drm/nouveau/nv50_fb.c           |   32 +
+ drivers/gpu/drm/nouveau/nv50_fb.c           |   38 +
  drivers/gpu/drm/nouveau/nv50_fbcon.c        |   17 +-
  drivers/gpu/drm/nouveau/nv50_fifo.c         |    5 +
  drivers/gpu/drm/nouveau/nv50_gpio.c         |   76 +
@@ -486,7 +490,7 @@ Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
  drivers/gpu/drm/nouveau/nv50_grctx.c        | 2383 +++++++++++++++++++++++++++
  drivers/gpu/drm/nouveau/nv50_instmem.c      |   18 +-
  drivers/gpu/drm/nouveau/nv50_sor.c          |   30 +-
- 45 files changed, 4298 insertions(+), 763 deletions(-)
+ 45 files changed, 4304 insertions(+), 763 deletions(-)
  create mode 100644 drivers/gpu/drm/nouveau/nv50_calc.c
  create mode 100644 drivers/gpu/drm/nouveau/nv50_fb.c
  create mode 100644 drivers/gpu/drm/nouveau/nv50_gpio.c
@@ -4790,10 +4794,10 @@ index 3ae8d07..581d405 100644
  int nv50_display_destroy(struct drm_device *dev);
 diff --git a/drivers/gpu/drm/nouveau/nv50_fb.c b/drivers/gpu/drm/nouveau/nv50_fb.c
 new file mode 100644
-index 0000000..a95e694
+index 0000000..32611bd
 --- /dev/null
 +++ b/drivers/gpu/drm/nouveau/nv50_fb.c
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,38 @@
 +#include "drmP.h"
 +#include "drm.h"
 +#include "nouveau_drv.h"
@@ -4802,10 +4806,16 @@ index 0000000..a95e694
 +int
 +nv50_fb_init(struct drm_device *dev)
 +{
-+	/* This is needed to get meaningful information from 100c90
-+	 * on traps. No idea what these values mean exactly. */
 +	struct drm_nouveau_private *dev_priv = dev->dev_private;
 +
++	/* Not a clue what this is exactly.  Without pointing it at a
++	 * scratch page, VRAM->GART blits with M2MF (as in DDX DFS)
++	 * cause IOMMU "read from address 0" errors (rh#561267)
++	 */
++	nv_wr32(dev, 0x100c08, dev_priv->gart_info.sg_dummy_bus >> 8);
++
++	/* This is needed to get meaningful information from 100c90
++	 * on traps. No idea what these values mean exactly. */
 +	switch (dev_priv->chipset) {
 +	case 0x50:
 +		nv_wr32(dev, 0x100c90, 0x0707ff);
