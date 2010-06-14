@@ -1,3 +1,215 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..02af524
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,64 @@
++Makefile
++Makefile.in
++aclocal.m4
++config.cache
++autom4te.cache
++config.guess
++config.h
++config.h.in
++config.log
++config.status
++config.sub
++configure
++configure.scan
++compile
++depcomp
++intl
++libtool
++ltconfig
++ltmain.sh
++missing
++mkinstalldirs
++install-sh
++stamp-h
++stamp-h1
++stamp-h.in
++version.h
++intl
++macros
++INSTALL
++PackageKit-*.tar.*
++org.freedesktop.PackageKit.conf
++xml-i18n-extract.in
++xml-i18n-extract
++xml-i18n-merge.in
++xml-i18n-merge
++xml-i18n-update.in
++xml-i18n-update
++intltool-extract.in
++intltool-extract
++intltool-merge.in
++intltool-merge
++intltool-update.in
++intltool-update
++xmldocs.make
++omf.make
++gtk-doc.make
++*~
++*.pc
++py-compile
++*.swp
++tags
++*.patch
++NEWS.new
++.lock-wscript
++.waf-*
++_build_
++waf-lightc
++wafadmin
++packagekit.types
++.anjuta
++*.cache
++*.anjuta
++ChangeLog
++
+diff --git a/backends/conary/conaryBackend.py b/backends/conary/conaryBackend.py
+index 9bf022d..ee3e2b0 100755
+--- a/backends/conary/conaryBackend.py
++++ b/backends/conary/conaryBackend.py
+@@ -151,16 +151,26 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+             installed = INFO_AVAILABLE
+         return installed
+ 
++    def get_package_id_from_pkg(self,pkg):
++        return self.get_package_id_new(pkg)
++
++    def _format_metadata(self, metadata):
++        name = metadata.get("name")
++        data = ""
++        if "shortDesc" in metadata:
++            data = metadata['shortDesc'].decode("UTF")
++            if data == "." or data == "":
++                data = name.replace("-",' ').replace("_"," ").capitalize()
++        return data
++
++
+     def get_package_id_new(self,pkg):
+ 
+         name,version,flavor = pkg.get("trove")
+         metadata = pkg.get("metadata")
+         data = ""
+         if metadata:
+-            if "shortDesc" in metadata:
+-                data = metadata['shortDesc'].decode("UTF")
+-                if data == "." or data == "":
+-                    data = name.replace("-",' ').capitalize()
++            data = self._format_metadata(metadata)
+         return pkpackage.get_package_id(name, version.trailingRevision(), self._get_arch(flavor), data)
+             
+     @ExceptionHandler
+@@ -174,11 +184,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         #data = versionObj.asString() + "#"
+         data = ""
+         if pkg:
+-            if "shortDesc" in pkg:
+-                data = pkg['shortDesc'].decode("UTF")
+-                if data == "." or data == "":
+-                    data = name.replace("-",' ').capitalize()
+-                
++            data = self._format_metadata(pkg) 
+         return pkpackage.get_package_id(name, version, arch, data)
+ 
+     @ExceptionHandler
+@@ -402,7 +408,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+            # name ,version,flavor = pkg.get("trove")
+             # get the string id from packagekit 
+             #log.info(pkg) 
+-            package_id = self.get_package_id_new(pkg)
++            package_id = self.get_package_id_from_pkg(pkg)
+             
+             # split the list for get Determine info
+             summary = package_id.split(";")
+@@ -411,7 +417,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+ 
+             summary[3] = pkg.get("metadata").get("label")
+             pkg_id = ";".join(summary)
+-            log.info("====== show the package (%s) %s- %s" %( pos, name, status) )
++            log.info("====== show the package (%s) %s %s %s" %( pos, name, status, meta) )
+             self.package(package_id, status, meta )
+         self.packages = []
+ 
+@@ -514,6 +520,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         self.percentage(None)
+         self.status(STATUS_INFO)
+         package_id = package_ids[0]
++        log.info("get_files ===============0")
+         def _get_files(troveSource, n, v, f):
+             files = []
+             troves = [(n, v, f)]
+@@ -521,21 +528,22 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+             troves.extend([ x for x in trv.iterTroveList(strongRefs=True)
+                                 if troveSource.hasTrove(*x)])
+             for n, v, f in troves:
+-                for (pathId, path, fileId, version, filename) in \
+-                    troveSource.iterFilesInTrove(n, v, f, sortByPath = True,
+-                                                 withFiles = True):
++                tr = troveSource.getTrove(n, v, f)
++                for (pathId, path, fileId, version) in tr.iterFileList(   ):
+                     files.append(path)
+             return files
+         
+         for package in package_id.split("&"):
++            log.info("get:files===========0")
+             log.info(package)
+             name, version, flavor, installed = self._findPackage(package)
+-
++            log.info((name,version,installed))
++            log.info(">>>>>>>>>>>>>>>>>>>>>><")
+             if installed == INFO_INSTALLED:
+                 files = _get_files(self.client.db, name, version, flavor)
+             else:
+                 files = _get_files(self.client.repos, name, version, flavor)
+-
++            log.info(files)
+             self.files(package_id, ';'.join(files))
+ 
+     @ExceptionHandler
+@@ -748,9 +756,6 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         package_id = package_ids[0]
+         #name, version, flavor, installed = self._findPackage(package_id)
+         
+-        summary = package_id.split(";")
+-        log.info("====== geting summary")
+-        log.info(summary)
+         name,version,arch,data = pkpackage.get_package_from_id(package_id)
+         cache = Cache()
+         pkgDict = cache.resolve(name)
+@@ -779,6 +784,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+             pkg_id = package_id.split(";")
+             pkg_id[3] = pkgDict["label"]
+             package_id = ";".join(pkg_id)
++            log.info(package_id)
+             self.details(package_id, license, categories, longDesc, url, 0)
+ 
+     def _show_package(self, name, version, flavor, status):
+@@ -909,15 +915,15 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         '''
+         find a package based on a package id (name;version;arch;summary)
+         '''
+-        log.info("========== _findPackage ==========")
+-        log.info(package_id)
++#        log.info("========== _findPackage ==========")
++ #       log.info(package_id)
+         troveTuples = self.get_package_from_id(package_id)
+-        log.info(troveTuples)
++  #      log.info(troveTuples)
+         for troveTuple in troveTuples:
+-            log.info("======== trove ")
+-            log.info(troveTuple)
++   #         log.info("======== trove ")
++    #        log.info(troveTuple)
+             installed = self.check_installed(troveTuple)
+-            log.info(installed)
++     #       log.info(installed)
+             name, version, flavor = troveTuple
+             return name, version, flavor, installed
+         else:
 diff --git a/backends/conary/pk-backend-conary.c b/backends/conary/pk-backend-conary.c
 index 485f61d..261bd25 100644
 --- a/backends/conary/pk-backend-conary.c
