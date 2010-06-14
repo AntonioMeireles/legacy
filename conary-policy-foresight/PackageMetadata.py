@@ -14,6 +14,7 @@
 
 
 from conary.build import policy
+from metadata import _BaseMetadata
 
 class SetPackageMetadataFromRecipe(policy.DestdirPolicy):
     # Cannot be a PackagePolicy because that is a subsequent
@@ -31,3 +32,109 @@ class SetPackageMetadataFromRecipe(policy.DestdirPolicy):
             self.recipe.Description(shortDesc =  self.recipe.packageSummary, longDesc =  self.recipe.packageDescription, macros = True)
         else:
             self.info('Package descriptions are not set; Application metadata is critical for a good user experience. Please consider fixing it')
+
+
+class SetupRecipeMetadata(_BaseMetadata):
+    """
+    NAME
+    ====
+
+    B{C{r.SetupRecipeMetadata()}} - Setup metadata for the package
+
+    SYNOPSIS
+    ========
+
+    C{r.SetupRecipeMetadata()}
+
+    DESCRIPTION
+    ===========
+
+    The C{r.SetupRecipeMetadata()} class adds recipe metadata to trove.
+
+    Metadata should be included as a set of variables in the recipe,
+    such as C{r.description}, C{r.long_description}, C{r.url} and
+    C{r.categories[]}.
+    """
+    
+    def __init__(self, recipe, *args, **keywords):
+        _BaseMetadata.__init__(self, recipe, *args, **keywords)
+
+    def do(self):
+        if not hasattr(self.recipe, '_addMetadataItem'):
+            # Old Conary
+            return
+        troveNames = self._getTroveNames()
+        
+        # Check if macros should be applied (defaults to True)
+        if hasattr(self.recipe, 'applyMacrosToMetadata') \
+                and not self.recipe.applyMacrosToMetadata:
+            applyMacros = False
+        else:
+            applyMacros = True
+
+        # Check for short description
+        if hasattr(self.recipe, 'shortDesc'):
+            if applyMacros:
+                shortDesc = self.recipe.shortDesc % self.recipe.macros
+            else:
+                shortDesc = self.recipe.shortDesc
+            itemDict = dict(shortDesc = shortDesc)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for long description
+        if hasattr(self.recipe, 'longDesc'):
+            if applyMacros:
+                longDesc = self.recipe.longDesc % self.recipe.macros
+            else:
+                longDesc = self.recipe.longDesc
+            itemDict = dict(longDesc = longDesc)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for url
+        if hasattr(self.recipe, 'url'):
+            if applyMacros:
+                url = self.recipe.url % self.recipe.macros
+            else:
+                url = self.recipe.url
+            itemDict = dict(url = url)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for single category
+        if hasattr(self.recipe, 'category'):
+            if applyMacros:
+                categories = [ self.recipe.category % self.recipe.macros ]
+            else:
+                categories = [ self.recipe.category ]
+            itemDict = dict(categories = categories)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for categories
+        if hasattr(self.recipe, 'categories') and \
+                type(self.recipe.categories) == type([]) and \
+                len(self.recipe.categories) > 0:
+            if applyMacros:
+                categories = [x % self.recipe.macros for x in self.recipe.categories]
+            else:
+                categories = self.recipe.categories
+            itemDict = dict(categories = categories)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for single license
+        if hasattr(self.recipe, 'license'):
+            if applyMacros:
+                licenses = [ self.recipe.license % self.recipe.macros ]
+            else:
+                licenses = [ self.recipe.license ]
+            itemDict = dict(licenses = licenses)
+            self.recipe._addMetadataItem(troveNames, itemDict)
+
+        # Check for licenses
+        if hasattr(self.recipe, 'licenses') and \
+                type(self.recipe.licenses) == type([]) and \
+                len(self.recipe.licenses) > 0:
+            if applyMacros:
+                licenses = [x % self.recipe.macros for x in self.recipe.licenses]
+            else:
+                licenses = self.recipe.licenses
+            itemDict = dict(licenses = licenses)
+            self.recipe._addMetadataItem(troveNames, itemDict)
