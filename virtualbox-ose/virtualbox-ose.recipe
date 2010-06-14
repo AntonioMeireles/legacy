@@ -1,0 +1,94 @@
+#
+# Copyright (c) 2010 Foresight Linux
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class VirtualboxOse(PackageRecipe):
+    name = 'virtualbox-ose'
+    version = '3.2.0'
+ 
+    buildRequires = ['chkconfig:runtime',
+		     'desktop-file-utils:runtime', 
+                     'glib:devel',
+		     'glibc:devel', 
+                     'libgcc:devellib', 
+                     'libstdc++:devel', 
+                     'zlib:devel',
+		     'file:runtime', 
+		     'curl:devel',
+		     'libIDL:devel',
+		     'libxml2:devel',
+		     'openssl:devel',
+		     'python:devel',
+		     'PIL:python',
+		     'libpng:devel',
+            'iasl:runtime',
+              'diffutils:runtime',]
+ 
+    def setup(r):
+	r.macros.archive_version = 'OSE-%(version)s'
+	r.macros.vbdir = '/opt/virtualbox'
+        r.macros.cflags += ' -L%(libdir)s/xorg.mesa.3d'
+        r.Environment('KBUILDDIR', '%(builddir)s')
+
+
+        r.addArchive('http://download.virtualbox.org/virtualbox/%(version)s/'
+                'VirtualBox-%(version)s-OSE.tar.bz2')
+        r.addSource('interfaces')
+        r.addSource('60-vboxdrv.rules')
+        r.addSource('vbox.cfg')
+        r.addSource('LocalConfig.kmk')
+	r.addSource('vboxdrv')
+	r.addSource('virtualbox.def')
+
+	
+	r.ManualConfigure('--disable-hardening')
+
+	r.Run('. env.sh && kmk all')
+
+        # Building the kernel modules requires that we package up the
+        # directory with the module sources, but we don't want that
+        # included by default in all VirtualBox installations.
+        # It is available for folks who want to compile their own
+        # modules, though.
+        r.Install('out/*/release/bin/src/', '/usr/src/VirtualBox/kernel/')
+        r.ComponentSpec('module-source', '/usr/src/VirtualBox/kernel/')
+        r.ByDefault(exceptions=':module-source')
+
+	# We also want a local copy of the kernel drivers
+	# So we can compile then and add the pre-compiled version
+	# to the distribution
+	r.Run('tar zcf /tmp/vbox-module-%(version)s-x86.tar.gz out/*/release/bin/src')
+
+
+
+#	r.Remove('out/*/release/bin/additions/VBoxClient')
+	for dir in ('additions', 'src', 'sdk'):
+	   r.Run('rm -rf out/*/release/bin/'+dir)
+
+        r.Install('out/*/release/bin/*', '%(vbdir)s/')
+
+	for library in ('VBoxDDU', 'VBoxREM', 'VBoxVMM', 'VBoxRT', 'VBoxXPCOM'):
+	   r.Symlink('%(vbdir)s/'+library+'.so', '%(vbdir)s/components/'+library+'.so')
+
+#        r.Install('out/*/release/bin/components/*', '%(vbdir)s/bin/components/',
+#                  preserveSymlinks=True)
+
+        r.ComponentSpec('runtime', '%(vbdir)s/components/')
+
+	# We build the kernel modules separately, one flavor per supported
+        # kernel, in the VirtualBox-kernel package
+        r.Requires('VirtualBox-kernel:runtime(%(version)s)',
+                   '%(vbdir)s/VirtualBox')
+
+        # Perhaps these scripts could be enhanced...
+        for program in ('VBoxManage', 'VBoxSDL', 'VBoxSVC', 'VBoxHeadless'):
+            r.Symlink('%(vbdir)s/VBox.sh', '%(bindir)s/'+program)
+
+	r.Install('vbox.cfg', '%(sysconfdir)s/vbox/')
+	r.Install('60-vboxdrv.rules', '%(sysconfdir)s/udev/rules.d/')
+	r.Install('virtualbox.def', '%(sysconfdir)s/default/virtualbox')
+	r.Install('vboxdrv', '%(initdir)s/vboxdrv')
+
+	r.TagSpec('initscript', '%(initdir)s/')
