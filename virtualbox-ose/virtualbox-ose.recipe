@@ -3,7 +3,7 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
+loadInstalled('python')
 class VirtualboxOse(PackageRecipe):
     name = 'virtualbox-ose'
     version = '3.2.0'
@@ -23,72 +23,220 @@ class VirtualboxOse(PackageRecipe):
 		     'python:devel',
 		     'PIL:python',
 		     'libpng:devel',
-            'iasl:runtime',
-              'diffutils:runtime',]
+                     'iasl:runtime',
+                     'diffutils:runtime',
+                     'Mesa:devel', 'SDL:devel', 'libX11:devel', 'libXcomposite:devel',
+                     'libXcursor:devel', 'libXdamage:devel', 'libXext:devel',
+                     'libXfixes:devel', 'libXinerama:devel', 'libXmu:devel',
+                     'libXrandr:devel', 'libXt:devel',
+                     'pam:devel', 'qt4:devel', 'qt4-core:devellib',
+                     'qt4-gui:devellib']
  
     def setup(r):
 	r.macros.archive_version = 'OSE-%(version)s'
-	r.macros.vbdir = '/opt/virtualbox'
         r.macros.cflags += ' -L%(libdir)s/xorg.mesa.3d'
         r.Environment('KBUILDDIR', '%(builddir)s')
 
 
         r.addArchive('http://download.virtualbox.org/virtualbox/%(version)s/'
-                'VirtualBox-%(version)s-OSE.tar.bz2')
-        r.addSource('interfaces')
-        r.addSource('60-vboxdrv.rules')
-        r.addSource('vbox.cfg')
-        r.addSource('LocalConfig.kmk')
-	r.addSource('vboxdrv')
-	r.addSource('virtualbox.def')
+                     'VirtualBox-%(version)s-OSE.tar.bz2')
 
-	
-	r.ManualConfigure('--disable-hardening')
+        # FIXME - locate new location of file bellow
+        # r.addSource('http://download.virtualbox.org/download/%(version)s/UserManual.pdf')
 
-	r.Run('. env.sh && kmk all')
+
+
+        for f in [ 'VirtualBox-OSE-90-vboxdrv.rules',
+                   'VirtualBox-OSE-60-vboxguest.rules',
+                   'VirtualBox-OSE.modules',
+                   'VirtualBox-OSE-guest.modules',
+                   'VirtualBox-OSE-vboxresize.desktop',
+                   'VirtualBox-OSE.blacklist-kvm']:
+            r.addSource('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + f + '?root=free', 
+                        dest = f)
+
+        for p in [ 'VirtualBox-OSE-3.2.0-noupdate.patch',
+                   'VirtualBox-OSE-3.2.0-strings.patch',
+                   'VirtualBox-OSE-3.1.0-libcxx.patch',
+                   # 'VirtualBox-OSE-3.2.0-xorg17.patch',
+                   'VirtualBox-OSE-3.2.0-optflags.patch',
+                   'VirtualBox-OSE-3.2.0-32bit.patch',
+                   'VirtualBox-OSE-3.2.0-visibility.patch',
+                   # 'VirtualBox-OSE-3.2.0-noansi.patch',
+                   'VirtualBox-OSE-3.2.0-cpuid.patch', ]:
+            r.addPatch('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + p + '?root=free')
+                  
+        r.Replace('lGL', 'lGL -L%(libdir)s/xorg.mesa.3d ', 'configure')
+        # brute force approach as upstream build system not specially sane
+        r.Replace('fPIC', 'fPIC -L%(libdir)s/xorg.mesa.3d', 'Config.kmk')
+
+	r.macros.optflags += ' -L%(libdir)s/xorg.mesa.3d '
+	r.ManualConfigure('--disable-kmods --enable-webservice ')
+
+	r.Run('. env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
+              ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= '
+              ' VBOX_WITH_UPDATE_REQUEST= KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
+              ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" '
+              ' VBOX_GCC_R0_OPT="%(optflags)s" VBOX_XCURSOR_LIBS="Xcursor Xext X11 GL" ')
+
+
+        # 
+        # Binaries and Wrapper with Launchers
+        r.Install('obj/bin/VBox.sh', '%(bindir)s/VBox', mode = 0755)
+        r.Symlink('VBox', '%(bindir)s/VBoxHeadless')
+        r.Symlink('VBox', '%(bindir)s/VBoxManage')
+        r.Symlink('VBox', '%(bindir)s/VBoxSDL')
+        r.Symlink('VBox', '%(bindir)s/VirtualBox') 
+
+        for i in [ 'obj/bin/VBoxTunctl',
+                   'obj/bin/VBoxBFE']:
+            r.Install(i, '%(bindir)s/', mode = 0755)
+
+        # Components
+        r.Install('obj/bin/components/*',
+                  '%(libdir)s/virtualbox/components/',
+                  mode = 0755) 
+        
+        # Lib
+        r.Install('obj/bin/*.so', '%(libdir)s/virtualbox/', mode = 0755)
+        
+        for f in [ 'obj/bin/V*.gc',
+                   'obj/bin/V*.r0',
+                   'obj/bin/VBoxEFI*.fd' ]: 
+            
+            r.Install(f, '%(libdir)s/virtualbox/', mode = 0644)
+
+        # Documentation
+        # r.Install('UserManual.pdf', '%(docdir)s/virtualbox/', mode = 0644)
+
+        # Executables
+        for f in [ 'obj/bin/EfiThunk',
+                   'obj/bin/VBoxHeadless',
+                   'obj/bin/VBoxSDL',
+                   'obj/bin/VBoxNetDHCP',
+                   'obj/bin/VBoxNetAdpCtl',
+                   'obj/bin/VirtualBox',
+                   'obj/bin/VBoxManage',
+                   'obj/bin/VBoxSVC',
+                   'obj/bin/VBoxXPCOMIPCD',
+                   'obj/bin/VBoxSysInfo.sh',
+                   'obj/bin/vboxshell.py',
+                   'obj/bin/VBoxTestOGL',
+                   # FIXME - we need gsoap packaged in order
+                   # for webservice to build
+                   # 'obj/bin/vboxwebsrv',
+                   # 'obj/bin/webtest',
+                   ]:
+            r.Install(f, '%(libdir)s/virtualbox/',
+                      mode = 0755)
+            
+        # Language files
+        r.Install('obj/bin/nls/*', '%(libdir)s/virtualbox/nls/', mode = 0755)
+
+        # SDK
+        r.macros.pyver = Python.majversion
+        r.macros.sitepkgs = '%(libdir)s/python%(pyver)s/site-packages'
+        r.Copy('obj/bin/sdk/*', '%(datadir)s/virtualbox/sdk/')
+        r.Move('%(datadir)s/virtualbox/sdk/bindings/xpcom/python/xpcom',
+               '%(sitepkgs)s/virtualbox/')
+        r.Symlink('../../../../../../..%(sitepkgs)s/virtualbox/xpcom',
+                  '%(datadir)s/virtualbox/sdk/bindings/xpcom/python/xpcom')
+
+        # Icon
+        r.Install('obj/bin/VBox.png', '%(datadir)s/pixmaps/', mode = 0644)
+        
+        # Guest X.Org drivers
+        r.macros.x11_api = '18'
+        
+        r.Install('obj/bin/additions/vboxmouse_drv_%(x11_api)s.so',
+                  '%(libdir)s/xorg/modules/drivers/vboxmouse_drv.so',
+                  mode = 0755)
+        r.Install('obj/bin/additions/vboxvideo_drv_%(x11_api)s.so',
+                  '%(libdir)s/xorg/modules/drivers/vboxvideo_drv.so',
+                  mode = 0755)
+
+        r.Install('src/VBox/Additions/linux/installer/90-vboxguest.fdi',
+                  '%(datadir)s/hal/fdi/policy/20thirdparty/90-vboxguest.fdi',
+                  mode = 0755)
+
+        # Guest tools
+        for f in [ 'obj/bin/additions/mount.vboxsf',
+                   'obj/bin/additions/VBoxService',
+                   'obj/bin/additions/VBoxClient',
+                   'obj/bin/additions/VBoxControl',]:
+            r.Install(f, '%(bindir)s', mode = 0755)
+        
+        r.Install('src/VBox/Additions/x11/Installer/98vboxadd-xclient',
+                  '%(sysconfdir)s/X11/xinit/xinitrc.d/98vboxadd-xclient.sh', mode = 0755)
+
+        r.Install('src/VBox/Additions/x11/Installer/vboxclient.desktop',
+                  '%(sysconfdir)s/xdg/autostart/vboxclient.desktop', mode = 0755)
+
+        r.Install('VirtualBox-OSE-vboxresize.desktop',
+                  '%(datadir)s/gdm/autostart/LoginWindow/vbox-autoresize.desktop', mode = 0755)
+
+
+        # Guest libraries
+        r.Install('obj/bin/additions/VBoxOGL*.so', '%(libdir)s', mode = 0755)
+        r.Symlink('../VBoxOGL.so', '%(libdir)s/dri/vboxvideo_dri.so')
+
+        r.Install('obj/bin/additions/pam_vbox.so', '%(lib)s/security/',
+                  mode = 0755)
+
+
+        # Installation root configuration
+        r.Create('%(sysconfdir)s/vbox/vbox.cfg ', contents = """ INSTALL_DIR=%(libdir)s/virtualbox' """)
+
+        # Install udev rules
+        r.Install('VirtualBox-OSE-90-vboxdrv.rules',
+                  '%(sysconfdir)s/udev/rules.d/90-vboxdrv.rules', mode = 0644)
+        r.Install('VirtualBox-OSE-60-vboxguest.rules',
+                  '%(sysconfdir)s/udev/rules.d/60-vboxguest.rules', mode = 0644)
+
+        # Install modules load script
+        r.Install('VirtualBox-OSE.modules', '%(sysconfdir)s/sysconfig/modules/%(name)s.modules', mode = 0755)
+        r.Install('VirtualBox-OSE-guest.modules', '%(sysconfdir)s/sysconfig/modules/%(name)s-guest.modules', mode = 0755)
+        r.Install('VirtualBox-OSE.blacklist-kvm', '%(sysconfdir)s/modprobe.d/%(name)s-blacklist-kvm.conf', mode = 0644)
+
 
         # Building the kernel modules requires that we package up the
         # directory with the module sources, but we don't want that
         # included by default in all VirtualBox installations.
         # It is available for folks who want to compile their own
         # modules, though.
-        r.Install('out/*/release/bin/src/', '/usr/src/VirtualBox/kernel/')
+        r.Install('obj/bin/src/vbox*', '/usr/src/VirtualBox/kernel/')
+        r.Install('obj/bin/additions/src/vbox*', '/usr/src/VirtualBox/kernel/')
         r.ComponentSpec('module-source', '/usr/src/VirtualBox/kernel/')
         r.ByDefault(exceptions=':module-source')
 
-	# We also want a local copy of the kernel drivers
-	# So we can compile then and add the pre-compiled version
-	# to the distribution
-	r.Run('tar zcf /tmp/vbox-module-%(version)s-x86.tar.gz out/*/release/bin/src')
-
-
-
-#	r.Remove('out/*/release/bin/additions/VBoxClient')
-	for dir in ('additions', 'src', 'sdk'):
-	   r.Run('rm -rf out/*/release/bin/'+dir)
-
-        r.Install('out/*/release/bin/*', '%(vbdir)s/')
-
-	for library in ('VBoxDDU', 'VBoxREM', 'VBoxVMM', 'VBoxRT', 'VBoxXPCOM'):
-	   r.Symlink('%(vbdir)s/'+library+'.so', '%(vbdir)s/components/'+library+'.so')
-
-#        r.Install('out/*/release/bin/components/*', '%(vbdir)s/bin/components/',
-#                  preserveSymlinks=True)
-
-        r.ComponentSpec('runtime', '%(vbdir)s/components/')
 
 	# We build the kernel modules separately, one flavor per supported
         # kernel, in the VirtualBox-kernel package
         r.Requires('VirtualBox-kernel:runtime(%(version)s)',
-                   '%(vbdir)s/VirtualBox')
+                   '%(bindir)s/VBox')
 
-        # Perhaps these scripts could be enhanced...
-        for program in ('VBoxManage', 'VBoxSDL', 'VBoxSVC', 'VBoxHeadless'):
-            r.Symlink('%(vbdir)s/VBox.sh', '%(bindir)s/'+program)
-
-	r.Install('vbox.cfg', '%(sysconfdir)s/vbox/')
-	r.Install('60-vboxdrv.rules', '%(sysconfdir)s/udev/rules.d/')
-	r.Install('virtualbox.def', '%(sysconfdir)s/default/virtualbox')
-	r.Install('vboxdrv', '%(initdir)s/vboxdrv')
 
 	r.TagSpec('initscript', '%(initdir)s/')
+
+        # set Perms right
+        for f in [ '%(libdir)s/virtualbox/VBoxHeadless', 
+                   '%(libdir)s/virtualbox/VBoxSDL', 
+                   '%(libdir)s/virtualbox/VBoxNetDHCP', 
+                   '%(libdir)s/virtualbox/VBoxNetAdpCtl', 
+                   '%(libdir)s/virtualbox/VirtualBox', ]:
+            r.SetModes(f, 04755)
+
+        for f in [ '/%(lib)s/security/pam_vbox.so',
+                   '%(bindir)s/mount.vboxsf',
+                   '%(bindir)s/VBoxClient',
+                   '%(bindir)s/VBoxControl',
+                   '%(bindir)s/VBoxService',
+                   '%(libdir)s/xorg/modules/drivers/',
+                   '%(libdir)s/dri/',
+                   '%(libdir)s/VBoxOGL*.so',
+                   '%(sysconfdir)s/X11/xinit/xinitrc.d/98vboxadd-xclient.sh',
+                   '%(sysconfdir)s/xdg/autostart/vboxclient.desktop',
+                   '%(datadir)s/hal/fdi/policy/20thirdparty/90-vboxguest.fdi',
+                   '%(sysconfdir)s/udev/rules.d/60-vboxguest.rules',
+                   '%(sysconfdir)s/sysconfig/modules/%(name)s-guest.modules']:
+            r.PackageSpec('virtualbox-guest', f)
