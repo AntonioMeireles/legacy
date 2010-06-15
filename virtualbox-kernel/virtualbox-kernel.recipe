@@ -5,23 +5,39 @@
 #
 
 loadSuperClass('kernelmodulepackage')
+loadInstalled('virtualbox-ose')
 class VirtualboxKernel(KernelModulePackageRecipe):
     name = 'virtualbox-kernel'
-    version = '2.0.2'
+    version = VirtualboxOse.version
  
     buildRequires = [
         'autoconf:runtime',
         'file:runtime',
         'make:runtime',
+        'virtualbox-ose:module-source'
       ]
  
     def unpack(r):
-        r.addArchive('vbox-module-%(version)s-x86.tar.gz', use=Arch.x86)
-        r.addArchive('vbox-module-%(version)s-x86_64.tar.gz', use=Arch.x86_64)
-        r.Environment('KERN_DIR', '/lib/modules/%(kver)s/build/')
+        r.addAction('cp -ar /usr/src/VirtualBox/kernel/* .')
 
     def build(r):
-        r.Make()
+        for suf in ['drv', 'netflt', 'netadp', 'guest', 'sf', 'video']:
+            name = 'vbox' + suf
+            r.Make(dir = name)
+
+    def install(r):
+        r.macros.moduledir = 'updates'
+        for suf in ['drv', 'netflt', 'netadp', 'guest', 'sf', 'video']:
+            name = 'vbox' + suf
+        
+            r.Install(name + '/*.ko', '/lib/modules/%(kver)s/%(moduledir)s/')
+
 
     def policy(r):
         r.ComponentProvides('%(version)s')
+        # host  modules : vboxdrv,vboxnetflt,vboxnetadp
+        # guest modules : vboxguest,vboxsf,vboxvideo
+        # FIXME we should probably split this in two pkgs in order to differentiate
+        # host from guest kmods. Point is, no one seems to be doing that ...
+
+
