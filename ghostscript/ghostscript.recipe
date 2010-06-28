@@ -4,9 +4,11 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Ghostscript(CPackageRecipe):
+loadSuperClass('rpmpackage')
+class Ghostscript(RPMPackageRecipe, CPackageRecipe):
     name = 'ghostscript'
-    version = '8.61'
+    version = '8.71'
+    rpmRelease = '9.fc13'
 
     buildRequires = [ 'SDL:devel', 'libICE:devel', 'libSM:devel',
         'libX11:devel', 'libXext:devel', 'libXt:devel', 'perl:runtime',
@@ -14,38 +16,78 @@ class Ghostscript(CPackageRecipe):
         'libstdc++:devel', 'libtiff:devel', 'openssl:devel',
         'pkgconfig:devel', 'zlib:devel', 'expat:devel', 'gnutls:devel']
 
+    rpmPatches = [
+        'ghostscript-multilib.patch',
+        'ghostscript-scripts.patch',
+        'ghostscript-noopt.patch',
+        'ghostscript-fPIC.patch',
+        'ghostscript-runlibfileifexists.patch',
+        'ghostscript-system-jasper.patch',
+        'ghostscript-pksmraw.patch',
+        'ghostscript-jbig2dec-nullderef.patch',
+        'ghostscript-gs-executable.patch',
+        'ghostscript-cups-filters.patch',
+        'ghostscript-CVE-2009-4270.patch',
+        'ghostscript-vsnprintf.patch',
+        'ghostscript-pdftoraster-exit.patch',
+        'ghostscript-ldflags.patch',
+        'ghostscript-pdf2dsc.patch',
+        'ghostscript-cups-realloc-color-depth.patch',
+        'ghostscript-tif-fail-close.patch',
+        'ghostscript-tiff-default-strip-size.patch',
+        'ghostscript-tiff-fixes.patch',
+    ]
+
+    externalArchive = 'mirror://sourceforge/%(name)s/'
+
     def setup(r):
-        r.macros.upver = r.version.replace('.', '')
-        r.addArchive('mirror://sourceforge/%(name)s/')
-
-        # RPL-2217 CVE-2008-0411
-        r.addPatch('ghostscript-8.61.CVE-2008-0411.patch')
-
-        # RPL-2991 CVE-2009-0583 CVE-2009-0584
-        r.addPatch('ghostscript-CVE-2009-0583.patch')
-
-        # RPL-
-        r.addPatch('CVE-2009-0196.patch', dir='jbig2dec')
-        r.addPatch('CVE-2009-0792.patch')
-        r.addPatch('CVE-2007-6725.patch')
-        r.addPatch('CVE-2008-6679.patch')
+        r.unpack()
 
         r.macros.cflags += ' -fPIC '
+        r.macros.fontpath = ':'.join([
+            '%(datadir)s/fonts/default/%(name)s',
+            '%(datadir)s/fonts/default/Type1',
+            '%(datadir)s/fonts/default/amspsfnt/pfb',
+            '%(datadir)s/fonts/default/cmpsfont/pfb',
+            '%(datadir)s/fonts',
+            '%(datadir)s/%(name)s/conf.d',
+            '%(sysconfdir)s/%(name)s',
+            '%(sysconfdir)s/%(name)s/%(version)s',
+        ])
 
-        r.Configure()
+        r.Configure('--with-ijs --enable-dynamic '
+            '--with-fontpath="%(fontpath)s" '
+            '--with-drivers=ALL --disable-compile-inits --with-system-libtiff')
+
+        r.Run('./autogen.sh', dir='ijs')
+        r.Configure("--enable-shared --disable-static", dir="ijs")
+
         r.Make('so')
         r.Make()
+        r.Make('cups')
         r.MakeInstall()
         r.MakeInstall(installtarget='soinstall')
+        r.MakeInstall(dir="ijs")
 
         r.Move('%(bindir)s/gsc', '%(bindir)s/gs')
-        r.Remove('%(bindir)s/gsx')
 
-        # Don't ship files that get shipped in the cups package.
-        r.Remove('%(sysconfdir)s/cups', recursive = True)
-        r.Remove('%(libdir)s/cups/filter', recursive = True)
-        r.Remove('/usr/lib/cups/filter', recursive = True)
-        # r.Remove('%(datadir)s/cups/model/')
-        #r.ComponentSpec('cups', '/etc/cups/', '%(libdir)s/cups/filter/',
-        #                        '%(datadir)s/cups/model/')
+        r.Create("%(mandir)s/man1/%(name)s.1", contents = ".so man1/gs.1")
+        r.Install("base/errors.h", "%(includedir)s/%(name)s/")
 
+        r.MakeDirs("%(sysconfdir)s/%(name)s/%(version)s")
+        for f in [ 'Fontmap', 'cidfmap', 'CIDFnmap' ]:
+            r.Create("%(sysconfdir)s/%(name)s/%(version)s" + f + '.local',
+                contents = "")
+
+        # Don't ship fixmswrd.pl as it pulls in perl (bug #463948).
+        r.Remove("%(bindir)s/fixmswrd.pl")
+
+        r.Config("%(datadir)s/%(name)s/%(version)s/Resource/Init/gs_init.ps",
+            r.glob("%(datadir)s/%(name)s/%(version)s/Resource/Init/Fontmap*"))
+
+        r.ComponentSpec('cups', '%(sysconfdir)s/cups/',
+                        '%(prefix)s/lib/cups/filter/',
+                        '%(datadir)s/cups/mime/',
+                        '%(datadir)s/cups/model/',
+                        )
+        r.PackageSpec('%(name)s-gtk', '%(bindir)s/gsx')
