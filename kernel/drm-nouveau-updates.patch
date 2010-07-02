@@ -1,7 +1,7 @@
-From a4cbb7f1379aa9817c85840c6d079dd222641dbd Mon Sep 17 00:00:00 2001
+From 1fe467ac55c8503078f679b1f503e4895d6c5895 Mon Sep 17 00:00:00 2001
 From: Marcin Slusarz <marcin.slusarz@gmail.com>
 Date: Wed, 17 Feb 2010 19:04:00 +0100
-Subject: [PATCH] drm-nouveau-updates
+Subject: [PATCH 1/3] drm-nouveau-updates
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -444,43 +444,226 @@ Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
 drm/nv50: fix iommu errors caused by device reading from address 0
 
 Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: fix POST detection for certain chipsets
+
+We totally fail at detecting un-POSTed chipsets prior to G80.  This commit
+changes the pre-G80 POST detection to read the programmed horizontal total
+from CRTC 0, and assume the card isn't POSTed if it's 0.
+
+NVIDIA use some other heuristics more similar to what we do on G80, but I
+wasted quite a long time trying to figure out the exact specifics of what
+they do so we can try this for a bit instead.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv40: allow cold-booting of nv4x chipsets
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: fix init table handlers to return proper error codes
+
+We really want to be able to distinguish between INIT_DONE and an actual
+error sometimes.  This commit fixes up several lazy "return 0;" to be
+actual error codes, and explicitly reserves "0" as "success, but stop
+parsing this table".
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: display error message for any failed init table opcode
+
+Some handlers don't report specific errors, but we still *really* want to
+know if we failed to parse a complete init table.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: ensure we've parsed i2c table entry for INIT_*I2C* handlers
+
+We may not have parsed the entry yet if the i2c_index is for an i2c bus
+that's not referenced by a DCB encoder.
+
+This could be done oh so much more nicely, except we have to care about
+prehistoric DCB tables too, and they make life painful.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: support init table i2c device identifier 0x81
+
+It appears to be meant to reference the second "default index".
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: fix i2c-related init table handlers
+
+Mutliple issues.  INIT_ZM_I2C_BYTE/INIT_I2C_BYTE didn't even try and
+use the register value, and all the handlers were using the wrong
+slave address.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: cast IGP memory location to u64 before shifting
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: match U/DP script against SOR link
+
+It appears version 0x21 'U' and 'd' tables require us to take the SOR link
+into account when selecting the appropriate table for a particular output.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: fix memory detection for cards with >=4GiB VRAM
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: completely fail init if we fail to map the PRAMIN BAR
+
+On cards where there's a specific BAR for PRAMIN, we used to try and fall
+back to the "legacy" aperture within the mmio BAR.
+
+This is doomed to cause problems, so lets just fail completely as there's
+obviously something else very wrong anyway.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: Don't clear AGPCMD completely on INIT_RESET.
+
+We just need to clear the SBA and ENABLE bits to reset the AGP
+controller: If the AGP bridge was configured to use "fast writes",
+clearing the FW bit would break the subsequent MMIO writes and
+eventually end with a lockup.
+
+Note that all the BIOSes I've seen do the same as we did (it works for
+them because they don't use MMIO), OTOH the blob leaves FW untouched.
+
+Signed-off-by: Francisco Jerez <currojerez@riseup.net>
+
+drm/nouveau: Ignore broken legacy I2C entries.
+
+The nv05 card in the bug report [1] doesn't have usable I2C port
+register offsets (they're all filled with zeros). Ignore them and use
+the defaults.
+
+[1] http://bugs.launchpad.net/bugs/569505
+
+Signed-off-by: Francisco Jerez <currojerez@riseup.net>
+
+drm/nv50: use alternate source of SOR_MODE_CTRL for DP hack
+
+Fixes module unload+reload on Dell M4500, where the "normal" registers
+get reset to 0.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: fix duallink_possible calculation for DCB 4.0 cards
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: obey dcb->duallink_possible
+
+It was once assumed that all G8x had dual-link TMDS everywhere, this isn't
+actually the case - especially considering passive DP->DVI converters and
+some HDMI connectors only support single-link.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: fix dual-link displays when plugged into single-link outputs
+
+When selecting the native mode for a display we weren't taking into account
+whether or not it was actually supported on that particular output.
+
+This patch modifies our native mode selection to run all modes through
+mode_valid() first.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: reduce usage of fence spinlock to when absolutely necessary
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: move LVDS detection back to connector detect() time
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nouveau: Put the dithering check back in nouveau_connector_create.
+
+a7b9f9e5adef dropped it by accident.
+
+Signed-off-by: Francisco Jerez <currojerez@riseup.net>
+Tested-by: Thibaut Girka <thib@sitedethib.com>
+
+drm/nouveau: set encoder for lvds
+
+fixes oops in nouveau_connector_get_modes with nv_encoder is NULL
+
+Signed-off-by: Albert Damen <albrt@gmx.net>
+Signed-off-by: Francisco Jerez <currojerez@riseup.net>
+
+drm/nouveau: tidy connector/encoder creation a little
+
+Create connectors before encoders to avoid having to do another loop across
+encoder list whenever we create a new connector.  This allows us to pass
+the connector to the encoder creation functions, and avoid using a
+create_resources() callback since we can now call it directly.
+
+This can also potentially modify the connector ordering on nv50.  On cards
+where the DCB connector and encoder tables are in the same order, things
+will be unchanged.  However, there's some cards where the ordering between
+the tables differ, and in one case, leads us to naming the connectors
+"wrongly".
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv50: fix regression caused by ed15e77b6ee7c4fa6f50c18b3325e7f96ed3aade
+
+It became possible for us to have connectors present without any encoders
+attached (TV out, we don't support TVDAC yet), which caused the DDX to
+segfault.
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+drm/nv04: fix regression caused by ed15e77b6ee7c4fa6f50c18b3325e7f96ed3aade
+
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
 ---
  drivers/gpu/drm/nouveau/Makefile            |    7 +-
- drivers/gpu/drm/nouveau/nouveau_bios.c      |  672 +++++---
- drivers/gpu/drm/nouveau/nouveau_bios.h      |  132 +-
+ drivers/gpu/drm/nouveau/nouveau_bios.c      | 1057 ++++++++-----
+ drivers/gpu/drm/nouveau/nouveau_bios.h      |  133 +-
  drivers/gpu/drm/nouveau/nouveau_bo.c        |   68 +-
  drivers/gpu/drm/nouveau/nouveau_calc.c      |    4 +-
- drivers/gpu/drm/nouveau/nouveau_channel.c   |   15 +-
- drivers/gpu/drm/nouveau/nouveau_connector.c |  163 ++-
+ drivers/gpu/drm/nouveau/nouveau_channel.c   |   17 +-
+ drivers/gpu/drm/nouveau/nouveau_connector.c |  383 +++---
  drivers/gpu/drm/nouveau/nouveau_connector.h |    3 +-
  drivers/gpu/drm/nouveau/nouveau_debugfs.c   |   18 +-
  drivers/gpu/drm/nouveau/nouveau_dma.c       |    5 +
  drivers/gpu/drm/nouveau/nouveau_dp.c        |    8 +-
  drivers/gpu/drm/nouveau/nouveau_drv.c       |   14 +-
- drivers/gpu/drm/nouveau/nouveau_drv.h       |   59 +-
- drivers/gpu/drm/nouveau/nouveau_encoder.h   |    3 +
+ drivers/gpu/drm/nouveau/nouveau_drv.h       |   70 +-
+ drivers/gpu/drm/nouveau/nouveau_encoder.h   |    7 +-
+ drivers/gpu/drm/nouveau/nouveau_fence.c     |   31 +-
  drivers/gpu/drm/nouveau/nouveau_gem.c       |   55 +-
  drivers/gpu/drm/nouveau/nouveau_hw.c        |    6 +-
  drivers/gpu/drm/nouveau/nouveau_i2c.c       |   23 +-
  drivers/gpu/drm/nouveau/nouveau_irq.c       |  615 +++++++-
- drivers/gpu/drm/nouveau/nouveau_mem.c       |  124 +-
+ drivers/gpu/drm/nouveau/nouveau_mem.c       |  129 +-
  drivers/gpu/drm/nouveau/nouveau_reg.h       |    1 +
  drivers/gpu/drm/nouveau/nouveau_sgdma.c     |   18 +
- drivers/gpu/drm/nouveau/nouveau_state.c     |   20 +-
+ drivers/gpu/drm/nouveau/nouveau_state.c     |   39 +-
  drivers/gpu/drm/nouveau/nv04_crtc.c         |    6 +-
- drivers/gpu/drm/nouveau/nv04_dac.c          |    8 +-
- drivers/gpu/drm/nouveau/nv04_dfp.c          |    4 +-
- drivers/gpu/drm/nouveau/nv04_display.c      |   49 +-
+ drivers/gpu/drm/nouveau/nv04_dac.c          |   15 +-
+ drivers/gpu/drm/nouveau/nv04_dfp.c          |   12 +-
+ drivers/gpu/drm/nouveau/nv04_display.c      |   64 +-
  drivers/gpu/drm/nouveau/nv04_fbcon.c        |    6 +-
  drivers/gpu/drm/nouveau/nv04_fifo.c         |    5 +
- drivers/gpu/drm/nouveau/nv04_tv.c           |    2 +-
- drivers/gpu/drm/nouveau/nv17_tv.c           |    6 +-
+ drivers/gpu/drm/nouveau/nv04_graph.c        |    3 +-
+ drivers/gpu/drm/nouveau/nv04_tv.c           |   10 +-
+ drivers/gpu/drm/nouveau/nv17_tv.c           |   12 +-
  drivers/gpu/drm/nouveau/nv40_fifo.c         |    7 +-
  drivers/gpu/drm/nouveau/nv40_graph.c        |   21 +
- drivers/gpu/drm/nouveau/nv50_calc.c         |   88 +
+ drivers/gpu/drm/nouveau/nv50_calc.c         |   87 +
  drivers/gpu/drm/nouveau/nv50_crtc.c         |   46 +-
- drivers/gpu/drm/nouveau/nv50_dac.c          |    4 +-
- drivers/gpu/drm/nouveau/nv50_display.c      |  111 +-
+ drivers/gpu/drm/nouveau/nv50_dac.c          |   13 +-
+ drivers/gpu/drm/nouveau/nv50_display.c      |  122 +-
  drivers/gpu/drm/nouveau/nv50_display.h      |    1 +
  drivers/gpu/drm/nouveau/nv50_fb.c           |   38 +
  drivers/gpu/drm/nouveau/nv50_fbcon.c        |   17 +-
@@ -489,8 +672,8 @@ Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
  drivers/gpu/drm/nouveau/nv50_graph.c        |  103 +-
  drivers/gpu/drm/nouveau/nv50_grctx.c        | 2383 +++++++++++++++++++++++++++
  drivers/gpu/drm/nouveau/nv50_instmem.c      |   18 +-
- drivers/gpu/drm/nouveau/nv50_sor.c          |   30 +-
- 45 files changed, 4304 insertions(+), 763 deletions(-)
+ drivers/gpu/drm/nouveau/nv50_sor.c          |   42 +-
+ 47 files changed, 4702 insertions(+), 1121 deletions(-)
  create mode 100644 drivers/gpu/drm/nouveau/nv50_calc.c
  create mode 100644 drivers/gpu/drm/nouveau/nv50_fb.c
  create mode 100644 drivers/gpu/drm/nouveau/nv50_gpio.c
@@ -523,7 +706,7 @@ index 48c290b..acd31ed 100644
  nouveau-$(CONFIG_DRM_NOUVEAU_DEBUG) += nouveau_debugfs.o
  nouveau-$(CONFIG_COMPAT) += nouveau_ioc32.o
 diff --git a/drivers/gpu/drm/nouveau/nouveau_bios.c b/drivers/gpu/drm/nouveau/nouveau_bios.c
-index 0e9cd1d..5472c76 100644
+index 0e9cd1d..1803cc4 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_bios.c
 +++ b/drivers/gpu/drm/nouveau/nouveau_bios.c
 @@ -26,6 +26,7 @@
@@ -534,7 +717,19 @@ index 0e9cd1d..5472c76 100644
  
  /* these defines are made up */
  #define NV_CIO_CRE_44_HEADA 0x0
-@@ -311,11 +312,11 @@ valid_reg(struct nvbios *bios, uint32_t reg)
+@@ -256,6 +257,11 @@ static bool NVShadowVBIOS(struct drm_device *dev, uint8_t *data)
+ struct init_tbl_entry {
+ 	char *name;
+ 	uint8_t id;
++	/* Return:
++	 *  > 0: success, length of opcode
++	 *    0: success, but abort further parsing of table (INIT_DONE etc)
++	 *  < 0: failure, table parsing will be aborted
++	 */
+ 	int (*handler)(struct nvbios *, uint16_t, struct init_exec *);
+ };
+ 
+@@ -311,11 +317,11 @@ valid_reg(struct nvbios *bios, uint32_t reg)
  
  	/* C51 has misaligned regs on purpose. Marvellous */
  	if (reg & 0x2 ||
@@ -548,7 +743,7 @@ index 0e9cd1d..5472c76 100644
  	    reg != 0x130d && reg != 0x1311 && reg != 0x60081d)
  		NV_WARN(dev, "=== C51 misaligned reg 0x%08X not verified ===\n",
  			reg);
-@@ -420,7 +421,7 @@ bios_wr32(struct nvbios *bios, uint32_t reg, uint32_t data)
+@@ -420,7 +426,7 @@ bios_wr32(struct nvbios *bios, uint32_t reg, uint32_t data)
  	LOG_OLD_VALUE(bios_rd32(bios, reg));
  	BIOSLOG(bios, "	Write: Reg: 0x%08X, Data: 0x%08X\n", reg, data);
  
@@ -557,7 +752,7 @@ index 0e9cd1d..5472c76 100644
  		still_alive();
  		nv_wr32(bios->dev, reg, data);
  	}
-@@ -647,7 +648,7 @@ nv50_pll_set(struct drm_device *dev, uint32_t reg, uint32_t clk)
+@@ -647,7 +653,7 @@ nv50_pll_set(struct drm_device *dev, uint32_t reg, uint32_t clk)
  	reg0 = (reg0 & 0xfff8ffff) | (pll.log2P << 16);
  	reg1 = (reg1 & 0xffff0000) | (pll.N1 << 8) | pll.M1;
  
@@ -566,7 +761,7 @@ index 0e9cd1d..5472c76 100644
  		still_alive();
  		nv_wr32(dev, reg + 4, reg1);
  		nv_wr32(dev, reg + 0, reg0);
-@@ -689,7 +690,7 @@ setPLL(struct nvbios *bios, uint32_t reg, uint32_t clk)
+@@ -689,7 +695,7 @@ setPLL(struct nvbios *bios, uint32_t reg, uint32_t clk)
  static int dcb_entry_idx_from_crtchead(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -575,7 +770,7 @@ index 0e9cd1d..5472c76 100644
  
  	/*
  	 * For the results of this function to be correct, CR44 must have been
-@@ -700,7 +701,7 @@ static int dcb_entry_idx_from_crtchead(struct drm_device *dev)
+@@ -700,7 +706,7 @@ static int dcb_entry_idx_from_crtchead(struct drm_device *dev)
  
  	uint8_t dcb_entry = NVReadVgaCrtc5758(dev, bios->state.crtchead, 0);
  
@@ -584,7 +779,88 @@ index 0e9cd1d..5472c76 100644
  		NV_ERROR(dev, "CR58 doesn't have a valid DCB entry currently "
  				"(%02X)\n", dcb_entry);
  		dcb_entry = 0x7f;	/* unused / invalid marker */
-@@ -713,25 +714,26 @@ static struct nouveau_i2c_chan *
+@@ -709,29 +715,121 @@ static int dcb_entry_idx_from_crtchead(struct drm_device *dev)
+ 	return dcb_entry;
+ }
+ 
++static int
++read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, int index, struct dcb_i2c_entry *i2c)
++{
++	uint8_t dcb_i2c_ver = dcb_version, headerlen = 0, entry_len = 4;
++	int i2c_entries = DCB_MAX_NUM_I2C_ENTRIES;
++	int recordoffset = 0, rdofs = 1, wrofs = 0;
++	uint8_t port_type = 0;
++
++	if (!i2ctable)
++		return -EINVAL;
++
++	if (dcb_version >= 0x30) {
++		if (i2ctable[0] != dcb_version) /* necessary? */
++			NV_WARN(dev,
++				"DCB I2C table version mismatch (%02X vs %02X)\n",
++				i2ctable[0], dcb_version);
++		dcb_i2c_ver = i2ctable[0];
++		headerlen = i2ctable[1];
++		if (i2ctable[2] <= DCB_MAX_NUM_I2C_ENTRIES)
++			i2c_entries = i2ctable[2];
++		else
++			NV_WARN(dev,
++				"DCB I2C table has more entries than indexable "
++				"(%d entries, max %d)\n", i2ctable[2],
++				DCB_MAX_NUM_I2C_ENTRIES);
++		entry_len = i2ctable[3];
++		/* [4] is i2c_default_indices, read in parse_dcb_table() */
++	}
++	/*
++	 * It's your own fault if you call this function on a DCB 1.1 BIOS --
++	 * the test below is for DCB 1.2
++	 */
++	if (dcb_version < 0x14) {
++		recordoffset = 2;
++		rdofs = 0;
++		wrofs = 1;
++	}
++
++	if (index == 0xf)
++		return 0;
++	if (index >= i2c_entries) {
++		NV_ERROR(dev, "DCB I2C index too big (%d >= %d)\n",
++			 index, i2ctable[2]);
++		return -ENOENT;
++	}
++	if (i2ctable[headerlen + entry_len * index + 3] == 0xff) {
++		NV_ERROR(dev, "DCB I2C entry invalid\n");
++		return -EINVAL;
++	}
++
++	if (dcb_i2c_ver >= 0x30) {
++		port_type = i2ctable[headerlen + recordoffset + 3 + entry_len * index];
++
++		/*
++		 * Fixup for chips using same address offset for read and
++		 * write.
++		 */
++		if (port_type == 4)	/* seen on C51 */
++			rdofs = wrofs = 1;
++		if (port_type >= 5)	/* G80+ */
++			rdofs = wrofs = 0;
++	}
++
++	if (dcb_i2c_ver >= 0x40) {
++		if (port_type != 5 && port_type != 6)
++			NV_WARN(dev, "DCB I2C table has port type %d\n", port_type);
++
++		i2c->entry = ROM32(i2ctable[headerlen + recordoffset + entry_len * index]);
++	}
++
++	i2c->port_type = port_type;
++	i2c->read = i2ctable[headerlen + recordoffset + rdofs + entry_len * index];
++	i2c->write = i2ctable[headerlen + recordoffset + wrofs + entry_len * index];
++
++	return 0;
++}
++
+ static struct nouveau_i2c_chan *
  init_i2c_device_find(struct drm_device *dev, int i2c_index)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -606,6 +882,20 @@ index 0e9cd1d..5472c76 100644
  	if (i2c_index == 0x80)	/* g80+ */
 -		i2c_index = bdcb->i2c_default_indices & 0xf;
 +		i2c_index = dcb->i2c_default_indices & 0xf;
++	else
++	if (i2c_index == 0x81)
++		i2c_index = (dcb->i2c_default_indices & 0xf0) >> 4;
++
++	if (i2c_index > DCB_MAX_NUM_I2C_ENTRIES) {
++		NV_ERROR(dev, "invalid i2c_index 0x%x\n", i2c_index);
++		return NULL;
++	}
++
++	/* Make sure i2c table entry has been parsed, it may not
++	 * have been if this is a bus not referenced by a DCB encoder
++	 */
++	read_dcb_i2c_entry(dev, dcb->version, dcb->i2c_table,
++			   i2c_index, &dcb->i2c[i2c_index]);
  
  	return nouveau_i2c_find(dev, i2c_index);
  }
@@ -616,7 +906,7 @@ index 0e9cd1d..5472c76 100644
  {
  	/*
  	 * For mlv < 0x80, it is an index into a table of TMDS base addresses.
-@@ -744,6 +746,7 @@ static uint32_t get_tmds_index_reg(struct drm_device *dev, uint8_t mlv)
+@@ -744,6 +842,7 @@ static uint32_t get_tmds_index_reg(struct drm_device *dev, uint8_t mlv)
  	 */
  
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -624,7 +914,7 @@ index 0e9cd1d..5472c76 100644
  	const int pramdac_offset[13] = {
  		0, 0, 0x8, 0, 0x2000, 0, 0, 0, 0x2008, 0, 0, 0, 0x2000 };
  	const uint32_t pramdac_table[4] = {
-@@ -756,13 +759,12 @@ static uint32_t get_tmds_index_reg(struct drm_device *dev, uint8_t mlv)
+@@ -756,13 +855,12 @@ static uint32_t get_tmds_index_reg(struct drm_device *dev, uint8_t mlv)
  		dcb_entry = dcb_entry_idx_from_crtchead(dev);
  		if (dcb_entry == 0x7f)
  			return 0;
@@ -640,7 +930,25 @@ index 0e9cd1d..5472c76 100644
  			NV_ERROR(dev, "Magic Lookup Value too big (%02X)\n",
  									mlv);
  			return 0;
-@@ -1066,6 +1068,126 @@ init_io_flag_condition(struct nvbios *bios, uint16_t offset,
+@@ -817,7 +915,7 @@ init_io_restrict_prog(struct nvbios *bios, uint16_t offset,
+ 		NV_ERROR(bios->dev,
+ 			 "0x%04X: Config 0x%02X exceeds maximal bound 0x%02X\n",
+ 			 offset, config, count);
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	configval = ROM32(bios->data[offset + 11 + config * 4]);
+@@ -919,7 +1017,7 @@ init_io_restrict_pll(struct nvbios *bios, uint16_t offset,
+ 		NV_ERROR(bios->dev,
+ 			 "0x%04X: Config 0x%02X exceeds maximal bound 0x%02X\n",
+ 			 offset, config, count);
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	freq = ROM16(bios->data[offset + 12 + config * 2]);
+@@ -1066,6 +1164,126 @@ init_io_flag_condition(struct nvbios *bios, uint16_t offset,
  }
  
  static int
@@ -767,7 +1075,223 @@ index 0e9cd1d..5472c76 100644
  init_idx_addr_latched(struct nvbios *bios, uint16_t offset,
  		      struct init_exec *iexec)
  {
-@@ -2572,48 +2694,37 @@ init_gpio(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+@@ -1169,7 +1387,7 @@ init_io_restrict_pll2(struct nvbios *bios, uint16_t offset,
+ 		NV_ERROR(bios->dev,
+ 			 "0x%04X: Config 0x%02X exceeds maximal bound 0x%02X\n",
+ 			 offset, config, count);
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	freq = ROM32(bios->data[offset + 11 + config * 4]);
+@@ -1230,12 +1448,11 @@ init_i2c_byte(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 	 */
+ 
+ 	uint8_t i2c_index = bios->data[offset + 1];
+-	uint8_t i2c_address = bios->data[offset + 2];
++	uint8_t i2c_address = bios->data[offset + 2] >> 1;
+ 	uint8_t count = bios->data[offset + 3];
+-	int len = 4 + count * 3;
+ 	struct nouveau_i2c_chan *chan;
+-	struct i2c_msg msg;
+-	int i;
++	int len = 4 + count * 3;
++	int ret, i;
+ 
+ 	if (!iexec->execute)
+ 		return len;
+@@ -1246,35 +1463,34 @@ init_i2c_byte(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	chan = init_i2c_device_find(bios->dev, i2c_index);
+ 	if (!chan)
+-		return 0;
++		return -ENODEV;
+ 
+ 	for (i = 0; i < count; i++) {
+-		uint8_t i2c_reg = bios->data[offset + 4 + i * 3];
++		uint8_t reg = bios->data[offset + 4 + i * 3];
+ 		uint8_t mask = bios->data[offset + 5 + i * 3];
+ 		uint8_t data = bios->data[offset + 6 + i * 3];
+-		uint8_t value;
++		union i2c_smbus_data val;
+ 
+-		msg.addr = i2c_address;
+-		msg.flags = I2C_M_RD;
+-		msg.len = 1;
+-		msg.buf = &value;
+-		if (i2c_transfer(&chan->adapter, &msg, 1) != 1)
+-			return 0;
++		ret = i2c_smbus_xfer(&chan->adapter, i2c_address, 0,
++				     I2C_SMBUS_READ, reg,
++				     I2C_SMBUS_BYTE_DATA, &val);
++		if (ret < 0)
++			return ret;
+ 
+ 		BIOSLOG(bios, "0x%04X: I2CReg: 0x%02X, Value: 0x%02X, "
+ 			      "Mask: 0x%02X, Data: 0x%02X\n",
+-			offset, i2c_reg, value, mask, data);
++			offset, reg, val.byte, mask, data);
+ 
+-		value = (value & mask) | data;
++		if (!bios->execute)
++			continue;
+ 
+-		if (bios->execute) {
+-			msg.addr = i2c_address;
+-			msg.flags = 0;
+-			msg.len = 1;
+-			msg.buf = &value;
+-			if (i2c_transfer(&chan->adapter, &msg, 1) != 1)
+-				return 0;
+-		}
++		val.byte &= mask;
++		val.byte |= data;
++		ret = i2c_smbus_xfer(&chan->adapter, i2c_address, 0,
++				     I2C_SMBUS_WRITE, reg,
++				     I2C_SMBUS_BYTE_DATA, &val);
++		if (ret < 0)
++			return ret;
+ 	}
+ 
+ 	return len;
+@@ -1300,12 +1516,11 @@ init_zm_i2c_byte(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 	 */
+ 
+ 	uint8_t i2c_index = bios->data[offset + 1];
+-	uint8_t i2c_address = bios->data[offset + 2];
++	uint8_t i2c_address = bios->data[offset + 2] >> 1;
+ 	uint8_t count = bios->data[offset + 3];
+-	int len = 4 + count * 2;
+ 	struct nouveau_i2c_chan *chan;
+-	struct i2c_msg msg;
+-	int i;
++	int len = 4 + count * 2;
++	int ret, i;
+ 
+ 	if (!iexec->execute)
+ 		return len;
+@@ -1316,23 +1531,25 @@ init_zm_i2c_byte(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	chan = init_i2c_device_find(bios->dev, i2c_index);
+ 	if (!chan)
+-		return 0;
++		return -ENODEV;
+ 
+ 	for (i = 0; i < count; i++) {
+-		uint8_t i2c_reg = bios->data[offset + 4 + i * 2];
+-		uint8_t data = bios->data[offset + 5 + i * 2];
++		uint8_t reg = bios->data[offset + 4 + i * 2];
++		union i2c_smbus_data val;
++
++		val.byte = bios->data[offset + 5 + i * 2];
+ 
+ 		BIOSLOG(bios, "0x%04X: I2CReg: 0x%02X, Data: 0x%02X\n",
+-			offset, i2c_reg, data);
+-
+-		if (bios->execute) {
+-			msg.addr = i2c_address;
+-			msg.flags = 0;
+-			msg.len = 1;
+-			msg.buf = &data;
+-			if (i2c_transfer(&chan->adapter, &msg, 1) != 1)
+-				return 0;
+-		}
++			offset, reg, val.byte);
++
++		if (!bios->execute)
++			continue;
++
++		ret = i2c_smbus_xfer(&chan->adapter, i2c_address, 0,
++				     I2C_SMBUS_WRITE, reg,
++				     I2C_SMBUS_BYTE_DATA, &val);
++		if (ret < 0)
++			return ret;
+ 	}
+ 
+ 	return len;
+@@ -1356,7 +1573,7 @@ init_zm_i2c(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 	 */
+ 
+ 	uint8_t i2c_index = bios->data[offset + 1];
+-	uint8_t i2c_address = bios->data[offset + 2];
++	uint8_t i2c_address = bios->data[offset + 2] >> 1;
+ 	uint8_t count = bios->data[offset + 3];
+ 	int len = 4 + count;
+ 	struct nouveau_i2c_chan *chan;
+@@ -1373,7 +1590,7 @@ init_zm_i2c(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	chan = init_i2c_device_find(bios->dev, i2c_index);
+ 	if (!chan)
+-		return 0;
++		return -ENODEV;
+ 
+ 	for (i = 0; i < count; i++) {
+ 		data[i] = bios->data[offset + 4 + i];
+@@ -1387,7 +1604,7 @@ init_zm_i2c(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 		msg.len = count;
+ 		msg.buf = data;
+ 		if (i2c_transfer(&chan->adapter, &msg, 1) != 1)
+-			return 0;
++			return -EIO;
+ 	}
+ 
+ 	return len;
+@@ -1426,7 +1643,7 @@ init_tmds(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	reg = get_tmds_index_reg(bios->dev, mlv);
+ 	if (!reg)
+-		return 0;
++		return -EINVAL;
+ 
+ 	bios_wr32(bios, reg,
+ 		  tmdsaddr | NV_PRAMDAC_FP_TMDS_CONTROL_WRITE_DISABLE);
+@@ -1470,7 +1687,7 @@ init_zm_tmds_group(struct nvbios *bios, uint16_t offset,
+ 
+ 	reg = get_tmds_index_reg(bios->dev, mlv);
+ 	if (!reg)
+-		return 0;
++		return -EINVAL;
+ 
+ 	for (i = 0; i < count; i++) {
+ 		uint8_t tmdsaddr = bios->data[offset + 3 + i * 2];
+@@ -1909,7 +2126,8 @@ init_reset(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 	/* no iexec->execute check by design */
+ 
+ 	pci_nv_19 = bios_rd32(bios, NV_PBUS_PCI_NV_19);
+-	bios_wr32(bios, NV_PBUS_PCI_NV_19, 0);
++	bios_wr32(bios, NV_PBUS_PCI_NV_19, pci_nv_19 & ~0xf00);
++
+ 	bios_wr32(bios, reg, value1);
+ 
+ 	udelay(10);
+@@ -1945,7 +2163,7 @@ init_configure_mem(struct nvbios *bios, uint16_t offset,
+ 	uint32_t reg, data;
+ 
+ 	if (bios->major_version > 2)
+-		return 0;
++		return -ENODEV;
+ 
+ 	bios_idxprt_wr(bios, NV_VIO_SRX, NV_VIO_SR_CLOCK_INDEX, bios_idxprt_rd(
+ 		       bios, NV_VIO_SRX, NV_VIO_SR_CLOCK_INDEX) | 0x20);
+@@ -2000,7 +2218,7 @@ init_configure_clk(struct nvbios *bios, uint16_t offset,
+ 	int clock;
+ 
+ 	if (bios->major_version > 2)
+-		return 0;
++		return -ENODEV;
+ 
+ 	clock = ROM16(bios->data[meminitoffs + 4]) * 10;
+ 	setPLL(bios, NV_PRAMDAC_NVPLL_COEFF, clock);
+@@ -2033,7 +2251,7 @@ init_configure_preinit(struct nvbios *bios, uint16_t offset,
+ 	uint8_t cr3c = ((straps << 2) & 0xf0) | (straps & (1 << 6));
+ 
+ 	if (bios->major_version > 2)
+-		return 0;
++		return -ENODEV;
+ 
+ 	bios_idxprt_wr(bios, NV_CIO_CRX__COLOR,
+ 			     NV_CIO_CRE_SCRATCH4__INDEX, cr3c);
+@@ -2572,48 +2790,37 @@ init_gpio(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
  	 * each GPIO according to various values listed in each entry
  	 */
  
@@ -837,7 +1361,77 @@ index 0e9cd1d..5472c76 100644
  		case 1:
  			v |= (0x00000001 << s);
  			break;
-@@ -2947,6 +3058,9 @@ static struct init_tbl_entry itbl_entry[] = {
+@@ -2669,7 +2876,7 @@ init_ram_restrict_zm_reg_group(struct nvbios *bios, uint16_t offset,
+ 		NV_ERROR(bios->dev,
+ 			 "0x%04X: Zero block length - has the M table "
+ 			 "been parsed?\n", offset);
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	strap_ramcfg = (bios_rd32(bios, NV_PEXTDEV_BOOT_0) >> 2) & 0xf;
+@@ -2853,14 +3060,14 @@ init_auxch(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	if (!bios->display.output) {
+ 		NV_ERROR(dev, "INIT_AUXCH: no active output\n");
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	auxch = init_i2c_device_find(dev, bios->display.output->i2c_index);
+ 	if (!auxch) {
+ 		NV_ERROR(dev, "INIT_AUXCH: couldn't get auxch %d\n",
+ 			 bios->display.output->i2c_index);
+-		return 0;
++		return -ENODEV;
+ 	}
+ 
+ 	if (!iexec->execute)
+@@ -2873,7 +3080,7 @@ init_auxch(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 		ret = nouveau_dp_auxch(auxch, 9, addr, &data, 1);
+ 		if (ret) {
+ 			NV_ERROR(dev, "INIT_AUXCH: rd auxch fail %d\n", ret);
+-			return 0;
++			return ret;
+ 		}
+ 
+ 		data &= bios->data[offset + 0];
+@@ -2882,7 +3089,7 @@ init_auxch(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 		ret = nouveau_dp_auxch(auxch, 8, addr, &data, 1);
+ 		if (ret) {
+ 			NV_ERROR(dev, "INIT_AUXCH: wr auxch fail %d\n", ret);
+-			return 0;
++			return ret;
+ 		}
+ 	}
+ 
+@@ -2912,14 +3119,14 @@ init_zm_auxch(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 
+ 	if (!bios->display.output) {
+ 		NV_ERROR(dev, "INIT_ZM_AUXCH: no active output\n");
+-		return 0;
++		return -EINVAL;
+ 	}
+ 
+ 	auxch = init_i2c_device_find(dev, bios->display.output->i2c_index);
+ 	if (!auxch) {
+ 		NV_ERROR(dev, "INIT_ZM_AUXCH: couldn't get auxch %d\n",
+ 			 bios->display.output->i2c_index);
+-		return 0;
++		return -ENODEV;
+ 	}
+ 
+ 	if (!iexec->execute)
+@@ -2930,7 +3137,7 @@ init_zm_auxch(struct nvbios *bios, uint16_t offset, struct init_exec *iexec)
+ 		ret = nouveau_dp_auxch(auxch, 8, addr, &bios->data[offset], 1);
+ 		if (ret) {
+ 			NV_ERROR(dev, "INIT_ZM_AUXCH: wr auxch fail %d\n", ret);
+-			return 0;
++			return ret;
+ 		}
+ 	}
+ 
+@@ -2947,6 +3154,9 @@ static struct init_tbl_entry itbl_entry[] = {
  	{ "INIT_COPY"                         , 0x37, init_copy                       },
  	{ "INIT_NOT"                          , 0x38, init_not                        },
  	{ "INIT_IO_FLAG_CONDITION"            , 0x39, init_io_flag_condition          },
@@ -847,7 +1441,65 @@ index 0e9cd1d..5472c76 100644
  	{ "INIT_INDEX_ADDRESS_LATCHED"        , 0x49, init_idx_addr_latched           },
  	{ "INIT_IO_RESTRICT_PLL2"             , 0x4A, init_io_restrict_pll2           },
  	{ "INIT_PLL2"                         , 0x4B, init_pll2                       },
-@@ -3123,7 +3237,7 @@ run_digital_op_script(struct drm_device *dev, uint16_t scriptptr,
+@@ -3014,7 +3224,7 @@ parse_init_table(struct nvbios *bios, unsigned int offset,
+ 	 * is changed back to EXECUTE.
+ 	 */
+ 
+-	int count = 0, i, res;
++	int count = 0, i, ret;
+ 	uint8_t id;
+ 
+ 	/*
+@@ -3029,26 +3239,33 @@ parse_init_table(struct nvbios *bios, unsigned int offset,
+ 		for (i = 0; itbl_entry[i].name && (itbl_entry[i].id != id); i++)
+ 			;
+ 
+-		if (itbl_entry[i].name) {
+-			BIOSLOG(bios, "0x%04X: [ (0x%02X) - %s ]\n",
+-				offset, itbl_entry[i].id, itbl_entry[i].name);
+-
+-			/* execute eventual command handler */
+-			res = (*itbl_entry[i].handler)(bios, offset, iexec);
+-			if (!res)
+-				break;
+-			/*
+-			 * Add the offset of the current command including all data
+-			 * of that command. The offset will then be pointing on the
+-			 * next op code.
+-			 */
+-			offset += res;
+-		} else {
++		if (!itbl_entry[i].name) {
+ 			NV_ERROR(bios->dev,
+ 				 "0x%04X: Init table command not found: "
+ 				 "0x%02X\n", offset, id);
+ 			return -ENOENT;
+ 		}
++
++		BIOSLOG(bios, "0x%04X: [ (0x%02X) - %s ]\n", offset,
++			itbl_entry[i].id, itbl_entry[i].name);
++
++		/* execute eventual command handler */
++		ret = (*itbl_entry[i].handler)(bios, offset, iexec);
++		if (ret < 0) {
++			NV_ERROR(bios->dev, "0x%04X: Failed parsing init "
++				 "table opcode: %s %d\n", offset,
++				 itbl_entry[i].name, ret);
++		}
++
++		if (ret <= 0)
++			break;
++
++		/*
++		 * Add the offset of the current command including all data
++		 * of that command. The offset will then be pointing on the
++		 * next op code.
++		 */
++		offset += ret;
+ 	}
+ 
+ 	if (offset >= bios->length)
+@@ -3123,7 +3340,7 @@ run_digital_op_script(struct drm_device *dev, uint16_t scriptptr,
  		      struct dcb_entry *dcbent, int head, bool dl)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -856,7 +1508,7 @@ index 0e9cd1d..5472c76 100644
  	struct init_exec iexec = {true, false};
  
  	NV_TRACE(dev, "0x%04X: Parsing digital output script table\n",
-@@ -3140,7 +3254,7 @@ run_digital_op_script(struct drm_device *dev, uint16_t scriptptr,
+@@ -3140,7 +3357,7 @@ run_digital_op_script(struct drm_device *dev, uint16_t scriptptr,
  static int call_lvds_manufacturer_script(struct drm_device *dev, struct dcb_entry *dcbent, int head, enum LVDS_script script)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -865,7 +1517,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t sub = bios->data[bios->fp.xlated_entry + script] + (bios->fp.link_c_increment && dcbent->or & OUTPUT_C ? 1 : 0);
  	uint16_t scriptofs = ROM16(bios->data[bios->init_script_tbls_ptr + sub * 2]);
  
-@@ -3194,10 +3308,9 @@ static int run_lvds_table(struct drm_device *dev, struct dcb_entry *dcbent, int
+@@ -3194,10 +3411,9 @@ static int run_lvds_table(struct drm_device *dev, struct dcb_entry *dcbent, int
  	 * of a list of pxclks and script pointers.
  	 */
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -877,7 +1529,7 @@ index 0e9cd1d..5472c76 100644
  
  	/*
  	 * For now we assume version 3.0 table - g80 support will need some
-@@ -3216,26 +3329,29 @@ static int run_lvds_table(struct drm_device *dev, struct dcb_entry *dcbent, int
+@@ -3216,26 +3432,29 @@ static int run_lvds_table(struct drm_device *dev, struct dcb_entry *dcbent, int
  		scriptptr = ROM16(bios->data[bios->fp.lvdsmanufacturerpointer + 11 + outputset * 2]);
  		break;
  	case LVDS_RESET:
@@ -918,7 +1570,7 @@ index 0e9cd1d..5472c76 100644
  		if (!clktable) {
  			NV_ERROR(dev, "Pixel clock comparison table not found\n");
  			return -ENOENT;
-@@ -3261,7 +3377,7 @@ int call_lvds_script(struct drm_device *dev, struct dcb_entry *dcbent, int head,
+@@ -3261,7 +3480,7 @@ int call_lvds_script(struct drm_device *dev, struct dcb_entry *dcbent, int head,
  	 */
  
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -927,7 +1579,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t lvds_ver = bios->data[bios->fp.lvdsmanufacturerpointer];
  	uint32_t sel_clk_binding, sel_clk;
  	int ret;
-@@ -3395,7 +3511,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
+@@ -3395,7 +3614,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
  #ifndef __powerpc__
  		NV_ERROR(dev, "Pointer to flat panel table invalid\n");
  #endif
@@ -936,7 +1588,7 @@ index 0e9cd1d..5472c76 100644
  		return 0;
  	}
  
-@@ -3428,7 +3544,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
+@@ -3428,7 +3647,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
  		 * fptable[4] is the minimum
  		 * RAMDAC_FP_HCRTC -> RAMDAC_FP_HSYNC_START gap
  		 */
@@ -945,7 +1597,7 @@ index 0e9cd1d..5472c76 100644
  		ofs = -7;
  		break;
  	default:
-@@ -3467,7 +3583,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
+@@ -3467,7 +3686,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
  
  	/* nv4x cards need both a strap value and fpindex of 0xf to use DDC */
  	if (lth.lvds_ver > 0x10)
@@ -954,7 +1606,7 @@ index 0e9cd1d..5472c76 100644
  
  	/*
  	 * If either the strap or xlated fpindex value are 0xf there is no
-@@ -3491,7 +3607,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
+@@ -3491,7 +3710,7 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
  bool nouveau_bios_fp_mode(struct drm_device *dev, struct drm_display_mode *mode)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -963,7 +1615,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t *mode_entry = &bios->data[bios->fp.mode_ptr];
  
  	if (!mode)	/* just checking whether we can produce a mode */
-@@ -3562,11 +3678,11 @@ int nouveau_bios_parse_lvds_table(struct drm_device *dev, int pxclk, bool *dl, b
+@@ -3562,11 +3781,11 @@ int nouveau_bios_parse_lvds_table(struct drm_device *dev, int pxclk, bool *dl, b
  	 * until later, when this function should be called with non-zero pxclk
  	 */
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -977,7 +1629,7 @@ index 0e9cd1d..5472c76 100644
  
  	ret = parse_lvds_manufacturer_table_header(dev, bios, &lth);
  	if (ret)
-@@ -3637,37 +3753,40 @@ int nouveau_bios_parse_lvds_table(struct drm_device *dev, int pxclk, bool *dl, b
+@@ -3637,37 +3856,40 @@ int nouveau_bios_parse_lvds_table(struct drm_device *dev, int pxclk, bool *dl, b
  		*if_is_24bit = bios->data[lvdsofs] & 16;
  		break;
  	case 0x30:
@@ -1033,8 +1685,13 @@ index 0e9cd1d..5472c76 100644
  	/* set dual_link flag for EDID case */
  	if (pxclk && (chip_version < 0x25 || chip_version > 0x28))
  		bios->fp.dual_link = (pxclk >= bios->fp.duallink_transition_clk);
-@@ -3682,7 +3801,7 @@ bios_output_config_match(struct drm_device *dev, struct dcb_entry *dcbent,
- 			 uint16_t record, int record_len, int record_nr)
+@@ -3679,20 +3901,37 @@ int nouveau_bios_parse_lvds_table(struct drm_device *dev, int pxclk, bool *dl, b
+ 
+ static uint8_t *
+ bios_output_config_match(struct drm_device *dev, struct dcb_entry *dcbent,
+-			 uint16_t record, int record_len, int record_nr)
++			 uint16_t record, int record_len, int record_nr,
++			 bool match_link)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
 -	struct nvbios *bios = &dev_priv->VBIOS;
@@ -1042,7 +1699,33 @@ index 0e9cd1d..5472c76 100644
  	uint32_t entry;
  	uint16_t table;
  	int i, v;
-@@ -3716,7 +3835,7 @@ nouveau_bios_dp_table(struct drm_device *dev, struct dcb_entry *dcbent,
+ 
++	switch (dcbent->type) {
++	case OUTPUT_TMDS:
++	case OUTPUT_LVDS:
++	case OUTPUT_DP:
++		break;
++	default:
++		match_link = false;
++		break;
++	}
++
+ 	for (i = 0; i < record_nr; i++, record += record_len) {
+ 		table = ROM16(bios->data[record]);
+ 		if (!table)
+ 			continue;
+ 		entry = ROM32(bios->data[table]);
+ 
++		if (match_link) {
++			v = (entry & 0x00c00000) >> 22;
++			if (!(v & dcbent->sorconf.link))
++				continue;
++		}
++
+ 		v = (entry & 0x000f0000) >> 16;
+ 		if (!(v & dcbent->or))
+ 			continue;
+@@ -3716,7 +3955,7 @@ nouveau_bios_dp_table(struct drm_device *dev, struct dcb_entry *dcbent,
  		      int *length)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1051,7 +1734,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t *table;
  
  	if (!bios->display.dp_table_ptr) {
-@@ -3725,7 +3844,7 @@ nouveau_bios_dp_table(struct drm_device *dev, struct dcb_entry *dcbent,
+@@ -3725,7 +3964,7 @@ nouveau_bios_dp_table(struct drm_device *dev, struct dcb_entry *dcbent,
  	}
  	table = &bios->data[bios->display.dp_table_ptr];
  
@@ -1060,7 +1743,16 @@ index 0e9cd1d..5472c76 100644
  		NV_ERROR(dev, "DisplayPort table version 0x%02x unknown\n",
  			 table[0]);
  		return NULL;
-@@ -3765,7 +3884,7 @@ nouveau_bios_run_display_table(struct drm_device *dev, struct dcb_entry *dcbent,
+@@ -3734,7 +3973,7 @@ nouveau_bios_dp_table(struct drm_device *dev, struct dcb_entry *dcbent,
+ 	*length = table[4];
+ 	return bios_output_config_match(dev, dcbent,
+ 					bios->display.dp_table_ptr + table[1],
+-					table[2], table[3]);
++					table[2], table[3], table[0] >= 0x21);
+ }
+ 
+ int
+@@ -3765,7 +4004,7 @@ nouveau_bios_run_display_table(struct drm_device *dev, struct dcb_entry *dcbent,
  	 */
  
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1069,7 +1761,16 @@ index 0e9cd1d..5472c76 100644
  	uint8_t *table = &bios->data[bios->display.script_table_ptr];
  	uint8_t *otable = NULL;
  	uint16_t script;
-@@ -3918,8 +4037,8 @@ int run_tmds_table(struct drm_device *dev, struct dcb_entry *dcbent, int head, i
+@@ -3823,7 +4062,7 @@ nouveau_bios_run_display_table(struct drm_device *dev, struct dcb_entry *dcbent,
+ 			dcbent->type, dcbent->location, dcbent->or);
+ 	otable = bios_output_config_match(dev, dcbent, table[1] +
+ 					  bios->display.script_table_ptr,
+-					  table[2], table[3]);
++					  table[2], table[3], table[0] >= 0x21);
+ 	if (!otable) {
+ 		NV_ERROR(dev, "Couldn't find matching output script table\n");
+ 		return 1;
+@@ -3918,8 +4157,8 @@ int run_tmds_table(struct drm_device *dev, struct dcb_entry *dcbent, int head, i
  	 */
  
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1080,7 +1781,7 @@ index 0e9cd1d..5472c76 100644
  	uint16_t clktable = 0, scriptptr;
  	uint32_t sel_clk_binding, sel_clk;
  
-@@ -3978,8 +4097,8 @@ int get_pll_limits(struct drm_device *dev, uint32_t limit_match, struct pll_lims
+@@ -3978,8 +4217,8 @@ int get_pll_limits(struct drm_device *dev, uint32_t limit_match, struct pll_lims
  	 */
  
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1091,7 +1792,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t pll_lim_ver = 0, headerlen = 0, recordlen = 0, entries = 0;
  	uint32_t crystal_strap_mask, crystal_straps;
  
-@@ -4293,31 +4412,32 @@ int get_pll_limits(struct drm_device *dev, uint32_t limit_match, struct pll_lims
+@@ -4293,31 +4532,32 @@ int get_pll_limits(struct drm_device *dev, uint32_t limit_match, struct pll_lims
  			break;
  		}
  
@@ -1149,7 +1850,7 @@ index 0e9cd1d..5472c76 100644
  
  	return 0;
  }
-@@ -4332,7 +4452,7 @@ static void parse_bios_version(struct drm_device *dev, struct nvbios *bios, uint
+@@ -4332,7 +4572,7 @@ static void parse_bios_version(struct drm_device *dev, struct nvbios *bios, uint
  	 */
  
  	bios->major_version = bios->data[offset + 3];
@@ -1158,7 +1859,7 @@ index 0e9cd1d..5472c76 100644
  	NV_TRACE(dev, "Bios version %02x.%02x.%02x.%02x\n",
  		 bios->data[offset + 3], bios->data[offset + 2],
  		 bios->data[offset + 1], bios->data[offset]);
-@@ -4402,7 +4522,7 @@ static int parse_bit_A_tbl_entry(struct drm_device *dev, struct nvbios *bios, st
+@@ -4402,7 +4642,7 @@ static int parse_bit_A_tbl_entry(struct drm_device *dev, struct nvbios *bios, st
  	}
  
  	/* First entry is normal dac, 2nd tv-out perhaps? */
@@ -1167,7 +1868,7 @@ index 0e9cd1d..5472c76 100644
  
  	return 0;
  }
-@@ -4526,8 +4646,8 @@ static int parse_bit_i_tbl_entry(struct drm_device *dev, struct nvbios *bios, st
+@@ -4526,8 +4766,8 @@ static int parse_bit_i_tbl_entry(struct drm_device *dev, struct nvbios *bios, st
  		return -ENOSYS;
  	}
  
@@ -1178,7 +1879,7 @@ index 0e9cd1d..5472c76 100644
  
  	return 0;
  }
-@@ -4796,11 +4916,11 @@ static int parse_bmp_structure(struct drm_device *dev, struct nvbios *bios, unsi
+@@ -4796,11 +5036,11 @@ static int parse_bmp_structure(struct drm_device *dev, struct nvbios *bios, unsi
  	uint16_t legacy_scripts_offset, legacy_i2c_offset;
  
  	/* load needed defaults in case we can't parse this info */
@@ -1195,7 +1896,7 @@ index 0e9cd1d..5472c76 100644
  	bios->fmaxvco = 256000;
  	bios->fminvco = 128000;
  	bios->fp.duallink_transition_clk = 90000;
-@@ -4907,10 +5027,10 @@ static int parse_bmp_structure(struct drm_device *dev, struct nvbios *bios, unsi
+@@ -4907,10 +5147,14 @@ static int parse_bmp_structure(struct drm_device *dev, struct nvbios *bios, unsi
  	bios->legacy.i2c_indices.crt = bios->data[legacy_i2c_offset];
  	bios->legacy.i2c_indices.tv = bios->data[legacy_i2c_offset + 1];
  	bios->legacy.i2c_indices.panel = bios->data[legacy_i2c_offset + 2];
@@ -1203,50 +1904,93 @@ index 0e9cd1d..5472c76 100644
 -	bios->bdcb.dcb.i2c[0].read = bios->data[legacy_i2c_offset + 5];
 -	bios->bdcb.dcb.i2c[1].write = bios->data[legacy_i2c_offset + 6];
 -	bios->bdcb.dcb.i2c[1].read = bios->data[legacy_i2c_offset + 7];
-+	bios->dcb.i2c[0].write = bios->data[legacy_i2c_offset + 4];
-+	bios->dcb.i2c[0].read = bios->data[legacy_i2c_offset + 5];
-+	bios->dcb.i2c[1].write = bios->data[legacy_i2c_offset + 6];
-+	bios->dcb.i2c[1].read = bios->data[legacy_i2c_offset + 7];
++	if (bios->data[legacy_i2c_offset + 4])
++		bios->dcb.i2c[0].write = bios->data[legacy_i2c_offset + 4];
++	if (bios->data[legacy_i2c_offset + 5])
++		bios->dcb.i2c[0].read = bios->data[legacy_i2c_offset + 5];
++	if (bios->data[legacy_i2c_offset + 6])
++		bios->dcb.i2c[1].write = bios->data[legacy_i2c_offset + 6];
++	if (bios->data[legacy_i2c_offset + 7])
++		bios->dcb.i2c[1].read = bios->data[legacy_i2c_offset + 7];
  
  	if (bmplength > 74) {
  		bios->fmaxvco = ROM32(bmp[67]);
-@@ -4984,7 +5104,8 @@ read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, i
- 		else
- 			NV_WARN(dev,
- 				"DCB I2C table has more entries than indexable "
--				"(%d entries, max index 15)\n", i2ctable[2]);
-+				"(%d entries, max %d)\n", i2ctable[2],
-+				DCB_MAX_NUM_I2C_ENTRIES);
- 		entry_len = i2ctable[3];
- 		/* [4] is i2c_default_indices, read in parse_dcb_table() */
- 	}
-@@ -5000,8 +5121,8 @@ read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, i
+@@ -4961,82 +5205,10 @@ static uint16_t findstr(uint8_t *data, int n, const uint8_t *str, int len)
+ 	return 0;
+ }
  
- 	if (index == 0xf)
- 		return 0;
+-static int
+-read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, int index, struct dcb_i2c_entry *i2c)
+-{
+-	uint8_t dcb_i2c_ver = dcb_version, headerlen = 0, entry_len = 4;
+-	int i2c_entries = DCB_MAX_NUM_I2C_ENTRIES;
+-	int recordoffset = 0, rdofs = 1, wrofs = 0;
+-	uint8_t port_type = 0;
+-
+-	if (!i2ctable)
+-		return -EINVAL;
+-
+-	if (dcb_version >= 0x30) {
+-		if (i2ctable[0] != dcb_version) /* necessary? */
+-			NV_WARN(dev,
+-				"DCB I2C table version mismatch (%02X vs %02X)\n",
+-				i2ctable[0], dcb_version);
+-		dcb_i2c_ver = i2ctable[0];
+-		headerlen = i2ctable[1];
+-		if (i2ctable[2] <= DCB_MAX_NUM_I2C_ENTRIES)
+-			i2c_entries = i2ctable[2];
+-		else
+-			NV_WARN(dev,
+-				"DCB I2C table has more entries than indexable "
+-				"(%d entries, max index 15)\n", i2ctable[2]);
+-		entry_len = i2ctable[3];
+-		/* [4] is i2c_default_indices, read in parse_dcb_table() */
+-	}
+-	/*
+-	 * It's your own fault if you call this function on a DCB 1.1 BIOS --
+-	 * the test below is for DCB 1.2
+-	 */
+-	if (dcb_version < 0x14) {
+-		recordoffset = 2;
+-		rdofs = 0;
+-		wrofs = 1;
+-	}
+-
+-	if (index == 0xf)
+-		return 0;
 -	if (index > i2c_entries) {
 -		NV_ERROR(dev, "DCB I2C index too big (%d > %d)\n",
-+	if (index >= i2c_entries) {
-+		NV_ERROR(dev, "DCB I2C index too big (%d >= %d)\n",
- 			 index, i2ctable[2]);
- 		return -ENOENT;
- 	}
-@@ -5023,8 +5144,12 @@ read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, i
- 			rdofs = wrofs = 0;
- 	}
- 
+-			 index, i2ctable[2]);
+-		return -ENOENT;
+-	}
+-	if (i2ctable[headerlen + entry_len * index + 3] == 0xff) {
+-		NV_ERROR(dev, "DCB I2C entry invalid\n");
+-		return -EINVAL;
+-	}
+-
+-	if (dcb_i2c_ver >= 0x30) {
+-		port_type = i2ctable[headerlen + recordoffset + 3 + entry_len * index];
+-
+-		/*
+-		 * Fixup for chips using same address offset for read and
+-		 * write.
+-		 */
+-		if (port_type == 4)	/* seen on C51 */
+-			rdofs = wrofs = 1;
+-		if (port_type >= 5)	/* G80+ */
+-			rdofs = wrofs = 0;
+-	}
+-
 -	if (dcb_i2c_ver >= 0x40 && port_type != 5 && port_type != 6)
 -		NV_WARN(dev, "DCB I2C table has port type %d\n", port_type);
-+	if (dcb_i2c_ver >= 0x40) {
-+		if (port_type != 5 && port_type != 6)
-+			NV_WARN(dev, "DCB I2C table has port type %d\n", port_type);
-+
-+		i2c->entry = ROM32(i2ctable[headerlen + recordoffset + entry_len * index]);
-+	}
- 
- 	i2c->port_type = port_type;
- 	i2c->read = i2ctable[headerlen + recordoffset + rdofs + entry_len * index];
-@@ -5036,7 +5161,7 @@ read_dcb_i2c_entry(struct drm_device *dev, int dcb_version, uint8_t *i2ctable, i
+-
+-	i2c->port_type = port_type;
+-	i2c->read = i2ctable[headerlen + recordoffset + rdofs + entry_len * index];
+-	i2c->write = i2ctable[headerlen + recordoffset + wrofs + entry_len * index];
+-
+-	return 0;
+-}
+-
  static struct dcb_gpio_entry *
  new_gpio_entry(struct nvbios *bios)
  {
@@ -1255,7 +1999,7 @@ index 0e9cd1d..5472c76 100644
  
  	return &gpio->entry[gpio->entries++];
  }
-@@ -5045,14 +5170,14 @@ struct dcb_gpio_entry *
+@@ -5045,14 +5217,14 @@ struct dcb_gpio_entry *
  nouveau_bios_gpio_entry(struct drm_device *dev, enum dcb_gpio_tag tag)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1274,7 +2018,7 @@ index 0e9cd1d..5472c76 100644
  	}
  
  	return NULL;
-@@ -5075,32 +5200,32 @@ parse_dcb30_gpio_entry(struct nvbios *bios, uint16_t offset)
+@@ -5075,32 +5247,32 @@ parse_dcb30_gpio_entry(struct nvbios *bios, uint16_t offset)
  	gpio->tag = tag;
  	gpio->line = line;
  	gpio->invert = flags != 4;
@@ -1317,7 +2061,7 @@ index 0e9cd1d..5472c76 100644
  	uint8_t *gpio_table = &bios->data[gpio_table_ptr];
  	int header_len = gpio_table[1],
  	    entries = gpio_table[2],
-@@ -5108,7 +5233,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
+@@ -5108,7 +5280,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
  	void (*parse_entry)(struct nvbios *, uint16_t) = NULL;
  	int i;
  
@@ -1326,7 +2070,7 @@ index 0e9cd1d..5472c76 100644
  		if (gpio_table_ptr && entry_len != 4) {
  			NV_WARN(dev, "Invalid DCB GPIO table entry length.\n");
  			return;
-@@ -5116,7 +5241,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
+@@ -5116,7 +5288,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
  
  		parse_entry = parse_dcb40_gpio_entry;
  
@@ -1335,7 +2079,7 @@ index 0e9cd1d..5472c76 100644
  		if (gpio_table_ptr && entry_len != 2) {
  			NV_WARN(dev, "Invalid DCB GPIO table entry length.\n");
  			return;
-@@ -5124,7 +5249,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
+@@ -5124,7 +5296,7 @@ parse_dcb_gpio_table(struct nvbios *bios)
  
  		parse_entry = parse_dcb30_gpio_entry;
  
@@ -1344,7 +2088,7 @@ index 0e9cd1d..5472c76 100644
  		/*
  		 * DCBs older than v3.0 don't really have a GPIO
  		 * table, instead they keep some GPIO info at fixed
-@@ -5158,30 +5283,82 @@ struct dcb_connector_table_entry *
+@@ -5158,30 +5330,82 @@ struct dcb_connector_table_entry *
  nouveau_bios_connector_entry(struct drm_device *dev, int index)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1433,7 +2177,7 @@ index 0e9cd1d..5472c76 100644
  		NV_DEBUG_KMS(dev, "No DCB connector table present\n");
  		return;
  	}
-@@ -5199,12 +5376,14 @@ parse_dcb_connector_table(struct nvbios *bios)
+@@ -5199,12 +5423,14 @@ parse_dcb_connector_table(struct nvbios *bios)
  	entry = conntab + conntab[1];
  	cte = &ct->entry[0];
  	for (i = 0; i < conntab[2]; i++, entry += conntab[3], cte++) {
@@ -1449,7 +2193,7 @@ index 0e9cd1d..5472c76 100644
  		switch (cte->entry & 0x00033000) {
  		case 0x00001000:
  			cte->gpio_tag = 0x07;
-@@ -5226,12 +5405,43 @@ parse_dcb_connector_table(struct nvbios *bios)
+@@ -5226,12 +5452,43 @@ parse_dcb_connector_table(struct nvbios *bios)
  		if (cte->type == 0xff)
  			continue;
  
@@ -1494,7 +2238,7 @@ index 0e9cd1d..5472c76 100644
  {
  	struct dcb_entry *entry = &dcb->entry[dcb->entries];
  
-@@ -5241,7 +5451,7 @@ static struct dcb_entry *new_dcb_entry(struct parsed_dcb *dcb)
+@@ -5241,7 +5498,7 @@ static struct dcb_entry *new_dcb_entry(struct parsed_dcb *dcb)
  	return entry;
  }
  
@@ -1503,7 +2247,7 @@ index 0e9cd1d..5472c76 100644
  {
  	struct dcb_entry *entry = new_dcb_entry(dcb);
  
-@@ -5252,7 +5462,7 @@ static void fabricate_vga_output(struct parsed_dcb *dcb, int i2c, int heads)
+@@ -5252,7 +5509,7 @@ static void fabricate_vga_output(struct parsed_dcb *dcb, int i2c, int heads)
  	/* "or" mostly unused in early gen crt modesetting, 0 is fine */
  }
  
@@ -1512,7 +2256,7 @@ index 0e9cd1d..5472c76 100644
  {
  	struct dcb_entry *entry = new_dcb_entry(dcb);
  
-@@ -5279,7 +5489,7 @@ static void fabricate_dvi_i_output(struct parsed_dcb *dcb, bool twoHeads)
+@@ -5279,7 +5536,7 @@ static void fabricate_dvi_i_output(struct parsed_dcb *dcb, bool twoHeads)
  #endif
  }
  
@@ -1521,7 +2265,7 @@ index 0e9cd1d..5472c76 100644
  {
  	struct dcb_entry *entry = new_dcb_entry(dcb);
  
-@@ -5290,13 +5500,13 @@ static void fabricate_tv_output(struct parsed_dcb *dcb, bool twoHeads)
+@@ -5290,23 +5547,17 @@ static void fabricate_tv_output(struct parsed_dcb *dcb, bool twoHeads)
  }
  
  static bool
@@ -1537,7 +2281,17 @@ index 0e9cd1d..5472c76 100644
  		entry->connector = (conn >> 12) & 0xf;
  	entry->bus = (conn >> 16) & 0xf;
  	entry->location = (conn >> 20) & 0x3;
-@@ -5314,7 +5524,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+ 	entry->or = (conn >> 24) & 0xf;
+-	/*
+-	 * Normal entries consist of a single bit, but dual link has the
+-	 * next most significant bit set too
+-	 */
+-	entry->duallink_possible =
+-			((1 << (ffs(entry->or) - 1)) * 3 == entry->or);
+ 
+ 	switch (entry->type) {
+ 	case OUTPUT_ANALOG:
+@@ -5314,7 +5565,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  		 * Although the rest of a CRT conf dword is usually
  		 * zeros, mac biosen have stuff there so we must mask
  		 */
@@ -1546,7 +2300,7 @@ index 0e9cd1d..5472c76 100644
  					 (conf & 0xffff) * 10 :
  					 (conf & 0xff) * 10000;
  		break;
-@@ -5323,7 +5533,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+@@ -5323,7 +5574,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  		uint32_t mask;
  		if (conf & 0x1)
  			entry->lvdsconf.use_straps_for_mode = true;
@@ -1555,7 +2309,7 @@ index 0e9cd1d..5472c76 100644
  			mask = ~0xd;
  			/*
  			 * The laptop in bug 14567 lies and claims to not use
-@@ -5347,7 +5557,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+@@ -5347,7 +5598,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  			 * Until we even try to use these on G8x, it's
  			 * useless reporting unknown bits.  They all are.
  			 */
@@ -1564,7 +2318,7 @@ index 0e9cd1d..5472c76 100644
  				break;
  
  			NV_ERROR(dev, "Unknown LVDS configuration bits, "
-@@ -5357,7 +5567,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+@@ -5357,7 +5608,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  		}
  	case OUTPUT_TV:
  	{
@@ -1573,7 +2327,7 @@ index 0e9cd1d..5472c76 100644
  			entry->tvconf.has_component_output = conf & (0x8 << 4);
  		else
  			entry->tvconf.has_component_output = false;
-@@ -5384,8 +5594,10 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+@@ -5384,8 +5635,20 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  		break;
  	case 0xe:
  		/* weird g80 mobile type that "nv" treats as a terminator */
@@ -1582,10 +2336,20 @@ index 0e9cd1d..5472c76 100644
  		return false;
 +	default:
 +		break;
++	}
++
++	if (dcb->version < 0x40) {
++		/* Normal entries consist of a single bit, but dual link has
++		 * the next most significant bit set too
++		 */
++		entry->duallink_possible =
++			((1 << (ffs(entry->or) - 1)) * 3 == entry->or);
++	} else {
++		entry->duallink_possible = (entry->sorconf.link == 3);
  	}
  
  	/* unsure what DCB version introduces this, 3.0? */
-@@ -5396,7 +5608,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
+@@ -5396,7 +5659,7 @@ parse_dcb20_entry(struct drm_device *dev, struct bios_parsed_dcb *bdcb,
  }
  
  static bool
@@ -1594,7 +2358,7 @@ index 0e9cd1d..5472c76 100644
  		  uint32_t conn, uint32_t conf, struct dcb_entry *entry)
  {
  	switch (conn & 0x0000000f) {
-@@ -5462,27 +5674,27 @@ parse_dcb15_entry(struct drm_device *dev, struct parsed_dcb *dcb,
+@@ -5462,27 +5725,27 @@ parse_dcb15_entry(struct drm_device *dev, struct parsed_dcb *dcb,
  	return true;
  }
  
@@ -1630,7 +2394,7 @@ index 0e9cd1d..5472c76 100644
  {
  	/*
  	 * DCB v2.0 lists each output combination separately.
-@@ -5534,8 +5746,7 @@ static int
+@@ -5534,8 +5797,7 @@ static int
  parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1640,7 +2404,7 @@ index 0e9cd1d..5472c76 100644
  	uint16_t dcbptr = 0, i2ctabptr = 0;
  	uint8_t *dcbtable;
  	uint8_t headerlen = 0x4, entries = DCB_MAX_NUM_ENTRIES;
-@@ -5543,9 +5754,6 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5543,9 +5805,6 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  	int recordlength = 8, confofs = 4;
  	int i;
  
@@ -1650,7 +2414,7 @@ index 0e9cd1d..5472c76 100644
  	/* get the offset from 0x36 */
  	if (dev_priv->card_type > NV_04) {
  		dcbptr = ROM16(bios->data[0x36]);
-@@ -5567,21 +5775,21 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5567,21 +5826,21 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  	dcbtable = &bios->data[dcbptr];
  
  	/* get DCB version */
@@ -1678,7 +2442,7 @@ index 0e9cd1d..5472c76 100644
  		} else {
  			i2ctabptr = ROM16(dcbtable[2]);
  			sig = ROM32(dcbtable[4]);
-@@ -5593,7 +5801,7 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5593,7 +5852,7 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  					"signature (%08X)\n", sig);
  			return -EINVAL;
  		}
@@ -1687,7 +2451,7 @@ index 0e9cd1d..5472c76 100644
  		char sig[8] = { 0 };
  
  		strncpy(sig, (char *)&dcbtable[-7], 7);
-@@ -5641,14 +5849,11 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5641,14 +5900,11 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  	if (!i2ctabptr)
  		NV_WARN(dev, "No pointer to DCB I2C port table\n");
  	else {
@@ -1705,7 +2469,7 @@ index 0e9cd1d..5472c76 100644
  	if (entries > DCB_MAX_NUM_ENTRIES)
  		entries = DCB_MAX_NUM_ENTRIES;
  
-@@ -5673,7 +5878,7 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5673,7 +5929,7 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  		NV_TRACEWARN(dev, "Raw DCB entry %d: %08x %08x\n",
  			     dcb->entries, connection, config);
  
@@ -1714,7 +2478,7 @@ index 0e9cd1d..5472c76 100644
  			break;
  	}
  
-@@ -5681,18 +5886,22 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
+@@ -5681,18 +5937,22 @@ parse_dcb_table(struct drm_device *dev, struct nvbios *bios, bool twoHeads)
  	 * apart for v2.1+ not being known for requiring merging, this
  	 * guarantees dcbent->index is the index of the entry in the rom image
  	 */
@@ -1742,7 +2506,7 @@ index 0e9cd1d..5472c76 100644
  
  	/*
  	 * DCB 3.0 also has the table in most cases, but there are some cards
-@@ -5700,9 +5909,11 @@ fixup_legacy_connector(struct nvbios *bios)
+@@ -5700,9 +5960,11 @@ fixup_legacy_connector(struct nvbios *bios)
  	 * indices are all 0.  We don't need the connector indices on pre-G80
  	 * chips (yet?) so limit the use to DCB 4.0 and above.
  	 */
@@ -1755,7 +2519,7 @@ index 0e9cd1d..5472c76 100644
  	/*
  	 * No known connector info before v3.0, so make it up.  the rule here
  	 * is: anything on the same i2c bus is considered to be on the same
-@@ -5710,37 +5921,38 @@ fixup_legacy_connector(struct nvbios *bios)
+@@ -5710,37 +5972,38 @@ fixup_legacy_connector(struct nvbios *bios)
  	 * its own unique connector index.
  	 */
  	for (i = 0; i < dcb->entries; i++) {
@@ -1807,7 +2571,7 @@ index 0e9cd1d..5472c76 100644
  	int i;
  
  	for (i = 0; i < dcb->entries; i++) {
-@@ -5826,7 +6038,7 @@ static int load_nv17_hw_sequencer_ucode(struct drm_device *dev,
+@@ -5826,7 +6089,7 @@ static int load_nv17_hw_sequencer_ucode(struct drm_device *dev,
  uint8_t *nouveau_bios_embedded_edid(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1816,7 +2580,7 @@ index 0e9cd1d..5472c76 100644
  	const uint8_t edid_sig[] = {
  			0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
  	uint16_t offset = 0;
-@@ -5859,7 +6071,7 @@ nouveau_bios_run_init_table(struct drm_device *dev, uint16_t table,
+@@ -5859,7 +6122,7 @@ nouveau_bios_run_init_table(struct drm_device *dev, uint16_t table,
  			    struct dcb_entry *dcbent)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1825,7 +2589,7 @@ index 0e9cd1d..5472c76 100644
  	struct init_exec iexec = { true, false };
  
  	mutex_lock(&bios->lock);
-@@ -5872,7 +6084,7 @@ nouveau_bios_run_init_table(struct drm_device *dev, uint16_t table,
+@@ -5872,7 +6135,7 @@ nouveau_bios_run_init_table(struct drm_device *dev, uint16_t table,
  static bool NVInitVBIOS(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1834,7 +2598,7 @@ index 0e9cd1d..5472c76 100644
  
  	memset(bios, 0, sizeof(struct nvbios));
  	mutex_init(&bios->lock);
-@@ -5888,7 +6100,7 @@ static bool NVInitVBIOS(struct drm_device *dev)
+@@ -5888,7 +6151,7 @@ static bool NVInitVBIOS(struct drm_device *dev)
  static int nouveau_parse_vbios_struct(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1843,7 +2607,7 @@ index 0e9cd1d..5472c76 100644
  	const uint8_t bit_signature[] = { 0xff, 0xb8, 'B', 'I', 'T' };
  	const uint8_t bmp_signature[] = { 0xff, 0x7f, 'N', 'V', 0x0 };
  	int offset;
-@@ -5915,7 +6127,7 @@ int
+@@ -5915,7 +6178,7 @@ int
  nouveau_run_vbios_init(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1852,7 +2616,7 @@ index 0e9cd1d..5472c76 100644
  	int i, ret = 0;
  
  	NVLockVgaCrtcs(dev, false);
-@@ -5946,9 +6158,9 @@ nouveau_run_vbios_init(struct drm_device *dev)
+@@ -5946,9 +6209,9 @@ nouveau_run_vbios_init(struct drm_device *dev)
  	}
  
  	if (dev_priv->card_type >= NV_50) {
@@ -1864,7 +2628,7 @@ index 0e9cd1d..5472c76 100644
  						       0, 0);
  		}
  	}
-@@ -5962,11 +6174,11 @@ static void
+@@ -5962,26 +6225,48 @@ static void
  nouveau_bios_i2c_devices_takedown(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1878,7 +2642,32 @@ index 0e9cd1d..5472c76 100644
  	for (i = 0; i < DCB_MAX_NUM_I2C_ENTRIES; i++, entry++)
  		nouveau_i2c_fini(dev, entry);
  }
-@@ -5975,13 +6187,11 @@ int
+ 
++static bool
++nouveau_bios_posted(struct drm_device *dev)
++{
++	struct drm_nouveau_private *dev_priv = dev->dev_private;
++	bool was_locked;
++	unsigned htotal;
++
++	if (dev_priv->chipset >= NV_50) {
++		if (NVReadVgaCrtc(dev, 0, 0x00) == 0 &&
++		    NVReadVgaCrtc(dev, 0, 0x1a) == 0)
++			return false;
++		return true;
++	}
++
++	was_locked = NVLockVgaCrtcs(dev, false);
++	htotal  = NVReadVgaCrtc(dev, 0, 0x06);
++	htotal |= (NVReadVgaCrtc(dev, 0, 0x07) & 0x01) << 8;
++	htotal |= (NVReadVgaCrtc(dev, 0, 0x07) & 0x20) << 4;
++	htotal |= (NVReadVgaCrtc(dev, 0, 0x25) & 0x01) << 10;
++	htotal |= (NVReadVgaCrtc(dev, 0, 0x41) & 0x01) << 11;
++	NVLockVgaCrtcs(dev, was_locked);
++	return (htotal != 0);
++}
++
+ int
  nouveau_bios_init(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
@@ -1893,7 +2682,21 @@ index 0e9cd1d..5472c76 100644
  	if (!NVInitVBIOS(dev))
  		return -ENODEV;
  
-@@ -6023,10 +6233,8 @@ nouveau_bios_init(struct drm_device *dev)
+@@ -6007,11 +6292,9 @@ nouveau_bios_init(struct drm_device *dev)
+ 	bios->execute = false;
+ 
+ 	/* ... unless card isn't POSTed already */
+-	if (dev_priv->card_type >= NV_10 &&
+-	    NVReadVgaCrtc(dev, 0, 0x00) == 0 &&
+-	    NVReadVgaCrtc(dev, 0, 0x1a) == 0) {
++	if (!nouveau_bios_posted(dev)) {
+ 		NV_INFO(dev, "Adaptor not initialised\n");
+-		if (dev_priv->card_type < NV_50) {
++		if (dev_priv->card_type < NV_40) {
+ 			NV_ERROR(dev, "Unable to POST this chipset\n");
+ 			return -ENODEV;
+ 		}
+@@ -6023,10 +6306,8 @@ nouveau_bios_init(struct drm_device *dev)
  	bios_wr32(bios, NV_PEXTDEV_BOOT_0, saved_nv_pextdev_boot_0);
  
  	ret = nouveau_run_vbios_init(dev);
@@ -1906,10 +2709,10 @@ index 0e9cd1d..5472c76 100644
  	/* feature_byte on BMP is poor, but init always sets CR4B */
  	was_locked = NVLockVgaCrtcs(dev, false);
 diff --git a/drivers/gpu/drm/nouveau/nouveau_bios.h b/drivers/gpu/drm/nouveau/nouveau_bios.h
-index fd94bd6..adf4ec2 100644
+index fd94bd6..bd33a54 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_bios.h
 +++ b/drivers/gpu/drm/nouveau/nouveau_bios.h
-@@ -34,9 +34,72 @@
+@@ -34,9 +34,73 @@
  
  #define DCB_LOC_ON_CHIP 0
  
@@ -1960,6 +2763,7 @@ index fd94bd6..adf4ec2 100644
 +	enum dcb_connector_type type;
 +	uint8_t index2;
 +	uint8_t gpio_tag;
++	void *drm;
 +};
 +
 +struct dcb_connector_table {
@@ -1983,7 +2787,7 @@ index fd94bd6..adf4ec2 100644
  	uint8_t i2c_index;
  	uint8_t heads;
  	uint8_t connector;
-@@ -71,69 +134,22 @@ struct dcb_entry {
+@@ -71,69 +135,22 @@ struct dcb_entry {
  	bool i2c_upper_default;
  };
  
@@ -2057,7 +2861,7 @@ index fd94bd6..adf4ec2 100644
  enum nouveau_or {
  	OUTPUT_A = (1 << 0),
  	OUTPUT_B = (1 << 1),
-@@ -190,8 +206,8 @@ struct pll_lims {
+@@ -190,8 +207,8 @@ struct pll_lims {
  	int refclk;
  };
  
@@ -2068,7 +2872,7 @@ index fd94bd6..adf4ec2 100644
  
  	uint8_t chip_version;
  
-@@ -199,11 +215,6 @@ struct nouveau_bios_info {
+@@ -199,11 +216,6 @@ struct nouveau_bios_info {
  	uint32_t tvdactestval;
  	uint8_t digital_min_front_porch;
  	bool fp_no_ddc;
@@ -2080,7 +2884,7 @@ index fd94bd6..adf4ec2 100644
  
  	struct mutex lock;
  
-@@ -234,7 +245,7 @@ struct nvbios {
+@@ -234,7 +246,7 @@ struct nvbios {
  	uint16_t some_script_ptr; /* BIT I + 14 */
  	uint16_t init96_tbl_ptr; /* BIT I + 16 */
  
@@ -2089,7 +2893,7 @@ index fd94bd6..adf4ec2 100644
  
  	struct {
  		int crtchead;
-@@ -260,7 +271,6 @@ struct nvbios {
+@@ -260,7 +272,6 @@ struct nvbios {
  		bool reset_after_pclk_change;
  		bool dual_link;
  		bool link_c_increment;
@@ -2269,7 +3073,7 @@ index ee2b845..88f9bc0 100644
  	int minvco2 = pll_lim->vco2.minfreq, maxvco2 = pll_lim->vco2.maxfreq;
  	int minU1 = pll_lim->vco1.min_inputfreq, minU2 = pll_lim->vco2.min_inputfreq;
 diff --git a/drivers/gpu/drm/nouveau/nouveau_channel.c b/drivers/gpu/drm/nouveau/nouveau_channel.c
-index adac0f8..1fc57ef 100644
+index adac0f8..f9b2acf 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_channel.c
 +++ b/drivers/gpu/drm/nouveau/nouveau_channel.c
 @@ -142,7 +142,6 @@ nouveau_channel_alloc(struct drm_device *dev, struct nouveau_channel **chan_ret,
@@ -2280,7 +3084,17 @@ index adac0f8..1fc57ef 100644
  	chan = dev_priv->fifos[channel];
  	INIT_LIST_HEAD(&chan->nvsw.vbl_wait);
  	INIT_LIST_HEAD(&chan->fence.pending);
-@@ -280,9 +279,18 @@ nouveau_channel_free(struct nouveau_channel *chan)
+@@ -258,9 +257,7 @@ nouveau_channel_free(struct nouveau_channel *chan)
+ 	nouveau_debugfs_channel_fini(chan);
+ 
+ 	/* Give outstanding push buffers a chance to complete */
+-	spin_lock_irqsave(&chan->fence.lock, flags);
+ 	nouveau_fence_update(chan);
+-	spin_unlock_irqrestore(&chan->fence.lock, flags);
+ 	if (chan->fence.sequence != chan->fence.sequence_ack) {
+ 		struct nouveau_fence *fence = NULL;
+ 
+@@ -280,9 +277,18 @@ nouveau_channel_free(struct nouveau_channel *chan)
  	 */
  	nouveau_fence_fini(chan);
  
@@ -2300,7 +3114,7 @@ index adac0f8..1fc57ef 100644
  	pgraph->fifo_access(dev, false);
  	if (pgraph->channel(dev) == chan)
  		pgraph->unload_context(dev);
-@@ -298,6 +306,8 @@ nouveau_channel_free(struct nouveau_channel *chan)
+@@ -298,6 +304,8 @@ nouveau_channel_free(struct nouveau_channel *chan)
  
  	pfifo->reassign(dev, true);
  
@@ -2309,7 +3123,7 @@ index adac0f8..1fc57ef 100644
  	/* Release the channel's resources */
  	nouveau_gpuobj_ref_del(dev, &chan->pushbuf);
  	if (chan->pushbuf_bo) {
-@@ -310,7 +320,6 @@ nouveau_channel_free(struct nouveau_channel *chan)
+@@ -310,7 +318,6 @@ nouveau_channel_free(struct nouveau_channel *chan)
  		iounmap(chan->user);
  
  	dev_priv->fifos[chan->id] = NULL;
@@ -2318,7 +3132,7 @@ index adac0f8..1fc57ef 100644
  }
  
 diff --git a/drivers/gpu/drm/nouveau/nouveau_connector.c b/drivers/gpu/drm/nouveau/nouveau_connector.c
-index d2f6335..8fc0145 100644
+index a378bc3..fb51958 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_connector.c
 +++ b/drivers/gpu/drm/nouveau/nouveau_connector.c
 @@ -218,7 +218,7 @@ nouveau_connector_set_encoder(struct drm_connector *connector,
@@ -2330,16 +3144,27 @@ index d2f6335..8fc0145 100644
  		drm_connector_property_set_value(connector,
  			dev->mode_config.dvi_i_subconnector_property,
  			nv_encoder->dcb->type == OUTPUT_TMDS ?
-@@ -236,7 +236,7 @@ nouveau_connector_detect(struct drm_connector *connector)
+@@ -236,19 +236,6 @@ nouveau_connector_detect(struct drm_connector *connector)
  	struct nouveau_i2c_chan *i2c;
  	int type, flags;
  
 -	if (connector->connector_type == DRM_MODE_CONNECTOR_LVDS)
-+	if (nv_connector->dcb->type == DCB_CONNECTOR_LVDS)
- 		nv_encoder = find_encoder_by_type(connector, OUTPUT_LVDS);
- 	if (nv_encoder && nv_connector->native_mode) {
- #ifdef CONFIG_ACPI
-@@ -279,7 +279,7 @@ nouveau_connector_detect(struct drm_connector *connector)
+-		nv_encoder = find_encoder_by_type(connector, OUTPUT_LVDS);
+-	if (nv_encoder && nv_connector->native_mode) {
+-		unsigned status = connector_status_connected;
+-
+-#ifdef CONFIG_ACPI
+-		if (!nouveau_ignorelid && !acpi_lid_open())
+-			status = connector_status_unknown;
+-#endif
+-		nouveau_connector_set_encoder(connector, nv_encoder);
+-		return status;
+-	}
+-
+ 	/* Cleanup the previous EDID block. */
+ 	if (nv_connector->edid) {
+ 		drm_mode_connector_update_edid_property(connector, NULL);
+@@ -281,7 +268,7 @@ nouveau_connector_detect(struct drm_connector *connector)
  		 * same i2c channel so the value returned from ddc_detect
  		 * isn't necessarily correct.
  		 */
@@ -2348,7 +3173,7 @@ index d2f6335..8fc0145 100644
  			if (nv_connector->edid->input & DRM_EDID_INPUT_DIGITAL)
  				type = OUTPUT_TMDS;
  			else
-@@ -300,7 +300,7 @@ nouveau_connector_detect(struct drm_connector *connector)
+@@ -302,7 +289,7 @@ nouveau_connector_detect(struct drm_connector *connector)
  
  detect_analog:
  	nv_encoder = find_encoder_by_type(connector, OUTPUT_ANALOG);
@@ -2357,7 +3182,71 @@ index d2f6335..8fc0145 100644
  		nv_encoder = find_encoder_by_type(connector, OUTPUT_TV);
  	if (nv_encoder) {
  		struct drm_encoder *encoder = to_drm_encoder(nv_encoder);
-@@ -321,11 +321,11 @@ detect_analog:
+@@ -320,14 +307,75 @@ detect_analog:
+ 	return connector_status_disconnected;
+ }
+ 
++static enum drm_connector_status
++nouveau_connector_detect_lvds(struct drm_connector *connector)
++{
++	struct drm_device *dev = connector->dev;
++	struct drm_nouveau_private *dev_priv = dev->dev_private;
++	struct nouveau_connector *nv_connector = nouveau_connector(connector);
++	struct nouveau_encoder *nv_encoder = NULL;
++	enum drm_connector_status status = connector_status_disconnected;
++
++	/* Cleanup the previous EDID block. */
++	if (nv_connector->edid) {
++		drm_mode_connector_update_edid_property(connector, NULL);
++		kfree(nv_connector->edid);
++		nv_connector->edid = NULL;
++	}
++
++	nv_encoder = find_encoder_by_type(connector, OUTPUT_LVDS);
++	if (!nv_encoder)
++		return connector_status_disconnected;
++
++	if (!dev_priv->vbios.fp_no_ddc) {
++		status = nouveau_connector_detect(connector);
++		if (status == connector_status_connected)
++			goto out;
++	}
++
++	/* If no EDID found above, and the VBIOS indicates a hardcoded
++	 * modeline is avalilable for the panel, set it as the panel's
++	 * native mode and exit.
++	 */
++	if (nouveau_bios_fp_mode(dev, NULL) && (dev_priv->vbios.fp_no_ddc ||
++	    nv_encoder->dcb->lvdsconf.use_straps_for_mode)) {
++		status = connector_status_connected;
++		goto out;
++	}
++
++	/* Still nothing, some VBIOS images have a hardcoded EDID block
++	 * stored for the panel stored in them.
++	 */
++	if (!dev_priv->vbios.fp_no_ddc) {
++		struct edid *edid =
++			(struct edid *)nouveau_bios_embedded_edid(dev);
++		if (edid) {
++			nv_connector->edid = kmalloc(EDID_LENGTH, GFP_KERNEL);
++			*(nv_connector->edid) = *edid;
++			status = connector_status_connected;
++		}
++	}
++
++out:
++#ifdef CONFIG_ACPI
++	if (status == connector_status_connected &&
++	    !nouveau_ignorelid && !acpi_lid_open())
++		status = connector_status_unknown;
++#endif
++
++	drm_mode_connector_update_edid_property(connector, nv_connector->edid);
++	nouveau_connector_set_encoder(connector, nv_encoder);
++	return status;
++}
++
  static void
  nouveau_connector_force(struct drm_connector *connector)
  {
@@ -2371,7 +3260,7 @@ index d2f6335..8fc0145 100644
  		if (connector->force == DRM_FORCE_ON_DIGITAL)
  			type = OUTPUT_TMDS;
  		else
-@@ -335,7 +335,7 @@ nouveau_connector_force(struct drm_connector *connector)
+@@ -337,7 +385,7 @@ nouveau_connector_force(struct drm_connector *connector)
  
  	nv_encoder = find_encoder_by_type(connector, type);
  	if (!nv_encoder) {
@@ -2380,7 +3269,7 @@ index d2f6335..8fc0145 100644
  			 drm_get_connector_name(connector));
  		connector->status = connector_status_disconnected;
  		return;
-@@ -369,7 +369,7 @@ nouveau_connector_set_property(struct drm_connector *connector,
+@@ -371,7 +419,7 @@ nouveau_connector_set_property(struct drm_connector *connector,
  		}
  
  		/* LVDS always needs gpu scaling */
@@ -2389,16 +3278,86 @@ index d2f6335..8fc0145 100644
  		    value == DRM_MODE_SCALE_NONE)
  			return -EINVAL;
  
-@@ -535,7 +535,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
- 	/* If we're not LVDS, destroy the previous native mode, the attached
- 	 * monitor could have changed.
+@@ -431,24 +479,27 @@ nouveau_connector_set_property(struct drm_connector *connector,
+ }
+ 
+ static struct drm_display_mode *
+-nouveau_connector_native_mode(struct nouveau_connector *connector)
++nouveau_connector_native_mode(struct drm_connector *connector)
+ {
+-	struct drm_device *dev = connector->base.dev;
++	struct drm_connector_helper_funcs *helper = connector->helper_private;
++	struct nouveau_connector *nv_connector = nouveau_connector(connector);
++	struct drm_device *dev = connector->dev;
+ 	struct drm_display_mode *mode, *largest = NULL;
+ 	int high_w = 0, high_h = 0, high_v = 0;
+ 
+-	/* Use preferred mode if there is one.. */
+-	list_for_each_entry(mode, &connector->base.probed_modes, head) {
++	list_for_each_entry(mode, &nv_connector->base.probed_modes, head) {
++		if (helper->mode_valid(connector, mode) != MODE_OK)
++			continue;
++
++		/* Use preferred mode if there is one.. */
+ 		if (mode->type & DRM_MODE_TYPE_PREFERRED) {
+ 			NV_DEBUG_KMS(dev, "native mode from preferred\n");
+ 			return drm_mode_duplicate(dev, mode);
+ 		}
+-	}
+ 
+-	/* Otherwise, take the resolution with the largest width, then height,
+-	 * then vertical refresh
+-	 */
+-	list_for_each_entry(mode, &connector->base.probed_modes, head) {
++		/* Otherwise, take the resolution with the largest width, then
++		 * height, then vertical refresh
++		 */
+ 		if (mode->hdisplay < high_w)
+ 			continue;
+ 
+@@ -530,21 +581,28 @@ static int
+ nouveau_connector_get_modes(struct drm_connector *connector)
+ {
+ 	struct drm_device *dev = connector->dev;
++	struct drm_nouveau_private *dev_priv = dev->dev_private;
+ 	struct nouveau_connector *nv_connector = nouveau_connector(connector);
+ 	struct nouveau_encoder *nv_encoder = nv_connector->detected_encoder;
++	struct drm_display_mode mode;
+ 	int ret = 0;
+ 
+-	/* If we're not LVDS, destroy the previous native mode, the attached
+-	 * monitor could have changed.
++	/* destroy the native mode, the attached monitor could have changed.
  	 */
 -	if (connector->connector_type != DRM_MODE_CONNECTOR_LVDS &&
-+	if (nv_connector->dcb->type != DCB_CONNECTOR_LVDS &&
- 	    nv_connector->native_mode) {
+-	    nv_connector->native_mode) {
++	if (nv_connector->native_mode) {
  		drm_mode_destroy(dev, nv_connector->native_mode);
  		nv_connector->native_mode = NULL;
-@@ -563,7 +563,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
+ 	}
+ 
+ 	if (nv_connector->edid)
+ 		ret = drm_add_edid_modes(connector, nv_connector->edid);
++	else
++	if (nv_encoder->dcb->type == OUTPUT_LVDS &&
++	    (nv_encoder->dcb->lvdsconf.use_straps_for_mode ||
++	     dev_priv->vbios.fp_no_ddc) &&
++	    nouveau_bios_fp_mode(dev, &mode)) {
++		nv_connector->native_mode = drm_mode_duplicate(dev, &mode);
++	}
+ 
+ 	/* Find the native mode if this is a digital panel, if we didn't
+ 	 * find any modes through DDC previously add the native mode to
+@@ -552,7 +610,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
+ 	 */
+ 	if (!nv_connector->native_mode)
+ 		nv_connector->native_mode =
+-			nouveau_connector_native_mode(nv_connector);
++			nouveau_connector_native_mode(connector);
+ 	if (ret == 0 && nv_connector->native_mode) {
+ 		struct drm_display_mode *mode;
+ 
+@@ -565,7 +623,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
  		ret = get_slave_funcs(nv_encoder)->
  			get_modes(to_drm_encoder(nv_encoder), connector);
  
@@ -2407,7 +3366,30 @@ index d2f6335..8fc0145 100644
  		ret += nouveau_connector_scaler_modes_add(connector);
  
  	return ret;
-@@ -613,6 +613,9 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
+@@ -583,9 +641,9 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
+ 
+ 	switch (nv_encoder->dcb->type) {
+ 	case OUTPUT_LVDS:
+-		BUG_ON(!nv_connector->native_mode);
+-		if (mode->hdisplay > nv_connector->native_mode->hdisplay ||
+-		    mode->vdisplay > nv_connector->native_mode->vdisplay)
++		if (nv_connector->native_mode &&
++		    (mode->hdisplay > nv_connector->native_mode->hdisplay ||
++		     mode->vdisplay > nv_connector->native_mode->vdisplay))
+ 			return MODE_PANEL;
+ 
+ 		min_clock = 0;
+@@ -593,8 +651,7 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
+ 		break;
+ 	case OUTPUT_TMDS:
+ 		if ((dev_priv->card_type >= NV_50 && !nouveau_duallink) ||
+-		    (dev_priv->card_type < NV_50 &&
+-		     !nv_encoder->dcb->duallink_possible))
++		    !nv_encoder->dcb->duallink_possible)
+ 			max_clock = 165000;
+ 		else
+ 			max_clock = 330000;
+@@ -615,6 +672,9 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
  
  		clock *= 3;
  		break;
@@ -2417,47 +3399,118 @@ index d2f6335..8fc0145 100644
  	}
  
  	if (clock < min_clock)
-@@ -680,7 +683,7 @@ nouveau_connector_create_lvds(struct drm_device *dev,
- 	/* Firstly try getting EDID over DDC, if allowed and I2C channel
- 	 * is available.
- 	 */
+@@ -656,193 +716,138 @@ nouveau_connector_funcs = {
+ 	.force = nouveau_connector_force
+ };
+ 
+-static int
+-nouveau_connector_create_lvds(struct drm_device *dev,
+-			      struct drm_connector *connector)
+-{
+-	struct nouveau_connector *nv_connector = nouveau_connector(connector);
+-	struct drm_nouveau_private *dev_priv = dev->dev_private;
+-	struct nouveau_i2c_chan *i2c = NULL;
+-	struct nouveau_encoder *nv_encoder;
+-	struct drm_display_mode native, *mode, *temp;
+-	bool dummy, if_is_24bit = false;
+-	int ret, flags;
+-
+-	nv_encoder = find_encoder_by_type(connector, OUTPUT_LVDS);
+-	if (!nv_encoder)
+-		return -ENODEV;
+-
+-	ret = nouveau_bios_parse_lvds_table(dev, 0, &dummy, &if_is_24bit);
+-	if (ret) {
+-		NV_ERROR(dev, "Error parsing LVDS table, disabling LVDS\n");
+-		return ret;
+-	}
+-	nv_connector->use_dithering = !if_is_24bit;
+-
+-	/* Firstly try getting EDID over DDC, if allowed and I2C channel
+-	 * is available.
+-	 */
 -	if (!dev_priv->VBIOS.pub.fp_no_ddc && nv_encoder->dcb->i2c_index < 0xf)
-+	if (!dev_priv->vbios.fp_no_ddc && nv_encoder->dcb->i2c_index < 0xf)
- 		i2c = nouveau_i2c_find(dev, nv_encoder->dcb->i2c_index);
- 
- 	if (i2c) {
-@@ -695,7 +698,7 @@ nouveau_connector_create_lvds(struct drm_device *dev,
- 	 */
- 	if (!nv_connector->edid && nouveau_bios_fp_mode(dev, &native) &&
- 	     (nv_encoder->dcb->lvdsconf.use_straps_for_mode ||
+-		i2c = nouveau_i2c_find(dev, nv_encoder->dcb->i2c_index);
+-
+-	if (i2c) {
+-		nouveau_connector_ddc_prepare(connector, &flags);
+-		nv_connector->edid = drm_get_edid(connector, &i2c->adapter);
+-		nouveau_connector_ddc_finish(connector, flags);
+-	}
+-
+-	/* If no EDID found above, and the VBIOS indicates a hardcoded
+-	 * modeline is avalilable for the panel, set it as the panel's
+-	 * native mode and exit.
+-	 */
+-	if (!nv_connector->edid && nouveau_bios_fp_mode(dev, &native) &&
+-	     (nv_encoder->dcb->lvdsconf.use_straps_for_mode ||
 -	      dev_priv->VBIOS.pub.fp_no_ddc)) {
-+	      dev_priv->vbios.fp_no_ddc)) {
- 		nv_connector->native_mode = drm_mode_duplicate(dev, &native);
- 		goto out;
- 	}
-@@ -704,7 +707,7 @@ nouveau_connector_create_lvds(struct drm_device *dev,
- 	 * stored for the panel stored in them.
- 	 */
- 	if (!nv_connector->edid && !nv_connector->native_mode &&
+-		nv_connector->native_mode = drm_mode_duplicate(dev, &native);
+-		goto out;
+-	}
+-
+-	/* Still nothing, some VBIOS images have a hardcoded EDID block
+-	 * stored for the panel stored in them.
+-	 */
+-	if (!nv_connector->edid && !nv_connector->native_mode &&
 -	    !dev_priv->VBIOS.pub.fp_no_ddc) {
-+	    !dev_priv->vbios.fp_no_ddc) {
- 		struct edid *edid =
- 			(struct edid *)nouveau_bios_embedded_edid(dev);
- 		if (edid) {
-@@ -739,46 +742,66 @@ out:
- }
+-		struct edid *edid =
+-			(struct edid *)nouveau_bios_embedded_edid(dev);
+-		if (edid) {
+-			nv_connector->edid = kmalloc(EDID_LENGTH, GFP_KERNEL);
+-			*(nv_connector->edid) = *edid;
+-		}
+-	}
+-
+-	if (!nv_connector->edid)
+-		goto out;
+-
+-	/* We didn't find/use a panel mode from the VBIOS, so parse the EDID
+-	 * block and look for the preferred mode there.
+-	 */
+-	ret = drm_add_edid_modes(connector, nv_connector->edid);
+-	if (ret == 0)
+-		goto out;
+-	nv_connector->detected_encoder = nv_encoder;
+-	nv_connector->native_mode = nouveau_connector_native_mode(nv_connector);
+-	list_for_each_entry_safe(mode, temp, &connector->probed_modes, head)
+-		drm_mode_remove(connector, mode);
+-
+-out:
+-	if (!nv_connector->native_mode) {
+-		NV_ERROR(dev, "LVDS present in DCB table, but couldn't "
+-			      "determine its native mode.  Disabling.\n");
+-		return -ENODEV;
+-	}
+-
+-	drm_mode_connector_update_edid_property(connector, nv_connector->edid);
+-	return 0;
+-}
++static const struct drm_connector_funcs
++nouveau_connector_funcs_lvds = {
++	.dpms = drm_helper_connector_dpms,
++	.save = NULL,
++	.restore = NULL,
++	.detect = nouveau_connector_detect_lvds,
++	.destroy = nouveau_connector_destroy,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.set_property = nouveau_connector_set_property,
++	.force = nouveau_connector_force
++};
  
- int
+-int
 -nouveau_connector_create(struct drm_device *dev, int index, int type)
-+nouveau_connector_create(struct drm_device *dev,
-+			 struct dcb_connector_table_entry *dcb)
++struct drm_connector *
++nouveau_connector_create(struct drm_device *dev, int index)
  {
++	const struct drm_connector_funcs *funcs = &nouveau_connector_funcs;
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
  	struct nouveau_connector *nv_connector = NULL;
++	struct dcb_connector_table_entry *dcb = NULL;
  	struct drm_connector *connector;
- 	struct drm_encoder *encoder;
+-	struct drm_encoder *encoder;
 -	int ret;
-+	int ret, type;
++	int type, ret = 0;
  
  	NV_DEBUG_KMS(dev, "\n");
  
@@ -2466,14 +3519,18 @@ index d2f6335..8fc0145 100644
 -		return -ENOMEM;
 -	nv_connector->dcb = nouveau_bios_connector_entry(dev, index);
 -	connector = &nv_connector->base;
--
++	if (index >= dev_priv->vbios.dcb.connector.entries)
++		return ERR_PTR(-EINVAL);
+ 
 -	switch (type) {
 -	case DRM_MODE_CONNECTOR_VGA:
+-		NV_INFO(dev, "Detected a VGA connector\n");
++	dcb = &dev_priv->vbios.dcb.connector.entry[index];
++	if (dcb->drm)
++		return dcb->drm;
++
 +	switch (dcb->type) {
-+	case DCB_CONNECTOR_NONE:
-+		return 0;
 +	case DCB_CONNECTOR_VGA:
- 		NV_INFO(dev, "Detected a VGA connector\n");
 +		type = DRM_MODE_CONNECTOR_VGA;
  		break;
 -	case DRM_MODE_CONNECTOR_DVID:
@@ -2481,78 +3538,69 @@ index d2f6335..8fc0145 100644
 +	case DCB_CONNECTOR_TV_0:
 +	case DCB_CONNECTOR_TV_1:
 +	case DCB_CONNECTOR_TV_3:
-+		NV_INFO(dev, "Detected a TV connector\n");
 +		type = DRM_MODE_CONNECTOR_TV;
  		break;
 -	case DRM_MODE_CONNECTOR_DVII:
+-		NV_INFO(dev, "Detected a DVI-I connector\n");
 +	case DCB_CONNECTOR_DVI_I:
- 		NV_INFO(dev, "Detected a DVI-I connector\n");
 +		type = DRM_MODE_CONNECTOR_DVII;
  		break;
 -	case DRM_MODE_CONNECTOR_LVDS:
 -		NV_INFO(dev, "Detected a LVDS connector\n");
 +	case DCB_CONNECTOR_DVI_D:
-+		NV_INFO(dev, "Detected a DVI-D connector\n");
 +		type = DRM_MODE_CONNECTOR_DVID;
  		break;
 -	case DRM_MODE_CONNECTOR_TV:
 -		NV_INFO(dev, "Detected a TV connector\n");
 +	case DCB_CONNECTOR_HDMI_0:
 +	case DCB_CONNECTOR_HDMI_1:
-+		NV_INFO(dev, "Detected a HDMI connector\n");
 +		type = DRM_MODE_CONNECTOR_HDMIA;
  		break;
 -	case DRM_MODE_CONNECTOR_DisplayPort:
+-		NV_INFO(dev, "Detected a DisplayPort connector\n");
 +	case DCB_CONNECTOR_LVDS:
-+		NV_INFO(dev, "Detected a LVDS connector\n");
 +		type = DRM_MODE_CONNECTOR_LVDS;
-+		break;
-+	case DCB_CONNECTOR_DP:
- 		NV_INFO(dev, "Detected a DisplayPort connector\n");
-+		type = DRM_MODE_CONNECTOR_DisplayPort;
++		funcs = &nouveau_connector_funcs_lvds;
  		break;
 -	default:
 -		NV_ERROR(dev, "Unknown connector, this is not good.\n");
++	case DCB_CONNECTOR_DP:
++		type = DRM_MODE_CONNECTOR_DisplayPort;
++		break;
 +	case DCB_CONNECTOR_eDP:
-+		NV_INFO(dev, "Detected an eDP connector\n");
 +		type = DRM_MODE_CONNECTOR_eDP;
  		break;
 +	default:
 +		NV_ERROR(dev, "unknown connector type: 0x%02x!!\n", dcb->type);
-+		return -EINVAL;
++		return ERR_PTR(-EINVAL);
  	}
  
 +	nv_connector = kzalloc(sizeof(*nv_connector), GFP_KERNEL);
 +	if (!nv_connector)
-+		return -ENOMEM;
++		return ERR_PTR(-ENOMEM);
 +	nv_connector->dcb = dcb;
 +	connector = &nv_connector->base;
 +
  	/* defaults, will get overridden in detect() */
  	connector->interlace_allowed = false;
  	connector->doublescan_allowed = false;
-@@ -786,55 +809,65 @@ nouveau_connector_create(struct drm_device *dev, int index, int type)
- 	drm_connector_init(dev, connector, &nouveau_connector_funcs, type);
+ 
+-	drm_connector_init(dev, connector, &nouveau_connector_funcs, type);
++	drm_connector_init(dev, connector, funcs, type);
  	drm_connector_helper_add(connector, &nouveau_connector_helper_funcs);
  
-+	/* attach encoders */
-+	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
-+		struct nouveau_encoder *nv_encoder = nouveau_encoder(encoder);
++	/* Check if we need dithering enabled */
++	if (dcb->type == DCB_CONNECTOR_LVDS) {
++		bool dummy, is_24bit = false;
 +
-+		if (nv_encoder->dcb->connector != dcb->index)
-+			continue;
++		ret = nouveau_bios_parse_lvds_table(dev, 0, &dummy, &is_24bit);
++		if (ret) {
++			NV_ERROR(dev, "Error parsing LVDS table, disabling "
++				 "LVDS\n");
++			goto fail;
++		}
 +
-+		if (get_slave_funcs(nv_encoder))
-+			get_slave_funcs(nv_encoder)->create_resources(encoder, connector);
-+
-+		drm_mode_connector_attach_encoder(connector, encoder);
-+	}
-+
-+	if (!connector->encoder_ids[0]) {
-+		NV_WARN(dev, "  no encoders, ignoring\n");
-+		drm_connector_cleanup(connector);
-+		kfree(connector);
-+		return 0;
++		nv_connector->use_dithering = !is_24bit;
 +	}
 +
  	/* Init DVI-I specific properties */
@@ -2564,9 +3612,8 @@ index d2f6335..8fc0145 100644
  	}
  
 -	if (type != DRM_MODE_CONNECTOR_LVDS)
-+	if (dcb->type != DCB_CONNECTOR_LVDS)
- 		nv_connector->use_dithering = false;
- 
+-		nv_connector->use_dithering = false;
+-
 -	if (type == DRM_MODE_CONNECTOR_DVID ||
 -	    type == DRM_MODE_CONNECTOR_DVII ||
 -	    type == DRM_MODE_CONNECTOR_LVDS ||
@@ -2623,14 +3670,25 @@ index d2f6335..8fc0145 100644
  	}
  
  	drm_sysfs_connector_add(connector);
++	dcb->drm = connector;
++	return dcb->drm;
  
 -	if (connector->connector_type == DRM_MODE_CONNECTOR_LVDS) {
-+	if (dcb->type == DCB_CONNECTOR_LVDS) {
- 		ret = nouveau_connector_create_lvds(dev, connector);
- 		if (ret) {
- 			connector->funcs->destroy(connector);
+-		ret = nouveau_connector_create_lvds(dev, connector);
+-		if (ret) {
+-			connector->funcs->destroy(connector);
+-			return ret;
+-		}
+-	}
++fail:
++	drm_connector_cleanup(connector);
++	kfree(connector);
++	return ERR_PTR(ret);
+ 
+-	return 0;
+ }
 diff --git a/drivers/gpu/drm/nouveau/nouveau_connector.h b/drivers/gpu/drm/nouveau/nouveau_connector.h
-index 728b809..4ef38ab 100644
+index 728b809..1ce3d91 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_connector.h
 +++ b/drivers/gpu/drm/nouveau/nouveau_connector.h
 @@ -49,6 +49,7 @@ static inline struct nouveau_connector *nouveau_connector(
@@ -2638,8 +3696,8 @@ index 728b809..4ef38ab 100644
  }
  
 -int nouveau_connector_create(struct drm_device *dev, int i2c_index, int type);
-+int nouveau_connector_create(struct drm_device *,
-+			     struct dcb_connector_table_entry *);
++struct drm_connector *
++nouveau_connector_create(struct drm_device *, int index);
  
  #endif /* __NOUVEAU_CONNECTOR_H__ */
 diff --git a/drivers/gpu/drm/nouveau/nouveau_debugfs.c b/drivers/gpu/drm/nouveau/nouveau_debugfs.c
@@ -2762,7 +3820,7 @@ index da3b93b..60a709c 100644
  		struct nouveau_framebuffer *nouveau_fb;
  
 diff --git a/drivers/gpu/drm/nouveau/nouveau_drv.h b/drivers/gpu/drm/nouveau/nouveau_drv.h
-index 5be0cca..b908f77 100644
+index 5be0cca..c31159a 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_drv.h
 +++ b/drivers/gpu/drm/nouveau/nouveau_drv.h
 @@ -76,6 +76,7 @@ struct nouveau_bo {
@@ -2773,6 +3831,15 @@ index 5be0cca..b908f77 100644
  	struct ttm_bo_kmap_obj kmap;
  	struct list_head head;
  
+@@ -195,7 +196,7 @@ struct nouveau_channel {
+ 		struct list_head pending;
+ 		uint32_t sequence;
+ 		uint32_t sequence_ack;
+-		uint32_t last_sequence_irq;
++		atomic_t last_sequence_irq;
+ 	} fence;
+ 
+ 	/* DMA push buffer */
 @@ -519,6 +520,7 @@ struct drm_nouveau_private {
  
  	struct workqueue_struct *wq;
@@ -2915,6 +3982,35 @@ index 5be0cca..b908f77 100644
  
  /* nouveau_grctx.c */
  extern int  nouveau_grctx_prog_load(struct drm_device *);
+@@ -1081,13 +1083,13 @@ extern long nouveau_compat_ioctl(struct file *file, unsigned int cmd,
+ 				 unsigned long arg);
+ 
+ /* nv04_dac.c */
+-extern int nv04_dac_create(struct drm_device *dev, struct dcb_entry *entry);
++extern int nv04_dac_create(struct drm_connector *, struct dcb_entry *);
+ extern uint32_t nv17_dac_sample_load(struct drm_encoder *encoder);
+ extern int nv04_dac_output_offset(struct drm_encoder *encoder);
+ extern void nv04_dac_update_dacclk(struct drm_encoder *encoder, bool enable);
+ 
+ /* nv04_dfp.c */
+-extern int nv04_dfp_create(struct drm_device *dev, struct dcb_entry *entry);
++extern int nv04_dfp_create(struct drm_connector *, struct dcb_entry *);
+ extern int nv04_dfp_get_bound_head(struct drm_device *dev, struct dcb_entry *dcbent);
+ extern void nv04_dfp_bind_head(struct drm_device *dev, struct dcb_entry *dcbent,
+ 			       int head, bool dl);
+@@ -1096,10 +1098,10 @@ extern void nv04_dfp_update_fp_control(struct drm_encoder *encoder, int mode);
+ 
+ /* nv04_tv.c */
+ extern int nv04_tv_identify(struct drm_device *dev, int i2c_index);
+-extern int nv04_tv_create(struct drm_device *dev, struct dcb_entry *entry);
++extern int nv04_tv_create(struct drm_connector *, struct dcb_entry *);
+ 
+ /* nv17_tv.c */
+-extern int nv17_tv_create(struct drm_device *dev, struct dcb_entry *entry);
++extern int nv17_tv_create(struct drm_connector *, struct dcb_entry *);
+ 
+ /* nv04_display.c */
+ extern int nv04_display_create(struct drm_device *);
 @@ -1119,7 +1121,8 @@ extern int nouveau_bo_pin(struct nouveau_bo *, uint32_t flags);
  extern int nouveau_bo_unpin(struct nouveau_bo *);
  extern int nouveau_bo_map(struct nouveau_bo *);
@@ -2925,7 +4021,15 @@ index 5be0cca..b908f77 100644
  extern u16 nouveau_bo_rd16(struct nouveau_bo *nvbo, unsigned index);
  extern void nouveau_bo_wr16(struct nouveau_bo *nvbo, unsigned index, u16 val);
  extern u32 nouveau_bo_rd32(struct nouveau_bo *nvbo, unsigned index);
-@@ -1163,6 +1166,16 @@ extern int nouveau_gem_ioctl_info(struct drm_device *, void *,
+@@ -1139,7 +1142,6 @@ extern int nouveau_fence_wait(void *obj, void *arg, bool lazy, bool intr);
+ extern int nouveau_fence_flush(void *obj, void *arg);
+ extern void nouveau_fence_unref(void **obj);
+ extern void *nouveau_fence_ref(void *obj);
+-extern void nouveau_fence_handler(struct drm_device *dev, int channel);
+ 
+ /* nouveau_gem.c */
+ extern int nouveau_gem_new(struct drm_device *, struct nouveau_channel *,
+@@ -1163,6 +1165,16 @@ extern int nouveau_gem_ioctl_info(struct drm_device *, void *,
  int nv17_gpio_get(struct drm_device *dev, enum dcb_gpio_tag tag);
  int nv17_gpio_set(struct drm_device *dev, enum dcb_gpio_tag tag, int state);
  
@@ -2943,7 +4047,7 @@ index 5be0cca..b908f77 100644
  #ifdef __BIG_ENDIAN
  #define ioread16_native ioread16be
 diff --git a/drivers/gpu/drm/nouveau/nouveau_encoder.h b/drivers/gpu/drm/nouveau/nouveau_encoder.h
-index bc4a240..e1df820 100644
+index bc4a240..e4442e2 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_encoder.h
 +++ b/drivers/gpu/drm/nouveau/nouveau_encoder.h
 @@ -47,6 +47,9 @@ struct nouveau_encoder {
@@ -2956,6 +4060,118 @@ index bc4a240..e1df820 100644
  			int dpcd_version;
  			int link_nr;
  			int link_bw;
+@@ -68,8 +71,8 @@ static inline struct drm_encoder *to_drm_encoder(struct nouveau_encoder *enc)
+ 
+ struct nouveau_connector *
+ nouveau_encoder_connector_get(struct nouveau_encoder *encoder);
+-int nv50_sor_create(struct drm_device *dev, struct dcb_entry *entry);
+-int nv50_dac_create(struct drm_device *dev, struct dcb_entry *entry);
++int nv50_sor_create(struct drm_connector *, struct dcb_entry *);
++int nv50_dac_create(struct drm_connector *, struct dcb_entry *);
+ 
+ struct bit_displayport_encoder_table {
+ 	uint32_t match;
+diff --git a/drivers/gpu/drm/nouveau/nouveau_fence.c b/drivers/gpu/drm/nouveau/nouveau_fence.c
+index faddf53..813d853 100644
+--- a/drivers/gpu/drm/nouveau/nouveau_fence.c
++++ b/drivers/gpu/drm/nouveau/nouveau_fence.c
+@@ -67,12 +67,13 @@ nouveau_fence_update(struct nouveau_channel *chan)
+ 	if (USE_REFCNT)
+ 		sequence = nvchan_rd32(chan, 0x48);
+ 	else
+-		sequence = chan->fence.last_sequence_irq;
++		sequence = atomic_read(&chan->fence.last_sequence_irq);
+ 
+ 	if (chan->fence.sequence_ack == sequence)
+ 		return;
+ 	chan->fence.sequence_ack = sequence;
+ 
++	spin_lock(&chan->fence.lock);
+ 	list_for_each_safe(entry, tmp, &chan->fence.pending) {
+ 		fence = list_entry(entry, struct nouveau_fence, entry);
+ 
+@@ -84,6 +85,7 @@ nouveau_fence_update(struct nouveau_channel *chan)
+ 		if (sequence == chan->fence.sequence_ack)
+ 			break;
+ 	}
++	spin_unlock(&chan->fence.lock);
+ }
+ 
+ int
+@@ -119,7 +121,6 @@ nouveau_fence_emit(struct nouveau_fence *fence)
+ {
+ 	struct drm_nouveau_private *dev_priv = fence->channel->dev->dev_private;
+ 	struct nouveau_channel *chan = fence->channel;
+-	unsigned long flags;
+ 	int ret;
+ 
+ 	ret = RING_SPACE(chan, 2);
+@@ -127,9 +128,7 @@ nouveau_fence_emit(struct nouveau_fence *fence)
+ 		return ret;
+ 
+ 	if (unlikely(chan->fence.sequence == chan->fence.sequence_ack - 1)) {
+-		spin_lock_irqsave(&chan->fence.lock, flags);
+ 		nouveau_fence_update(chan);
+-		spin_unlock_irqrestore(&chan->fence.lock, flags);
+ 
+ 		BUG_ON(chan->fence.sequence ==
+ 		       chan->fence.sequence_ack - 1);
+@@ -138,9 +137,9 @@ nouveau_fence_emit(struct nouveau_fence *fence)
+ 	fence->sequence = ++chan->fence.sequence;
+ 
+ 	kref_get(&fence->refcount);
+-	spin_lock_irqsave(&chan->fence.lock, flags);
++	spin_lock(&chan->fence.lock);
+ 	list_add_tail(&fence->entry, &chan->fence.pending);
+-	spin_unlock_irqrestore(&chan->fence.lock, flags);
++	spin_unlock(&chan->fence.lock);
+ 
+ 	BEGIN_RING(chan, NvSubSw, USE_REFCNT ? 0x0050 : 0x0150, 1);
+ 	OUT_RING(chan, fence->sequence);
+@@ -173,14 +172,11 @@ nouveau_fence_signalled(void *sync_obj, void *sync_arg)
+ {
+ 	struct nouveau_fence *fence = nouveau_fence(sync_obj);
+ 	struct nouveau_channel *chan = fence->channel;
+-	unsigned long flags;
+ 
+ 	if (fence->signalled)
+ 		return true;
+ 
+-	spin_lock_irqsave(&chan->fence.lock, flags);
+ 	nouveau_fence_update(chan);
+-	spin_unlock_irqrestore(&chan->fence.lock, flags);
+ 	return fence->signalled;
+ }
+ 
+@@ -221,27 +217,12 @@ nouveau_fence_flush(void *sync_obj, void *sync_arg)
+ 	return 0;
+ }
+ 
+-void
+-nouveau_fence_handler(struct drm_device *dev, int channel)
+-{
+-	struct drm_nouveau_private *dev_priv = dev->dev_private;
+-	struct nouveau_channel *chan = NULL;
+-
+-	if (channel >= 0 && channel < dev_priv->engine.fifo.channels)
+-		chan = dev_priv->fifos[channel];
+-
+-	if (chan) {
+-		spin_lock_irq(&chan->fence.lock);
+-		nouveau_fence_update(chan);
+-		spin_unlock_irq(&chan->fence.lock);
+-	}
+-}
+-
+ int
+ nouveau_fence_init(struct nouveau_channel *chan)
+ {
+ 	INIT_LIST_HEAD(&chan->fence.pending);
+ 	spin_lock_init(&chan->fence.lock);
++	atomic_set(&chan->fence.last_sequence_irq, 0);
+ 	return 0;
+ }
+ 
 diff --git a/drivers/gpu/drm/nouveau/nouveau_gem.c b/drivers/gpu/drm/nouveau/nouveau_gem.c
 index 8265fed..0846a1e 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_gem.c
@@ -3800,7 +5016,7 @@ index 447f9f6..13e73ce 100644
  	return IRQ_HANDLED;
  }
 diff --git a/drivers/gpu/drm/nouveau/nouveau_mem.c b/drivers/gpu/drm/nouveau/nouveau_mem.c
-index 2dc09db..775a701 100644
+index 2dc09db..816948b 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_mem.c
 +++ b/drivers/gpu/drm/nouveau/nouveau_mem.c
 @@ -347,6 +347,20 @@ nv50_mem_vm_bind_linear(struct drm_device *dev, uint64_t virt, uint32_t size,
@@ -3892,7 +5108,7 @@ index 2dc09db..775a701 100644
  		pci_read_config_dword(bridge, 0x84, &mem);
  		return (uint64_t)(((mem >> 4) & 127) + 1)*1024*1024;
  	}
-@@ -477,50 +526,32 @@ nouveau_mem_fb_amount_igp(struct drm_device *dev)
+@@ -477,50 +526,39 @@ nouveau_mem_fb_amount_igp(struct drm_device *dev)
  }
  
  /* returns the amount of FB ram in bytes */
@@ -3934,19 +5150,25 @@ index 2dc09db..775a701 100644
 -					NV10_FIFO_DATA_RAM_AMOUNT_MB_MASK) >>
 -					NV10_FIFO_DATA_RAM_AMOUNT_MB_SHIFT;
 -			return mem * 1024 * 1024;
--		}
--		break;
 +
 +	if (dev_priv->card_type == NV_04) {
 +		dev_priv->vram_size = nouveau_mem_detect_nv04(dev);
 +	} else
 +	if (dev_priv->flags & (NV_NFORCE | NV_NFORCE2)) {
 +		dev_priv->vram_size = nouveau_mem_detect_nforce(dev);
-+	} else {
++	} else
++	if (dev_priv->card_type < NV_50) {
 +		dev_priv->vram_size  = nv_rd32(dev, NV04_FIFO_DATA);
 +		dev_priv->vram_size &= NV10_FIFO_DATA_RAM_AMOUNT_MB_MASK;
-+		if (dev_priv->chipset == 0xaa || dev_priv->chipset == 0xac)
-+			dev_priv->vram_sys_base = nv_rd32(dev, 0x100e10) << 12;
++	} else {
++		dev_priv->vram_size = nv_rd32(dev, NV04_FIFO_DATA);
++		dev_priv->vram_size |= (dev_priv->vram_size & 0xff) << 32;
++		dev_priv->vram_size &= 0xffffffff00;
++		if (dev_priv->chipset == 0xaa || dev_priv->chipset == 0xac) {
++			dev_priv->vram_sys_base = nv_rd32(dev, 0x100e10);
++			dev_priv->vram_sys_base <<= 12;
+ 		}
+-		break;
  	}
  
 -	NV_ERROR(dev,
@@ -3965,7 +5187,7 @@ index 2dc09db..775a701 100644
  }
  
  #if __OS_HAS_AGP
-@@ -631,15 +662,12 @@ nouveau_mem_init(struct drm_device *dev)
+@@ -631,15 +669,12 @@ nouveau_mem_init(struct drm_device *dev)
  	spin_lock_init(&dev_priv->ttm.bo_list_lock);
  	spin_lock_init(&dev_priv->tile.lock);
  
@@ -4024,7 +5246,7 @@ index ed15905..554fb45 100644
  	return 0;
  }
 diff --git a/drivers/gpu/drm/nouveau/nouveau_state.c b/drivers/gpu/drm/nouveau/nouveau_state.c
-index a8d77c8..a11cd7f 100644
+index a8d77c8..7c1d252 100644
 --- a/drivers/gpu/drm/nouveau/nouveau_state.c
 +++ b/drivers/gpu/drm/nouveau/nouveau_state.c
 @@ -34,7 +34,6 @@
@@ -4103,6 +5325,43 @@ index a8d77c8..a11cd7f 100644
  	nouveau_mem_close(dev);
  out_instmem:
  	engine->instmem.takedown(dev);
+@@ -691,29 +701,24 @@ int nouveau_load(struct drm_device *dev, unsigned long flags)
+ 	NV_INFO(dev, "Detected an NV%2x generation card (0x%08x)\n",
+ 		dev_priv->card_type, reg0);
+ 
+-	/* map larger RAMIN aperture on NV40 cards */
+-	dev_priv->ramin  = NULL;
++	/* Map PRAMIN BAR, or on older cards, the aperture withing BAR0 */
+ 	if (dev_priv->card_type >= NV_40) {
+ 		int ramin_bar = 2;
+ 		if (pci_resource_len(dev->pdev, ramin_bar) == 0)
+ 			ramin_bar = 3;
+ 
+ 		dev_priv->ramin_size = pci_resource_len(dev->pdev, ramin_bar);
+-		dev_priv->ramin = ioremap(
+-				pci_resource_start(dev->pdev, ramin_bar),
++		dev_priv->ramin =
++			ioremap(pci_resource_start(dev->pdev, ramin_bar),
+ 				dev_priv->ramin_size);
+ 		if (!dev_priv->ramin) {
+-			NV_ERROR(dev, "Failed to init RAMIN mapping, "
+-				      "limited instance memory available\n");
++			NV_ERROR(dev, "Failed to PRAMIN BAR");
++			return -ENOMEM;
+ 		}
+-	}
+-
+-	/* On older cards (or if the above failed), create a map covering
+-	 * the BAR0 PRAMIN aperture */
+-	if (!dev_priv->ramin) {
++	} else {
+ 		dev_priv->ramin_size = 1 * 1024 * 1024;
+ 		dev_priv->ramin = ioremap(mmio_start_offs + NV_RAMIN,
+-							dev_priv->ramin_size);
++					  dev_priv->ramin_size);
+ 		if (!dev_priv->ramin) {
+ 			NV_ERROR(dev, "Failed to map BAR0 PRAMIN.\n");
+ 			return -ENOMEM;
 diff --git a/drivers/gpu/drm/nouveau/nv04_crtc.c b/drivers/gpu/drm/nouveau/nv04_crtc.c
 index d2f143e..9986aba 100644
 --- a/drivers/gpu/drm/nouveau/nv04_crtc.c
@@ -4121,7 +5380,7 @@ index d2f143e..9986aba 100644
  	int horizBlankStart	= (mode->crtc_hdisplay >> 3)		- 1;
  	int horizBlankEnd	= (mode->crtc_htotal >> 3)		- 1;
 diff --git a/drivers/gpu/drm/nouveau/nv04_dac.c b/drivers/gpu/drm/nouveau/nv04_dac.c
-index 1d73b15..1cb19e3 100644
+index 1d73b15..8066c56 100644
 --- a/drivers/gpu/drm/nouveau/nv04_dac.c
 +++ b/drivers/gpu/drm/nouveau/nv04_dac.c
 @@ -230,13 +230,13 @@ uint32_t nv17_dac_sample_load(struct drm_encoder *encoder)
@@ -4142,8 +5401,31 @@ index 1d73b15..1cb19e3 100644
  	}
  
  	saved_rtest_ctrl = NVReadRAMDAC(dev, 0, NV_PRAMDAC_TEST_CONTROL + regoffset);
+@@ -501,11 +501,13 @@ static const struct drm_encoder_funcs nv04_dac_funcs = {
+ 	.destroy = nv04_dac_destroy,
+ };
+ 
+-int nv04_dac_create(struct drm_device *dev, struct dcb_entry *entry)
++int
++nv04_dac_create(struct drm_connector *connector, struct dcb_entry *entry)
+ {
+ 	const struct drm_encoder_helper_funcs *helper;
+-	struct drm_encoder *encoder;
+ 	struct nouveau_encoder *nv_encoder = NULL;
++	struct drm_device *dev = connector->dev;
++	struct drm_encoder *encoder;
+ 
+ 	nv_encoder = kzalloc(sizeof(*nv_encoder), GFP_KERNEL);
+ 	if (!nv_encoder)
+@@ -527,5 +529,6 @@ int nv04_dac_create(struct drm_device *dev, struct dcb_entry *entry)
+ 	encoder->possible_crtcs = entry->heads;
+ 	encoder->possible_clones = 0;
+ 
++	drm_mode_connector_attach_encoder(connector, encoder);
+ 	return 0;
+ }
 diff --git a/drivers/gpu/drm/nouveau/nv04_dfp.c b/drivers/gpu/drm/nouveau/nv04_dfp.c
-index 483f875..41634d4 100644
+index 483f875..3559d89 100644
 --- a/drivers/gpu/drm/nouveau/nv04_dfp.c
 +++ b/drivers/gpu/drm/nouveau/nv04_dfp.c
 @@ -269,10 +269,10 @@ static void nv04_dfp_mode_set(struct drm_encoder *encoder,
@@ -4159,23 +5441,81 @@ index 483f875..41634d4 100644
  	regp->fp_horiz_regs[FP_SYNC_START] = output_mode->hsync_start - 1;
  	regp->fp_horiz_regs[FP_SYNC_END] = output_mode->hsync_end - 1;
  	regp->fp_horiz_regs[FP_VALID_START] = output_mode->hskew;
+@@ -584,11 +584,12 @@ static const struct drm_encoder_funcs nv04_dfp_funcs = {
+ 	.destroy = nv04_dfp_destroy,
+ };
+ 
+-int nv04_dfp_create(struct drm_device *dev, struct dcb_entry *entry)
++int
++nv04_dfp_create(struct drm_connector *connector, struct dcb_entry *entry)
+ {
+ 	const struct drm_encoder_helper_funcs *helper;
+-	struct drm_encoder *encoder;
+ 	struct nouveau_encoder *nv_encoder = NULL;
++	struct drm_encoder *encoder;
+ 	int type;
+ 
+ 	switch (entry->type) {
+@@ -613,11 +614,12 @@ int nv04_dfp_create(struct drm_device *dev, struct dcb_entry *entry)
+ 	nv_encoder->dcb = entry;
+ 	nv_encoder->or = ffs(entry->or) - 1;
+ 
+-	drm_encoder_init(dev, encoder, &nv04_dfp_funcs, type);
++	drm_encoder_init(connector->dev, encoder, &nv04_dfp_funcs, type);
+ 	drm_encoder_helper_add(encoder, helper);
+ 
+ 	encoder->possible_crtcs = entry->heads;
+ 	encoder->possible_clones = 0;
+ 
++	drm_mode_connector_attach_encoder(connector, encoder);
+ 	return 0;
+ }
 diff --git a/drivers/gpu/drm/nouveau/nv04_display.c b/drivers/gpu/drm/nouveau/nv04_display.c
-index ef77215..c7898b4 100644
+index ef77215..b35b7ed 100644
 --- a/drivers/gpu/drm/nouveau/nv04_display.c
 +++ b/drivers/gpu/drm/nouveau/nv04_display.c
-@@ -93,10 +93,9 @@ int
+@@ -93,10 +93,10 @@ int
  nv04_display_create(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
 -	struct parsed_dcb *dcb = dev_priv->vbios->dcb;
 +	struct dcb_table *dcb = &dev_priv->vbios.dcb;
++	struct drm_connector *connector, *ct;
  	struct drm_encoder *encoder;
  	struct drm_crtc *crtc;
 -	uint16_t connector[16] = { 0 };
  	int i, ret;
  
  	NV_DEBUG_KMS(dev, "\n");
-@@ -154,52 +153,10 @@ nv04_display_create(struct drm_device *dev)
+@@ -133,19 +133,23 @@ nv04_display_create(struct drm_device *dev)
+ 	for (i = 0; i < dcb->entries; i++) {
+ 		struct dcb_entry *dcbent = &dcb->entry[i];
+ 
++		connector = nouveau_connector_create(dev, dcbent->connector);
++		if (IS_ERR(connector))
++			continue;
++
+ 		switch (dcbent->type) {
+ 		case OUTPUT_ANALOG:
+-			ret = nv04_dac_create(dev, dcbent);
++			ret = nv04_dac_create(connector, dcbent);
+ 			break;
+ 		case OUTPUT_LVDS:
+ 		case OUTPUT_TMDS:
+-			ret = nv04_dfp_create(dev, dcbent);
++			ret = nv04_dfp_create(connector, dcbent);
+ 			break;
+ 		case OUTPUT_TV:
+ 			if (dcbent->location == DCB_LOC_ON_CHIP)
+-				ret = nv17_tv_create(dev, dcbent);
++				ret = nv17_tv_create(connector, dcbent);
+ 			else
+-				ret = nv04_tv_create(dev, dcbent);
++				ret = nv04_tv_create(connector, dcbent);
+ 			break;
+ 		default:
+ 			NV_WARN(dev, "DCB type %d not known\n", dcbent->type);
+@@ -154,51 +158,15 @@ nv04_display_create(struct drm_device *dev)
  
  		if (ret)
  			continue;
@@ -4221,15 +5561,18 @@ index ef77215..c7898b4 100644
 -		default:
 -			type = DRM_MODE_CONNECTOR_Unknown;
 -			continue;
--		}
++	list_for_each_entry_safe(connector, ct,
++				 &dev->mode_config.connector_list, head) {
++		if (!connector->encoder_ids[0]) {
++			NV_WARN(dev, "%s has no encoders, removing\n",
++				drm_get_connector_name(connector));
++			connector->funcs->destroy(connector);
+ 		}
 -
 -		nouveau_connector_create(dev, dcbent->connector, type);
--	}
-+	for (i = 0; i < dcb->connector.entries; i++)
-+		nouveau_connector_create(dev, &dcb->connector.entry[i]);
+ 	}
  
  	/* Save previous state */
- 	NVLockVgaCrtcs(dev, false);
 diff --git a/drivers/gpu/drm/nouveau/nv04_fbcon.c b/drivers/gpu/drm/nouveau/nv04_fbcon.c
 index fd01caa..813b25c 100644
 --- a/drivers/gpu/drm/nouveau/nv04_fbcon.c
@@ -4285,11 +5628,39 @@ index f31347b..66fe559 100644
  	return 0;
  }
  
+diff --git a/drivers/gpu/drm/nouveau/nv04_graph.c b/drivers/gpu/drm/nouveau/nv04_graph.c
+index e260986..f0cbbc0 100644
+--- a/drivers/gpu/drm/nouveau/nv04_graph.c
++++ b/drivers/gpu/drm/nouveau/nv04_graph.c
+@@ -527,8 +527,7 @@ static int
+ nv04_graph_mthd_set_ref(struct nouveau_channel *chan, int grclass,
+ 			int mthd, uint32_t data)
+ {
+-	chan->fence.last_sequence_irq = data;
+-	nouveau_fence_handler(chan->dev, chan->id);
++	atomic_set(&chan->fence.last_sequence_irq, data);
+ 	return 0;
+ }
+ 
 diff --git a/drivers/gpu/drm/nouveau/nv04_tv.c b/drivers/gpu/drm/nouveau/nv04_tv.c
-index 9c63099..c4e3404 100644
+index 9c63099..84b5954 100644
 --- a/drivers/gpu/drm/nouveau/nv04_tv.c
 +++ b/drivers/gpu/drm/nouveau/nv04_tv.c
-@@ -262,7 +262,7 @@ int nv04_tv_create(struct drm_device *dev, struct dcb_entry *entry)
+@@ -223,10 +223,12 @@ static void nv04_tv_destroy(struct drm_encoder *encoder)
+ 	kfree(nv_encoder);
+ }
+ 
+-int nv04_tv_create(struct drm_device *dev, struct dcb_entry *entry)
++int
++nv04_tv_create(struct drm_connector *connector, struct dcb_entry *entry)
+ {
+ 	struct nouveau_encoder *nv_encoder;
+ 	struct drm_encoder *encoder;
++	struct drm_device *dev = connector->dev;
+ 	struct drm_nouveau_private *dev_priv = dev->dev_private;
+ 	struct i2c_adapter *adap;
+ 	struct drm_encoder_funcs *funcs = NULL;
+@@ -262,11 +264,11 @@ int nv04_tv_create(struct drm_device *dev, struct dcb_entry *entry)
  	nv_encoder->or = ffs(entry->or) - 1;
  
  	/* Run the slave-specific initialization */
@@ -4298,8 +5669,23 @@ index 9c63099..c4e3404 100644
  
  	was_locked = NVLockVgaCrtcs(dev, false);
  
+-	ret = drm_i2c_encoder_init(encoder->dev, to_encoder_slave(encoder), adap,
++	ret = drm_i2c_encoder_init(dev, to_encoder_slave(encoder), adap,
+ 				   &nv04_tv_encoder_info[type].board_info);
+ 
+ 	NVLockVgaCrtcs(dev, was_locked);
+@@ -294,7 +296,9 @@ int nv04_tv_create(struct drm_device *dev, struct dcb_entry *entry)
+ 
+ 	/* Set the slave encoder configuration */
+ 	sfuncs->set_config(encoder, nv04_tv_encoder_info[type].params);
++	sfuncs->create_resources(encoder, connector);
+ 
++	drm_mode_connector_attach_encoder(connector, encoder);
+ 	return 0;
+ 
+ fail:
 diff --git a/drivers/gpu/drm/nouveau/nv17_tv.c b/drivers/gpu/drm/nouveau/nv17_tv.c
-index 21ac6e4..74c8803 100644
+index 21ac6e4..44437ff 100644
 --- a/drivers/gpu/drm/nouveau/nv17_tv.c
 +++ b/drivers/gpu/drm/nouveau/nv17_tv.c
 @@ -45,8 +45,8 @@ static uint32_t nv42_tv_sample_load(struct drm_encoder *encoder)
@@ -4322,6 +5708,26 @@ index 21ac6e4..74c8803 100644
  			}
  		}
  
+@@ -744,8 +744,10 @@ static struct drm_encoder_funcs nv17_tv_funcs = {
+ 	.destroy = nv17_tv_destroy,
+ };
+ 
+-int nv17_tv_create(struct drm_device *dev, struct dcb_entry *entry)
++int
++nv17_tv_create(struct drm_connector *connector, struct dcb_entry *entry)
+ {
++	struct drm_device *dev = connector->dev;
+ 	struct drm_encoder *encoder;
+ 	struct nv17_tv_encoder *tv_enc = NULL;
+ 
+@@ -774,5 +776,7 @@ int nv17_tv_create(struct drm_device *dev, struct dcb_entry *entry)
+ 	encoder->possible_crtcs = entry->heads;
+ 	encoder->possible_clones = 0;
+ 
++	nv17_tv_create_resources(encoder, connector);
++	drm_mode_connector_attach_encoder(connector, encoder);
+ 	return 0;
+ }
 diff --git a/drivers/gpu/drm/nouveau/nv40_fifo.c b/drivers/gpu/drm/nouveau/nv40_fifo.c
 index b4f19cc..500ccfd 100644
 --- a/drivers/gpu/drm/nouveau/nv40_fifo.c
@@ -4395,10 +5801,10 @@ index 53e8afe..0616c96 100644
  		nv40_graph_set_region_tiling(dev, i, 0, 0, 0);
 diff --git a/drivers/gpu/drm/nouveau/nv50_calc.c b/drivers/gpu/drm/nouveau/nv50_calc.c
 new file mode 100644
-index 0000000..90f3f6b
+index 0000000..2cdc2bf
 --- /dev/null
 +++ b/drivers/gpu/drm/nouveau/nv50_calc.c
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,87 @@
 +/*
 + * Copyright 2010 Red Hat Inc.
 + *
@@ -4486,7 +5892,6 @@ index 0000000..90f3f6b
 +
 +	return clk;
 +}
-+
 diff --git a/drivers/gpu/drm/nouveau/nv50_crtc.c b/drivers/gpu/drm/nouveau/nv50_crtc.c
 index d1a651e..03d0e41 100644
 --- a/drivers/gpu/drm/nouveau/nv50_crtc.c
@@ -4552,7 +5957,7 @@ index d1a651e..03d0e41 100644
  
  	return 0;
 diff --git a/drivers/gpu/drm/nouveau/nv50_dac.c b/drivers/gpu/drm/nouveau/nv50_dac.c
-index f08f042..1fd9537 100644
+index f08f042..e114f81 100644
 --- a/drivers/gpu/drm/nouveau/nv50_dac.c
 +++ b/drivers/gpu/drm/nouveau/nv50_dac.c
 @@ -79,8 +79,8 @@ nv50_dac_detect(struct drm_encoder *encoder, struct drm_connector *connector)
@@ -4566,8 +5971,40 @@ index f08f042..1fd9537 100644
  		NV_DEBUG_KMS(dev, "Using bios provided load_pattern of %d\n",
  			  load_pattern);
  	} else {
+@@ -275,14 +275,11 @@ static const struct drm_encoder_funcs nv50_dac_encoder_funcs = {
+ };
+ 
+ int
+-nv50_dac_create(struct drm_device *dev, struct dcb_entry *entry)
++nv50_dac_create(struct drm_connector *connector, struct dcb_entry *entry)
+ {
+ 	struct nouveau_encoder *nv_encoder;
+ 	struct drm_encoder *encoder;
+ 
+-	NV_DEBUG_KMS(dev, "\n");
+-	NV_INFO(dev, "Detected a DAC output\n");
+-
+ 	nv_encoder = kzalloc(sizeof(*nv_encoder), GFP_KERNEL);
+ 	if (!nv_encoder)
+ 		return -ENOMEM;
+@@ -293,12 +290,14 @@ nv50_dac_create(struct drm_device *dev, struct dcb_entry *entry)
+ 
+ 	nv_encoder->disconnect = nv50_dac_disconnect;
+ 
+-	drm_encoder_init(dev, encoder, &nv50_dac_encoder_funcs,
++	drm_encoder_init(connector->dev, encoder, &nv50_dac_encoder_funcs,
+ 			 DRM_MODE_ENCODER_DAC);
+ 	drm_encoder_helper_add(encoder, &nv50_dac_helper_funcs);
+ 
+ 	encoder->possible_crtcs = entry->heads;
+ 	encoder->possible_clones = 0;
++
++	drm_mode_connector_attach_encoder(connector, encoder);
+ 	return 0;
+ }
+ 
 diff --git a/drivers/gpu/drm/nouveau/nv50_display.c b/drivers/gpu/drm/nouveau/nv50_display.c
-index 90f0bf5..2c2ec5f 100644
+index 90f0bf5..a0d7467 100644
 --- a/drivers/gpu/drm/nouveau/nv50_display.c
 +++ b/drivers/gpu/drm/nouveau/nv50_display.c
 @@ -143,7 +143,7 @@ nv50_evo_channel_new(struct drm_device *dev, struct nouveau_channel **pchan)
@@ -4599,17 +6036,37 @@ index 90f0bf5..2c2ec5f 100644
  			continue;
  
  		gpio = nouveau_bios_gpio_entry(dev, conn->dcb->gpio_tag);
-@@ -465,8 +463,7 @@ static int nv50_display_disable(struct drm_device *dev)
+@@ -465,8 +463,8 @@ static int nv50_display_disable(struct drm_device *dev)
  int nv50_display_create(struct drm_device *dev)
  {
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
 -	struct parsed_dcb *dcb = dev_priv->vbios->dcb;
 -	uint32_t connector[16] = {};
 +	struct dcb_table *dcb = &dev_priv->vbios.dcb;
++	struct drm_connector *connector, *ct;
  	int ret, i;
  
  	NV_DEBUG_KMS(dev, "\n");
-@@ -522,49 +519,20 @@ int nv50_display_create(struct drm_device *dev)
+@@ -509,62 +507,39 @@ int nv50_display_create(struct drm_device *dev)
+ 			continue;
+ 		}
+ 
++		connector = nouveau_connector_create(dev, entry->connector);
++		if (IS_ERR(connector))
++			continue;
++
+ 		switch (entry->type) {
+ 		case OUTPUT_TMDS:
+ 		case OUTPUT_LVDS:
+ 		case OUTPUT_DP:
+-			nv50_sor_create(dev, entry);
++			nv50_sor_create(connector, entry);
+ 			break;
+ 		case OUTPUT_ANALOG:
+-			nv50_dac_create(dev, entry);
++			nv50_dac_create(connector, entry);
+ 			break;
+ 		default:
  			NV_WARN(dev, "DCB encoder %d unknown\n", entry->type);
  			continue;
  		}
@@ -4629,10 +6086,7 @@ index 90f0bf5..2c2ec5f 100644
 -
 -		encoders = connector[entry->connector];
 -		if (!(encoders & (1 << entry->type)))
-+	for (i = 0 ; i < dcb->connector.entries; i++) {
-+		if (i != 0 && dcb->connector.entry[i].index2 ==
-+			      dcb->connector.entry[i - 1].index2)
- 			continue;
+-			continue;
 -		connector[entry->connector] = 0;
 -
 -		if (encoders & (1 << OUTPUT_DP)) {
@@ -4648,13 +6102,18 @@ index 90f0bf5..2c2ec5f 100644
 -			type = DRM_MODE_CONNECTOR_LVDS;
 -		} else {
 -			type = DRM_MODE_CONNECTOR_Unknown;
--		}
++	list_for_each_entry_safe(connector, ct,
++				 &dev->mode_config.connector_list, head) {
++		if (!connector->encoder_ids[0]) {
++			NV_WARN(dev, "%s has no encoders, removing\n",
++				drm_get_connector_name(connector));
++			connector->funcs->destroy(connector);
+ 		}
 -
 -		if (type == DRM_MODE_CONNECTOR_Unknown)
 -			continue;
 -
 -		nouveau_connector_create(dev, entry->connector, type);
-+		nouveau_connector_create(dev, &dcb->connector.entry[i]);
  	}
  
  	ret = nv50_display_init(dev);
@@ -4666,7 +6125,7 @@ index 90f0bf5..2c2ec5f 100644
  
  	return 0;
  }
-@@ -667,8 +635,8 @@ nv50_display_irq_head(struct drm_device *dev, int *phead,
+@@ -667,8 +642,8 @@ nv50_display_irq_head(struct drm_device *dev, int *phead,
  		return -1;
  	}
  
@@ -4677,7 +6136,7 @@ index 90f0bf5..2c2ec5f 100644
  
  		if (dcbent->type != type)
  			continue;
-@@ -692,7 +660,7 @@ nv50_display_script_select(struct drm_device *dev, struct dcb_entry *dcbent,
+@@ -692,7 +667,7 @@ nv50_display_script_select(struct drm_device *dev, struct dcb_entry *dcbent,
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
  	struct nouveau_connector *nv_connector = NULL;
  	struct drm_encoder *encoder;
@@ -4686,7 +6145,7 @@ index 90f0bf5..2c2ec5f 100644
  	uint32_t mc, script = 0, or;
  
  	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
-@@ -710,7 +678,7 @@ nv50_display_script_select(struct drm_device *dev, struct dcb_entry *dcbent,
+@@ -710,7 +685,7 @@ nv50_display_script_select(struct drm_device *dev, struct dcb_entry *dcbent,
  	switch (dcbent->type) {
  	case OUTPUT_LVDS:
  		script = (mc >> 8) & 0xf;
@@ -4695,7 +6154,7 @@ index 90f0bf5..2c2ec5f 100644
  			if (bios->fp.dual_link)
  				script |= 0x0100;
  			if (bios->fp.if_is_24bit)
-@@ -815,6 +783,37 @@ ack:
+@@ -815,6 +790,37 @@ ack:
  }
  
  static void
@@ -4733,7 +6192,7 @@ index 90f0bf5..2c2ec5f 100644
  nv50_display_unk20_handler(struct drm_device *dev)
  {
  	struct dcb_entry *dcbent;
-@@ -837,6 +836,8 @@ nv50_display_unk20_handler(struct drm_device *dev)
+@@ -837,6 +843,8 @@ nv50_display_unk20_handler(struct drm_device *dev)
  
  	nouveau_bios_run_display_table(dev, dcbent, script, pclk);
  
@@ -4742,7 +6201,7 @@ index 90f0bf5..2c2ec5f 100644
  	tmp = nv_rd32(dev, NV50_PDISPLAY_CRTC_CLK_CTRL2(head));
  	tmp &= ~0x000000f;
  	nv_wr32(dev, NV50_PDISPLAY_CRTC_CLK_CTRL2(head), tmp);
-@@ -919,10 +920,12 @@ nv50_display_error_handler(struct drm_device *dev)
+@@ -919,10 +927,12 @@ nv50_display_error_handler(struct drm_device *dev)
  	nv_wr32(dev, NV50_PDISPLAY_TRAPPED_ADDR, 0x90000000);
  }
  
@@ -4758,7 +6217,7 @@ index 90f0bf5..2c2ec5f 100644
  	struct drm_connector *connector;
  	const uint32_t gpio_reg[4] = { 0xe104, 0xe108, 0xe280, 0xe284 };
  	uint32_t unplug_mask, plug_mask, change_mask;
-@@ -975,6 +978,8 @@ nv50_display_irq_hotplug(struct drm_device *dev)
+@@ -975,6 +985,8 @@ nv50_display_irq_hotplug(struct drm_device *dev)
  	nv_wr32(dev, 0xe054, nv_rd32(dev, 0xe054));
  	if (dev_priv->chipset >= 0x90)
  		nv_wr32(dev, 0xe074, nv_rd32(dev, 0xe074));
@@ -4767,7 +6226,7 @@ index 90f0bf5..2c2ec5f 100644
  }
  
  void
-@@ -983,8 +988,10 @@ nv50_display_irq_handler(struct drm_device *dev)
+@@ -983,8 +995,10 @@ nv50_display_irq_handler(struct drm_device *dev)
  	struct drm_nouveau_private *dev_priv = dev->dev_private;
  	uint32_t delayed = 0;
  
@@ -7632,7 +9091,7 @@ index f0dc4e3..5f21df3 100644
  		return -EINVAL;
  
 diff --git a/drivers/gpu/drm/nouveau/nv50_sor.c b/drivers/gpu/drm/nouveau/nv50_sor.c
-index c2fff54..b11eaf9 100644
+index c2fff54..4832bba 100644
 --- a/drivers/gpu/drm/nouveau/nv50_sor.c
 +++ b/drivers/gpu/drm/nouveau/nv50_sor.c
 @@ -211,7 +211,7 @@ nv50_sor_mode_set(struct drm_encoder *encoder, struct drm_display_mode *mode,
@@ -7644,15 +9103,43 @@ index c2fff54..b11eaf9 100644
  		if (nv_encoder->dcb->sorconf.link & 1)
  			mode_ctl |= 0x00000800;
  		else
-@@ -274,6 +274,7 @@ static const struct drm_encoder_funcs nv50_sor_encoder_funcs = {
+@@ -272,32 +272,22 @@ static const struct drm_encoder_funcs nv50_sor_encoder_funcs = {
+ };
+ 
  int
- nv50_sor_create(struct drm_device *dev, struct dcb_entry *entry)
+-nv50_sor_create(struct drm_device *dev, struct dcb_entry *entry)
++nv50_sor_create(struct drm_connector *connector, struct dcb_entry *entry)
  {
-+	struct drm_nouveau_private *dev_priv = dev->dev_private;
  	struct nouveau_encoder *nv_encoder = NULL;
++	struct drm_device *dev = connector->dev;
  	struct drm_encoder *encoder;
- 	bool dum;
-@@ -319,5 +320,32 @@ nv50_sor_create(struct drm_device *dev, struct dcb_entry *entry)
+-	bool dum;
+ 	int type;
+ 
+ 	NV_DEBUG_KMS(dev, "\n");
+ 
+ 	switch (entry->type) {
+ 	case OUTPUT_TMDS:
+-		NV_INFO(dev, "Detected a TMDS output\n");
++	case OUTPUT_DP:
+ 		type = DRM_MODE_ENCODER_TMDS;
+ 		break;
+ 	case OUTPUT_LVDS:
+-		NV_INFO(dev, "Detected a LVDS output\n");
+ 		type = DRM_MODE_ENCODER_LVDS;
+-
+-		if (nouveau_bios_parse_lvds_table(dev, 0, &dum, &dum)) {
+-			NV_ERROR(dev, "Failed parsing LVDS table\n");
+-			return -EINVAL;
+-		}
+-		break;
+-	case OUTPUT_DP:
+-		NV_INFO(dev, "Detected a DP output\n");
+-		type = DRM_MODE_ENCODER_TMDS;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -319,5 +309,29 @@ nv50_sor_create(struct drm_device *dev, struct dcb_entry *entry)
  	encoder->possible_crtcs = entry->heads;
  	encoder->possible_clones = 0;
  
@@ -7660,11 +9147,7 @@ index c2fff54..b11eaf9 100644
 +		int or = nv_encoder->or, link = !(entry->dpconf.sor.link & 1);
 +		uint32_t tmp;
 +
-+		if (dev_priv->chipset < 0x90 ||
-+		    dev_priv->chipset == 0x92 || dev_priv->chipset == 0xa0)
-+			tmp = nv_rd32(dev, NV50_PDISPLAY_SOR_MODE_CTRL_C(or));
-+		else
-+			tmp = nv_rd32(dev, NV90_PDISPLAY_SOR_MODE_CTRL_C(or));
++		tmp = nv_rd32(dev, 0x61c700 + (or * 0x800));
 +
 +		switch ((tmp & 0x00000f00) >> 8) {
 +		case 8:
@@ -7683,8 +9166,9 @@ index c2fff54..b11eaf9 100644
 +			nv_encoder->dp.mc_unknown = 5;
 +	}
 +
++	drm_mode_connector_attach_encoder(connector, encoder);
  	return 0;
  }
 -- 
-1.7.0.1
+1.7.1
 
