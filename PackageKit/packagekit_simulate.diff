@@ -1,9 +1,9 @@
 diff --git a/.gitignore b/.gitignore
 new file mode 100644
-index 0000000..02af524
+index 0000000..3c98b49
 --- /dev/null
 +++ b/.gitignore
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,71 @@
 +Makefile
 +Makefile.in
 +aclocal.m4
@@ -67,9 +67,29 @@ index 0000000..02af524
 +*.cache
 +*.anjuta
 +ChangeLog
-+
++*.o
++*.gmo
++*.lo
++*.la
++*.so
++.deps/
++*.pyc
++.libs/
+diff --git a/backends/conary/XMLCache.py b/backends/conary/XMLCache.py
+index 527d962..df09ff9 100644
+--- a/backends/conary/XMLCache.py
++++ b/backends/conary/XMLCache.py
+@@ -215,7 +215,7 @@ class XMLCache:
+             log.info("deleting the JobPath %s "% jobPath)
+             util.rmtree(jobPath)
+             log.info("end deleting the JobPath %s "% jobPath)
+-        log.info("making the logPath ")
++        log.info("making the logPath  %s" % jobPath)
+         os.mkdir(jobPath)
+         log.info("freeze JobPath")
+         updJob.freeze(jobPath)
 diff --git a/backends/conary/conaryBackend.py b/backends/conary/conaryBackend.py
-index 9bf022d..ee3e2b0 100755
+index 9bf022d..1c715e7 100755
 --- a/backends/conary/conaryBackend.py
 +++ b/backends/conary/conaryBackend.py
 @@ -151,16 +151,26 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
@@ -116,7 +136,41 @@ index 9bf022d..ee3e2b0 100755
          return pkpackage.get_package_id(name, version, arch, data)
  
      @ExceptionHandler
-@@ -402,7 +408,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -253,26 +259,25 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         from conary.conaryclient.update import NoNewTrovesError,DepResolutionFailure
+         updJob = self.client.newUpdateJob()
+         try:
+-            log.info("prepare updateJOb...............")
+-            log.info(applyList)
++            log.info("prepare updateJob for massive Update.")
+             suggMap = self.client.prepareUpdateJob(updJob, applyList)
+-            log.info("end prepare updateJOB..............")
++            log.info("end the preparedUpdateJob Updated all packages end")
+         except NoNewTrovesError:
+             #self.error(ERROR_NO_PACKAGES_TO_UPDATE, "No new apps were found")
+             return updJob, None
+         except DepResolutionFailure as error :
+             log.info(error.getErrorMessage())
+-            deps =  error.cannotResolve
++            deps =  error.getErrorMessage()
+             
+-            dep_package = [ str(i[0][0]).split(":")[0] for i in deps ]
+-            log.info(dep_package)
+-            self.error(ERROR_DEP_RESOLUTION_FAILED,  "This package depends of:  %s" % ", ".join(set(dep_package)))
++            #dep_package = [ str(i[0][0]).split(":")[0] for i in deps ]
++            #log.info(dep_package)
++            self.error(ERROR_DEP_RESOLUTION_FAILED, deps)
+         if cache:
+             Cache().cacheUpdateJob(applyList, updJob)
+         return updJob, suggMap
+ 
+     def _do_update(self, applyList):
+-        log.info("========= _do_update ========")
++        log.info("========= Checking the freeze dir  ========")
+         jobPath = Cache().checkCachedUpdateJob(applyList)
+         log.info(jobPath)
+         if jobPath:
+@@ -402,7 +407,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
             # name ,version,flavor = pkg.get("trove")
              # get the string id from packagekit 
              #log.info(pkg) 
@@ -125,7 +179,7 @@ index 9bf022d..ee3e2b0 100755
              
              # split the list for get Determine info
              summary = package_id.split(";")
-@@ -411,7 +417,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -411,7 +416,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
  
              summary[3] = pkg.get("metadata").get("label")
              pkg_id = ";".join(summary)
@@ -134,15 +188,17 @@ index 9bf022d..ee3e2b0 100755
              self.package(package_id, status, meta )
          self.packages = []
  
-@@ -514,6 +520,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -513,7 +518,8 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         self.allow_cancel(True)
          self.percentage(None)
          self.status(STATUS_INFO)
-         package_id = package_ids[0]
+-        package_id = package_ids[0]
++        package_id = package_ids
 +        log.info("get_files ===============0")
          def _get_files(troveSource, n, v, f):
              files = []
              troves = [(n, v, f)]
-@@ -521,21 +528,22 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -521,41 +527,37 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
              troves.extend([ x for x in trv.iterTroveList(strongRefs=True)
                                  if troveSource.hasTrove(*x)])
              for n, v, f in troves:
@@ -154,23 +210,52 @@ index 9bf022d..ee3e2b0 100755
                      files.append(path)
              return files
          
-         for package in package_id.split("&"):
-+            log.info("get:files===========0")
-             log.info(package)
+-        for package in package_id.split("&"):
+-            log.info(package)
++        for package in package_id:
              name, version, flavor, installed = self._findPackage(package)
 -
-+            log.info((name,version,installed))
-+            log.info(">>>>>>>>>>>>>>>>>>>>>><")
              if installed == INFO_INSTALLED:
                  files = _get_files(self.client.db, name, version, flavor)
              else:
                  files = _get_files(self.client.repos, name, version, flavor)
 -
-+            log.info(files)
-             self.files(package_id, ';'.join(files))
- 
+-            self.files(package_id, ';'.join(files))
+-
++            (name,version,arch,installed) = package.split(";")
++            if ":" in name:
++                name,trove = name.split(":")
++            package = ";".join( [name,version,arch,installed])
++            log.info("%s package " % package)
++            self.files(package, ';'.join(files))
      @ExceptionHandler
-@@ -748,9 +756,6 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+     def update_system(self, only_trusted):
+ 
+-        # FIXME: use only_trusted
+-
+         self.allow_cancel(True)
+         self.status(STATUS_UPDATE)
+         self.client.setUpdateCallback( UpdateSystemCallback(self, self.cfg) )
+-        updateItems = self.client.fullUpdateItemList()
+-        [ log.info(i) for i,ver,flav in updateItems]
++        log.info("1.- Getting the all packages what not on conaryLabels")
++        updateItems =self.client.fullUpdateItemList()
+         applyList = [ (x[0], (None, None), x[1:], True) for x in updateItems ]
+-
+-        log.info(">>>>>>>>>> get update >>>>>>>>>>>>")
+-        self._get_update(applyList)
+-        log.info(">>>>>>>>>> DO Update >>>>>>>>>>>>")
++        log.info(">>>>>>>>>> start _do_update method  >>>>>>>>>>>>")
+         jobs = self._do_update(applyList)
+-        log.info(">>>>>>>>>>END DO Update >>>>>>>>>>>>")
+-        log.info(jobs)
++        log.info(">>>>>>>>>>END _do_update_method >>>>>>>>>>>>")
++        jobs.close()
++        self.client.close()
+         self.client.setUpdateCallback(self.callback )
+ 
+ #    @ExceptionHandler
+@@ -748,9 +750,6 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
          package_id = package_ids[0]
          #name, version, flavor, installed = self._findPackage(package_id)
          
@@ -180,7 +265,7 @@ index 9bf022d..ee3e2b0 100755
          name,version,arch,data = pkpackage.get_package_from_id(package_id)
          cache = Cache()
          pkgDict = cache.resolve(name)
-@@ -779,6 +784,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -779,6 +778,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
              pkg_id = package_id.split(";")
              pkg_id[3] = pkgDict["label"]
              package_id = ";".join(pkg_id)
@@ -188,7 +273,37 @@ index 9bf022d..ee3e2b0 100755
              self.details(package_id, license, categories, longDesc, url, 0)
  
      def _show_package(self, name, version, flavor, status):
-@@ -909,15 +915,15 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+@@ -849,6 +849,7 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         else:
+             return UPDATE_STATE_STABLE
+     @ExceptionHandler
++    
+     def get_updates(self, filters):
+         self.allow_cancel(True)
+         self.percentage(0)
+@@ -860,11 +861,11 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+         log.info("============== get_updates ========================")
+         log.info("get fullUpdateItemList")
+         updateItems =self.client.fullUpdateItemList()
+-#        updateItems = cli.cli.getUpdateItemList()
++#        updateItems = self.client.getUpdateItemList()
+         applyList = [ (x[0], (None, None), x[1:], True) for x in updateItems ]
+-        log.info("_get_update ....")
+ 
+         self.status(STATUS_RUNNING)
++
+         updJob, suggMap = self._get_update(applyList)
+         log.info("_get_update ....end.")
+ 
+@@ -886,7 +887,6 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
+             info = self._get_info(name)
+             trove_info = ( ( name,version,flavor ), info) 
+             r.append(trove_info)
+-            #self._show_package(name, version, flavor, info)
+         
+         pkg_list = Cache().resolve_list([ name for (  ( name,version,flavor), info )  in r ])
+         log.info("generate the pkgs ")
+@@ -909,15 +909,15 @@ class PackageKitConaryBackend(PackageKitBaseBackend):
          '''
          find a package based on a package id (name;version;arch;summary)
          '''
@@ -210,6 +325,220 @@ index 9bf022d..ee3e2b0 100755
              name, version, flavor = troveTuple
              return name, version, flavor, installed
          else:
+diff --git a/backends/conary/conaryCallback.py b/backends/conary/conaryCallback.py
+index 7dc9ffc..9d4fabd 100644
+--- a/backends/conary/conaryCallback.py
++++ b/backends/conary/conaryCallback.py
+@@ -23,163 +23,74 @@ from conaryProgress import PackagekitProgress
+ from pkConaryLog import log
+ 
+ MEGA = 1048576.0
+-
+ class UpdateSystemCallback(callbacks.UpdateCallback):
+     def __init__(self, backend, cfg=None):
+         callbacks.UpdateCallback.__init__(self)
+-        log.info("==== callback ==== ")
+-        if cfg:
+-            self.setTrustThreshold(cfg.trustThreshold)
+-
+         self.backend = backend
+-        self.currentJob = None
+-        self.smallUpdate = False
+-        self.error = []
+-        self.progress = PackagekitProgress()
+-        self.progress.set_steps([ 30,60 ]  )
+-        self.disablepercent = False
+-        self.dostep = True
+     #1
+     #3
+     def requestingChangeSet(self):
+-        log.info("Callback UpdateSystem........ STATUS_REQUEST changeset ")
+         self.backend.status(STATUS_REQUEST)
+-#        self.backend.percentage(self.progress.percent)
+- #       log.info(self.progress.percent)
+     #2
+     def downloadingChangeSet(self, got, need):
+         self.backend.status(STATUS_DOWNLOAD)
+-        log.info("Callback UpdateSystem........ STATUS_DOWNLOAD  Changeset %.2f percent %.2f/%.2f Mbytes" % ( got*100/float(need), got/MEGA,need/MEGA) )
+-        self.progress.set_subpercent( got*100 / float(need) )
+-        self.backend.percentage( self.progress.percent )
+-        log.info( "%s percent" % self.progress.percent)
+-        if got == need:
+-            log.info("Do a step ========0")
+-            self.progress.step()
+-
+     #4
+     def resolvingDependencies(self):
+-        log.info("Callback UpdateSystem........ STATUS_DEP_RESOLVE ")
+-        self.backend.percentage(self.progress.percent)
+         self.backend.status(STATUS_DEP_RESOLVE)
+ 
+     #5  >> request> download
+     def setChangesetHunk(self, num, total):
+-        log.info("callback. .......... set Changeset HUnk %s/%s" % (num, total ) )
+-        if total > 0:
+-            p = num*100/float(total)
+-        else:
+-            p = 0
+-        log.info("Do a supercent ========sub")
+-        self.progress.set_subpercent(p)
+-        self.disablepercent = True
+-        self.backend.percentage(self.progress.percent)
+-        log.info(self.progress.percent)
+-        if num == total:
+-            self.dostep =True
++        pass
+     #6 
+     def setUpdateHunk(self, hunk, hunkCount):
+-        log.info("callback. .......... set update HUnk %s/%s" % ( hunk, hunkCount))
+-        if self.dostep:
+-            self.disablepercent = True
+-            self.dostep = False
+-
+-
+-        if hunk < hunkCount:
+-            p = hunk*100/float(hunkCount)
+-            log.info("Do a supercent ========sub")
+-            self.progress.set_subpercent( p )
+-        else:
+-            self.smallUpdate = True
+-
+-        self.backend.percentage(self.progress.percent)
+-        log.info(self.progress.percent)
++        pass
+ 
+     def setUpdateJob(self, job):
+         self.currentJob = job
+-        self.backend.percentage(self.progress.percent)
+-        log.info("callback UpdateSystem. setUpdateJob")
+-        log.info(self.progress.percent)
+-        
+ 
+     def creatingRollback(self):
+-        #self.backend.status('Creating Rollback')
+         self.backend.status(STATUS_ROLLBACK)
+-        self.backend.percentage(self.progress.percent)
+-        log.info("callback updateSystem. creatingRollback")
+-        log.info(self.progress.percent)
+-        log.info(self.progress.percent)
+-
+ 
+     def preparingUpdate(self, troveNum, troveCount, add=0):
+-        #self.progress.step()
+-        log.info("callback updateSystem. preparingUpdate")
+         if not self.currentJob or len(self.currentJob) == 0 or troveNum > troveCount:
+             return
+-
+-
+-        self.backend.percentage(self.progress.percent)
+         if troveNum > 0:
+             troveNum -= 1
+-        job = self.currentJob[troveNum]
+-        name = job[0]
+-        oldVersion, oldFlavor = job[1]
+-        newVersion, newFlavor = job[2]
+-        #log.info("JOB>>>>>>>> %s " % str(job) )
+-        if oldVersion and newVersion:
+-            self.backend.status(STATUS_UPDATE)
+-            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
+-            self.backend.package(package_id, INFO_UPDATING, '')
+-        elif oldVersion and not newVersion:
+-            self.backend.status(STATUS_REMOVE)
+-            package_id = self.backend.get_package_id(name, oldVersion, oldFlavor)
+-            self.backend.package(package_id, INFO_REMOVING, '')
+-        elif not oldVersion and newVersion:
+-            self.backend.status(STATUS_INSTALL)
+-            package_id = self.backend.get_package_id(name, newVersion, newFlavor)
+-            self.backend.package(package_id, INFO_INSTALLING, '')
+-        log.info(self.progress.percent)
++        if troveNum <= len(self.currentJob):
++            job = self.currentJob[troveNum]
++            name = job[0]
++            oldVersion, oldFlavor = job[1]
++            newVersion, newFlavor = job[2]
++            if oldVersion and newVersion:
++                self.backend.status(STATUS_UPDATE)
++                if ":" not  in name:
++                    package_id = self.backend.get_package_id(name, newVersion, newFlavor)
++                    self.backend.package(package_id, INFO_UPDATING, '')
++            elif oldVersion and not newVersion:
++                self.backend.status(STATUS_REMOVE)
++                package_id = self.backend.get_package_id(name, oldVersion, oldFlavor)
++                self.backend.package(package_id, INFO_REMOVING, '')
++            elif not oldVersion and newVersion:
++                self.backend.status(STATUS_INSTALL)
++                package_id = self.backend.get_package_id(name, newVersion, newFlavor)
++                self.backend.package(package_id, INFO_INSTALLING, '')
+ 
+     def creatingDatabaseTransaction(self, troveNum, troveCount):
+-        self.backend.percentage(self.progress.percent)
+-        log.info(self.progress.percent)
+         self.backend.status(STATUS_COMMIT)
+-        #self.preparingUpdate(troveNum, troveCount, add=troveCount)
+-        log.info("Callback UpdateSystem........ CreateingDatabaseTransaction %.2f / %.2f " % ( troveNum, troveCount ) )
+-        #self.progress.set_subpercent( got*100 / float(need) )
+-
+     def committingTransaction(self):
+-        log.info('callback UpdateSystem......Committing Transaction')
+-
+         self.backend.status(STATUS_COMMIT)
+-        self.backend.percentage(self.progress.percent)
+-        log.info(self.progress.percent)
+-
+     def updateDone(self):
+-        log.info("callback. ..........  update done")
+-        self.backend.percentage(self.progress.percent)
+         self.currentJob = None
+-        log.info(self.progress.percent)
+-
+     def downloadingFileContents(self, got, need):
+-        #self.backend.status('Downloading files for changeset')
+-        log.info("Callback ........ STATUS_DOWNLOAD  FIle Contents %s " %  str( got*100/need  ))
+         self.backend.status(STATUS_DOWNLOAD)
+-        #self.backend.sub_percentage(got*100/need)
+ 
+     def requestingFileContents(self):
+-        #self.backend.status('Requesting File Contents')
+-        log.info("Callback ........ STATUS_REQUEST request File contents ")
+         self.backend.status(STATUS_REQUEST)
+ 
+     def removeFiles(self, filenum, total):
+-        log.info("Callback ........ STATUS_REMOVE %s/%sfiles" %( filenum, total) )
+         self.backend.status(STATUS_REMOVE)
+-        self.preparingUpdate(filenum, total, add=total)
+     
+     def done(self):
+-        #self.backend.status('Done')
+-    #    self.progress.step()
+         log.info("DONEEEEEEEEEEEE")
+  
+     def warning(self, msg, *args, **kwargs):
+@@ -207,8 +118,6 @@ class GetUpdateCallback(callbacks.UpdateCallback):
+         self.error = []
+         self.progress = PackagekitProgress()
+         self.progress.set_steps([1,50, 100 ]  )
+-    # 1 >> downloadingChangeSet
+-    # 2 >> downloadingChangeSet
+     def requestingChangeSet(self):
+         log.info("Callback getUpdates ........ STATUS_REQUEST changeset ")
+         self.backend.status(STATUS_REQUEST)
+@@ -217,14 +126,13 @@ class GetUpdateCallback(callbacks.UpdateCallback):
+         self.progress.step()
+ 
+     def downloadingChangeSet(self, got, need):
+-       # log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
++        log.info("Callback getUpdates. Changeset %s percent of %.2f/%.2f bytes" % ( int( got*100/float(need)), got/MEGA,need/MEGA) )
+         self.backend.status(STATUS_DOWNLOAD)
+         self.progress.set_subpercent( got*100 / float(need) )
+         self.backend.percentage( self.progress.percent )
+-       # log.info( "%s percent" % self.progress.percent)
++        log.info( "%s percent" % self.progress.percent)
+     # 3
+     def resolvingDependencies(self):
+-        #self.backend.status('Resolving Dependencies')
+         self.backend.status(STATUS_DEP_RESOLVE)
+         self.progress.step()
+         log.info("Callback getUpdates........ STATUS_DEP_RESOLVE ")
 diff --git a/backends/conary/pk-backend-conary.c b/backends/conary/pk-backend-conary.c
 index 485f61d..261bd25 100644
 --- a/backends/conary/pk-backend-conary.c
