@@ -1,0 +1,91 @@
+
+# HG changeset patch
+# User Michael Tharp <mtharp@rpath.com>
+# Date 1278428369 14400
+# Node ID c0afd4878954ced656b0c6b2192dae570901d48b
+# Parent 61f511e730a2c97215644dfd4c3a34f32c9cda18
+Fix compatibility with pycrypto 2.1 (CNY-3465)
+
+--- a/conary/lib/openpgpfile.py	Fri Jul 02 13:32:34 2010 -0400
++++ b/conary/lib/openpgpfile.py	Tue Jul 06 10:59:29 2010 -0400
+@@ -14,7 +14,6 @@
+ 
+ import base64
+ import binascii
+-import errno
+ import fcntl
+ import itertools
+ import os
+@@ -2954,20 +2953,21 @@ class PGP_SecretAnyKey(PGP_Key):
+         # Fetch the crypto key
+         cryptoKey = self.makePgpKey(passPhrase = passwordCallback())
+ 
+-        if isinstance(cryptoKey,(DSA.DSAobj_c, DSA.DSAobj)):
++        # See comment in OpenPGPKey.getType
++        if type(cryptoKey.key).__name__ == 'dsaKey':
+             pkAlg = PK_ALGO_DSA
+             # Pick a random number that is relatively prime with the crypto
+             # key's q
+             relprime = cryptoKey.q + 1
+             while relprime > cryptoKey.q:
+                 relprime = num_getRelPrime(cryptoKey.q)
+-        elif isinstance(cryptoKey, (RSA.RSAobj_c, RSA.RSAobj)):
++        elif type(cryptoKey.key).__name__ == 'rsaKey':
+             pkAlg = PK_ALGO_RSA
+             # RSA doesn't need a prime for signing
+             relprime = 0
+         else:
+             # Maybe we need a different exception?
+-            raise UnsupportedEncryptionAlgorithm(cryptoKey.__class__.__name__)
++            raise UnsupportedEncryptionAlgorithm(type(cryptoKey.key).__name__)
+ 
+         hashAlg = 2 # sha
+ 
+--- a/conary/lib/openpgpkey.py	Fri Jul 02 13:32:34 2010 -0400
++++ b/conary/lib/openpgpkey.py	Tue Jul 06 10:59:29 2010 -0400
+@@ -23,7 +23,6 @@ from conary.lib import graph, util, api
+ from conary.lib import graph, util, api
+ 
+ import openpgpfile
+-from Crypto.PublicKey import DSA
+ from openpgpfile import BadPassPhrase
+ from openpgpfile import KeyNotFound
+ from openpgpfile import num_getRelPrime
+@@ -86,6 +85,23 @@ class OpenPGPKey(object):
+                     trustRegex = trustRegex)
+         self.signatures = sorted(sigs.values(), key = lambda x: x.signer)
+ 
++    def getType(self):
++        # pycrypto's API has no consistent way to tell what kind of key we
++        # have. This is apparently the least awful way to do it.
++        keyType = type(self.cryptoKey.key).__name__
++        if keyType == 'rsaKey':
++            return 'RSA'
++        elif keyType == 'dsaKey':
++            return 'DSA'
++        else:
++            raise TypeError("Unrecognized key type")
++
++    def isRSA(self):
++        return self.getType() == 'RSA'
++
++    def isDSA(self):
++        return self.getType() == 'DSA'
++
+     def getTrustLevel(self):
+         return self.trustLevel
+ 
+@@ -102,7 +118,7 @@ class OpenPGPKey(object):
+         return self.timestamp
+ 
+     def signString(self, data):
+-        if isinstance(self.cryptoKey,(DSA.DSAobj_c, DSA.DSAobj)):
++        if self.isDSA():
+             K = self.cryptoKey.q + 1
+             while K > self.cryptoKey.q:
+                 K = num_getRelPrime(self.cryptoKey.q)
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/NEWS.src/CNY-3465.bugfix	Tue Jul 06 10:59:29 2010 -0400
+@@ -0,0 +1,1 @@
++Fixed signing of packages with pycrypto 2.1
+
