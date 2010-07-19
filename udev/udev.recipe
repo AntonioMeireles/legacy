@@ -7,8 +7,8 @@
 loadSuperClass('rpmpackage')
 class Udev(RPMPackageRecipe,CPackageRecipe):
     name = 'udev'
-    version = '145'
-    rpmRelease = '21.fc12'
+    version = '151'
+    rpmRelease = '10.fc13'
 
     buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
                       'bison:runtime', 'pam:devel', 'chkconfig:runtime', 'libxslt:runtime',
@@ -22,21 +22,29 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
     # until we rely on rRPL's glibc (2.5) 
     buildRequires += ['kernel:build-tree', ]
 
-    rpmPatches = [ '0001-enumeration-move-ALSA-control-devices-to-the-end-of-.patch',
-                   '0002-udevd-add-timestamp-to-debug-output.patch',
-                   '0003-fix-wrong-parameter-size-on-ioctl-FIONREAD.patch',
-                   '0004-fix-single-session-CD-detection.patch',
-                   '0005-fix-previous-commit-for-CD-detection.patch',
-                   'ck-runseat.patch',
-                   'udev-141-cpu-online.patch',
-                   # https://bugzilla.redhat.com/show_bug.cgi?id=532628
-                   'udev-145-hid2hci-backport.patch',
-                   'udev-145-modem-modeswitch.patch',
-                   '0001-cdrom_id-Still-check-profiles-even-if-there-is-no-me.patch',
-                   'udev-145-rename.patch',
-                   'udev.git-d7e2d38c1f0ead2239808dd117577a99a3ad3cde.patch',
-                   'udev.git-fa0612104ad30d4228aa7782308a77e21b7f6fb5.patch',
+    rpmPatches = [ '0001-firmware-fix-error-reporting-on-missing-firmware-fil.patch',
+                   '0002-keymap-Add-Dell-Inspiron-1011-Mini-10.patch',
+                   '0003-Fix-brightness-keys-on-MSI-Wind-U-100.patch',
+                   '0004-keymap-Add-support-for-Gateway-AOA110-AOA150-clones.patch',
+                   '0005-keymap-Fix-LG-X110.patch',
+                   '0006-Force-key-release-for-volume-keys-on-Dell-Studio-155.patch',
+                   '0007-keymap-Add-Toshiba-Satellite-M30X.patch',
+                   '0013-keymap-Add-Samsung-Q210-P210-force-release-quirk.patch',
+                   '0014-keymap-Add-Fujitsu-Amilo-1848-u-force-release-quirk.patch',
+                   '0015-Decrease-buffer-size-when-advancing-past-NUL-byte.patch',
+                   '0016-Use-UTIL_LINE_SIZE-not-UTIL_PATH_SIZE-to-truncate-pr.patch',
+                   '0017-Increase-UTIL_LINE_SIZE-from-2048-to-16384.patch',
+                   '0018-Fix-virtio-ports-rule-to-use-attr-instead-of-ATTR.patch',
+                   '0019-udev-acl-Correctly-handle-ENV-ACL_MANAGE-0.patch',
+                   '0021-input_id-Fix-linking.patch',
+#                   '0022-replace-utimes-with-utimensat.patch',
+                   '0029-firmware-fix-possible-segfault-when-firmware-device-.patch',
+                   '0030-rules-input-create-by-path-links-for-pci-devices.patch',
+##                   '0031-Fix-switching-Logitech-bluetooth-adapters-into-hci-m.patch',
+#                   '0032-do-not-reset-SELinux-context-when-the-node-was-not-t.patch',
+                   '0034-add-LGPL-COPYING-to-libudev-and-GUdev.patch',
                    '0035-cdrom_id-open-non-mounted-optical-media-with-O_EXCL.patch',
+                   '0036-modeswitch-morph-into-tool-that-only-switches-Mobile.patch',
                    '0048-cdrom_id-remove-debugging-code.patch',
                    '0049-cdrom_id-retry-to-open-the-device-if-EBUSY.patch',
                    '0050-cdrom_id-check-mount-state-in-retry-loop.patch',
@@ -53,7 +61,9 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
                    '0074-cdrom_id-add-missing-profiles-to-feature_profiles.patch',
                    '0075-cdrom_id-set-ID_CDROM_MEDIA-1-only-for-known-media.patch',
                    '0110-cdrom_id-only-mark-sr-0-9-as-ID_CDROM.patch',
-                   'udev-147-virtio.patch',
+                   'udev-151-rules.patch',
+                   'udev-151-virtio.patch',
+                   'udev-151-gperf.patch'
                    ]
 
     rpmSources = [ 'udev-post.init',
@@ -70,7 +80,18 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         # FIXME 
         # http://article.gmane.org/gmane.linux.hotplug.devel/14081
         # modded to fit our goals
+        # expects %(kver)s set...
+        if Arch.x86:
+            r.macros.archWideness = '32'
+        else:
+            r.macros.archWideness = '64'
+
         r.addPatch('udev-old-glibc-hack.patch', macros=True)
+        
+        # backport from http://patch-tracker.debian.org/patch/series/dl/udev/158-1/old_cloexec
+        r.addPatch('old_cloexec.patch')
+
+        r.addPatch('udev-le16toh.patch')
 
         # addons and extra features
         
@@ -96,22 +117,23 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         # force relative symlinks
         r.Symlink('/lib/udev/scsi_id', '/sbin/scsi_id')
 
-        for x in [ 'udevinfo', 'udevtest']:
-            r.Symlink('/sbin/udevadm', '%(bindir)s/' + x)
+#        for x in [ 'udevinfo', 'udevtest']:
+#            r.Symlink('/sbin/udevadm', '%(bindir)s/' + x)
 
-        for x in [ 'udevmonitor']:
-            r.Symlink('/sbin/udevadm', '%(sbindir)s/' + x)
+#        for x in [ 'udevmonitor']:
+#            r.Symlink('/sbin/udevadm', '%(sbindir)s/' + x)
 
-        for x in [ 'udevtrigger', 'udevsettle', 'udevcontrol']:
-            r.Symlink('/sbin/udevadm', '/sbin/' + x)
+#        for x in [ 'udevtrigger', 'udevsettle', 'udevcontrol']:
+#            r.Symlink('/sbin/udevadm', '/sbin/' + x)
 
 
         # These rules should do...
         for x in ( 'rules/redhat/40-redhat.rules',
-                   'rules/packages/40-isdn.rules',
-                   'rules/packages/40-alsa.rules',
-                   'rules/packages/64-md-raid.rules',
-                   'rules/packages/64-device-mapper.rules'):
+#                   'rules/packages/40-isdn.rules',
+#                   'rules/packages/40-alsa.rules',
+#                   'rules/packages/64-md-raid.rules',
+#                   'rules/packages/64-device-mapper.rules'
+                   ):
             r.Install( x , '%(udev_scriptdir)s/rules.d/', mode = 0644)
 
         r.MakeDirs('%(sysconfdir)s/udev/devices')
@@ -157,6 +179,6 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
 
         r.ComponentSpec('data', '/lib/udev/rules.d/.*')
         r.ComponentSpec('runtime', '/lib/udev/.*')
-        r.ComponentSpec('runtime', '/usr/lib/ConsoleKit/.*')
+
 
         r.NonBinariesInBindirs(exceptions='%(udev_scriptdir)s/.*')
