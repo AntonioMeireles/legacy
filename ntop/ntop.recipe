@@ -37,17 +37,32 @@ class Ntop(AutoPackageRecipe):
         r.addPatch('ntop-am.patch')
         r.addPatch('ntop-disable-etter_fingerprint_download.patch')
 
-
-
         r.Create('%(localstatedir)s/lib/ntop/{addressQueue,dnsCache,fingerprint,LsWatch,macPrefix,ntop_pw,prefsCache}.db', mode=0755)
-        r.Configure('--disable-static  --enable-mysql --enable-snmp --enable-i18n --enable-sslv3 --with-tcpwrap', configureName='autogen.sh')
-        r.Run(""" sed -i -e 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' -e 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool """)
+
+        r.addAction('./autogen.sh --noconfig')
+        r.Configure(' --disable-static  --enable-mysql --enable-snmp'
+                    ' --enable-i18n --enable-sslv3 --with-tcpwrap')
+
+        r.Replace(('^hardcode_libdir_flag_spec=.*',
+                   'hardcode_libdir_flag_spec=""'),
+                  ('^runpath_var=LD_RUN_PATH',
+                   'runpath_var=DIE_RPATH_DIE'),
+                  'libtool')
+
         r.Replace('/usr/local/etc/ntop', '%(datadir)s/ntop', 'globals-defines.h')
+
         r.Make()
         r.MakeInstall()
-
 
         r.Move('/etc/ntop/*gz', '%(datadir)s/ntop/')
         r.Move('/etc/ntop/*dat', '%(datadir)s/ntop/')
         r.Config(exceptions='%(sysconfdir)s/%(name)s/*.{gz,dat}')
-        r.Requires('info-ntop:user', '%(sbindir)s/ntop')
+        r.UtilizeUser('ntop', '%(sbindir)s/ntop')
+
+        r.MakeDirs('%(localstatedir)s/lib/ntop/rrd/{flows,graphics,interfaces}')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/ntop/rrd/{flows,graphics,interfaces}')
+
+        # these are not dlopened modules, but -devel cruft
+        r.Remove('%(libdir)s/lib{myrrd,ntop,ntopreport,*Plugin*}.so')
+        # remove empty file
+        r.Remove('%(datadir)s/ntop/html/ntop.html')
