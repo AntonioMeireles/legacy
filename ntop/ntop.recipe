@@ -4,9 +4,9 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Ntop(CPackageRecipe):
+class Ntop(AutoPackageRecipe):
     name = 'ntop'
-    version = '3.3.10'
+    version = '3.4_pre3'
  
     buildRequires = ['GeoIP:devel', 
             'gdbm:devel', 
@@ -15,14 +15,39 @@ class Ntop(CPackageRecipe):
             'pcre:devel', 
             'python:devel', 
             'rrdtool:devel', 
-            'zlib:devel'
+            'zlib:devel',
+            'chkconfig:runtime',
+            'lm_sensors:devel', 
+            'mysql:devel', 
+            'net-snmp:devel', 
+            'pam:devel',
+            'python-mako:python',
+            'rrdtool:python'
                 ]
 
  
     def setup(r):
         r.macros.version = r.version.replace('_', '-')
         r.addArchive('http://downloads.sourceforge.net/project/ntop/ntop/ntop-%(version)s/')
-        r.Configure(configureName='autogen.sh')
+        r.addSource('ntop.conf', dir='%(sysconfdir)s', mode=0644)
+        r.addSource('ntop.init', dest='%(initdir)s/ntop', mode=0755)
+        r.addPatch('ntop-running-user.patch')
+        r.addPatch('ntop-http_c.patch')
+        r.addPatch('ntop-dbfile-default-dir.patch')
+        r.addPatch('ntop-am.patch')
+        r.addPatch('ntop-disable-etter_fingerprint_download.patch')
+
+
+
+        r.Create('%(localstatedir)s/lib/ntop/{addressQueue,dnsCache,fingerprint,LsWatch,macPrefix,ntop_pw,prefsCache}.db', mode=0755)
+        r.Configure('--disable-static  --enable-mysql --enable-snmp --enable-i18n --enable-sslv3 --with-tcpwrap', configureName='autogen.sh')
+        r.Run(""" sed -i -e 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' -e 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool """)
+        r.Replace('/usr/local/etc/ntop', '%(datadir)s/ntop', 'globals-defines.h')
         r.Make()
         r.MakeInstall()
+
+
+        r.Move('/etc/ntop/*gz', '%(datadir)s/ntop/')
+        r.Move('/etc/ntop/*dat', '%(datadir)s/ntop/')
         r.Config(exceptions='%(sysconfdir)s/%(name)s/*.{gz,dat}')
+        r.Requires('info-ntop:user', '%(sbindir)s/ntop')
