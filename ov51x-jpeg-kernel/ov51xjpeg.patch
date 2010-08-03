@@ -1,0 +1,215 @@
+diff -Nur ov51x-jpeg-1.5.9/ov511-decomp.c ov51x-jpeg-1.5.9_patched/ov511-decomp.c
+--- ov51x-jpeg-1.5.9/ov511-decomp.c	2008-09-28 06:58:09.000000000 -0400
++++ ov51x-jpeg-1.5.9_patched/ov511-decomp.c	2009-11-21 15:14:14.000000000 -0500
+@@ -508,6 +508,5 @@
+ struct ov51x_decomp_ops ov511_decomp_ops = {
+ 	.decomp_400 =	Decompress400,
+ 	.decomp_420 =	Decompress420,
+-	.owner =	THIS_MODULE,
+ };
+ 
+diff -Nur ov51x-jpeg-1.5.9/ov518-decomp.c ov51x-jpeg-1.5.9_patched/ov518-decomp.c
+--- ov51x-jpeg-1.5.9/ov518-decomp.c	2008-09-28 06:58:09.000000000 -0400
++++ ov51x-jpeg-1.5.9_patched/ov518-decomp.c	2009-11-21 15:14:29.000000000 -0500
+@@ -1488,6 +1488,5 @@
+ struct ov51x_decomp_ops ov518_decomp_ops = {
+ 	.decomp_400 =	Decompress400,	
+ 	.decomp_420 =	Decompress420,	
+-	.owner =	THIS_MODULE,
+ };
+ 
+diff -Nur ov51x-jpeg-1.5.9/ov519-decomp.c ov51x-jpeg-1.5.9_patched/ov519-decomp.c
+--- ov51x-jpeg-1.5.9/ov519-decomp.c	2008-09-28 06:58:09.000000000 -0400
++++ ov51x-jpeg-1.5.9_patched/ov519-decomp.c	2009-11-21 15:14:42.000000000 -0500
+@@ -1534,7 +1534,6 @@
+ struct ov51x_decomp_ops ov519_decomp_ops = {
+ 	.decomp_400 =	Decompress400,	
+ 	.decomp_420 =	Decompress420,	
+-	.owner =	THIS_MODULE,
+ };
+ 
+ 
+diff -Nur ov51x-jpeg-1.5.9/ov51x-jpeg-core.c ov51x-jpeg-1.5.9_patched/ov51x-jpeg-core.c
+--- ov51x-jpeg-1.5.9/ov51x-jpeg-core.c	2008-09-28 06:58:09.000000000 -0400
++++ ov51x-jpeg-1.5.9_patched/ov51x-jpeg-core.c	2009-11-21 15:17:49.000000000 -0500
+@@ -12,6 +12,9 @@
+ * To support OV7670 sensors as found in Creative Live! Vista IM webcam
+ * With reference to One Laptop Per Child sourced kernel patches in 2.6.20 kernel
+ * contributed to kernel by Jonathan Corbet.
++* 
++* Modified to work with 2.6.29 kernels by Onur KÃ¼Ã§Ã¼k <onur@pardus.org.tr>
++* Re-patched by gOLDfeesh <info@goldfeesh.net> to work with Ubuntu Karmic 9.10
+ */
+ 
+ 
+@@ -539,7 +542,7 @@
+ 
+ static struct file_operations ov511_control_fops = {
+ 	.ioctl =	ov51x_control_ioctl,
+-#ifdef CONFIG_COMPAT 
++#if defined(CONFIG_COMPAT) && LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 29)
+ 	.compat_ioctl =	v4l_compat_ioctl32,
+ #endif
+ };
+@@ -678,7 +681,6 @@
+ 	ov->proc_devdir = create_proc_entry(dirname, S_IFDIR, ov51x_jpeg_proc_entry);
+ 	if (!ov->proc_devdir)
+ 		return;
+-	ov->proc_devdir->owner = THIS_MODULE;
+ 
+ 	/* Create "info" entry (human readable device information) */
+ 	PDEBUG(4, "creating /proc/ov51x-jpeg/ov51x/%s/info", dirname);
+@@ -686,8 +688,7 @@
+ 		ov->proc_devdir, ov511_read_proc_info, ov);
+ 	if (!ov->proc_info)
+ 		return;
+-	ov->proc_info->owner = THIS_MODULE;
+-
++	
+ 	/* Don't create it if old snapshot mode on (would cause race cond.) */
+ 	if (!snapshot) {
+ 		/* Create "button" entry (snapshot button status) */
+@@ -697,7 +698,6 @@
+ 			ov511_read_proc_button, ov);
+ 		if (!ov->proc_button)
+ 			return;
+-		ov->proc_button->owner = THIS_MODULE;
+ 	}
+ 
+ 	/* Create "control" entry (ioctl() interface) */
+@@ -709,7 +709,6 @@
+ 		unlock_kernel();
+ 		return;
+ 	}
+-	ov->proc_control->owner = THIS_MODULE;
+ 	ov->proc_control->data = ov;
+ 	ov->proc_control->proc_fops = &ov511_control_fops;
+ 	unlock_kernel();
+@@ -762,11 +761,8 @@
+ 	 */
+ 
+ 	ov51x_jpeg_proc_entry = create_proc_entry("ov51x-jpeg", S_IFDIR, &proc_root);
+-	if (ov51x_jpeg_proc_entry)
+-		ov51x_jpeg_proc_entry->owner = THIS_MODULE;
+-	else
++	if (!ov51x_jpeg_proc_entry)
+ 		err("Unable to create /proc/ov51x-jpeg");
+-
+ }
+ 
+ static void
+@@ -5733,7 +5729,7 @@
+ {
+ #else
+ static int
+-ov51x_v4l1_open(struct inode *inode, struct file *file)
++ov51x_v4l1_open(struct file *file)
+ {
+ 	struct video_device *vdev = video_devdata(file);
+ #endif
+@@ -5804,7 +5800,7 @@
+ {
+ #else
+ static int
+-ov51x_v4l1_close(struct inode *inode, struct file *file)
++ov51x_v4l1_close(struct file *file)
+ {
+ 	struct video_device *vdev = file->private_data;
+ #endif
+@@ -5850,14 +5846,15 @@
+ }
+ 
+ /* Do not call this function directly! */
+-static int
+ #ifdef OV511_OLD_V4L
++static long
+ ov51x_v4l1_ioctl_internal(struct usb_ov511 *ov, unsigned int cmd,
+ 			  void *arg)
+ {
+ #else
+-ov51x_v4l1_ioctl_internal(struct inode *inode, struct file *file,
+-			  unsigned int cmd, void *arg)
++static long
++ov51x_v4l1_ioctl_internal(struct file *file,
++ 			  unsigned int cmd, void *arg)
+ {
+ 	struct video_device *vdev = file->private_data;
+ 	struct usb_ov511 *ov = video_get_drvdata(vdev);
+@@ -6355,7 +6352,7 @@
+ 	return err;
+ }
+ 
+-static int
++static long
+ ov51x_v4l1_ioctl(struct video_device *vdev, unsigned int cmd, void *arg)
+ {
+ 	struct usb_ov511 *ov = vdev->priv;
+@@ -6372,9 +6369,9 @@
+ 
+ #else	/* If new V4L API */
+ 
+-static int
+-ov51x_v4l1_ioctl(struct inode *inode, struct file *file,
+-		 unsigned int cmd, unsigned long arg)
++static long
++ov51x_v4l1_ioctl(struct file *file,
++ 		 unsigned int cmd, unsigned long arg)
+ {
+ 	struct video_device *vdev = file->private_data;
+ 	struct usb_ov511 *ov = video_get_drvdata(vdev);
+@@ -6383,8 +6380,7 @@
+ 	if (down_interruptible(&ov->lock))
+ 		return -EINTR;
+ 
+-	rc = video_usercopy(inode, file, cmd, arg, ov51x_v4l1_ioctl_internal);
+-
++	rc = video_usercopy(file, cmd, arg, ov51x_v4l1_ioctl_internal);
+ 	up(&ov->lock);
+ 	return rc;
+ }
+@@ -6624,17 +6620,17 @@
+ 
+ #else	/* New V4L API */
+ 
+-static struct file_operations ov511_fops = {
++static struct v4l2_file_operations ov511_fops =  {
+ 	.owner =	THIS_MODULE,
+ 	.open =		ov51x_v4l1_open,
+ 	.release =	ov51x_v4l1_close,
+ 	.read =		ov51x_v4l1_read,
+ 	.mmap =		ov51x_v4l1_mmap,
+ 	.ioctl =	ov51x_v4l1_ioctl,
+-#ifdef CONFIG_COMPAT 
++#if defined(CONFIG_COMPAT) && LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 29)
+ 	.compat_ioctl =	v4l_compat_ioctl32,
+ #endif
+-	.llseek =	no_llseek,
++
+ };
+ 
+ static struct video_device vdev_template = {
+@@ -8374,7 +8370,7 @@
+ 
+ 	memcpy(ov->vdev, &vdev_template, sizeof(*ov->vdev));
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
+-	ov->vdev->dev = dev->dev;
++	ov->vdev->parent = &dev->dev;
+ #else
+ 	ov->vdev->dev = &dev->dev;
+ #endif
+diff -Nur ov51x-jpeg-1.5.9/ov51x-jpeg.h ov51x-jpeg-1.5.9_patched/ov51x-jpeg.h
+--- ov51x-jpeg-1.5.9/ov51x-jpeg.h	2008-09-28 06:58:09.000000000 -0400
++++ ov51x-jpeg-1.5.9_patched/ov51x-jpeg.h	2009-11-21 14:52:17.000000000 -0500
+@@ -63,6 +63,12 @@
+ #include <media/v4l2-ioctl.h>
+ #endif
+ 
++/* Add missing info and warn macros by hand for new kernels */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
++#define info(args...) printk(KERN_INFO KBUILD_MODNAME args)
++#define warn(args...) printk(KERN_WARNING KBUILD_MODNAME args)
++#endif
++
+ /* --------------------------------- */
+ /* DEFINES FOR OV511 AND OTHER CHIPS */
+ /* --------------------------------- */
