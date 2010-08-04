@@ -1,0 +1,160 @@
+#!/bin/bash
+#
+# Based on script from Raymond 25DEC2003 support@bigriverinfotech.com
+# Changed by Adrian Reber <adrian@lisas.de>
+#
+# processname: jabberd
+# description: jabberd is the next generation of the jabberd server
+# chkconfig: - 85 15
+#
+
+# source function library
+. /etc/rc.d/init.d/functions
+
+START_DAEMONS="router resolver sm c2s s2s"
+CONFIG_DIR="/etc/jabberd"
+
+# pull in sysconfig settings
+[ -f /etc/sysconfig/jabberd ] && . /etc/sysconfig/jabberd
+
+#
+progs="$START_DAEMONS"
+progsPath="/usr/bin"
+confPath="$CONFIG_DIR"
+pidPath="/var/lib/jabberd/pid"
+retval=0
+#
+ReqBins ( ) {
+	for prog in ${progs}; do
+		if [ ! -x ${progsPath}/${prog} ]; then
+			echo "jabberd binary [${prog}] not found."
+			echo "Cannot continue."
+			return -1
+		fi
+	done
+	return 0
+}
+#
+ReqConfs ( ) {
+	for prog in ${progs}; do
+		if [ ! -f ${confPath}/${prog}.xml ]; then
+			echo "jabberd configuration [${prog}.xml] not found."
+			echo "Cannot continue."
+			return -1
+		fi
+	done
+	return 0
+}
+#
+ReqDirs ( ) {
+	if [ ! -d ${pidPath} ]; then
+		echo "jabberd PID directory not found. Cannot continue."
+		return -1
+	fi
+	return 0
+}
+#
+Start ( ) {
+	for req in ReqBins ReqConfs ReqDirs; do
+		${req}
+		retval=$?
+		[ ${retval} == 0 ] || return ${retval}
+	done
+	echo "Initializing jabberd processes ..."
+	for prog in ${progs}; do
+		if [ $( pidof -s ${prog} ) ]; then
+			echo "process [${prog}] already running"
+			continue
+		fi
+		echo -n "Starting ${prog}: "
+		rm -f /var/lock/subsys/${prog}
+		rm -f ${pidPath}/${prog}.pid
+		args="-c ${confPath}/${prog}.xml"
+		if [ ${prog} == "c2s" -a ! -z "$C2S_AS_ROOT" ]; then
+			if [ $C2S_AS_ROOT == "yes" ]; then
+				daemon --user root "${progsPath}/${prog} ${args} >/dev/null 2>&1 &"
+			else
+				daemon --user jabber "${progsPath}/${prog} ${args} >/dev/null 2>&1 &"
+			fi
+		else
+			daemon --user jabber "${progsPath}/${prog} ${args} >/dev/null 2>&1 &"
+		fi
+		retval=$?
+		echo
+		if [ ${retval} == 0 ]; then
+			touch /var/lock/subsys/${prog}
+		else
+			let retval=-1
+			break
+		fi
+	done
+	return ${retval}
+}
+#
+Stop ( ) {
+	echo "Terminating jabberd processes ..."
+	for prog in ${progs}; do
+		echo -n "Stopping ${prog}: "
+		killproc ${prog}
+		retval=$?
+		if [ ${retval} == 0 ]; then
+			rm -f /var/lock/subsys/${prog}
+			rm -f ${pidPath}/${prog}.pid
+		fi
+		echo
+		sleep 1
+	done
+	return ${retval}
+}
+#
+reload()
+{
+	echo "Reloading jabberd processes ..."
+	for prog in ${progs}; do
+		killproc ${prog} -HUP
+		retval=$?
+	done
+	return ${retval}
+}
+
+rhstatus()
+{
+        for prog in ${progs}; do
+                status ${prog}
+		retval=$?
+        done
+	return ${retval}
+}
+
+case "$1" in
+	start)
+		Start
+		;;
+	stop)
+		Stop
+		;;
+	reload)
+		reload
+		;;
+	status)
+		rhstatus
+		;;
+	restart)
+		Stop
+		Start
+		;;
+	condrestart)
+        	for prog in ${progs}; do
+			if [ ! -f /var/lock/subsys/${prog} ]; then
+				exit
+			fi
+		done
+		Stop
+		sleep 3
+		Start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|condrestart|reload|status}"
+		let retval=2
+esac
+exit ${retval}
