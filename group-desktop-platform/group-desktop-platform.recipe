@@ -26,7 +26,7 @@ class GroupDesktopPlatform(GroupRecipe):
     rPathVersionStr = None
 
     supDocComponents = [ 'supdoc', ]
-    develComponents  = [ 'build-tree', 'devellib', 'devel']
+    develComponents  = [ 'build-tree', 'devellib', 'devel', 'develdoc']
     docComponents  = [ 'supdoc', 'doc']
     localeComponents  = [ 'locale']
 
@@ -63,10 +63,6 @@ class GroupDesktopPlatform(GroupRecipe):
                           'group-supported-stuff-extra-devel',
                          ]
     bucketExtraDocGroups = [ 'group-extra-docs', 
-                             # bellow grp should have no docs there
-                             # we need to have it here to avoid a loop
-                             # anyway...
-                             'group-supported-stuff-extra-devel',
                              ]
 
     rplLabel = 'conary.rpath.com@rpl:2-qa'
@@ -2633,7 +2629,6 @@ class GroupDesktopPlatform(GroupRecipe):
              r.flAdd(p, groupName='group-tryton')
 
         r.flCreateGroup('group-supported-stuff-extra', parentGroup='group-desktop-platform', dynamicGroup = False)
-        r.flCreateGroup('group-supported-stuff-extra-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
         # here goes everything that isn't fit for any other group but _is_ in our labels
 
         # get around the CNY-3238 mess
@@ -4051,18 +4046,6 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # final housekeeping
 
-        # we  need this as we use now copyComponents
-        # for develComponents.
-        def dropDevelItemsFromNonDevelGroups(groupName='group-desktop-platform'):
-            groupList = r.getChildGroups(groupName)
-            for g in groupList:
-                if g[0].name not in r.bucketDevelGroups:
-                    r.copyComponents(r.develComponents, g[0].name, 'group-supported-stuff-extra-devel')
-                    r.removeComponents(r.develComponents, g[0].name)
-                    dropDevelItemsFromNonDevelGroups(g[0].name)
-
-        dropDevelItemsFromNonDevelGroups()
-
         # FIXME: this is freak. r.add(..., component=['lib'], flavor = is: x86) installs
         # remaining components with byDefault=False
         # obviously this messes everything, as conary still tries to resolve them...
@@ -4242,6 +4225,26 @@ class GroupDesktopPlatform(GroupRecipe):
         r.removeComponents(r.develComponents, 'group-gnome-lite-dist')
         r.flCreateGroup('group-gnome-lite-locales', parentGroup='group-desktop-platform', dynamicGroup = True)
         r.moveComponents(r.localeComponents, 'group-gnome-lite-dist', 'group-gnome-lite-locales')
+
+        # XXX order key
+        # we  need this as we use now copyComponents
+        # for develComponents.
+        def dropDevelItemsFromNonDevelGroups(groupName):
+            groupList = r.getChildGroups(groupName)
+            for g in groupList:
+                print ' .... %s .... ' % g[0].name
+                if g[0].name not in r.bucketDevelGroups:
+                    if g[0].name != 'group-supported-stuff-extra-devel':
+                        print '#.... %s ....#' % g[0].name
+                        r.copyComponents(r.develComponents, g[0].name, 'group-supported-stuff-extra-devel')
+                        r.removeComponents(r.develComponents, g[0].name)
+                        dropDevelItemsFromNonDevelGroups(g[0].name)
+
+        r.flCreateGroup('group-supported-stuff-extra-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+
+        for edition in [ 'gnome', 'kde', 'xfce']:
+
+            dropDevelItemsFromNonDevelGroups(groupName='group-%s-dist' % edition)
 
 
         # dist-devel groups
