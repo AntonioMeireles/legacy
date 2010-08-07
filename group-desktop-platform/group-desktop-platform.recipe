@@ -4229,27 +4229,6 @@ class GroupDesktopPlatform(GroupRecipe):
         # r.flCreateGroup('group-gnome-lite-locales', parentGroup='group-desktop-platform', dynamicGroup = True)
         # r.moveComponents(r.localeComponents, 'group-gnome-lite-dist', 'group-gnome-lite-locales')
 
-        # XXX order key
-        # we  need this as we use now copyComponents
-        # for develComponents.
-        def dropDevelItemsFromNonDevelGroups(groupName):
-            groupList = r.getChildGroups(groupName)
-            for g in groupList:
-                # print ' .... %s .... ' % g[0].name
-                if g[0].name not in r.bucketDevelGroups:
-                    if g[0].name != 'group-supported-stuff-extra-devel':
-                        # print '#.... %s ....#' % g[0].name
-                        r.copyComponents(r.develComponents, g[0].name, 'group-supported-stuff-extra-devel')
-                        r.removeComponents(r.develComponents, g[0].name)
-                        dropDevelItemsFromNonDevelGroups(g[0].name)
-
-        r.flCreateGroup('group-supported-stuff-extra-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
-
-        for edition in [ 'gnome', 'kde', 'xfce']:
-
-            dropDevelItemsFromNonDevelGroups(groupName='group-%s-dist' % edition)
-
-
         # dist-devel groups
         # simplifies life to devs, as it makes  sync/update group-`edition`-{devel,dist} unnecessary
         for edition in [ 'gnome', 'kde', 'xfce']:
@@ -4263,6 +4242,31 @@ class GroupDesktopPlatform(GroupRecipe):
             # so we keep things consistent by having each of them to require the matching 
             # 'group-' + edition + '-dist-devel'
             r.Requires('group-' + edition + '-dist-devel', groupName= 'group-'+ edition + '-devel')
+
+        # XXX order key
+        # we  need this as we use now copyComponents
+        # for develComponents.
+        def dropDevelItemsFromNonDevelGroups(groupName):
+            def develCleanup(target):
+                r.copyComponents(r.develComponents, target, 'group-supported-stuff-extra-devel')
+                r.removeComponents(r.develComponents, target)
+
+            # we clean current group
+            develCleanup(groupName)
+            # we check groups bellow current group 
+            groupList = r.getChildGroups(groupName)
+            for g in groupList:
+                if g[0].name not in r.bucketDevelGroups:
+                    # we clean remaining non -devel groups
+                    dropDevelItemsFromNonDevelGroups(g[0].name)
+
+        r.flCreateGroup('group-supported-stuff-extra-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+
+        for edition in [ 'gnome', 'kde', 'xfce']:
+            dropDevelItemsFromNonDevelGroups(groupName='group-%s-dist' % edition)
+
+
+
 
 # vi: set ts=4 sts=4 sw=4 expandtab:
 
