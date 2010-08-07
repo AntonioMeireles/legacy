@@ -7,10 +7,14 @@
 loadSuperClass('rpmpackage')
 class PMUtils(RPMPackageRecipe, CPackageRecipe):
     name = 'pm-utils'
-    version = '1.2.5'
-    rpmRelease = '2.fc11'
-    rpmPatches = ['pm-utils-1.2.5-fix-kms.patch']
-
+    version = '1.2.6.1'
+    rpmRelease = '3.fc13'
+    rpmPatches = [ 'pm-utils-1.2.6-nouveau.patch',
+                   'pm-utils-1.2.6.1-open-the-pod-bay-doors.patch']
+    rpmSources = [ 'pm-utils-99hd-apm-restore',
+                   'pm-utils-hd-apm-restore.conf',
+                   'pm-utils-bugreport-info.sh' ]
+    
     buildRequires = [ 'pkgconfig:devel', 'pciutils:devel', 'xmlto:runtime', ]
 
     def setup(r):
@@ -25,8 +29,18 @@ class PMUtils(RPMPackageRecipe, CPackageRecipe):
         r.MakeDirs('%(localstatedir)s/run/pm-utils/locks')
         r.MakeDirs('%(localstatedir)s/run/pm-utils/storage')
 
-        r.addSource('pm-utils-99hd-apm-restore', rpm=r.srpm, dir='%(libdir)s/pm-utils/sleep.d/99hd-apm-restore.hook', mode = 0755)
-        r.addSource('pm-utils-hd-apm-restore.conf', rpm=r.srpm, dir='%(sysconfdir)s/pm-utils-hd-apm-restore.conf', mode = 0644)
-        r.addSource('pm-utils-bugreport-info.sh', rpm=r.srpm, dir='%(bindir)s/pm-utils-bugreport-info.sh', mode = 0755)
+        r.Install('pm-utils-99hd-apm-restore', '%(libdir)s/pm-utils/sleep.d/99hd-apm-restore.hook', mode = 0755)
+        r.Install('pm-utils-hd-apm-restore.conf', '%(sysconfdir)s/pm-utils-hd-apm-restore.conf', mode = 0644)
+        r.Install('pm-utils-bugreport-info.sh', '%(bindir)s/pm-utils-bugreport-info.sh', mode = 0755)
 
         r.ExcludeDirectories(exceptions = ['%(sysconfdir)s/pm/.*', '%(localstatedir)s/run/pm-utils/.*'])
+
+        r.Create('%(localstatedir)s/log/pm-suspend.log', mode = 0600)
+        r.InitialContents('%(localstatedir)s/log/pm-suspend.log')
+
+        # xHCI/USB3 is broken in kernel atm regarding suspend / resume
+        # as is - systems never suspend
+        # this workaround  gets it to behave allowing systems to suspend 
+        # and resume normally (works on my W510)
+        r.Create('%(sysconfdir)s/pm/config.d/00sleep_module', mode = 0644,
+                 contents = 'SUSPEND_MODULES="xhci_hcd"')
