@@ -1,23 +1,38 @@
-[PATCH] dvb: add support for kworld 340u and ub435-q to em28xx-dvb
+commit 611225f5e7f9d11c4b119fac224f1bd6903b0150
+Author: Jarod Wilson <jarod@redhat.com>
+Date:   Sun Mar 7 17:55:43 2010 -0300
 
-This adds support for the KWorld PlusTV 340U and KWorld UB345-Q ATSC
-sticks, which are really the same device. The sticks have an eMPIA
-em2870 usb bridge chipset, an LG Electronics LGDT3304 ATSC/QAM
-demodulator and an NXP TDA18271HD tuner -- early versions of the 340U
-have a a TDA18271HD/C1, later models and the UB435-Q have a C2.
+    V4L/DVB: dvb: add support for kworld 340u and ub435-q to em28xx-dvb
+    
+    This adds support for the KWorld PlusTV 340U and KWorld UB345-Q ATSC
+    sticks, which are really the same device. The sticks have an eMPIA
+    em2870 usb bridge chipset, an LG Electronics LGDT3304 ATSC/QAM
+    demodulator and an NXP TDA18271HD tuner -- early versions of the 340U
+    have a a TDA18271HD/C1, later models and the UB435-Q have a C2.
+    
+    The stick has been tested succesfully with both VSB_8 and QAM_256 signals.
+    Its using lgdt3304 support added to the lgdt3305 driver by a prior patch,
+    rather than the current lgdt3304 driver, as its severely lacking in
+    functionality by comparison (see said patch for details).
+    
+    Signed-off-by: Jarod Wilson <jarod@redhat.com>
+    Signed-off-by: Michael Krufky <mkrufky@kernellabs.com>
+    Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
 
-The stick has been tested succesfully with both VSB_8 and QAM_256 signals.
-Its using lgdt3304 support added to the lgdt3305 driver by a prior patch,
-rather than the current lgdt3304 driver, as its severely lacking in
-functionality by comparison (see said patch for details).
-
-Signed-off-by: Jarod Wilson <jarod@redhat.com>
-
----
-diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-cards.c
---- a/drivers/media/video/em28xx/em28xx-cards.c	Thu Feb 11 23:11:30 2010 -0200
-+++ b/drivers/media/video/em28xx/em28xx-cards.c	Thu Feb 18 16:47:17 2010 -0500
-@@ -170,6 +170,22 @@
+diff --git a/Documentation/video4linux/CARDLIST.em28xx b/Documentation/video4linux/CARDLIST.em28xx
+index 3a623aa..5c56875 100644
+--- a/Documentation/video4linux/CARDLIST.em28xx
++++ b/Documentation/video4linux/CARDLIST.em28xx
+@@ -72,3 +72,4 @@
+  73 -> Reddo DVB-C USB TV Box                   (em2870)
+  74 -> Actionmaster/LinXcel/Digitus VC211A      (em2800)
+  75 -> Dikom DK300                              (em2882)
++ 76 -> KWorld PlusTV 340U or UB435-Q (ATSC)     (em2870)        [1b80:a340]
+diff --git a/drivers/media/video/em28xx/em28xx-cards.c b/drivers/media/video/em28xx/em28xx-cards.c
+index 3a4fd85..ffbe544 100644
+--- a/drivers/media/video/em28xx/em28xx-cards.c
++++ b/drivers/media/video/em28xx/em28xx-cards.c
+@@ -158,6 +158,22 @@ static struct em28xx_reg_seq evga_indtube_digital[] = {
  	{ -1,			-1,	-1,		-1},
  };
  
@@ -40,7 +55,7 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-cards.c
  /* Pinnacle Hybrid Pro eb1a:2881 */
  static struct em28xx_reg_seq pinnacle_hybrid_pro_analog[] = {
  	{EM28XX_R08_GPIO,	0xfd,   ~EM_GPIO_4,	10},
-@@ -1703,6 +1719,16 @@
+@@ -1667,6 +1683,16 @@ struct em28xx_board em28xx_boards[] = {
  		.tuner_gpio    = reddo_dvb_c_usb_box,
  		.has_dvb       = 1,
  	},
@@ -57,7 +72,7 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-cards.c
  };
  const unsigned int em28xx_bcount = ARRAY_SIZE(em28xx_boards);
  
-@@ -1826,6 +1852,8 @@
+@@ -1788,6 +1814,8 @@ struct usb_device_id em28xx_id_table[] = {
  			.driver_info = EM2820_BOARD_IODATA_GVMVP_SZ },
  	{ USB_DEVICE(0xeb1a, 0x50a6),
  			.driver_info = EM2860_BOARD_GADMEI_UTV330 },
@@ -66,9 +81,10 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-cards.c
  	{ },
  };
  MODULE_DEVICE_TABLE(usb, em28xx_id_table);
-diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-dvb.c
---- a/drivers/media/video/em28xx/em28xx-dvb.c	Thu Feb 11 23:11:30 2010 -0200
-+++ b/drivers/media/video/em28xx/em28xx-dvb.c	Thu Feb 18 16:47:17 2010 -0500
+diff --git a/drivers/media/video/em28xx/em28xx-dvb.c b/drivers/media/video/em28xx/em28xx-dvb.c
+index cf1d8c3..3ac8d30 100644
+--- a/drivers/media/video/em28xx/em28xx-dvb.c
++++ b/drivers/media/video/em28xx/em28xx-dvb.c
 @@ -30,11 +30,13 @@
  #include "tuner-simple.h"
  
@@ -83,7 +99,7 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-dvb.c
  
  MODULE_DESCRIPTION("driver for em28xx based DVB cards");
  MODULE_AUTHOR("Mauro Carvalho Chehab <mchehab@infradead.org>");
-@@ -231,6 +233,18 @@
+@@ -231,6 +233,18 @@ static struct lgdt330x_config em2880_lgdt3303_dev = {
  	.demod_chip = LGDT3303,
  };
  
@@ -102,7 +118,7 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-dvb.c
  static struct zl10353_config em28xx_zl10353_with_xc3028 = {
  	.demod_address = (0x1e >> 1),
  	.no_tuner = 1,
-@@ -247,6 +261,17 @@
+@@ -247,6 +261,17 @@ static struct s5h1409_config em28xx_s5h1409_with_xc3028 = {
  	.mpeg_timing   = S5H1409_MPEGTIMING_CONTINOUS_NONINVERTING_CLOCK
  };
  
@@ -120,7 +136,7 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-dvb.c
  static struct zl10353_config em28xx_zl10353_xc3028_no_i2c_gate = {
  	.demod_address = (0x1e >> 1),
  	.no_tuner = 1,
-@@ -569,6 +594,14 @@
+@@ -572,6 +597,14 @@ static int dvb_init(struct em28xx *dev)
  			}
  		}
  		break;
@@ -135,13 +151,14 @@ diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx-dvb.c
  	default:
  		em28xx_errdev("/2: The frontend of your DVB/ATSC card"
  				" isn't supported yet\n");
-diff -r 14021dfc00f3 drivers/media/video/em28xx/em28xx.h
---- a/drivers/media/video/em28xx/em28xx.h	Thu Feb 11 23:11:30 2010 -0200
-+++ b/drivers/media/video/em28xx/em28xx.h	Thu Feb 18 16:47:17 2010 -0500
-@@ -112,6 +112,7 @@
- #define EM2861_BOARD_GADMEI_UTV330PLUS           72
+diff --git a/drivers/media/video/em28xx/em28xx.h b/drivers/media/video/em28xx/em28xx.h
+index 6216786..1c61a6b 100644
+--- a/drivers/media/video/em28xx/em28xx.h
++++ b/drivers/media/video/em28xx/em28xx.h
+@@ -114,6 +114,7 @@
  #define EM2870_BOARD_REDDO_DVB_C_USB_BOX          73
  #define EM2800_BOARD_VC211A			  74
+ #define EM2882_BOARD_DIKOM_DK300		  75
 +#define EM2870_BOARD_KWORLD_A340		  76
  
  /* Limits minimum and default number of buffers */
