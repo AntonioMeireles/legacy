@@ -1,80 +1,142 @@
 #!/bin/sh
 #
-# dhcpd         This shell script takes care of starting and stopping
-#               dhcpd.
+### BEGIN INIT INFO
+# Provides: dhcpd
+# Default-Start:
+# Default-Stop:
+# Should-Start:
+# Required-Start: $network
+# Required-Stop:
+# Short-Description: Start and stop the DHCP server
+# Description: dhcpd provides the Dynamic Host Configuration Protocol (DHCP)
+#              server.
+### END INIT INFO
+#
+# The fields below are left around for legacy tools (will remove later).
 #
 # chkconfig: - 65 35
-# description: dhcpd provide access to Dynamic Host Control Protocol.
+# description: dhcpd provides the Dynamic Host Configuration Protocol (DHCP) \
+#              server
+# processname: dhcpd
+# config: /etc/dhcpd.conf
+# config: /var/lib/dhcpd/dhcpd.leases
+# pidfile: /var/run/dhcpd.pid
 
-# Source function library.
-. /etc/rc.d/init.d/functions
-
-# Source networking configuration.
-. /etc/sysconfig/network
-. /etc/sysconfig/dhcpd
-
-# Check that networking is up.
-[ ${NETWORKING} = "no" ] && exit 0
-
-[ -f /usr/sbin/dhcpd ] || exit 0
-[ -f /etc/dhcpd.conf ] || exit 0
-[ -f /var/lib/dhcp/dhcpd.leases ] || exit 0
+. /etc/init.d/functions
 
 RETVAL=0
-prog="dhcpd"
+
+prog=dhcpd
+dhcpd=/usr/sbin/dhcpd
+lockfile=/var/lock/subsys/dhcpd
+pidfile=/var/run/dhcpd.pid
+statedir=/var/lib/dhcpd
+
+[ -f /etc/sysconfig/dhcpd ] && . /etc/sysconfig/dhcpd
+
+# if the user specified a different config file, make sure we reference it
+findConfig() {
+    for arg in $DHCPDARGS ; do
+        if [ "$found" = 1 ]; then
+            [ -f "$arg" ] && echo "$arg"
+            return
+        fi
+        if [ "$arg" = "-cf" ]; then
+            found=1
+            continue
+        fi
+    done
+    echo "/etc/dhcpd.conf"
+}
+
+conf="$(findConfig "$DHCPDARGS")"
+
+if [ ! -f $statedir/dhcpd.leases ] ; then
+    mkdir -p $statedir
+    touch $statedir/dhcpd.leases
+    [ -x /sbin/restorecon ] && [ -d /selinux ] && /sbin/restorecon $statedir/dhcpd.leases >/dev/null 2>&1
+fi
+
+configtest() {
+    [ -x $dhcpd ] || return 5
+    [ -f $conf ] || return 6
+    $dhcpd -q -t -cf $conf
+    RETVAL=$?
+    return $RETVAL
+}
 
 start() {
-	# Start daemons.
-	echo -n $"Starting $prog: "
-	daemon /usr/sbin/dhcpd ${DHCPDARGS}
-	RETVAL=$?
-	echo
-	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/dhcpd
-	return $RETVAL
+    [ -x $dhcpd ] || return 5
+    [ -f $conf ] || return 6
+
+    pidofproc $prog >/dev/null 2>&1
+    RETVAL=$?
+    [ $RETVAL -eq 0 ] && return $RETVAL
+
+    echo -n $"Starting $prog: "
+    daemon $dhcpd $DHCPDARGS
+    RETVAL=$?
+    echo
+    [ $RETVAL = 0 ] && touch $lockfile
+    return $RETVAL
 }
 
 stop() {
-	# Stop daemons.
-	echo -n $"Shutting down $prog: "
-	killproc dhcpd
-	RETVAL=$?
-	echo
-	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/dhcpd
-	return $RETVAL
+    pidofproc $prog >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        RETVAL=7
+        return $RETVAL
+    fi
+
+    echo -n $"Shutting down $prog: "
+    killproc $prog
+    RETVAL=$?
+
+    [ $RETVAL = 0 ] && success || failure
+    echo
+    [ $RETVAL = 0 ] && rm -f $lockfile
+    return $RETVAL
 }
 
-# See how we were called.
+if [ $# -gt 1 ]; then
+    RETVAL=2
+    exit $RETVAL
+fi
+
 case "$1" in
-  start)
-	start
-	;;
-  stop)
-	stop
-	;;
-  restart|reload)
-	stop
-	start
-	RETVAL=$?
-	;;
-  condrestart)
-	if [ -f /var/lock/subsys/dhcpd ]; then
-	    stop
-	    start
-	    RETVAL=$?
-	fi
-	;;
-  configtest)
-	dhcpd -t
-	RETVAL=$?
-	;;
-  status)
-	status dhcpd
-	RETVAL=$?
-	;;
-  *)
-	echo $"Usage: $0 {start|stop|restart|condrestart|configtest|status}"
-	exit 1
+    start)
+        start
+        RETVAL=$?
+        ;;
+    stop)
+        stop
+        RETVAL=$?
+        ;;
+    restart|force-reload)
+        stop ; start
+        RETVAL=$?
+        ;;
+    try-restart|reload)
+        RETVAL=3
+        ;;
+    condrestart)
+        if [ -f $lockfile ]; then
+            stop ; start
+            RETVAL=$?
+        fi
+        ;;
+    configtest)
+        configtest
+        RETVAL=$?
+        ;;
+    status)
+        status $dhcpd
+        RETVAL=$?
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart|condrestart|configtest|status}"
+        RETVAL=3
+        ;;
 esac
 
 exit $RETVAL
-

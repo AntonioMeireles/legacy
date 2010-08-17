@@ -1,91 +1,184 @@
 #
-# Copyright (c) 2004-2006 rPath, Inc.
+# Copyright (c) 2004-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+# XXX Remove me after review
+# Recipe is largely a copy of fedora spec http://pkgs.fedoraproject.org/gitweb/?p=dhcp.git;a=summary
+# Also note this is not the first commit of dhcp on fl:2-devel. Because dhcp:source is already there (but not built)
+#0. The fc14 and fc15 srpm look the same. I just picked fc14.
+#1. some sample docs. i.e. dhcpd.conf.sample
+#2. /var/spool/mail
+#3. libdhcp4client. It should be obsolete now.
+#4. a patch needs to be rebased? (dhcp-4.2.0-missing-ipv6-not-fatal.patch)
+#5. quite some extra source are dropped (e.g. dhcrelay.init), because the srpm also provides them
 
-class Dhcp(CPackageRecipe):
-    buildRequires = [ 'groff:runtime' ]
-
+loadSuperClass('rpmpackage')
+class Dhcp(RPMPackageRecipe, CPackageRecipe):
     name = 'dhcp'
-    version = '3.0.5'
-    
+    version = '4.2.0'
+
+    rpmUpVer = '4.2.0'
+    rpmRelease = '2.fc14'
+
+    buildRequires = [
+        'autoconf:runtime', # for autoreconf -f -i
+        'doxygen:runtime',
+        'groff:runtime',
+        'libcap:devel',
+        'libxml2:runtime',
+        'libxslt:runtime',
+        'openldap:devel',
+        'openssl:devel',
+        ]
+
+    rpmPatches = [
+        'dhcp-4.2.0-errwarn-message.patch',
+        'dhcp-4.2.0-options.patch',
+        'dhcp-4.2.0-release-by-ifup.patch',
+        'dhcp-4.2.0-dhclient-decline-backoff.patch',
+        'dhcp-4.2.0-unicast-bootp.patch',
+        'dhcp-4.2.0-ldap.patch',
+        'dhcp-4.2.0-dhclient-usage.patch',
+        'dhcp-4.2.0-default-requested-options.patch',
+        'dhcp-4.2.0-xen-checksum.patch',
+        'dhcp-4.2.0-manpages.patch',
+        'dhcp-4.2.0-paths.patch',
+        #'dhcp-4.2.0-CLOEXEC.patch', # our glibc is not new enough
+        'dhcp-4.2.0-inherit-leases.patch',
+        'dhcp-4.2.0-garbage-chars.patch',
+        'dhcp-4.2.0-invalid-dhclient-conf.patch',
+        #'dhcp-4.2.0-missing-ipv6-not-fatal.patch', # need to rebase if CLOEXEC patch is not applied
+        'dhcp-4.2.0-IFNAMSIZ.patch',
+        'dhcp-4.2.0-add_timeout_when_NULL.patch',
+        'dhcp-4.2.0-64_bit_lease_parse.patch',
+        'dhcp-4.2.0-capability.patch',
+        'dhcp-4.2.0-logpid.patch',
+        'dhcp-4.2.0-UseMulticast.patch',
+        'dhcp-4.2.0-sendDecline.patch',
+        'dhcp-4.2.0-retransmission.patch',
+        'dhcp-4.2.0-release6-elapsed.patch',
+        'dhcp-4.2.0-initialization-delay.patch',
+        'dhcp-4.2.0-parse_date.patch',
+    ]
+
+    rpmSources = [
+        'dhcpd.init',
+        'dhcpd6.init',
+        'dhcrelay.init',
+        #'dhclient-script', # manually processed
+        'README.dhclient.d',
+        '11-dhclient',
+        '12-dhcpd',
+        '56dhclient',
+    ]
+
     def setup(r):
-        srpm = 'ftp://download.fedora.redhat.com/pub/fedora/linux/releases/7/Fedora/source/SRPMS/dhcp-3.0.5-35.fc7.src.rpm'
-
-        r.addArchive('dhcp-%(version)s.tar.gz', rpm=srpm)
-
-        r.addSource('linux.dbus-example', rpm=srpm, dest='client/scripts/linux')
-        r.addSource('Makefile.dist', rpm=srpm, dest='libdhcp4client/')
-        r.addSource('dhcp4client.h', rpm=srpm, dest='libdhcp4client/')
-        r.addSource('libdhcp_control.h', rpm=srpm, dest='libdhcp4client/')
-        r.addSource('dhcpd.conf.sample')
-        r.addSource('dhcpd.init')
+        r.addArchive('ftp://ftp.isc.org/isc/dhcp/dhcp-%s.tar.gz' % r.macros.version.replace('_', '-')) #, keyid='1BC91E6C')
+        r.addArchive('http://cloud.github.com/downloads/dcantrell/ldap-for-dhcp/ldap-for-dhcp-4.1.1-2.tar.gz')
+        r.addSource('dhcpd6.conf')
+        r.addSource('dhcpd6.sysconfig')
+        r.addSource('dhcpd.conf')
         r.addSource('dhcpd.sysconfig')
-        r.addSource('dhcrelay.init')
         r.addSource('dhcrelay.sysconfig')
-        r.addSource('dhcpd.leases')
-        r.addSource('site.conf', macros=True)
-        r.addSource('site.h', macros=True,
-                    apply='cat site.h >> includes/site.h; rm site.h')
-        r.addSource('findptrsize.c')
 
-        r.addPatch('dhcp-3.0.5-version.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-Makefile.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-warnings.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-extended-new-option-info.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-errwarn-message.patch', rpm=srpm)
-        # We don't care for ldap and the patch doesn't apply :)
-        #r.addPatch('dhcp-3.0.5-ldap-configuration.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-memory.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-options.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-release-by-ifup.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-dhclient-decline-backoff.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-enable-timeout-functions.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-inherit-leases.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-selinux.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-unicast-bootp.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-fast-timeout.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-failover-ports.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-dhclient-usage.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-default-requested-options.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-prototypes.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-manpages.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-libdhcp4client.patch', rpm=srpm)
-        r.addPatch('dhcp-3.0.5-xen-checksum.patch', rpm=srpm)
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
 
-        r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
-                  'includes/cf/linux.h')
-        r.Replace('\/bin\/dbus-send', '%(bindir)s/dbus-send', 'client/scripts/linux')
-        # Don't build libdhcp4client, we have a separate package for that
-        r.Replace('libdhcp4client', '', 'work.linux-2.2/Makefile')
+        for source in r.rpmSources:
+            r.addSource(source, rpm=r.srpm)
+        r.addSource('dhclient-script', dest='client/scripts/linux', rpm=r.srpm)
 
-        r.Make('findptrsize')
-        r.ManualConfigure('--copts "%(cflags)s -DEXTENDED_NEW_OPTION_INFO'
-            ' $([ $(./findptrsize) -ge 8 ] && echo -DPTRSIZE_64BIT)"')
+        # not needed since we have /var/spool/mail symlink to /srv/spool/mail
+        #r.Replace('/var/spool/mail', '%(servicedir)s/spool/mail',
+        #          'includes/cf/linux.h')
+
+        #r.Install('libdhcp4client.pc', '%(datadir)s/pkgconfig/')
+
+        r.Run('autoreconf --verbose --force --install')
+        r.macros.cflags = '-fno-strict-aliasing -fPIC -D_GNU_SOURCE'
+        r.Configure(
+            ' --with-srv-lease-file=%(localstatedir)s/lib/dhcpd/dhcpd.leases'
+            ' --with-srv6-lease-file=%(localstatedir)s/lib/dhcpd/dhcpd6.leases'
+            ' --with-cli-lease-file=%(localstatedir)s/lib/dhclient/dhclient.leases'
+            ' --with-cli6-lease-file=%(localstatedir)s/lib/dhclient/dhclient6.leases'
+            ' --with-srv-pid-file=%(localstatedir)s/run/dhcpd.pid'
+            ' --with-srv6-pid-file=%(localstatedir)s/run/dhcpd6.pid'
+            ' --with-cli-pid-file=%(localstatedir)s/run/dhclient.pid'
+            ' --with-cli6-pid-file=%(localstatedir)s/run/dhclient6.pid'
+            ' --with-relay-pid-file=%(localstatedir)s/run/dhcrelay.pid'
+            ' --with-ldap'
+            ' --with-ldapcrypto'
+            )
+
         r.Make()
         r.MakeInstall()
+
+        # Remove files we don't want
+        r.Remove('%(sysconfdir)s/dhclient.conf')
+        r.Remove('%(sysconfdir)s/dhcpd.conf')
+
+        # Install correct dhclient-script
+        r.Move('%(sbindir)s/dhclient', '%(essentialsbindir)s/')
+        r.Install('client/scripts/linux', '%(essentialsbindir)s/dhclient-script')
+
+        # Install init scripts
         r.Install('dhcpd.init', '%(initdir)s/dhcpd', mode=0755)
-        r.Install('dhcpd.leases', '%(localstatedir)s/lib/dhcp/')
-        r.Install('dhcpd.sysconfig', '%(sysconfdir)s/sysconfig/dhcpd')
+        r.Install('dhcpd6.init', '%(initdir)s/dhcpd6', mode=0755)
         r.Install('dhcrelay.init', '%(initdir)s/dhcrelay', mode=0755)
+
+        # Start empty lease databases
+        r.MakeDirs('%(localstatedir)s/lib/dhcpd')
+        r.Run('touch %(destdir)s%(localstatedir)s/lib/dhcpd/dhcpd.leases')
+        r.Run('touch %(destdir)s%(localstatedir)s/lib/dhcpd/dhcpd6.leases')
+        r.MakeDirs('%(localstatedir)s/lib/dhclient')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/dhclient')
+
+        # Create default sysconfig files for dhcpd and dhcrelay
+        r.Install('dhcpd.sysconfig', '%(sysconfdir)s/sysconfig/dhcpd')
+        r.Install('dhcpd6.sysconfig', '%(sysconfdir)s/sysconfig/dhcpd6')
         r.Install('dhcrelay.sysconfig', '%(sysconfdir)s/sysconfig/dhcrelay')
 
-        r.Run('mv client/dhclient.conf client/dhclient.conf.sample')
+        # Copy sample conf files into position (called by doc macro)
+        r.Copy('client/dhclient.conf', 'client/dhclient.conf.sample')
         r.Doc('client/dhclient.conf.sample', component='dhclient:')
         r.AutoDoc('RELNOTES')
-        r.Doc('dhcpd.conf.sample')
+        #r.Doc('dhcpd.conf.sample')
 
-        r.SetModes('%(essentialsbindir)s/dhclient-script', 0755)
-        r.Requires('initscripts:runtime', '/sbin/dhclient-script')
+        # Install default (empty) dhcpd.conf:
+        r.Install('dhcpd.conf', '%(sysconfdir)s/dhcp/')
+        r.Install('dhcpd6.conf', '%(sysconfdir)s/dhcp/')
 
-        r.MakeDirs('%(localstatedir)s/lib/dhclient')
-        r.PackageSpec('dhclient', '%(localstatedir)s/lib/dhcp',
+        # Install dhcp.schema for LDAP configuration
+        r.Install('contrib/ldap/dhcp.schema', '%(sysconfdir)s/openldap/schema/')
+
+        # Install empty directory for dhclient.d scripts
+        r.MakeDirs('%(sysconfdir)s/dhcp/dhclient.d')
+
+        # Install NetworkManager dispatcher script
+        r.Install('11-dhclient', '%(sysconfdir)s/NetworkManager/dispatcher.d/')
+        r.Install('12-dhcpd', '%(sysconfdir)s/NetworkManager/dispatcher.d/')
+
+        # Install pm-utils script to handle suspend/resume and dhclient leases
+        r.Install('56dhclient', '%(libdir)s/pm-utils/sleep.d/')
+
+        r.Requires('initscripts:runtime', '%(essentialsbindir)s/dhclient-script')
+
+        r.PackageSpec('dhclient',
+            '%(sysconfdir)s/dhcp/dhclient.d',
             '%(localstatedir)s/lib/dhclient',
+            '%(sysconfdir)s/NetworkManager/dispatcher.d/11-dhclient',
             '%(essentialsbindir)s/dhclient.*',
+            '%(libdir)s/pm-utils/sleep.d/',
             '%(mandir)s/man.*/dhclient.*',
-            '%(mandir)s/man5/dhcp-options.5.*')
-        r.TagSpec('initscript', '%(initdir)s/')
+            '%(mandir)s/man5/dhcp-options.5.*',
+            '%(mandir)s/man5/dhcp-eval.5.*')
 
-        r.ExcludeDirectories(exceptions='/var/(lib|run)/(dhcp|dhclient)')
+        #r.PackageSpec('libdhcp4client', '%(includedir)s/dhcp4client/.*',
+        #    '%(libdir)s/libdhcp4client.*',
+        #    '%(libdir)s/pkgconfig/libdhcp4client.pc')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.InitialContents('%(localstatedir)s/lib/dhcpd/dhcpd.leases')
+        r.InitialContents('%(localstatedir)s/lib/dhcpd/dhcpd6.leases')
