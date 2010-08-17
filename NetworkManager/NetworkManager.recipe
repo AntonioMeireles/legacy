@@ -1,62 +1,83 @@
+#XXX Remove after review
+#1. what are the empty dirs for?
+
 loadSuperClass('gnomepackage')
+loadRecipe('ppp') # for proper pppd_plugin_dir
 class NetworkManager(GnomePackageRecipe):
 
-   buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'chkconfig:runtime',
-                     'gnome-keyring:devel', 'gnome-vfs:devel', 'ppp:devel',
-                     'hal:devel', 'iproute:runtime', 'libart_lgpl:devel',
-                     'libbonobo:devel', 'libbonoboui:devel', 'libgcrypt:devel',
-                     'libglade:devel', 'libgnome:devel', 'libgnomecanvas:devel',
-                     'libgnomeui:devel', 'libgpg-error:devel', 'libnl:devel',
-                     'popt:devel', 'wireless-tools:devel', 'dbus:devel',
-                     'dbus-glib:devellib', 'glib:devel', 'pango:devel',
-                     'autoconf:runtime', 'automake:runtime', 'libtool:devel',
-                     'desktop-file-utils:runtime', 'libnotify:devel',
-                     'intltool:runtime', 'autoconf:data', 'libtool:runtime',
-                     'pkgconfig:devel', 'intltool:devel', 'gettext:runtime',
-                     'gettext:devel', 'gnome-common:devel', 'gnome-common:runtime', 
-                     'dbus-glib:runtime', 'automake:runtime', 'autoconf:runtime',
-                     'intltool:devel', 'libtool:devel', 'util-macros:devel',
-                     'polkit:devel', 'polkit:runtime', 'nspr:devel', 'nss:devel',
-                     'e2fsprogs:devel', 'util-linux:devel', 'udev:devel', 'udev:lib',
-                     'iptables:runtime'
-                     ]
+    name = "NetworkManager"
+    version = '0.8.1'
 
+    buildRequires = [
+        'GConf:devel',
+        'chkconfig:runtime',
+        'dbus-glib:devellib',
+        'dbus-glib:runtime',
+        'dbus:devel',
+        'desktop-file-utils:runtime',
+        'e2fsprogs:devel',
+        'gnome-keyring:devel',
+        'hal:devel',
+        'iproute:runtime',
+        'iptables:runtime',
+        'libgcrypt:devel',
+        'libglade:devel',
+        'libgpg-error:devel',
+        'libnl:devel',
+        'libnotify:devel',
+        'nspr:devel',
+        'nss:devel',
+        'pango:devel',
+        'polkit:devel',
+        'polkit:runtime',
+        'popt:devel',
+        'ppp:devel',
+        'udev:devel',
+        'udev:lib',
+        'util-linux:devel',
+        'util-macros:devel',
+        'wireless-tools:devel',
+        ]
 
-   name = "NetworkManager"
-   version = '0.7.997'
+    extraConfig = (
+        ' --disable-static'
+        ' --with-distro=redhat'
+        ' --with-dhclient=yes'
+        ' --with-dhcpcd=no'
+        ' --with-crypto=nss'
+        ' --enable-more-warnings=no'
+        ' --with-pppd-plugin-dir=%(libdir)s/pppd/' + Ppp.version
+        )
 
-   extraConfig = ' --disable-static --with-distro=redhat  --with-dhcp-client=dhclient --with-crypto=nss '
-   configureName = 'autogen.sh'
+    patches = [
+        # include config.h for isblank()
+        'fix-build.patch',
+        # from fedora
+        'explain-dns1-dns2.patch',
+        ]
 
-   def unpack(r):
-      r.addGitSnapshot('git://anongit.freedesktop.org/NetworkManager/NetworkManager.git', tag='0.7.997')
-      # don't crash on shutdown
-      r.addPatch('no-crash-on-shutdown.patch')
-      r.addSource('ntpd.dispatch')
+    def policy(r):
+        r.addSource('NetworkManager.conf')
 
-      rhCVS = 'http://cvs.fedoraproject.org/viewvc/rpms/NetworkManager/devel/'
+        # create a VPN directory
+        r.MakeDirs('%(sysconfdir)s/NetworkManager/VPN')
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/NetworkManager/VPN')
 
-      for p in [ 'explain-dns1-dns2.patch',
-                 ]:
-                 r.addPatch(rhCVS + p + '?view=co')
+        # create a keyfile plugin system settings directory
+        r.ExcludeDirectories(exceptions='%(sysconfdir)s/%(name)s/system-connections')
 
-      r.addSource(rhCVS + 'nm-system-settings.conf'  + '?view=co', dest = 'nm-system-settings.conf')
-      # r.Replace('-Wall -Werror', ' ', 'configure.in')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/%(name)s')
+ 
+        # not sure if these are needed
+        r.MakeDirs('%(sysconfdir)s/NetworkManager/dispatcher.d')
+        r.MakeDirs('%(datadir)s/gnome-vpn-properties')
+        r.MakeDirs('%(localstatedir)s/lib/NetworkManager')
 
-
-   def policy(r):
-      r.MakeDirs('%(sysconfdir)s/NetworkManager/VPN')
-      r.MakeDirs('%(sysconfdir)s/NetworkManager/dispatcher.d')
-      r.ExcludeDirectories(exceptions='%(localstatedir)s/run/%(name)s')
-      r.ExcludeDirectories(exceptions='%(sysconfdir)s/%(name)s/system-connections')
-      r.ExcludeDirectories(exceptions='%(sysconfdir)s/NetworkManager/VPN')
-      r.Install('ntpd.dispatch', '%(sysconfdir)s/NetworkManager/dispatcher.d/ntpd')
-
-      r.Requires('libnl:lib','%(sbindir)s/NetworkManager')
-      r.Requires('wpa_supplicant:runtime','%(sbindir)s/NetworkManager')
-      r.Requires('ModemManager:runtime','%(sbindir)s/NetworkManager')
-      r.Requires('mobile-broadband-provider-info:data','%(sbindir)s/NetworkManager')
-
-      r.Install('nm-system-settings.conf', '%(sysconfdir)s/%(name)s/')
-
-      r.Install('test/.libs/nm-online', '%(bindir)s/', mode = 0755)
+        r.Requires('libnl:lib', '%(sbindir)s/NetworkManager')
+        r.Requires('wpa_supplicant:runtime', '%(sbindir)s/NetworkManager')
+        r.Requires('ModemManager:runtime', '%(sbindir)s/NetworkManager')
+        r.Requires('mobile-broadband-provider-info:data', '%(sbindir)s/NetworkManager')
+ 
+        r.Install('NetworkManager.conf', '%(sysconfdir)s/%(name)s/')
+ 
+        r.Install('test/.libs/nm-online', '%(bindir)s/', mode = 0755)
