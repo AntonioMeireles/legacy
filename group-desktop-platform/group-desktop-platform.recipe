@@ -53,17 +53,6 @@ class GroupDesktopPlatform(GroupRecipe):
         'group-xfce-extras',
     ]
 
-    bucketDevelGroups = [ 'group-devel',
-                          'group-text-devel',
-                          'group-os-devel',
-                          'group-gnome-devel',
-                          'group-kde-devel',
-                          'group-xfce-devel',
-                          'group-desktop-common-devel',
-                          'group-supported-stuff-extra-devel',
-                         ]
-    bucketExtraDocGroups = [ 'group-extra-docs', 
-                             ]
 
     rplLabel = 'conary.rpath.com@rpl:2-qa'
     rplLabelCompat = 'conary.rpath.com@rpl:1-compat'
@@ -98,26 +87,15 @@ class GroupDesktopPlatform(GroupRecipe):
         r.createGroup(name, autoResolve=autoResolve, depCheck=depCheck,
                       checkOnlyByDefaultDeps=checkOnlyByDefaultDeps, 
                       byDefault=byDefault,  checkPathConflicts=checkPathConflicts)
+
+        # we drop supDocComponents inconditionally
+        r.removeComponents(r.supDocComponents,
+                           name)
         if parentGroup:
             r.addNewGroup(name, groupName=parentGroup, byDefault=byDefault)
         r.setDefaultGroup(name)
 
-
-        if parentGroup and not name in r.bucketExtraDocGroups:
-            r.moveComponents(r.supDocComponents, name, 'group-extra-docs')
-
-        if parentGroup and not dynamicGroup:
-            if name in r.xfcegroups:
-                r.copyComponents(r.develComponents,  name, 'group-xfce-devel')
-            elif name in r.kdegroups:
-                r.copyComponents(r.develComponents,  name, 'group-kde-devel')
-            elif name == 'group-gnome':
-               r.copyComponents(r.develComponents,  name, 'group-gnome-devel')
-
-            elif name not in r.bucketDevelGroups and name not in r.bucketExtraDocGroups and name not in ['group-gnome' ] and name not in r.kdegroups and name not in r.xfcegroups:
-                r.copyComponents(r.develComponents,  name, 'group-desktop-common-devel')
-
-    def rplAddGroup(r, name, flavor = None):
+    def rplAddGroup(r, name, groupName, flavor = None, recurse=True):
         if not flavor:
             if Arch.x86_64:
                 flavor = r.x86_64rplGroupsFlavorString
@@ -126,10 +104,15 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # copyScripts = True gives interesting errors...
         # has to do with group recursion
-        r.addCopy(name, flavor=flavor, searchPath = r.rplGroupUmbrella)
+        r.addCopy(name, groupName=groupName, flavor=flavor,
+                  searchPath = r.rplGroupUmbrella,
+                  recurse = recurse)
 
-        # below until rpl:2-qa decides to do it too...
-        r.moveComponents(r.supDocComponents, name, 'group-rpl-extra-docs')
+        # we drop supDocComponents inconditionally
+        r.removeComponents(r.supDocComponents,
+                           groupName)
+        r.setByDefault(True, groupName=groupName)
+
 
     def flAddTroves(r, troves, **kwargs):
         for trove in troves:
@@ -232,7 +215,6 @@ class GroupDesktopPlatform(GroupRecipe):
 
         if Arch.x86_64:
             flavor32 = r.x86FlavorString
-
             r.replace(name,
                       newVersionStr = versionStr,
                       groupName='group-compat32',
@@ -310,17 +292,36 @@ class GroupDesktopPlatform(GroupRecipe):
 
         r.addNewGroup('group-desktop-platform', groupName='group-world')
 
-        r.flCreateGroup('group-extra-docs', parentGroup='group-desktop-platform', dynamicGroup = True)
-        r.flCreateGroup('group-rpl-extra-docs', parentGroup='group-desktop-platform', dynamicGroup = True)
+        r.flCreateGroup('group-supported-stuff-extra', parentGroup='group-desktop-platform', dynamicGroup = False)
+        # here goes everything that isn't fit for any other group but _is_ in our labels
 
-        # stuff we re{use,factor} from upstream (rpl:2-qa)
-        r.flCreateGroup('group-rpl-fullpack', parentGroup='group-desktop-platform', dynamicGroup = True)
 
-        for groupName in r.rplGroups:
-            r.rplAddGroup(groupName)
+        # devel groups skel
+        for ed in ['gnome', 'kde', 'xfce']:
+            r.flCreateGroup('group-%s-devel' % ed, parentGroup='group-desktop-platform',
+                            dynamicGroup = True,
+                            depCheck=False, autoResolve = False, checkPathConflicts=True
+                            )
+            for g in ['group-devel', 'group-os-devel', 'group-text-devel', ]:
+                r.rplAddGroup(g, groupName='group-%s-devel' % ed, recurse=True)
+                
+        # common bits
+        r.flCreateGroup('group-desktop-common', parentGroup='group-desktop-platform')
+        # bits from rpl that ship by default
+        for i in r.rplGroups:
+            if i not in [ 'group-devel', 'group-anaconda-deps', 'group-os-devel', 'group-text-devel', ]:
+                r.rplAddGroup(i, groupName='group-desktop-common')
 
         if Arch.x86_64:
-            r.rplAddGroup('group-compat32')
+            r.rplAddGroup('group-compat32', groupName='group-desktop-common')
+
+        r.rplAddGroup('group-anaconda-deps', groupName='group-desktop-platform')
+
+        # the real show beguins here
+        r.flCreateGroup('group-desktop-common-extras', parentGroup='group-desktop-platform', dynamicGroup = True)
+        # above dynamicGroup = True because we don't want the :devel 's there to go to 'group-desktop-common-devel'
+
+
 
         # we don't ship those anymore
         r.remove('perl-libwww-perl', groupName='group-devel')
@@ -342,34 +343,8 @@ class GroupDesktopPlatform(GroupRecipe):
         # we want more terminfo than rpl:2 ships
         r.rplAdd('ncurses:supterminfo', groupName='group-core')
 
-        # devel groups
-        r.flCreateGroup('group-desktop-common-devel', parentGroup='group-desktop-platform',
-                        dynamicGroup = True)
-        for ed in ['gnome', 'kde', 'xfce']:
-            r.flCreateGroup('group-%s-devel' % ed, parentGroup='group-desktop-platform',
-                            dynamicGroup = True,
-                            depCheck=False, autoResolve = False, checkPathConflicts=True
-                            )
-            r.addNewGroup('group-desktop-common-devel', groupName='group-%s-devel' % ed)
 
-            for g in ['group-devel', 'group-os-devel', 'group-text-devel']:
-                r.addNewGroup(g, groupName='group-%s-devel' % ed)
 
-        # common bits
-        r.flCreateGroup('group-desktop-common', parentGroup='group-desktop-platform')
-        # bits from rpl that ship by default
-        r.flCreateGroup('group-rpl-derived', parentGroup='group-desktop-common', dynamicGroup = True)
-
-        for i in r.rplGroups:
-            if i not in [ 'group-devel','group-anaconda-deps', 'group-os-devel', 'group-text-devel', ]:
-                r.addNewGroup(i, groupName='group-rpl-derived')
-
-        if Arch.x86_64:
-            r.addNewGroup('group-compat32', groupName='group-rpl-derived')
-
-        # the real show beguins here
-        r.flCreateGroup('group-desktop-common-extras', parentGroup='group-desktop-platform', dynamicGroup = True)
-        # above dynamicGroup = True because we don't want the :devel 's there to go to 'group-desktop-common-devel'
 
         # kernel
         if Arch.x86:
@@ -483,9 +458,9 @@ class GroupDesktopPlatform(GroupRecipe):
         r.rplAdd('samba-server', groupName='group-foresight-basics')
 
         # our ruby
-        r.flAdd('ruby', groupName='group-desktop-common-devel')
+        r.flAdd('ruby', groupName='group-devel')
 
-        r.flAdd('perl-HTML-Parser', groupName='group-desktop-common-devel')
+        r.flAdd('perl-HTML-Parser', groupName='group-devel')
 
         r.replace('distro-release', r.foresightLinuxLabel)
 
@@ -507,43 +482,43 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('font-fixed-terminus-console', groupName='group-foresight-basics')
 
         # qt4 bindings for python
-        r.flAdd('PyQt4', groupName='group-foresight-basics', byDefault=False)
-        r.flAdd('QScintilla2', groupName='group-foresight-basics', byDefault=False)
+#        r.flAdd('PyQt4', groupName='group-foresight-basics', byDefault=False)
+#        r.flAdd('QScintilla2', groupName='group-foresight-basics', byDefault=False)
 
         # override rPL in order to fetch our metadata package policy hooks
-        r.flAdd('conary-policy-foresight', groupName='group-desktop-common-devel')
+        r.flAdd('conary-policy-foresight', groupName='group-devel')
 
         # package to override configs for developers
-        r.flAdd('foresight-conary-config-devel', groupName='group-desktop-common-devel')
+        r.flAdd('foresight-conary-config-devel', groupName='group-devel')
         # Configs to set the installLabelPath for 2-qa and 2-devel users
-        r.flAdd('foresight-conary-config-2-qa', groupName='group-desktop-common-devel', byDefault=False)
-        r.flAdd('foresight-conary-config-2-devel', groupName='group-desktop-common-devel', byDefault=False)
+        r.flAdd('foresight-conary-config-2-qa', groupName='group-devel', byDefault=False)
+        r.flAdd('foresight-conary-config-2-devel', groupName='group-devel', byDefault=False)
 
         # we  need newer versions than the ones in rPL-2
-        r.flAdd('pkgconfig', groupName='group-desktop-common-devel')
-        r.flAdd('flex', groupName='group-desktop-common-devel')
+        r.flAdd('pkgconfig', groupName='group-devel')
+        r.flAdd('flex', groupName='group-devel')
         r.flAdd('dmraid', groupName='group-desktop-common')
         r.flAdd('autofs', groupName='group-desktop-common')
         r.flAdd('db', groupName='group-desktop-common')
-        r.flAdd('userspace-kernel-headers', groupName = 'group-desktop-common-devel')
-        r.flAdd('libnl', groupName = 'group-desktop-common-devel')
-        r.flAdd('automake', groupName = 'group-desktop-common-devel')
-        r.flAdd('autoconf', groupName = 'group-desktop-common-devel')
-        r.flAdd('libtool', groupName = 'group-desktop-common-devel')
-        r.flAdd('elfutils', groupName = 'group-desktop-common-devel')
-        r.flAdd('sqlite', groupName = 'group-desktop-common-devel')
+        r.flAdd('userspace-kernel-headers', groupName = 'group-devel')
+        r.flAdd('libnl', groupName = 'group-devel')
+        r.flAdd('automake', groupName = 'group-devel')
+        r.flAdd('autoconf', groupName = 'group-devel')
+        r.flAdd('libtool', groupName = 'group-devel')
+        r.flAdd('elfutils', groupName = 'group-devel')
+        r.flAdd('sqlite', groupName = 'group-devel')
 
         # patched rPL gcc in order for boost to behave
-        r.flAdd('gcc', groupName = 'group-desktop-common-devel')
-        r.flAdd('gcc-c++', groupName = 'group-desktop-common-devel')
-        r.flAdd('gcc-fortran', groupName = 'group-desktop-common-devel')
-        r.flAdd('gcc-java', groupName = 'group-desktop-common-devel')
-        r.flAdd('gcc-objc', groupName = 'group-desktop-common-devel')
-        r.flAdd('libgcc', groupName = 'group-desktop-common-devel')
-        r.flAdd('libstdc++', groupName = 'group-desktop-common-devel')
+        r.flAdd('gcc', groupName = 'group-devel')
+        r.flAdd('gcc-c++', groupName = 'group-devel')
+        r.flAdd('gcc-fortran', groupName = 'group-devel')
+        r.flAdd('gcc-java', groupName = 'group-devel')
+        r.flAdd('gcc-objc', groupName = 'group-devel')
+        r.flAdd('libgcc', groupName = 'group-devel')
+        r.flAdd('libstdc++', groupName = 'group-devel')
 
         # 'fixes' FL-2088 on our side  while CNY-3143 not properly resolved 
-        r.flAdd('expat', groupName = 'group-desktop-common-devel')
+        r.flAdd('expat', groupName = 'group-devel')
         
         # a lot of stock userland expect it to handle encrypted media
         r.flAdd('cryptsetup', groupName='group-foresight-basics')
@@ -571,96 +546,6 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('hal-cups-utils', groupName='group-foresight-basics')
 
         r.flAdd('tmpwatch', groupName='group-foresight-basics')
-
-        # get around the CNY-3238 mess
-        # Various deps with byDefault=False
-        commonDeps = [
-            ('avahi-qt4', 'avahi'),
-            'exiv2',
-            'libgphoto2',
-            'gsm',
-            'x264',
-            'imlib2',
-            'ffmpeg',
-            'transcode',
-            'libdvdnav',
-            'mplayer', #TODO: install by default?
-            'gnome-mplayer',
-            'mplayer-codecs',
-            'qt4',
-                ('qt4-core', 'qt4'),
-                ('qt4-gui', 'qt4'),
-                ('qt4-qt3support', 'qt4'),
-                ('qt4-sql', 'qt4'),
-            'qca2',
-            'qca2-ossl',
-            'qimageblitz',
-            'poppler-data',
-            'poppler',
-                ('poppler-glib', 'poppler'),
-                ('poppler-qt', 'poppler'),
-                ('poppler-qt4', 'poppler'),
-            'libpqxx',
-            'wv2',
-            'libzip',
-            'libvncserver',
-            'wxGTK',
-            'wxPython',
-            ('svncpp', 'rapidsvn'),
-            'rapidsvn',
-            'libical',
-            'libopensync',
-            'gnokii',
-            'chmlib',
-            'libetpan',
-            'gst-python',
-            'cddb-py',
-            'mutagen', 'notify-python', 'python-ctypes',
-            'commoncpp',
-            'libspectre',
-            'taglib',
-            'taglib-extras',
-            'gmm',
-            'gtk-chtheme',
-            'giver',
-            'reportlab',
-            'gourmet',
-            'gthumb',
-            'mysql-embedded',
-            'opencv',
-            'synapse',
-            'GraphicsMagick',
-            'llvm',
-            'libopenraw',
-            ('libopenraw-gnome', 'libopenraw'),
-            'gsl',
-            'glew',
-            'OpenGTL',
-            # various libs used (not only) by kde4
-            'akonadi',
-            'automoc',
-            'eigen2',
-            'libassuan',
-            'raptor',
-            'rasqal',
-            'redland',
-            'soprano',
-            'strigi',
-            'xz',
-            'oxygen-icon-theme',
-            'attica',
-            'libiodbc',
-            'libssh',
-            'polkit-qt-1',
-            'shared-desktop-ontologies',
-            'libindicate-qt',
-        ]
-        for p in commonDeps:
-            # keep it here for now (see CNY-3238 comments)
-            # get around the CNY-3238 mess
-            r.flAdd(p, groupName='group-foresight-basics', byDefault=False)
-            #r.flAdd(p, groupName='group-supported-stuff-extra')
-
 
         # extra stuff to anaconda-deps, per elliot request
 #        r.flAdd('anaconda', groupName='group-anaconda-deps')
@@ -1014,7 +899,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
         r.flAdd('sun-jre', groupName='group-desktop-common', source='sun-jdk')
         r.flAdd('sun-java-webplugin', groupName='group-desktop-common', source='sun-jdk')
-        r.flAdd('sun-jdk', groupName='group-desktop-common-devel', source='sun-jdk')
+        r.flAdd('sun-jdk', groupName='group-devel', source='sun-jdk')
 
         r.flCreateGroup('group-gnome-extras', parentGroup='group-desktop-platform', depCheck=False)
 
@@ -1212,16 +1097,16 @@ class GroupDesktopPlatform(GroupRecipe):
         ## graphics tools
         r.flAdd('f-spot', groupName='group-gnome')
 
-        r.flAdd('graphviz', groupName='group-desktop-common-devel')
-        r.flAdd('graphviz-mono', groupName='group-desktop-common-devel', source='graphviz')
-        r.flAdd('graphviz-ruby', groupName='group-desktop-common-devel', source='graphviz')
+        r.flAdd('graphviz', groupName='group-devel')
+        r.flAdd('graphviz-mono', groupName='group-devel', source='graphviz')
+        r.flAdd('graphviz-ruby', groupName='group-devel', source='graphviz')
         #r.flAdd('graphviz-java', groupName='group-desktop-common-devel', source='graphviz')
         #r.flAdd('graphviz-guile', groupName='group-desktop-common-devel', source='graphviz')
-        r.flAdd('graphviz-perl', groupName='group-desktop-common-devel', source='graphviz')
-        r.flAdd('graphviz-tcl', groupName='group-desktop-common-devel', source='graphviz')
+        r.flAdd('graphviz-perl', groupName='group-devel', source='graphviz')
+        r.flAdd('graphviz-tcl', groupName='group-devel', source='graphviz')
 
         # foresight build related stuff
-        r.flAdd('foresight-recipes', groupName='group-desktop-common-devel')
+        r.flAdd('foresight-recipes', groupName='group-devel')
 
         ## brasero bits
         r.flAdd('brasero', groupName='group-gnome')
@@ -1522,8 +1407,8 @@ class GroupDesktopPlatform(GroupRecipe):
         # 'closures' section
         #
 
-        r.flAdd('gnome-python-extras', groupName='group-desktop-common-devel')
-        r.flAdd('libgda', groupName='group-desktop-common-devel')
+        r.flAdd('gnome-python-extras', groupName='group-devel')
+        r.flAdd('libgda', groupName='group-devel')
         # nautilus wants it
         r.flAdd('exempi', groupName='group-gnome')
 
@@ -1589,6 +1474,9 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flAdd('stetic', groupName='group-gnome-devel')
         r.flAdd('PyYAML', groupName='group-gnome-devel')
         r.flAdd('gnome-common', groupName='group-gnome-devel')
+        r.flAdd('vala', groupName='group-gnome-devel')
+        r.flAdd('gobject-introspection',groupName='group-gnome-devel')
+        r.flAdd('lua',groupName='group-gnome-devel')
 
         # translation stuff
         r.flAdd('poedit', groupName='group-gnome-devel')
@@ -1615,7 +1503,7 @@ class GroupDesktopPlatform(GroupRecipe):
         #
         r.flAdd('freetype', groupName='group-gnome')
 
-        r.flAdd('libelf', groupName='group-desktop-common-devel')
+        r.flAdd('libelf', groupName='group-devel')
 
         # get group-gnome-devel usefull by default...
         #
@@ -2137,6 +2025,7 @@ class GroupDesktopPlatform(GroupRecipe):
                 r.add( p + ':lib', groupName='group-compat32',
                        flavor = r.x86FlavorString,
                        searchPath = r.rplGroupUmbrellaCompat32)
+
             #  special case
             r.add( 'DirectFB:lib-core',
                    groupName='group-compat32',
@@ -2166,11 +2055,11 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # rPath core toolset
         r.flAdd('conary', versionStr=r.conaryVersion, groupName='group-desktop-common')
-        r.flAdd('conary-repository', versionStr=r.conaryVersion, groupName='group-desktop-common-devel', source = 'conary')
-        r.flAdd('conary-build', versionStr=r.conaryVersion, groupName='group-desktop-common-devel', source = 'conary')
-        r.flAdd('conary-policy', groupName='group-desktop-common-devel')
+        r.flAdd('conary-repository', versionStr=r.conaryVersion, groupName='group-devel', source = 'conary')
+        r.flAdd('conary-build', versionStr=r.conaryVersion, groupName='group-devel', source = 'conary')
+        r.flAdd('conary-policy', groupName='group-devel')
         for rbuild in ['decorator','rpath-common','rpath-xmllib','rpath-product-definition', 'rbuild', 'rbuilder-client']:
-            r.flAdd(rbuild, groupName='group-desktop-common-devel')
+            r.flAdd(rbuild, groupName='group-devel')
         r.flAdd('rmake', groupName='group-devel')
         r.flAdd('rmake-proxy', groupName='group-devel', byDefault=False, source = 'rmake')
         r.flAdd('rmake-repos', groupName='group-devel', byDefault=False, source = 'rmake')
@@ -2180,21 +2069,21 @@ class GroupDesktopPlatform(GroupRecipe):
 
         # the ones below should (had) be(en) in group-devel from rpl...
         # More group-devel stuff that we need for anaconda
-        r.flAdd('elementtree', groupName='group-desktop-common-devel')
-        r.flAdd('neon', groupName='group-desktop-common-devel')
-        r.rplAdd('gd', groupName='group-desktop-common-devel')
-        r.rplAdd('htmlview', groupName='group-desktop-common-devel')
-        r.flAdd('kid', groupName='group-desktop-common-devel')
+        r.flAdd('elementtree', groupName='group-devel')
+        r.flAdd('neon', groupName='group-devel')
+        r.rplAdd('gd', groupName='group-devel')
+        r.rplAdd('htmlview', groupName='group-devel')
+        r.flAdd('kid', groupName='group-devel')
 
         # more group-devel stuff
         r.remove('python:test', groupName='group-world')
         
-        r.flAdd('bzr', groupName='group-desktop-common-devel')
-        r.flAdd('bzrtools', groupName='group-desktop-common-devel')
-        r.flAdd('ConfigObj', groupName='group-desktop-common-devel')
-        r.flAdd('scons', groupName='group-desktop-common-devel')
+        r.flAdd('bzr', groupName='group-devel')
+        r.flAdd('bzrtools', groupName='group-devel')
+        r.flAdd('ConfigObj', groupName='group-devel')
+        r.flAdd('scons', groupName='group-devel')
         # ermo: presumably, people who install a -devel system will want contexts by default?!
-        r.flAdd('foresight-contexts', groupName='group-desktop-common-devel')
+        r.flAdd('foresight-contexts', groupName='group-devel')
 
         #
         # our own xorg stack
@@ -2215,11 +2104,11 @@ class GroupDesktopPlatform(GroupRecipe):
                   ]
 
         for p in utils:
-            r.flAdd(p, source='xorg-utils', groupName='group-desktop-common-devel')
+            r.flAdd(p, source='xorg-utils', groupName='group-devel')
 
         ## end of packages built by xorg-utils
 
-        r.flAdd('xtrans', groupName='group-desktop-common-devel')
+        r.flAdd('xtrans', groupName='group-devel')
 
         ## packages built by xorg-proto
         proto  = [ 'util-macros',
@@ -2261,14 +2150,14 @@ class GroupDesktopPlatform(GroupRecipe):
                    'xproto',
                    ]
         for p in proto:
-            # r.flAdd(p, source='xorg-proto', groupName='group-desktop-common-devel')
+            # r.flAdd(p, source='xorg-proto', groupName='group-devel')
             r.flAdd(p, source='xorg-proto', groupName='group-xorg')
 
         ## end of list of packages built by xorg-proto
 
         r.flAdd('xcursor-themes', groupName='group-xorg', source='xorg-apps')
         r.flAdd('xkeyboard-config', groupName='group-xorg')
-        r.flAdd('xorg-sgml-doctools', groupName='group-desktop-common-devel')
+        r.flAdd('xorg-sgml-doctools', groupName='group-devel')
 
         ## packages built by xorg-libs
 
@@ -2447,7 +2336,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
         ## end of packages built by xorg-apps
 
-        r.flCreateGroup('group-xorg-fonts', parentGroup='group-xorg', depCheck=False)
+        # r.flCreateGroup('group-xorg-fonts', parentGroup='group-xorg', depCheck=False)
         ## packages built by xorg fonts
         fonts = [  'encodings',
                    'font-adobe-100dpi',
@@ -2489,27 +2378,26 @@ class GroupDesktopPlatform(GroupRecipe):
                    ]
 
         for p in fonts:
-            r.flAdd(p, source='xorg-fonts', groupName='group-xorg-fonts')
+            r.flAdd(p, source='xorg-fonts', groupName='group-xorg')
 
         ## end of packages built by xorg-fonts
 
         # extra fonts we ship
-        r.flAdd('urw-fonts', groupName='group-xorg-fonts')
-        r.flAdd('liberation-fonts-ttf', groupName='group-xorg-fonts')
-        r.flAdd('msttcorefonts', groupName='group-xorg-fonts')
-        r.rplAdd('bitstream-vera-fonts', groupName='group-xorg-fonts')
+        r.flAdd('urw-fonts', groupName='group-xorg')
+        r.flAdd('liberation-fonts-ttf', groupName='group-xorg')
+        r.flAdd('msttcorefonts', groupName='group-xorg')
+        r.rplAdd('bitstream-vera-fonts', groupName='group-xorg')
 
-        r.flAdd('charis-fonts', groupName='group-xorg-fonts')
-        r.flAdd('gentium-fonts', groupName='group-xorg-fonts')
+        r.flAdd('charis-fonts', groupName='group-xorg')
+        r.flAdd('gentium-fonts', groupName='group-xorg')
 
-        r.flAdd('dejavu-fonts-ttf', groupName='group-xorg-fonts')
+        r.flAdd('dejavu-fonts-ttf', groupName='group-xorg')
 
-        r.flCreateGroup('group-xorg-fonts-extra', parentGroup='group-xorg', depCheck=False, byDefault=False)
-        r.flAdd('sazanami-font', groupName='group-xorg-fonts-extra')
-        r.flAdd('wqy-zenhei', groupName='group-xorg-fonts-extra') # Chinese font
-        r.flAdd('jd')
+        # r.flCreateGroup('group-xorg-fonts-extra', parentGroup='group-xorg', depCheck=False, byDefault=False)
+        r.flAdd('sazanami-font', groupName='group-supported-stuff-extra')
+        r.flAdd('wqy-zenhei', groupName='group-supported-stuff-extra') # Chinese font
 
-        r.flCreateGroup('group-xorg-drivers', parentGroup='group-xorg', depCheck=False)
+#        r.flCreateGroup('group-xorg-drivers', parentGroup='group-xorg', depCheck=False)
 
         ## packages built by xorg-drivers-input
         inputDrivers = [ 'xf86-input-acecad',
@@ -2531,7 +2419,7 @@ class GroupDesktopPlatform(GroupRecipe):
             ]
 
         for p in inputDrivers:
-            r.flAdd(p, source='xorg-driver-input', groupName='group-xorg-drivers')
+            r.flAdd(p, source='xorg-driver-input', groupName='group-xorg')
         ## end of packages built by xorg-drivers-input
 
         ## packages built by xorg-drivers-video
@@ -2578,10 +2466,10 @@ class GroupDesktopPlatform(GroupRecipe):
                          ]
 
         for p in videoDrivers:
-            r.flAdd(p, source='xorg-driver-video', groupName='group-xorg-drivers')
+            r.flAdd(p, source='xorg-driver-video', groupName='group-xorg')
 
         #Cheap hack for now to get around CNY-3000
-        r.flAdd('xf86-video-i810', source='xorg-driver-video', groupName='group-xorg-drivers')
+        r.flAdd('xf86-video-i810', source='xorg-driver-video', groupName='group-xorg')
 
         ## end of packages built by xorg-drivers-video
 
@@ -2589,9 +2477,9 @@ class GroupDesktopPlatform(GroupRecipe):
         #   end of our xorg stack
         #
 
-        r.flAdd('cmake', groupName='group-desktop-common-devel')
+        r.flAdd('cmake', groupName='group-devel')
         # Deps for cmake
-        r.flAdd('xmlrpc-c', groupName='group-desktop-common-devel')
+        r.flAdd('xmlrpc-c', groupName='group-devel')
 
         # remainings
         # FL-2551
@@ -2648,91 +2536,96 @@ class GroupDesktopPlatform(GroupRecipe):
                    'trytond_ldap_connection']:
              r.flAdd(p, groupName='group-tryton')
 
-        r.flCreateGroup('group-supported-stuff-extra', parentGroup='group-desktop-platform', dynamicGroup = False)
-        # here goes everything that isn't fit for any other group but _is_ in our labels
 
         # get around the CNY-3238 mess
         # ## Various deps that would be  byDefault=False
+
+        # FIXME 
         commonDeps = [
+            'akonadi',
+            'attica',
+            'automoc',
             ('avahi-qt4', 'avahi'),
             ('avahi-tools', 'avahi'),
+            'cddb-py',
+            'chmlib',
+            'commoncpp',
+            'eigen2',
             'exiv2',
-            'libgphoto2',
-            'gsm',
-            'x264',
-            'imlib2',
             'ffmpeg',
-            'transcode',
-            'libdvdnav',
-            'mplayer', #TODO: install by default?
+            'giver',
+            'glew',
+            'gmm',
+            'gnokii',
             'gnome-mplayer',
+            'gourmet',
+            'GraphicsMagick',
+            'gsl',
+            'gsm',
+            'gst-python',
+            'gthumb',
+            'gtk-chtheme',
+            'imlib2',
+            'libassuan',
+            'libdvdnav',
+            'libetpan',
+            'libgphoto2',
+            'libical',
+            'libindicate-qt',
+            'libiodbc',
+            'libopenraw',
+            ('libopenraw-gnome', 'libopenraw'),
+            'libopensync',
+            'libpqxx',
+            'libspectre',
+            'libssh',
+            'libvncserver',
+            'libzip',
+            'llvm',
             'mplayer-codecs',
-            'qt4',
-                ('qt4-core', 'qt4'),
-                ('qt4-gui', 'qt4'),
-                ('qt4-qt3support', 'qt4'),
-                ('qt4-sql', 'qt4'),
+            'mplayer', 
+            'mutagen', 'notify-python', 'python-ctypes',
+            'mysql-embedded',
+            'opencv',
+            'OpenGTL',
+            'oxygen-icon-theme',
+            'PokerTH',
+            'polkit-qt-1',
+            'poppler',
+            'poppler-data',
+            ('poppler-glib', 'poppler'),
+            ('poppler-qt4', 'poppler'),
+            ('poppler-qt', 'poppler'),
             'qca2',
             'qca2-ossl',
             'qimageblitz',
-            'poppler-data',
-            'poppler',
-                ('poppler-glib', 'poppler'),
-                ('poppler-qt', 'poppler'),
-                ('poppler-qt4', 'poppler'),
-            'libpqxx',
-            'wv2',
-            'libzip',
-            'libvncserver',
-            'wxGTK',
-            'wxPython',
-            ('svncpp', 'rapidsvn'),
+            'qt4',
+            ('qt4-core', 'qt4'),
+            ('qt4-gui', 'qt4'),
+            ('qt4-qt3support', 'qt4'),
+            ('qt4-sql', 'qt4'),
             'rapidsvn',
-            'libical',
-            'libopensync',
-            'gnokii',
-            'chmlib',
-            'libetpan',
-            'gst-python',
-            'cddb-py',
-            'mutagen', 'notify-python', 'python-ctypes',
-            'PokerTH',
-            'commoncpp',
-            'libspectre',
-            'taglib',
-            'taglib-extras',
-            'gmm',
-            'gtk-chtheme',
-            'giver',
-            'reportlab',
-            'gourmet',
-            'gthumb',
-            'mysql-embedded',
-            'opencv',
-            'synapse',
-            'GraphicsMagick',
-            'llvm',
-            'libopenraw',
-            ('libopenraw-gnome', 'libopenraw'),
-            'gsl',
-            'glew',
-            'OpenGTL',
-            # various libs used (not only) by kde4
-            'akonadi',
-            'automoc',
-            'eigen2',
-            'libassuan',
             'raptor',
             'rasqal',
             'redland',
+            'reportlab',
+            'shared-desktop-ontologies',
             'soprano',
             'strigi',
+            ('svncpp', 'rapidsvn'),
+            'synapse',
+            'taglib',
+            'taglib-extras',
+            'transcode',
+            'wv2',
+            'wxGTK',
+            'wxPython',
+            'x264',
             'xz',
-            'oxygen-icon-theme',
         ]
         for p in commonDeps:
             # get around the CNY-3238 mess
-            # r.flAdd(p, groupName='group-foresight-basics', byDefault=False)
+            r.flAdd(p, groupName='group-foresight-basics', byDefault=False)
             r.flAdd(p, groupName='group-supported-stuff-extra')
 
         for p in [
@@ -3419,6 +3312,7 @@ class GroupDesktopPlatform(GroupRecipe):
             'perl-Glib',
             'perl-Cairo',
             'perl-Gtk2',
+            'perl-Pango',
             'perl-Gtk2-TrayIcon',
             'boa-constructor',
             'easygui',
@@ -3898,7 +3792,7 @@ class GroupDesktopPlatform(GroupRecipe):
             'pulseaudio-equalizer',
             'pgbouncer',
             'fribid',
-            'mythtv',
+            'jd',
             'psycopg2',
             'python-txpostgres',
             'python-wokkel',
@@ -3929,153 +3823,158 @@ class GroupDesktopPlatform(GroupRecipe):
         # until RPL-2554 is solved...
         r.flAdd('libmspack', groupName='group-supported-stuff-extra')
 
-        # OpenOffice.org iceberg
-        # we want all to appear in searchPath...
-        OOObase = [ 
-                    # XXX we shouldn't have to reference hsqldb here, but if we do not 
-                    # some java deps it provides are found by OOO from an older, badly
-                    # packaged version of blogbridge
-                    'hsqldb',
-                    'openoffice.org',
-                    'openoffice.org-base',
-                    'openoffice.org-calc',
-                    'openoffice.org-draw',
-                    'openoffice.org-impress',
-                    'openoffice.org-math',
-#                    'openoffice.org-mono',
-                    'openoffice.org-writer'
-                    ]
 
-        # pre-made packs for gnome/kde users pleasure...
-        r.flCreateGroup('group-ooo-gnome', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
-        r.flCreateGroup('group-ooo-kde', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
+        def addOpenOfficeOrg(desktopType='gnome', targetGroup='group-gnome-dist'):
+            # OpenOffice.org iceberg
+            # we want all to appear in searchPath...
+            OOObase = [ 
+                # XXX we shouldn't have to reference hsqldb here, but if we do not 
+                # some java deps it provides are found by OOO from an older, badly
+                # packaged version of blogbridge
+                'hsqldb',
+                'openoffice.org',
+                'openoffice.org-base',
+                'openoffice.org-calc',
+                'openoffice.org-draw',
+                'openoffice.org-impress',
+                'openoffice.org-math',
+                #                    'openoffice.org-mono',
+                'openoffice.org-writer'
+                ]
 
-        for p in OOObase:
-            r.flAdd(p, groupName='group-ooo-gnome', source='openoffice.org')
-            r.flAdd(p, groupName='group-ooo-kde', source='openoffice.org')
+            # pre-made packs for gnome/kde users pleasure...
+            # r.flCreateGroup('group-ooo-gnome', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
+            # r.flCreateGroup('group-ooo-kde', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
 
-        r.flAdd('openoffice.org-kde', groupName='group-ooo-kde', source='openoffice.org')
-        r.flAdd('openoffice.org-gnome', groupName='group-ooo-gnome', source='openoffice.org')
+            for p in OOObase:
+                r.flAdd(p, groupName=targetGroup, source='openoffice.org')
 
-        # i18n
+            if desktopType == 'kde':
+                r.flAdd('openoffice.org-kde', groupName=targetGroup, source='openoffice.org')
+            elif desktopType == 'gnome':
+                r.flAdd('openoffice.org-gnome', groupName=targetGroup, source='openoffice.org')
 
-        OOOi18nDocLangs = [
-        'br',
-        'cs',
-        'cy',
-        'da',
-        'de',
-        'es',
-        'et',
-        'fr',
-        'he',
-        'hu',
-        'it',
-        'ja',
-        'km',
-        'ko',
-        'nl',
-        'pa-IN',
-        'pl',
-        'pt-BR',
-        'ru',
-        'rw',
-        'sv',
-        'vi',
-        'zh-CN',
-        'zh-TW',
-        ]
+            # i18n
 
-        OOOi18nLangs = [
-            'af',
-            'ar',
-            'as-IN',
-            'be-BY',
-            'bg',
-            'bn',
-            'br',
-            'bs',
-            'ca',
-            'cs',
-            'cy',
-            'da',
-            'de',
-            'dz',
-            'el',
-            'en-ZA',
-            'eo',
-            'es',
-            'et',
-            'fa',
-            'fi',
-            'fr',
-            'ga',
-            'gl',
-            'gu',
-            'gu-IN',
-            'he',
-            'hi-IN',
-            'hr',
-            'hu',
-            'it',
-            'ja',
-            'ka',
-            'km',
-            'ko',
-            'ku',
-            'lt',
-            'mk',
-            'ml-IN',
-            'mn',
-            'mr-IN',
-            'my',
-            'nb',
-            'ne',
-            'nl',
-            'nn',
-            'nr',
-            'ns',
-            'or-IN',
-            'pa-IN',
-            'pl',
-            'pt',
-            'pt-BR',
-            'ru',
-            'rw',
-            'sh',
-            'sk',
-            'sl',
-            'sr',
-            'ss',
-            'st',
-            'sv',
-            'sw-TZ',
-            'ta-IN',
-            'te-IN',
-            'tg',
-            'th',
-            'ti-ER',
-            'tn',
-            'tr',
-            'ts',
-            'uk',
-            'ur-IN',
-            'uz',
-            've',
-            'vi',
-            'xh',
-            'zh-CN',
-            'zh-TW',
-            'zu'
-            ]
+            OOOi18nDocLangs = [
+                'br',
+                'cs',
+                'cy',
+                'da',
+                'de',
+                'es',
+                'et',
+                'fr',
+                'he',
+                'hu',
+                'it',
+                'ja',
+                'km',
+                'ko',
+                'nl',
+                'pa-IN',
+                'pl',
+                'pt-BR',
+                'ru',
+                'rw',
+                'sv',
+                'vi',
+                'zh-CN',
+                'zh-TW',
+                ]
 
-        r.flCreateGroup('group-ooo-locales', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
+            OOOi18nLangs = [
+                'af',
+                'ar',
+                'as-IN',
+                'be-BY',
+                'bg',
+                'bn',
+                'br',
+                'bs',
+                'ca',
+                'cs',
+                'cy',
+                'da',
+                'de',
+                'dz',
+                'el',
+                'en-ZA',
+                'eo',
+                'es',
+                'et',
+                'fa',
+                'fi',
+                'fr',
+                'ga',
+                'gl',
+                'gu',
+                'gu-IN',
+                'he',
+                'hi-IN',
+                'hr',
+                'hu',
+                'it',
+                'ja',
+                'ka',
+                'km',
+                'ko',
+                'ku',
+                'lt',
+                'mk',
+                'ml-IN',
+                'mn',
+                'mr-IN',
+                'my',
+                'nb',
+                'ne',
+                'nl',
+                'nn',
+                'nr',
+                'ns',
+                'or-IN',
+                'pa-IN',
+                'pl',
+                'pt',
+                'pt-BR',
+                'ru',
+                'rw',
+                'sh',
+                'sk',
+                'sl',
+                'sr',
+                'ss',
+                'st',
+                'sv',
+                'sw-TZ',
+                'ta-IN',
+                'te-IN',
+                'tg',
+                'th',
+                'ti-ER',
+                'tn',
+                'tr',
+                'ts',
+                'uk',
+                'ur-IN',
+                'uz',
+                've',
+                'vi',
+                'xh',
+                'zh-CN',
+                'zh-TW',
+                'zu'
+                ]
 
-        for l in OOOi18nLangs:
-            r.flAdd('openoffice.org-locale-' + l, groupName='group-ooo-locales', source='openoffice.org')
+            # r.flCreateGroup('group-ooo-locales', parentGroup='group-supported-stuff-extra', dynamicGroup = False)
+            for l in OOOi18nLangs:
+                r.flAdd('openoffice.org-locale-' + l, groupName='group-supported-stuff-extra', source='openoffice.org')
+                # r.flAdd('openoffice.org-locale-' + l, groupName='group-ooo-locales', source='openoffice.org')
 
-#        for l in OOOi18nDocLangs:
-#            r.flAdd('openoffice.org-doc-' + l, groupName='group-ooo-locales', source='openoffice.org')
+            #        for l in OOOi18nDocLangs:
+            #            r.flAdd('openoffice.org-doc-' + l, groupName='group-ooo-locales', source='openoffice.org')
+
+
 
         # final housekeeping
 
@@ -4086,16 +3985,14 @@ class GroupDesktopPlatform(GroupRecipe):
         if Arch.x86_64:
             legacyArchGroups = ['group-compat32',] #  'group-desktop-platform-compat32']
             for g in legacyArchGroups:
-                r.removeComponents( [ 'devel', 'python', 'doc', 'data', 'runtime', 'test', 'perl',
-                                      'supdoc', 'locale', 'config', 'devellib'],
+                r.removeComponents( [ 'devel', 'python', 'doc', 'data',
+                                      'runtime', 'test', 'perl',
+                                      'bin', 'tk',
+                                      'supdoc', 'locale', 'config', 'devellib' ],
                                     groupName=g)
 
 
         # add our python (2.6)
-        # FIXME 2.6.5 seems to be be BREAKING a few stuff (starting by rMake)  
-        #r.flAdd('python', versionStr = '2.6.4-1-1', groupName='group-desktop-common')
-        #r.flAdd('idle', versionStr = '2.6.4-1-1', groupName='group-desktop-common', source = 'python')
-
         r.flAdd('python', groupName='group-desktop-common')
         r.flAdd('idle', groupName='group-desktop-common', source = 'python')
 
@@ -4124,13 +4021,15 @@ class GroupDesktopPlatform(GroupRecipe):
                         dynamicGroup = True)
 
         r.addNewGroup('group-desktop-common', groupName='group-gnome-dist')
-        r.addNewGroup('group-gnome', groupName='group-gnome-dist')
-        r.addNewGroup('group-mozilla', groupName='group-gnome-dist')
-        r.addNewGroup('group-pidgin', groupName='group-gnome-dist')
-        r.addNewGroup('group-ooo-gnome', groupName='group-gnome-dist')
-        r.remove('hplip', groupName='group-gnome-dist')
-        r.remove('httpd', groupName='group-gnome-dist')
-        r.remove('php', groupName='group-gnome-dist')
+        r.addNewGroup('group-gnome',  groupName='group-gnome-dist')
+        r.addNewGroup('group-mozilla',  groupName='group-gnome-dist')
+        r.addNewGroup('group-pidgin',  groupName='group-gnome-dist')
+        r.remove('hplip',  groupName='group-gnome-dist')
+        r.remove('httpd',  groupName='group-gnome-dist')
+        r.remove('php',  groupName='group-gnome-dist')
+        addOpenOfficeOrg(desktopType='gnome', targetGroup='group-gnome-dist')
+
+
 
         # Define KDE Edition
         r.flCreateGroup('group-kde-dist', parentGroup='group-desktop-platform',
@@ -4141,7 +4040,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.addNewGroup('group-desktop-common', groupName='group-kde-dist')
         r.addNewGroup('group-kde', groupName='group-kde-dist')
 
-        r.addNewGroup('group-ooo-kde', groupName='group-kde-dist')
+        addOpenOfficeOrg(desktopType='kde', targetGroup='group-kde-dist')
         r.addNewGroup('group-mozilla', groupName='group-kde-dist')
         r.addNewGroup('group-desktop-common-extras', groupName='group-kde-dist')
 
@@ -4149,160 +4048,73 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flCreateGroup('group-xfce-dist', parentGroup='group-desktop-platform',
                         checkOnlyByDefaultDeps=False,
                         # checkOnlyByDefaultDeps=True,
+
                         depCheck=True, autoResolve=True, checkPathConflicts=True,
                         dynamicGroup = True)
         r.addNewGroup('group-desktop-common', groupName='group-xfce-dist')
         r.addNewGroup('group-xfce', groupName='group-xfce-dist')
-        r.addNewGroup('group-mozilla', groupName='group-xfce-dist')
-        r.addNewGroup('group-pidgin', groupName='group-xfce-dist')
-        r.addNewGroup('group-desktop-common-extras', groupName='group-xfce-dist')
-        # gdm stuff
-        r.flAdd('xfce-default-session', groupName='group-xfce-dist')
-        r.flAdd('gdm', groupName='group-xfce-dist')
-
-        # Define GNOME Lite Edition
-        # XXX FIXME XXX
-        # until we get group-gnome-lite-dist sanitized it will be just an alias to stock
-        # gnome-dist
-
-        # r.flCreateGroup('group-gnome-lite-dist', parentGroup='group-desktop-platform',
-        #                depCheck=True, autoResolve=True, checkPathConflicts=True,
-        #                dynamicGroup = True)
-
-        r.flCreateGroup('group-gnome-lite-dist', parentGroup='group-desktop-platform',
-                        depCheck=False, autoResolve=True, checkPathConflicts=False,
-                        dynamicGroup = True)
-        # checks turned off above as we do know that group-gnome-dist is closed already
-        r.addNewGroup('group-gnome-dist', groupName='group-gnome-lite-dist')
-
-
-        # r.addNewGroup('group-desktop-common', groupName='group-gnome-lite-dist')
-
-        # # overrides for services and dbus service activation files
-        # r.add('foresight-services', groupName='group-gnome-lite-dist')
-        # r.flAdd('atk', groupName='group-gnome-lite-dist')
-        # r.flAdd('at-spi', groupName='group-gnome-lite-dist')
-        # r.flAdd('banshee', groupName='group-gnome-lite-dist')
-        # r.flAdd('brasero', groupName='group-gnome-lite-dist')
-        # r.flAdd('cairo', groupName='group-gnome-lite-dist')
-        # r.flAdd('compiz-gnome', groupName='group-gnome-lite-dist')
-        # r.flAdd('evince', groupName='group-gnome-lite-dist')
-        # r.flAdd('evolution', groupName='group-gnome-lite-dist')
-        # r.flAdd('file-roller', groupName='group-gnome-lite-dist')
-        # r.flAdd('firefox', groupName='group-gnome-lite-dist')
-        # r.flAdd('foresight-user-guide', groupName='group-gnome-lite-dist')
-        # r.flAdd('f-spot', groupName='group-gnome-lite-dist')
-        # r.flAdd('gcalctool', groupName='group-gnome-lite-dist')
-        # r.flAdd('gdm', groupName='group-gnome-lite-dist')
-        # r.flAdd('gedit', groupName='group-gnome-lite-dist')
-        # r.flAdd('gksu', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-applets', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-audio', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-control-center', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-desktop', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-doc-utils', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-do', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-icon-theme', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-keyring', groupName='group-gnome-lite-dist')
-        # #        r.flAdd('gnome-main-menu', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-media', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-menus', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-mime-data', groupName='group-gnome-lite-dist')
-        # ###        r.flAdd('gnome-packagekit', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-panel', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-panel-layout', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-power-manager', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-screensaver', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-session', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-settings-daemon', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-sharp', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-spell', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-terminal', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-themes', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-utils', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-volume-manager', groupName='group-gnome-lite-dist')
-        # r.flAdd('gst-plugins-base', groupName='group-gnome-lite-dist')
-        # r.flAdd('gst-plugins-good', groupName='group-gnome-lite-dist')
-        # r.flAdd('gtkmm', groupName='group-gnome-lite-dist')
-        # r.flAdd('gtk-sharp', groupName='group-gnome-lite-dist')
-        # r.flAdd('gvfs', groupName='group-gnome-lite-dist')
-        # #        r.flAdd('gnome-disk-utility', groupName='group-gnome-lite-dist')
-        # r.flAdd('gnome-mount', groupName='group-gnome-lite-dist')
-        # r.flAdd('hal-sharp', groupName='group-gnome-lite-dist')
-        # r.flAdd('hicolor-icon-theme', groupName='group-gnome-lite-dist')
-        # r.flAdd('icon-naming-utils', groupName='group-gnome-lite-dist')
-        # r.flAdd('ipod-sharp', groupName='group-gnome-lite-dist')
-        # r.flAdd('iso-codes', groupName='group-gnome-lite-dist')
-        # r.flAdd('libbonobo', groupName='group-gnome-lite-dist')
-        # r.flAdd('libbonoboui', groupName='group-gnome-lite-dist')
-        # r.flAdd('libical', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgksu', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgnome-background', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgnome', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgnomeui', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgphoto2-sharp', groupName='group-gnome-lite-dist')
-        # r.flAdd('libgphoto2', groupName='group-gnome-lite-dist')
-        # r.flAdd('metacity', groupName='group-gnome-lite-dist')
-        # r.flAdd('mousetweaks', groupName='group-gnome-lite-dist')
-        # r.flAdd('nautilus', groupName='group-gnome-lite-dist')
-        # r.flAdd('nautilus-open-terminal', groupName='group-gnome-lite-dist')
-        # r.flAdd('network-manager-applet', groupName='group-gnome-lite-dist')
-        # r.flAdd('pidgin', groupName='group-gnome-lite-dist')
-        # r.flAdd('podsleuth', groupName='group-gnome-lite-dist')
-        # r.flAdd('seahorse', groupName='group-gnome-lite-dist')
-        # r.flAdd('shared-mime-info', groupName='group-gnome-lite-dist')
-        # r.flAdd('tomboy', groupName='group-gnome-lite-dist')
-        # r.flAdd('totem', groupName='group-gnome-lite-dist')
-        # r.flAdd('yelp', groupName='group-gnome-lite-dist')
-        # r.flAdd('notify-osd', groupName='group-gnome-lite-dist')
-        # r.flAdd('indicator-applet', groupName='group-gnome-lite-dist')
-        # for liteRemove in 'gimp', 'gutenprint', 'ghostscript', 'hplip', \
-            #     'kerneloops', 'kernel:build-tree', 'icedtea-jdk', 'icedtea-jre', \
-            #     'icedtea-gcjwebplugin', 'moonlight', 'synapse', 'transmission', \
-            #     'postgresql', 'qt', 'unixODBC', 'qt4', 'qt4-sql', 'qt4-gui', \
-            #     'qt4-qt3support', 'gtk-qt-engine', 'qt4-core', 'mysql', \
-            #     'pavumeter', 'pavucontrol', 'simple-ccsm', \
-            #     'compiz-fusion-plugins-extra', 'compiz-fusion-plugins-unsupported':
-            #     r.remove(liteRemove, groupName='group-gnome-lite-dist')
-
-        # r.removeComponents(r.docComponents, 'group-gnome-lite-dist')
-        # r.removeComponents(r.develComponents, 'group-gnome-lite-dist')
-        # r.flCreateGroup('group-gnome-lite-locales', parentGroup='group-desktop-platform', dynamicGroup = True)
-        # r.moveComponents(r.localeComponents, 'group-gnome-lite-dist', 'group-gnome-lite-locales')
 
 
         # XXX order key
-        # we  need this as we use now copyComponents
-        # for develComponents.
-        def dropDevelItemsFromNonDevelGroups(groupName):
-            def develCleanup(target):
-                r.copyComponents(r.develComponents, target, 'group-supported-stuff-extra-devel')
-                r.removeComponents(r.develComponents, target)
+        def trimStockGroups(groupName, ed):
+            print 'entering ...' + groupName
 
-            # we clean current group
-            develCleanup(groupName)
-            # we check groups bellow current group 
-            groupList = r.getChildGroups(groupName)
-            for g in groupList:
-                if g[0].name not in r.bucketDevelGroups:
-                    # we clean remaining non -devel groups
-                    dropDevelItemsFromNonDevelGroups(g[0].name)
+            def ignoreGroup(groupName):
+                if groupName in ['group-supported-stuff-extra',
+                                 'group-rails',
+                                 'group-compat32',
+                                 ]:
+                    print 'ignoring ' + groupName
+                    return True
+                elif groupName.find('devel') > 0:
+                    print 'ignoring ' + groupName
+                    return True
+                else:
+                    return False
 
-        r.flCreateGroup('group-supported-stuff-extra-devel', parentGroup='group-desktop-platform', dynamicGroup = True)
+            def componentCleanup(source, ed):
+                # we devel{,lib} clean current group
+                print 'NOT ignoring ' + groupName
+                dest = 'group-supported-stuff-extra'                    
+                if ed != None:
+                    dest = 'group-' + ed +'-devel'
+                    default = True
+                    # avoids {ati-fglrx,nvidia}:devel{,lib}
+                    # files clash
+                    if source == 'group-drivers':
+                        default = False
+                    r.copyComponents(r.develComponents,
+                                     source,
+                                     dest,
+                                     byDefault=default)
+                else:
+                    r.removeComponents(r.develComponents,
+                                       source)
+                    r.removeComponents(r.supDocComponents,
+                                       source)
 
-        for edition in [ 'gnome', 'kde', 'xfce']:
-            dropDevelItemsFromNonDevelGroups(groupName='group-%s-dist' % edition)
+            if not ignoreGroup(groupName):
+                componentCleanup(groupName, ed )
+                # we check groups bellow current group 
+                groupList = r.getChildGroups(groupName)
+                for g in groupList:
+                    if not ignoreGroup(g[0].name):
+                        trimStockGroups(g[0].name, ed)
 
+        # :devel{,lib} stuff in group-{gnome,kde,xfce}-dist 
+        # gets copyed to group-{gnome,kde,xfce}-dist-devel 
+        # but not erased as we have inner groups that belong
+        # to more than one -dist group 
+        
 
-        # dist-devel groups
-        # simplifies life to devs, as it makes  sync/update group-`edition`-{devel,dist} unnecessary
-        for edition in [ 'gnome', 'kde', 'xfce']:
+        for edition in ['gnome', 'kde', 'xfce']:
             r.flCreateGroup('group-' + edition + '-dist-devel', parentGroup='group-desktop-platform',
                             depCheck=True, autoResolve=True, checkPathConflicts=True,
                             checkOnlyByDefaultDeps=False,
                             dynamicGroup = True)
+            r.addNewGroup('group-'+ edition + '-devel', groupName='group-' + edition + '-dist-devel' )
             r.addNewGroup('group-'+ edition + '-dist', groupName='group-' + edition + '-dist-devel')
-            r.addNewGroup('group-'+ edition + '-devel', groupName='group-' + edition + '-dist-devel')
+
             # we do not have a simple way to get each 'group-'+ edition + '-devel' closed as those 
             # are created too soon. (and ence tried to get closed before all stuff getting referenced) 
             # so we keep things consistent by having each of them to require the matching 
@@ -4310,6 +4122,12 @@ class GroupDesktopPlatform(GroupRecipe):
             r.Requires('group-' + edition + '-dist-devel', groupName= 'group-'+ edition + '-devel')
 
 
+        # now we scan all groups
+        # under our group 'tree' that are not -devel ones
+        # nor are group-supported-stuff-extra
+        # and we erase all :devel stuff we find 
+        for g in r.getChildGroups('group-desktop-platform'):
+            trimStockGroups(g[0].name, None)
 
 
 
