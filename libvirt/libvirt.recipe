@@ -54,68 +54,37 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
                       'device-mapper:devel',
                       'openssl:devel',
 		      'libgcrypt:devel',
-                      'lxc:devel'
+                      'lxc:devel',
+                      'libnl:devel', 'libpciaccess:devel', 'udev:devel',
                       ]
 
     name = 'libvirt'
-    version = '0.7.1'
-    rpmRelease = '15.fc12'
-    rpmPatches = [ # A couple of hot-unplug memory handling fixes (#523953)
-                   'libvirt-fix-net-hotunplug-double-free.patch',
-                   'libvirt-fix-pci-hostdev-hotunplug-leak.patch',
-                   # Don't set a bogus error in virDrvSupportsFeature()
-                   'libvirt-fix-drv-supports-feature-bogus-error.patch',
-                   # Fix raw save format
-                   'libvirt-fix-qemu-raw-format-save.patch',
-                   # Fix USB device passthrough (#422683)
-                   'libvirt-fix-usb-device-passthrough.patch',
-                   # Disable sound backend (#524499, #508317)
-                   'libvirt-disable-audio-backend.patch',
-                   # Re-label qcow2 backing files (#497131)
-                   'libvirt-svirt-relabel-qcow2-backing-files.patch',
-                   # Change logrotate config to weekly (#526769)
-                   'libvirt-change-logrotate-config-to-weekly.patch',
-                   'libvirt-logrotate-create-lxc-uml-dirs.patch',
-                   # Add several PCI hot-unplug typo fixes from upstream
-                   'libvirt-fix-device-detach-typo1.patch',
-                   'libvirt-fix-device-detach-typo2.patch',
-                   'libvirt-fix-device-detach-typo3.patch',
-                   # Fix libvirtd memory leak during error reply sending (#528162)
-                   'libvirt-fix-libvirtd-leak-in-error-reply.patch',
-                   # Fix restore of qemu guest using raw save format (#523158)
-                   'libvirt-fix-qemu-restore-from-raw1.patch',
-                   'libvirt-fix-qemu-restore-from-raw2.patch',
-                   
-                   # Misc fixes to qemu machine types handling
-                   'libvirt-qemu-machine-type-fixes1.patch',
-                   'libvirt-qemu-machine-type-fixes2.patch',
-
-                   # A couple of XML formatting fixes
-                   'libvirt-storage-iscsi-auth-xml-formatting.patch',
-                   'libvirt-network-delay-attribute-formatting.patch',
-
-                   # Fix xen driver recounting (#531429)
-                   'libvirt-fix-xen-driver-refcounting.patch',
-
-                   # Fix crash on virsh error (#531429)
-                   'libvirt-double-free-on-virsh-error.patch',
-                   # Fix segfault where XML parsing fails in qemu disk hotplug
-                   'libvirt-fix-crash-on-device-hotplug-parse-error.patch',
-                   # Fix segfault where interface target device name is ommitted (#523418)
-                   'libvirt-fix-crash-on-missing-iface-target-dev.patch',
-
-                   # Avoid compressing small log files (#531030)
-                   'libvirt-logrotate-avoid-compressing-small-logs.patch',
-                   ]
+    version = '0.8.2'
+    rpmRelease = '1.fc13'
+    rpmPatches = [ 'libvirt-0.8.2-01-extract-backing-store-format.patch',
+                   'libvirt-0.8.2-02-remove-type-field.patch',
+                   'libvirt-0.8.2-03-refactor-metadata-extract.patch',
+                   'libvirt-0.8.2-04-require-storage-format.patch',
+                   'libvirt-0.8.2-05-disk-path-iterator.patch',
+                   'libvirt-0.8.2-06-use-disk-iterator.patch',
+                   'libvirt-0.8.2-07-secdriver-params.patch',
+                   'libvirt-0.8.2-08-disable-disk-probing.patch',
+                   'libvirt-0.8.2-09-set-default-driver.patch',
+                   'libvirt-0.8.2-10-qemu-img-format-handling.patch',
+                   'libvirt-0.8.2-11-storage-vol-backing.patch',
+                   # CVE-2010-2242
+                   'libvirt-0.8.2-apply-iptables-sport-mapping.patch']
     
     def configure(r):
-        r.Replace('with_init_scripts', 'with_init_script', 'configure')
 
-        config =  (' --with-libvirtd --with-init-scripts=redhat --with-sasl'
+        config =  (' --with-libvirtd --with-init-script=redhat --with-sasl'
                    ' --with-polkit --with-hal'
+                   # XXX  check why virtualbox-ose:devel isn't enough 
+                   ' --without-vbox '
+                   # 
                    ' --with-avahi --with-gnu-ld --with-lxc'
                    ' --without-xen --with-qemu --with-python --without-phyp'
-                   ' --without-capng --without-netcf --with-vbox --with-hal --with-esx'
+                   ' --without-capng --without-netcf --with-hal --with-esx'
                    ' --with-storage-lvm --with-storage-iscsi --with-storage-disk --with-storage-mpath'
                    ' --with-remote-pid-file=%(localstatedir)s/run/libvirtd.pid '
                    ' --prefix=%(prefix)s --localstatedir=%(localstatedir)s --libdir=%(libdir)s'
@@ -135,6 +104,7 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
                    '%(localstatedir)s/cache/%(name)s',
                    '%(localstatedir)s/cache/%(name)s/qemu',
                    '%(sysconfdir)s/%(name)s',
+                   '%(datadir)s/lib/libvirt/dnsmasq'
                    ]:
             r.MakeDirs(d)
             r.ExcludeDirectories(exceptions = d)
@@ -162,9 +132,9 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
                    'lib/%(name)s/lxc/', 
                    'cache/%(name)s/qemu/',
                    'lib/%(name)s/network/', 
-                   'lib/%(name)s/iptables/',
-                   'lib/%(name)s/iptables/filter/', 
-                   'lib/%(name)s/iptables/nat/',
+#                   'lib/%(name)s/iptables/',
+#                   'lib/%(name)s/iptables/filter/', 
+#                   'lib/%(name)s/iptables/nat/',
                    'log/%(name)s/',
                    'log/%(name)s/qemu/']:
             r.SetModes('%(localstatedir)s/' + d, 0700)
@@ -172,10 +142,14 @@ class LibVirt(RPMPackageRecipe,AutoPackageRecipe):
         r.SetModes('%(libexecdir)s/libvirt_parthelper', 0755)
         r.SetModes('%(sbindir)s/libvirtd', 0755)
 
+
+
         # We don't want to install /etc/libvirt/qemu/networks in the package directly
         # because if the admin wants to delete the default network completely, we don't
         # want to end up re-incarnating it on every conary upgrade.
         r.MakeDirs('%(datadir)s/libvirt/networks')
+        r.SetModes('%(datadir)s/lib/libvirt/dnsmasq/', 0700)
+
         r.Copy('%(sysconfdir)s/libvirt/qemu/networks/default.xml', '%(datadir)s/libvirt/networks/default.xml')
         r.Remove('%(sysconfdir)s/libvirt/qemu/networks/default.xml')
         r.Remove('%(sysconfdir)s/libvirt/qemu/networks/autostart/default.xml')
