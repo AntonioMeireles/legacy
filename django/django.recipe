@@ -1,49 +1,53 @@
 #
-# Copyright (c) 2006-2009 rPath, Inc.
+# Copyright (c) 2006-2010 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadInstalled('python')
 class Django(PackageRecipe):
 
-    buildRequires = [ 'python-setuptools:python', 'MySQL-python:python',
-                      'PIL:python', 'coreutils:runtime', 'mx:python',
-                      'python-sqlite:python', 'mod_python:python',
-                      'python-markdown:python', 
-                      'PyYAML:python',
-                      'python-ctypes:python',
-                      'python:devel',
-                      'simplejson:python',
-                      'cmemcache:python',
-                      'psycopg2:python',
-                    ]
+    buildRequires = [
+      'MySQL-python:python',
+      'PIL:python',
+      'PyYAML:python',
+      'python-memcached:python',
+      'coreutils:runtime',
+      'mod_python:python',
+      'mx:python',
+      'psycopg2:python',
+      'python-ctypes:python',
+      'python-markdown:python',
+      'python-setuptools:python',
+      'python-sqlite:python',
+      'python:devel',
+      'simplejson:python',
+    ]
 
     name = 'django'
-    version = '1.1.1'
+    #version = 'r13266'
+    version = '1.2.1'
 
     def setup(r):
         r.macros.archive_name = 'Django'
-        r.macros.pyver = Python.majversion
+        r.macros.pyver = '2.4'
         r.macros.sitepkgs = '%(libdir)s/python%(pyver)s/site-packages'
 
-        r.addArchive('http://media.djangoproject.com/releases/%(version)s/'
-                     '%(archive_name)s-%(version)s.tar.gz')
-        # When we execfile('setup.py'), __file__ is not set.
-        r.Replace('__file__', '""', 'setup.py')
-        r.PythonSetup(action = "install")
+        #r.addSvnSnapshot("http://code.djangoproject.com/svn/django/trunk/")
+        r.addArchive('http://media.djangoproject.com/releases/1.2/')
 
-        # Deal with locale directory which happens to be in :python
-        r.MakeDirs('%(datadir)s/locale')
-        r.Move('%(sitepkgs)s/django/conf/locale/*',
-               '%(datadir)s/locale/')
-        r.Remove('%(sitepkgs)s/django/conf/locale', recursive=True)
+        r.Run('python setup.py build')
+        r.Run('python setup.py install --root=%(destdir)s')
 
-        r.Symlink('%(datadir)s/locale/', '%(sitepkgs)s/django/conf/locale')
-        r.Requires('django:locale',
+        if Arch.x86_64:
+            # Hack to deal with locales in non-libdir on x86_64 -- do
+            # not move only conf/locale, because that leads to mixed
+            # pure/impure python
+            r.Move('%(prefix)s/lib/python%(pyver)s/site-packages/django',
+                   '%(sitepkgs)s/')
+
+        r.Requires('django:python',
             '%(sitepkgs)s/django/contrib/localflavor/.*',
             '%(sitepkgs)s/django/middleware/locale/.*')
-
 
         # Break out cache backends
         # Memcache
@@ -60,7 +64,9 @@ class Django(PackageRecipe):
 
         # MySQL
         r.PackageSpec('django-db-mysql',
-            '%(sitepkgs)s/django/db/backends/mysql/.*')
+            '%(sitepkgs)s/django/db/backends/mysql/.*',
+            '%(sitepkgs)s/django/contrib/gis/db/backend/mysql/.*',
+            )
         r.Requires('mysql:runtime',
             '%(sitepkgs)s/django/db/backends/mysql/client.py')
 
