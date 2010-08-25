@@ -1,0 +1,103 @@
+
+commit fa719811ac922ec40a34fe456623963f0312c0e1
+Author: Markus Armbruster <armbru@redhat.com>
+Date:   Thu Jun 24 19:59:29 2010 +0200
+
+    ide: Make PIIX and ISA IDE init functions return the qdev
+    
+    Signed-off-by: Markus Armbruster <armbru@redhat.com>
+    Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+    (cherry picked from commit 57c888664b5eb7edbbce4be98cb1406aa0d85c2b)
+
+diff --git a/hw/ide.h b/hw/ide.h
+index 0e7d540..f0cb320 100644
+--- a/hw/ide.h
++++ b/hw/ide.h
+@@ -1,17 +1,18 @@
+ #ifndef HW_IDE_H
+ #define HW_IDE_H
+ 
+-#include "qdev.h"
++#include "isa.h"
++#include "pci.h"
+ 
+ /* ide-isa.c */
+-int isa_ide_init(int iobase, int iobase2, int isairq,
+-                 DriveInfo *hd0, DriveInfo *hd1);
++ISADevice *isa_ide_init(int iobase, int iobase2, int isairq,
++                        DriveInfo *hd0, DriveInfo *hd1);
+ 
+ /* ide-pci.c */
+ void pci_cmd646_ide_init(PCIBus *bus, DriveInfo **hd_table,
+                          int secondary_ide_enabled);
+-void pci_piix3_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn);
+-void pci_piix4_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn);
++PCIDevice *pci_piix3_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn);
++PCIDevice *pci_piix4_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn);
+ 
+ /* ide-macio.c */
+ int pmac_ide_init (DriveInfo **hd_table, qemu_irq irq,
+diff --git a/hw/ide/isa.c b/hw/ide/isa.c
+index dff7c79..95189d6 100644
+--- a/hw/ide/isa.c
++++ b/hw/ide/isa.c
+@@ -75,8 +75,8 @@ static int isa_ide_initfn(ISADevice *dev)
+     return 0;
+ };
+ 
+-int isa_ide_init(int iobase, int iobase2, int isairq,
+-                 DriveInfo *hd0, DriveInfo *hd1)
++ISADevice *isa_ide_init(int iobase, int iobase2, int isairq,
++                        DriveInfo *hd0, DriveInfo *hd1)
+ {
+     ISADevice *dev;
+     ISAIDEState *s;
+@@ -86,14 +86,14 @@ int isa_ide_init(int iobase, int iobase2, int isairq,
+     qdev_prop_set_uint32(&dev->qdev, "iobase2", iobase2);
+     qdev_prop_set_uint32(&dev->qdev, "irq",     isairq);
+     if (qdev_init(&dev->qdev) < 0)
+-        return -1;
++        return NULL;
+ 
+     s = DO_UPCAST(ISAIDEState, dev, dev);
+     if (hd0)
+         ide_create_drive(&s->bus, 0, hd0);
+     if (hd1)
+         ide_create_drive(&s->bus, 1, hd1);
+-    return 0;
++    return dev;
+ }
+ 
+ static ISADeviceInfo isa_ide_info = {
+diff --git a/hw/ide/piix.c b/hw/ide/piix.c
+index 2776ac3..eab346a 100644
+--- a/hw/ide/piix.c
++++ b/hw/ide/piix.c
+@@ -158,22 +158,24 @@ static int pci_piix4_ide_initfn(PCIDevice *dev)
+ 
+ /* hd_table must contain 4 block drivers */
+ /* NOTE: for the PIIX3, the IRQs and IOports are hardcoded */
+-void pci_piix3_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn)
++PCIDevice *pci_piix3_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn)
+ {
+     PCIDevice *dev;
+ 
+     dev = pci_create_simple(bus, devfn, "piix3-ide");
+     pci_ide_create_devs(dev, hd_table);
++    return dev;
+ }
+ 
+ /* hd_table must contain 4 block drivers */
+ /* NOTE: for the PIIX4, the IRQs and IOports are hardcoded */
+-void pci_piix4_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn)
++PCIDevice *pci_piix4_ide_init(PCIBus *bus, DriveInfo **hd_table, int devfn)
+ {
+     PCIDevice *dev;
+ 
+     dev = pci_create_simple(bus, devfn, "piix4-ide");
+     pci_ide_create_devs(dev, hd_table);
++    return dev;
+ }
+ 
+ static PCIDeviceInfo piix_ide_info[] = {
+
