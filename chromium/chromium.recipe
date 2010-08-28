@@ -1,6 +1,9 @@
+import datetime
 class Chromium(PackageRecipe):
     name = 'chromium'
-    version = '55771'
+    svnVersion = '57784'
+    # reconstruct real version from chromium/src/chrome/VERSION
+    version = '7.0.509.0+' + svnVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
                      'nss:devellib', 'nspr:devellib', 'gcc-c++:runtime',
@@ -16,52 +19,87 @@ class Chromium(PackageRecipe):
                      'gettext:runtime', 'intltool:runtime', 'bzip2:devel',
                      'libjpeg:devel', 'scrnsaverproto:devel', 'Mesa:devel',
                      'libXScrnSaver:devel', 'dbus-glib:devellib', 'cups:devel',
-                    'libgnome-keyring:devellib',
-                     'vim:runtime', # For debugging...
+                     'libgnome-keyring:devellib',
                      'gnutls:devel', 
                      'libgcrypt:devel',
-                     'libgpg-error:devel'
+                     'libgpg-error:devel',
+                     'rsync:runtime',
                     ]
 
     def setup(r):
         r.addArchive('http://build.chromium.org/buildbot/archives/'
-                     'chromium.r55675.tgz')
+                     'chromium.r57642.tgz')
 
         # Updates the code that was extracted to a specific svn revision.
         r.Run("GYP_GENERATORS=make GYP_DEFINES='werror=' " + \
               "/opt/google/depot_tools/gclient update --force --revision=src@%s" % \
-              r.version, dir='chrome-svn/tarball/chromium')
+              r.svnVersion, dir='chrome-svn/tarball/chromium')
 
         r.MakeDirs('%(builddir)s/chrome-svn/tarball/chromium/src/out')
 
-        # Build the makefiles.
+        r.macros.gypDefines =  (''
+                                'no_strict_aliasing=1  '
+                                'use_system_zlib=1 '
+                                'use_system_libjpeg=1 '
+                                'use_system_libxml=0 '
+                                'use_system_libxslt=0 '
+                                'use_system_bzip2=1 '
+                                'use_system_libevent=1 '
+                                'use_system_libpng=1 ' 
+                                'linux_link_gnome_keyring=1 ' 
+                                # 'use_system_ffmpeg=1 '
+                                'proprietary_codecs=1 '
+                                'linux_use_tcmalloc=0 '
+                                'werror= gcc_version=41 '
+                                )
         if Arch.x86_64:
-            r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
-                      '%(builddir)s/chrome-svn/tarball/chromium/src/out64')
-            # workaround for http://code.google.com/p/chromium/issues/detail?id=36687
-            # r.Run("GYP_GENERATORS=make GYP_DEFINES='werror= target_arch=x64 ' "
-            r.Run("GYP_GENERATORS=make GYP_DEFINES='werror= target_arch=x64 linux_use_tcmalloc=0' "
-                  "/opt/google/depot_tools/gclient runhooks --force",
-                  dir='chrome-svn/tarball/chromium')
+            r.macros.gypDefines += 'target_arch=x64 '
+            outArch = '64'
         else:
-            r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
-                      '%(builddir)s/chrome-svn/tarball/chromium/src/out32')
+            r.macros.gypDefines += 'target_arch=ia32 '
+            outArch = '32'
 
-            r.Run("GYP_GENERATORS=make GYP_DEFINES='werror= linux_use_tcmalloc=0' "
-                  "/opt/google/depot_tools/gclient runhooks --force",
-                  dir='chrome-svn/tarball/chromium')
+        # Build the makefiles.
+        # r.macros.cflags += ' -D__STDC_CONSTANT_MACROS'
+        # r.macros.cxxflags += ' -D__STDC_CONSTANT_MACROS'
 
+        r.Symlink('%(builddir)s/chrome-svn/tarball/chromium/src/out',
+                  '%(builddir)s/chrome-svn/tarball/chromium/src/out'+outArch)
+
+        r.MakeDirs('chromium_build')
+        r.Run(' CHROMIUM_EXCLUDES="--exclude=src/chrome/test/data'
+              ' --exclude=src/chrome/tools/test/reference_build '
+              ' --exclude=src/chrome_frame --exclude=src/gears/binaries '
+              ' --exclude=src/net/data/cache_tests --exclude=src/o3d/documentation '
+              ' --exclude=src/o3d/samples --exclude=src/third_party/lighttpd'
+              ' --exclude=src/third_party/WebKit/LayoutTests'
+              ' --exclude=src/webkit/data/layout_tests'
+              ' --exclude=src/webkit/tools/test/reference_build" '
+              ' rsync -rlpgo --exclude=".svn/" '
+              ' ${CHROMIUM_EXCLUDES} src/ ../../../chromium_build ',
+              dir = 'chrome-svn/tarball/chromium')
+
+        
+        # Disable prefixing to allow linking against system zlib
+        r.Replace('^#include "mozzconf.h"$',
+                  '',
+                  'chromium_build/third_party/zlib/zconf.h')
+
+        r.Run("GYP_DEFINES=\'%(gypDefines)s\'  GYP_GENERATORS=make "
+               "build/gyp_chromium "
+               " build/all.gyp --depth=. ",
+               dir='chromium_build')
 
         # Make.
-        r.Run('/usr/bin/make -j5 chrome BUILDTYPE=Release',
-              dir='chrome-svn/tarball/chromium/src')
+        r.Make('chrome V=1 BUILDTYPE=Release ',
+               dir='chromium_build')
 
         # Install.
         r.addSource('chromium-browser')
         r.Replace('@@LIBDIR@@', '%(libdir)s', 'chromium-browser')
         r.Install('chromium-browser', '%(bindir)s/chromium-browser')
 
-        buildLoc = 'chrome-svn/tarball/chromium/src/out/Release/'
+        buildLoc = 'chromium_build/out/Release/'
         artifacts = ['chrome.pak', 'locales', 'resources.pak', 'resources', 
                      'xdg-settings', 'chrome']
 
@@ -73,7 +111,7 @@ class Chromium(PackageRecipe):
         r.addSource('chromium-browser.desktop')
         r.Desktopfile('chromium-browser.desktop')
 
-        r.Install('chrome-svn/tarball/chromium/src/out/Release/'
+        r.Install('chromium_build/out/Release/'
                   'product_logo_48.png', 
                   '%(datadir)s/pixmaps/chromium-browser.png')
 
