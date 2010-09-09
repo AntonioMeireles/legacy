@@ -1,7 +1,7 @@
 if [ "$PS1" ]; then
   D="/etc/bash_completion.d"
-  if [ -f "$D"/git ]; then
-    . "$D"/git
+  if [ -f "$D"/hg ]; then
+    . "$D"/hg
   fi
   unset D
 fi
