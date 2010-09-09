@@ -5,5 +5,6 @@ if [ "$PS1" ]; then
   if [ -f "$D"/bzr ]; then
     . "$D"/bzr
   fi
+  unset D
 fi
 
