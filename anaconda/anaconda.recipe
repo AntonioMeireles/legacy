@@ -3,11 +3,12 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-
+import datetime
 class Anaconda(CPackageRecipe):
     name = 'anaconda'
-    version = '11.3.0.44'
-    imagesVer = '11.devel'
+    baseVersion = '11.3.0.44'
+    rplVersion = '20100304'
+    version = '%s+%s' % (baseVersion,datetime.date.today().strftime("%Y.%m.%d"))
 
     buildRequires = ['atk:devel', 'audit:devel', 'bzip2:devel', 'cairo:devel',
         'conary-repository:python', 'desktop-file-utils:runtime',
@@ -23,33 +24,24 @@ class Anaconda(CPackageRecipe):
         'popt:devel', 'pump:devel', 'pyblock:python', 'pygobject:python',
         'pygtk:python', 'pykickstart:python', 'pyparted:python',
         'python:devel', 'pyxf86config:python', 'rhpl:python', 'rhpxl:python',
-        'slang:devel', 'urlgrabber:python', 'zlib:devel', 'expat:devellib',
-        ]
-    # NEEDS to be built with rPL's userspace-kernel-headers
+        'slang:devel', 'urlgrabber:python', 'zlib:devel']
 
     def setup(r):
-        r.macros.imagesVer = r.imagesVer
-
         r.disableParallelMake()
-        #r.addMercurialSnapshot('http://hg.foresightlinux.org/hg/anaconda', tag='anaconda-fl-20081121')
-        r.addMercurialSnapshot('http://hg.foresightlinux.org/hg/anaconda', tag = 'd8cc0400e4c7')
-        #r.addMercurialSnapshot('http://localhost:8080')
+        r.addMercurialSnapshot('http://hg.rpath.com/anaconda-rpl2',
+                               tag='%(name)s-'+r.rplVersion)
+
         r.Replace((re.escape('/usr/lib/'), '%(libdir)s/',),
                   (re.escape('/lib/'), '%(essentiallibdir)s/',),
                   'loader2/Makefile')
-        r.addPatch('buildfix.patch')
-        # r.addPatch('kudzu.patch')
+        # this is the minimall set from http://hg.foresightlinux.org/hg/anaconda
+        # there's lots of stuff there that would only make sense *if*
+        # we were building this and anaconda-templates against FL and not rPL
+        # as we are
+        r.addPatch('foresightSpecificStuff.patch')
+
         r.addPatch('add-all-firmware.patch')
-        r.addPatch('omit-kernel-check.patch')
-
-        r.addPatch('libata-migrate.patch')
-
-        r.addPatch('ignoreZeros.patch')
-
-        # HOTFIX  drop deprecated video drivers
-        #         should be done straight in source
-        # MarkT - this should fix anaconda-templates build
-        # r.Replace('xf86-video-nsc', '', 'scripts/upd-instroot')
+        # r.addPatch('omit-kernel-check.patch')
 
         r.Make('depend')
         r.Make()
@@ -61,6 +53,35 @@ class Anaconda(CPackageRecipe):
 
         r.Strip(exceptions='%(libdir)s/anaconda-runtime/loader/.*')
 
-        r.Symlink('%(prefix)s/lib/anaconda-runtime/implantisomd5', '%(bindir)s/')
         r.PackageSpec('anaconda-utils', '%(bindir)s/implantisomd5',
-                                        '%(prefix)s/lib/anaconda-runtime/implantisomd5')
+                                        '%(prefix)s/lib/anaconda-runtime/'
+                                        'implantisomd5')
+
+        # place our distro installclass into anaconda-custom.
+        r.Move('%(prefix)s/lib/anaconda/installclasses/foresight.*',
+               '%(datadir)s/anaconda/installclasses/')
+        r.PackageSpec('anaconda-custom',
+                      '%(datadir)s/anaconda/installclasses/')
+
+        # Add our custom artwork
+        r.addArchive('anaconda-foresight-artwork.tar.gz',
+                     dir = 'custom_pixmaps')
+
+        for image in ('anaconda_header.png', 'first.png', 'first-lowres.png',
+                      'prodlogo.png', 'progress_first.png',
+                      'progress_first-375.png', 'splash.png',
+                      'syslinux-splash.png'):
+            r.Install('custom_pixmaps/pixmaps/' + image,
+                      '%(datadir)s/anaconda/pixmaps/')
+            r.PackageSpec('anaconda-custom',
+                          '%(datadir)s/anaconda/pixmaps/*')
+
+        # none of the files in anaconda-images are flavor specific.
+        r.Flavor(exceptions='%(datadir)s/anaconda/pixmaps/.*')
+
+        # Add custom grub configuration
+        r.addSource('grub.defaults', dest='%(datadir)s/anaconda/')
+        r.PackageSpec('anaconda-custom', '%(datadir)s/anaconda/grub.*')
+
+            
+
