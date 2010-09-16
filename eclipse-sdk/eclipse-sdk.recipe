@@ -7,9 +7,8 @@
 class EclipseSDK(AutoPackageRecipe):
 
     name = 'eclipse-sdk'
-    version = '3.5.2'
-    build_id = '23529'
-    timestamp = 'R3_5_1'
+    version = '3.6.0'
+    build_version = '0.6.1'
 
     buildRequires = [
         # XXX HACK ALERT 
@@ -44,77 +43,84 @@ class EclipseSDK(AutoPackageRecipe):
         'inputproto:devel',
         'libXtst:devel',
         'gcc-c++:runtime',
+        'WebKit:devel',
+        'jzlib:java',
     ]
 
 
     def setup(r):
-        r.macros.timestamp = r.timestamp
-        r.macros.build_site = 'http://download.eclipse.org/technology/linuxtools/eclipse-build/'
-        r.macros.build_repo = 'http://dev.eclipse.org/svnroot/technology/org.eclipse.linuxtools/eclipse-build/trunk'
+        r.macros.build_version = r.build_version
+        r.macros.build_site = 'http://download.eclipse.org/technology/linuxtools/eclipse-build/3.6.x_Helios/'
+        r.macros.bundles = 'http://download.eclipse.org/tools/orbit/downloads/drops/R20100519200754/bundles'
 
-        #r.macros.eclipsedir = '%(libdir)s/eclipse-%(major_version)s'
         r.macros.eclipsedir = '%(libdir)s/eclipse'
 
-        r.addArchive('%(build_site)s/eclipse-build-0.5.0.tar.bz2')
-        #r.addSvnSnapshot('%(build_repo)s/eclipse-build', revision=r.build_id)
-        #for d in ('config', 'feature'):
-        #    r.addSvnSnapshot('%(build_repo)s/eclipse-build-'+d, revision=r.build_id)
-        #    r.Run('ln -s `pwd`/../%%(name)s--eclipse-build-%s eclipse-build-%s' % (d, d))
+        r.addArchive('%(build_site)s/eclipse-build-%(build_version)s.tar.bz2')
 
         r.addSource('%(build_site)s/eclipse-%(version)s-src.tar.bz2')
 
-        r.addSource('eclipse-mv-platform.sh')
-        r.addSource('eclipse-mv-jdt.sh')
         r.addSource('eclipse.wrapper', macros = True)
 
-        dependencies = [
-            'com.ibm.icu_4.0.1.v20090822.jar',
+        def updateDependencies(name, bundles):
+            dependencies = []
+            for bundle in bundles:
+                dependencies.append(bundle+'=%(builddir)s/'+bundle)
+                r.addSource('%%(bundles)s/%s' % bundle)
+            r.Run("echo '%s' > %s.properties" % ('\n'.join(dependencies), name))
+
+        # JTD
+        updateDependencies('jdtdependencies', [
+            'org.hamcrest.core_1.1.0.v20090501071000.jar',
+        ])
+        # SDK
+        updateDependencies('sdkdependencies', [
+            'org.objectweb.asm_3.2.0.v200909071300.jar',
+        ])
+        # Platform
+        updateDependencies('dependencies', [
+            'com.ibm.icu_4.2.1.v20100412.jar',
             'com.jcraft.jsch_0.1.41.v200903070017.jar',
-            'javax.servlet_2.5.0.v200806031605.jar',
+            'javax.servlet_2.5.0.v200910301333.jar',
             'javax.servlet.jsp_2.0.0.v200806031607.jar',
             'org.apache.commons.codec_1.3.0.v20080530-1600.jar',
             'org.apache.commons.el_1.0.0.v200806031608.jar',
-            'org.apache.commons.httpclient_3.1.0.v20080605-1935.jar',
-            'org.apache.commons.logging_1.0.4.v200904062259.jar',
+            'org.apache.commons.httpclient_3.1.0.v201005080502.jar',
+            'org.apache.commons.logging_1.0.4.v201005080501.jar',
             'org.apache.jasper_5.5.17.v200903231320.jar',
-            'org.apache.lucene_1.9.1.v20080530-1600.jar',
-            'org.apache.lucene.analysis_1.9.1.v20080530-1600.jar',
-            'org.hamcrest.core_1.1.0.v20090501071000.jar',
-            'org.mortbay.jetty.server_6.1.15.v200905151201.jar',
-            'org.mortbay.jetty.util_6.1.15.v200905182336.jar',
-            'org.objectweb.asm_3.1.0.v200803061910.jar',
-            'org.sat4j.core_2.1.1.v20090825.jar',
-            'org.sat4j.pb_2.1.1.v20090825.jar',
-        ]
-        buildDependencies = []
-        for jar in dependencies:
-            buildDependencies.append(jar+'=%(builddir)s/'+jar)
-            r.addSource('http://download.eclipse.org/tools/orbit/downloads/drops/R20100114021427/bundles/%s' % jar)
+            'org.apache.lucene_1.9.1.v20100518-1140.jar',
+            'org.apache.lucene.analysis_1.9.1.v20100518-1140.jar',
+            'org.mortbay.jetty.server_6.1.23.v201004211559.jar',
+            'org.mortbay.jetty.util_6.1.23.v201004211559.jar',
+            'org.sat4j.core_2.2.0.v20100429.jar',
+            'org.sat4j.pb_2.2.0.v20100429.jar',
+        ])
 
-        r.Run("echo '%s' > dependencies.properties" % '\n'.join(buildDependencies))
-
-        #r.addArchive('http://download.eclipse.org/tools/orbit/downloads/drops/R20100114021427/bundles/org.apache.ant_1.7.1.v20090120-1145.zip', dir='eclipse-build-0.5.0/')
-        r.addArchive('http://download.eclipse.org/tools/orbit/downloads/drops/R20100114021427/bundles/org.junit_3.8.2.v20090203-1005.zip', dir='eclipse-build-0.5.0/')
+        r.addArchive('http://download.eclipse.org/tools/orbit/downloads/drops/R20100519200754/bundles/org.junit_3.8.2.v3_8_2_v20100427-1100.zip', dir='eclipse-build-%(build_version)s/')
         r.addSource('mirror://sourceforge/junit/junit/4.5/junit-4.5.jar')
 
         r.Replace(
-            ('/usr/share/java/junit4.jar', '%(builddir)s/junit-4.5.jar'),
-            ('/usr/share/java/junit.jar', '%(builddir)s/org.junit_3.8.2.v20090203-1005/junit.jar'),
             ('/usr/share/java/ant.jar', '%(datadir)s/ant/ant.jar'),
             ('/usr/share/java/ant.*.jar:/usr/share/java/', '%(datadir)s/ant/'),
             'nonosgidependencies.properties'
         )
+        r.Replace(
+            ('/usr/share/java/junit4.jar', '%(builddir)s/junit-4.5.jar'),
+            ('/usr/share/java/junit.jar', '%(builddir)s/org.junit_3.8.2.v3_8_2_v20100427-1100/junit.jar'),
+            'jdtnonosgidependencies.properties'
+        )
 
         patches = [
-            'eclipse-java-home.patch',
-            'eclipse-swt-jni-fix.patch',
             'eclipse-swt-mesa-fix.patch',
+            'eclipse-sdk-iterators.patch',
+            'eclipse-sdk-bug317829.patch',
         ]
 
         for patch in patches:
             r.addSource(patch, dir='patches/', macros = True)
 
         r.addPatch('eclipse-build.xml-patches.patch')
+
+        r.addPatch('eclipse-build-no-symlink.patch')
 
         bootClassPath = [
             '$JAVA_HOME/jre/lib/rt.jar',
@@ -131,134 +137,20 @@ class EclipseSDK(AutoPackageRecipe):
         # Don't build for non-linux,gtk,%(arch)s targets
         # Don't build for arches other than the one on which we're building
 
-        r.Run('AWT_LIB_PATH=$JAVA_HOME/jre/lib/%s ant -DbuildArch=%s' % (awt_arch, arch))
-        r.Run('ant -DdestDir=%%(destdir)s -Dprefix=/usr -DbuildArch=%s -Dmultilib=true install' % arch)
-
-        r.macros.sdkDir = '%(eclipsedir)s'
-        r.macros.installDir = '%(eclipsedir)s-Platform'
-        r.macros.metadataDir = '%(installDir)s/metadata-Platform'
-        r.macros.provisionDir = '%(installDir)s-provisioned'
-        r.macros.profileId = 'PlatformProfile'
-
-        # Remove P2 metadata
-        r.Remove('%(installDir)s/p2', recursive=True)
-
-        # Copy just the platform
-        r.MakeDirs('%(installDir)s')
-        r.Run("sh %(builddir)s/eclipse-mv-platform.sh %(destdir)s%(sdkDir)s", dir='%(installDir)s')
-        r.Run("mv plugins/*.source* %(destdir)s%(sdkDir)s/plugins", dir='%(installDir)s')
-
-        # Generate metadata for the platform
-        r.Run('java'
-                ' -jar %(destdir)s%(installDir)s/plugins/org.eclipse.equinox.launcher_*.jar'
-                ' -application'
-                ' org.eclipse.equinox.p2.metadata.generator.EclipseGenerator'
-                # ' -debug'
-                # ' -consolelog'
-                ' -metadataRepository file:%(destdir)s%(metadataDir)s'
-                ' -artifactRepository file:%(destdir)s%(metadataDir)s'
-                ' -source %(destdir)s%(installDir)s'
-                ' -root "Eclipse Platform"'
-                ' -rootVersion %(version)s'
-                ' -flavor tooling'
-                ' -publishArtifacts'
-                ' -append'
-                ' -artifactRepositoryName "Eclipse Platform"'
-                ' -metadataRepositoryName "Eclipse Platform"'
-        )
-
-        # JDT
-        r.macros.jdtDir = '%(sdkDir)s-JDT'
-        r.Run('sh eclipse-mv-jdt.sh "%(destdir)s%(sdkDir)s" "%(destdir)s%(jdtDir)s"')
-
-        # Provision with director
-        r.Run('java'
-                ' -Declipse.p2.data.area=file:%(destdir)s%(provisionDir)s/p2'
-                ' -Declipse.p2.MD5Check=false'
-                ' -jar %(destdir)s%(installDir)s/plugins/org.eclipse.equinox.launcher_*.jar'
-                ' -application org.eclipse.equinox.p2.director'
-                # ' -debug'
-                # ' -consolelog'
-                ' -flavor tooling'
-                ' -installIU "Eclipse Platform"'
-                ' -p2.os linux'
-                ' -p2.ws gtk'
-                ' -p2.arch ' + arch +
-                ' -roaming'
-                ' -profile %(profileId)s'
-                ' -profileProperties org.eclipse.update.install.features=true'
-                ' -metadataRepository file:%(destdir)s%(metadataDir)s'
-                ' -artifactRepository file:%(destdir)s%(metadataDir)s'
-                ' -destination %(destdir)s%(provisionDir)s'
-                ' -bundlepool %(destdir)s%(provisionDir)s'
-        )
-
-        # Common stuff
-        r.Move('%(sdkDir)s/.eclipseproduct', '%(provisionDir)s/')
-        for f in ('about.html', 'about_files', 'epl-v10.html', 'notice.html', 'readme'):
-            r.Move('%(installDir)s/'+f, '%(provisionDir)s/')
-
-        r.macros.dropins = '%(provisionDir)s/dropins'
-        r.MakeDirs('%(dropins)s/jdt', '%(dropins)s/sdk')
-        r.Move('%(jdtDir)s/features/*', '%(dropins)s/jdt/')
-        r.Move('%(jdtDir)s/plugins/*', '%(dropins)s/jdt/')
-        r.Move('%(sdkDir)s/features/*', '%(dropins)s/sdk/')
-        r.Move('%(sdkDir)s/plugins/*', '%(dropins)s/sdk/')
-
-        r.Remove('%(metadataDir)s', recursive=True)
-        r.Remove('%(installDir)s', recursive=True)
-        r.Remove('%(jdtDir)s', recursive=True)
-        r.Remove('%(sdkDir)s', recursive=True)
-
-        r.Move('%(provisionDir)s', '%(sdkDir)s')
-
-        # Fix paths in p2 data
-        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.core/cache', recursive=True)
-        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.director/rollback/content.xml', recursive=True)
-        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/.settings/org.eclipse.equinox.p2.artifact.repository.prefs')
-        r.Remove('%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/profileRegistry/PlatformProfile.profile/.data/.settings ')
-
-        profileDir = '%(sdkDir)s/p2/org.eclipse.equinox.p2.engine/profileRegistry'
-        r.Run('gunzip *.gz', dir=profileDir+'/%(profileId)s.profile')
-        r.Replace('%(provisionDir)s', '%(sdkDir)s', profileDir+'/%(profileId)s.profile/*')
-
-        r.Replace('%(destdir)s', '', profileDir+'/%(profileId)s.profile/*')
-
-        r.Replace(('%(destdir)s', ''),
-                  ('eclipse-Platform', 'eclipse'),
-                  ('SDKProfile', 'PlatformProfile'),
-                  '%(libdir)s/eclipse/configuration/config.ini', allowNoChange=True)
-
-        r.Replace('eclipse-Platform', 'eclipse', profileDir+'/%(profileId)s.profile/*', allowNoChange=True)
-
-        # this allows users to install stuff in their homedirs...
-        r.Replace(
-            'eclipse.p2.data.area=.*', 'eclipse.p2.data.area=@config.dir/../p2/',
-            '%(eclipsedir)s/configuration/config.ini'
-            )
+        r.Run('AWT_LIB_PATH=$JAVA_HOME/jre/lib/%s ant -DbuildArch=%s provision.cvs' % (awt_arch, arch))
+        r.Run('ant -DdestDir=%%(destdir)s -Dprefix=/usr -DbuildArch=%s -Dmultilib=true installSDKinDropins' % arch)
 
         # use our own wrapper to get update sites pre-populated
         r.Install('eclipse.wrapper', '%(bindir)s/eclipse', mode = 0755)
 
-
-        # Remove the unnecessary configuration data
-        r.Remove('%(sdkDir)s/configuration/org.eclipse.update', recursive=True)
-        r.Remove('%(sdkDir)s/configuration/org.eclipse.core.runtime', recursive=True)
-        r.Remove('%(sdkDir)s/configuration/org.eclipse.equinox.app', recursive=True)
-
-        # Replace symlinks with real files
-        r.Install('org.junit_3.8.2.v20090203-1005/junit.jar', '%(sdkDir)s/dropins/jdt/org.junit_3.8.2.v20090203-1005/')
-        r.Install('org.hamcrest.core_1.1.0.v20090501071000.jar', '%(sdkDir)s/dropins/sdk/')
-        r.Install('org.objectweb.asm_3.1.0.v200803061910.jar', '%(sdkDir)s/dropins/sdk/')
-        r.Install('junit-4.5.jar', '%(sdkDir)s/dropins/jdt/org.junit4_4.5.0.v20090824/junit.jar')
-        r.Install('junit-4.5.jar', '%(sdkDir)s/dropins/sdk/org.junit4/junit.jar')
+        r.Install('junit-4.5.jar', '%(eclipsedir)s/dropins/jdt/plugins/junit4.jar')
 
         r.AutoDoc(exceptions='.*')
 
         r.Requires(exceptDeps='java: org.apache.tools.ant.*')
         r.Requires(exceptDeps='java: org.eclipse.pde.internal.build.publisher.BrandP2Task')
 
-        r.ExcludeDirectories(exceptions='%(libdir)s/eclipse-%(version)s/dropins')
+        r.Requires(exceptDeps=r'soname: ELF.*/libjawt.so.*')
 
         r.Remove('%(libdir)s/eclipse/eclipse.ini')
         r.Symlink('%(sysconfdir)s/eclipse.ini', '%(libdir)s/eclipse/' )
@@ -277,3 +169,4 @@ echo "-XX:CompileCommand=exclude,org/python/pydev/editor/codecompletion/revisite
 echo "-XX:CompileCommand=exclude,org/python/pydev/ui/filetypes/FileTypesPreferencesPage,getDottedValidSourceFiles" >> %(destdir)s/%(sysconfdir)s/eclipse.ini 
             """
             )
+
