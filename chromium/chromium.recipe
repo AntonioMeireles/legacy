@@ -1,10 +1,6 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseTarballRevision = '57968'
-    svnVersion = '61784'
-    # reconstruct real version from chromium/src/chrome/VERSION
-    # version = '7.0.548.0+r' + svnVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
     baseVersion = '7.0.517.43' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
@@ -48,18 +44,20 @@ class Chromium(AutoPackageRecipe):
                      'libgpg-error:devel',
                      'rsync:runtime',
                      'libevent:devel',
-                     'yasm:runtime'
+                     'yasm:runtime',
+                     'libxml2:devel',
+                     'libxslt:devel',
                     ]
 
     def setup(r):
         r.addArchive('http://build.chromium.org/buildbot/official/%(name)s-'+ r.baseVersion +'.tar.bz2')
 
-        r.macros.gypDefines =  (''
+        r.macros.gypDefines =  ('release_extra_cflags=\"%(cflags)s\" '
                                 'no_strict_aliasing=1  '
                                 'use_system_zlib=1 '
                                 'use_system_libjpeg=1 '
-                                'use_system_libxml=0 '
-                                'use_system_libxslt=0 '
+                                'use_system_libxml=1 '
+                                'use_system_libxslt=1 '
                                 'use_system_bzip2=1 '
                                 'use_system_libevent=1 '
                                 'use_system_libpng=1 ' 
@@ -68,10 +66,13 @@ class Chromium(AutoPackageRecipe):
                                 'proprietary_codecs=1 '
                                 'linux_use_tcmalloc=0 '
                                 'werror= gcc_version=41 '
-                                '-Dlinux_strip_binary=1 '
-                                '-Duse_system_yasm=1 '
+                                'linux_strip_binary=1 '
+                                'use_system_yasm=1 '
                                 # until https://bugzilla.mozilla.org/show_bug.cgi?id=547312
-                                '-Duse_system_ssl=0 '
+                                'use_system_ssl=0 '
+                                # 
+                                'disable_sse2=1 '
+                                'remove_webcore_debug_symbols=1 '
                                 )
         if Arch.x86_64:
             r.macros.gypDefines += 'target_arch=x64 '
@@ -94,7 +95,6 @@ class Chromium(AutoPackageRecipe):
 
         # Make.
         r.Make('chrome V=1 BUILDTYPE=Release ')
-               
 
         # Install.
         r.addSource('chromium-browser')
@@ -113,8 +113,7 @@ class Chromium(AutoPackageRecipe):
         r.addSource('chromium-browser.desktop')
         r.Desktopfile('chromium-browser.desktop')
 
-        r.Install('out/Release/'
-                  'product_logo_48.png', 
+        r.Install(buildLoc + 'product_logo_48.png', 
                   '%(datadir)s/pixmaps/chromium-browser.png')
 
         # Chromium doesn't look in the mozilla plugins dir by default.
