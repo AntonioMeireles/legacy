@@ -79,7 +79,12 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
                 '--target=%(target)s '
                 '--cache-file=config.cache '
                 '--disable-profile '
-                '--enable-multi-arch '
+                # XXX seems to fool conary
+                # '--enable-multi-arch '
+                # soname: ELF64/ld-linux-x86-64.so.2(Linux)
+                # soname: ELF64/libpthread.so.0(Linux)
+                # note the lack of x86_64 above
+                '--disable-multi-arch '
                 '--enable-experimental-malloc '
                 # XXX re-enable after we make 
                 # sure our nss is where we want 
@@ -107,24 +112,16 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
                 r.macros.cflags += ' -mno-tls-direct-seg-refs'
 
         r.addArchive('%(name)s-%(version)s-2-%(glibcDate)s.tar.bz2', rpm=r.srpm)
-#        r.addArchive('%(name)s-%(version)s-2-%(glibcDate)s-fedora.tar.bz2', dir='../%(maindir)s', rpm=r.srpm)
         r.addArchive('%(name)s-%(version)s-2-%(glibcDate)s-fedora.tar.bz2', rpm=r.srpm)
 
         for patch in r.rpmPatches:
             r.addPatch(patch, rpm=r.srpm)
 
-        
-#        r.addPatch('glibc-override_headers.patch')
         r.addSource('hardlink.c')
         r.Run('rm -f sysdeps/alpha/alphaev6/memcpy.S')
-#        if Arch.x86_64:
-#            r.Move('override_headers/asm/unistd.h-64', 'override_headers/asm/unistd.h')
-#        else:
-#            r.Move('override_headers/asm/unistd.h-32', 'override_headers/asm/unistd.h')
+
         r.Run('touch `find . -name configure`')
         r.Run('touch locale/programs/*-kw.h')
-
-        # r.addPatches()
 
         r.install()
 
@@ -207,10 +204,21 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
         r.TagSpec('initscript', '%(initdir)s/')
         r.UtilizeUser('nscd', '%(initdir)s/nscd')
 
-    def addPatches(r):
-        """
-        add any patches needed for glibc
-        """
+        r.Create('%(sysconfdir)s/ld.so.cache')
+
+        r.Remove('%(lib)s/libnss1-*', allowNoMatch = True)
+        r.Remove('%(lib)s/libnss-*.so.*', allowNoMatch = True)
+        # 
+        # XXX
+        # FIXME: fix this. 
+        # this was supposed to fix breackage induced by --enable-multi-arch
+        # it doesn't ...
+        # if Arch.x86_64:
+        #     r.Requires(exceptDeps=r'soname\:\ ELF64\/ld\-linux\-x86\-64\.so\.2\(Linux\)')
+        #     r.Requires(exceptDeps=r'soname\:\ ELF64\/libpthread\.so\.0\(Linux\)')
+        # else:
+        #     r.Requires(exceptDeps=r'soname\:\ ELF32\/ld\-linux\.so\.2\(Linux\)')
+        #     r.Requires(exceptDeps=r'soname\:\ ELF32\/libpthread\.so\.0\(Linux\)')
 
     def build(r, conf, objDir='obj'):
         """
@@ -366,16 +374,3 @@ done""")
         r.FixupMultilibPaths(exceptions='/usr/lib/debug/') 
 
         # 
-        r.Create('%(sysconfdir)s/ld.so.cache')
-
-        r.Remove('%(lib)s/libnss1-*', allowNoMatch = True)
-        r.Remove('%(lib)s/libnss-*.so.*', allowNoMatch = True)
-        # 
-        # XXX
-        # FIXME: fix this. 
-        if Arch.x86_64:
-            r.Requires(exceptDeps=r'soname\:\ ELF64\/ld\-linux\-x86\-64\.so\.2\(Linux\)')
-            r.Requires(exceptDeps=r'soname\:\ ELF64\/libpthread\.so\.0\(Linux\)')
-        else:
-            r.Requires(exceptDeps=r'soname\:\ ELF32\/ld\-linux\.so\.2\(Linux\)')
-            r.Requires(exceptDeps=r'soname\:\ ELF32\/libpthread\.so\.0\(Linux\)')
