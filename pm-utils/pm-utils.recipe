@@ -5,25 +5,24 @@
 #
 
 loadSuperClass('rpmpackage')
-class PMUtils(RPMPackageRecipe, CPackageRecipe):
+class PMUtils(RPMPackageRecipe, AutoPackageRecipe):
     name = 'pm-utils'
-    version = '1.2.6.1'
-    rpmRelease = '3.fc13'
-    rpmPatches = [ 'pm-utils-1.2.6-nouveau.patch',
-                   'pm-utils-1.2.6.1-open-the-pod-bay-doors.patch']
+    version = '1.3.1'
+    rpmRelease = '4.fc14'
+    rpmPatches = [ ]
     rpmSources = [ 'pm-utils-99hd-apm-restore',
                    'pm-utils-hd-apm-restore.conf',
                    'pm-utils-bugreport-info.sh' ]
     
     buildRequires = [ 'pkgconfig:devel', 'pciutils:devel', 'xmlto:runtime', ]
 
-    def setup(r):
-        r.unpack()
+    def configure(r):
+        r.addArchive('http://pm-utils.freedesktop.org/releases/pm-quirks-20100619.tar.gz')
 
         r.Configure()
-        r.Make()
-        r.MakeInstall()
 
+    def policy(r):
+        r.Copy('../video-quirks', '%(libdir)s/pm-utils/')
         r.DanglingSymlinks(exceptions='%(bindir)s/pm.*')
 
         r.MakeDirs('%(localstatedir)s/run/pm-utils/locks')
@@ -38,12 +37,6 @@ class PMUtils(RPMPackageRecipe, CPackageRecipe):
         r.Create('%(localstatedir)s/log/pm-suspend.log', mode = 0600)
         r.InitialContents('%(localstatedir)s/log/pm-suspend.log')
 
-        # xHCI/USB3 is broken in kernel atm regarding suspend / resume
-        # as is - systems never suspend
-        # this workaround  gets it to behave allowing systems to suspend 
-        # and resume normally (works on my W510)
-        r.Create('%(sysconfdir)s/pm/config.d/00sleep_module', mode = 0644,
-                 contents = 'SUSPEND_MODULES="xhci_hcd"')
 
         # migration helpers
         # versions up to 1.2.5-1-1 had a few badly placed files
@@ -58,8 +51,8 @@ class PMUtils(RPMPackageRecipe, CPackageRecipe):
 target = ''' + _file + ''' 
 echo $target
 if [ -d $target ] ; then
-echo deleting $target to avoid a file type conflict on %(names)s update
+echo deleting $target to avoid a file type conflict on %(name)s update
 rm -rf $target
 fi
-''')
+''' % r.macros )
         
