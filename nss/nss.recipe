@@ -1,0 +1,214 @@
+#
+# Copyright (c) 2007-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+loadSuperClass('rpmpackage')
+class NSS(RPMPackageRecipe,CPackageRecipe):
+    name = 'nss'
+    version = '3.12.6'
+    rpmRelease = '12.fc12'
+
+
+    buildRequires = [ 'nspr:devel', 'perl:runtime', 'sqlite:devel', 'zlib:devel']
+    # FIXME - get the PKI flayout consistent  
+    # probably f3 material ...
+
+    # XXX get nss-utils stuff pkged
+
+    def setup(r):
+        r.disableParallelMake()
+        r.addArchive('%(name)s-%(version)s-stripped.tar.bz2', rpm=r.srpm)
+        r.addArchive('%(name)s-pem-20100809.tar.bz2', rpm=r.srpm, dir = '%(name)s-%(version)s/')
+
+        rpmPatches = [ 'nss-nolocalsql.patch',
+                       'nss-enable-pem.patch',
+                       'renegotiate-transitional.patch',
+                       'validate-arguments.patch',
+                       'nsspem-596674.patch',
+                       'nss-sysinit-userdb-first.patch',
+                       '0001-Add-support-for-PKCS-8-encoded-private-keys.patch',
+                       '0001-Do-not-define-SEC_SkipTemplate.patch',
+                       ]
+
+        for p in  rpmPatches:
+            r.addPatch(p, rpm=r.srpm, dir='mozilla')
+
+        if Arch.x86_64:
+            r.Environment('USE_64', '1')
+
+        r.Environment('BUILD_OPT', '1')
+        r.Environment('FREEBL_NO_DEPEND', '1')
+        
+        r.Environment('XCFLAGS', '%(optflags)s')
+
+        r.Environment('PKG_CONFIG_ALLOW_SYSTEM_LIBS', '1')
+        r.Environment('PKG_CONFIG_ALLOW_SYSTEM_CFLAGS', '1')
+
+        # r.Environment('NSS_ENABLE_ECC','1')
+
+        r.Environment('NSPR_INCLUDE_DIR','%(includedir)s/nspr4')
+        r.Environment('NSPR_LIB_DIR','%(libdir)s')
+
+        ## Add custom CA certificates
+        # First, obtain a DER file of the root certificate and feed
+        # it to addbuiltin, which is provided by this package:
+        #
+        # /usr/lib/nss/unsupported-tools/addbuiltin \
+        #   -n "Cert Nickname" -t "CT,C,C" <foo.der >foo.txt
+        #
+        # Then, `cvc add' the .txt file to this package and make an
+        # addSource line like the one(s) below.
+        #
+        r.addSource('cacert.org.txt', dir='custom_builtins')
+
+        r.Run('cat custom_builtins/*.txt >>mozilla/security/nss/lib/ckfw/'
+            'builtins/certdata.txt')
+        r.Make('generate', dir='mozilla/security/nss/lib/ckfw/builtins')
+
+        r.Make(dir='mozilla/security/coreconf')
+        r.Make(dir='mozilla/security/dbm')
+        r.Make(dir='mozilla/security/nss')
+
+        r.MakeDirs('%(libdir)s/pkgconfig')
+        # Set up our package file
+        r.macros.nspr_version = '4.6.99'
+        r.addSource('nss.pc.in', rpm=r.srpm)
+        r.addSource('nss-config.in', rpm=r.srpm)
+        r.Run(""" cat nss.pc.in | sed -e "s,%%libdir%%,%(libdir)s,g" \
+                          -e "s,%%prefix%%,%(prefix)s,g" \
+                          -e "s,%%exec_prefix%%,%(prefix)s,g" \
+                          -e "s,%%includedir%%,%(includedir)s/nss3,g" \
+                          -e "s,%%NSPR_VERSION%%,%(nspr_version)s,g" \
+                          -e "s,%%NSS_VERSION%%,%(version)s,g" > \
+                          %(destdir)s/%(libdir)s/pkgconfig/nss.pc
+
+NSS_VMAJOR=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VMAJOR" | awk '{print $3}'`
+NSS_VMINOR=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VMINOR" | awk '{print $3}'`
+NSS_VPATCH=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VPATCH" | awk '{print $3}'`
+
+export NSS_VMAJOR 
+export NSS_VMINOR 
+export NSS_VPATCH
+
+sed -i 's/, nss-util >= %%NSSUTIL_VERSION%%//' -i 's/-lnssutil3//' %(destdir)s/%(libdir)s/pkgconfig/nss.pc
+
+mkdir %(destdir)s/%(bindir)s
+cat nss-config.in | sed -e "s,@libdir@,%(libdir)s,g" \
+                          -e "s,@prefix@,%(prefix)s,g" \
+                          -e "s,@exec_prefix@,%(prefix)s,g" \
+                          -e "s,@includedir@,%(includedir)s/nss3,g" \
+                          -e "s,@MOD_MAJOR_VERSION@,$NSS_VMAJOR,g" \
+                          -e "s,@MOD_MINOR_VERSION@,$NSS_VMINOR,g" \
+                          -e "s,@MOD_PATCH_VERSION@,$NSS_VPATCH,g" \
+                          > %(destdir)s/%(bindir)s/nss-config
+
+chmod 755 %(destdir)s/%(bindir)s/nss-config
+	""")
+
+        r.macros.unsupported_tools_directory='%(libdir)s/nss/unsupported-tools'
+
+        # There is no make install target so we'll do it ourselves.
+
+        for file in [ 'libsoftokn3.so',
+                      'libfreebl3.so',
+                      'libnss3.so',
+                      'libnssutil3.so',
+                      'libssl3.so',
+                      'libsmime3.so',
+                      'libnssckbi.so',
+                      'libnsspem.so',
+                      'libnssdbm3.so'
+                      ]:
+            r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '/%(lib)s/', mode=0755)
+            r.Symlink('/%(lib)s/' + file, '%(libdir)s/' + file)
+
+        # These ghost files will be (re)generated in the post/taghandler step bellow
+        for file in [ 'libsoftokn3.chk', 'libfreebl3.chk' ]:
+            r.Create('/%(lib)s/' + file)
+            r.Symlink('/%(lib)s/' + file, '%(libdir)s/' + file)
+
+        r.addSource('nss_shlibsign.tagdescription',
+                    macros=True,
+                    dest='%(tagdescriptiondir)s/nss_shlibsign')
+
+        r.addSource('nss_shlibsign.taghandler',
+                    macros=True,
+                    dest='%(taghandlerdir)s/nss_shlibsign',
+                    mode=0755)
+
+        r.Requires('nss:runtime', '%(taghandlerdir)s/nss_shlibsign')
+
+        for i in  [ 'libsoftokn3.so', 'libfreebl3.so']:
+            r.TagSpec('nss_shlibsign', '/%(lib)s/' + i )
+
+        # Install the empty NSS db files
+        r.MakeDirs('%(sysconfdir)s/pki/nssdb')
+
+        r.addSource('blank-cert8.db',
+                    dest = '%(sysconfdir)s/pki/nssdb/cert8.db',
+                    mode = 0644,
+                    rpm = r.srpm)
+
+        r.addSource('blank-key3.db',
+                    dest = '%(sysconfdir)s/pki/nssdb/key3.db',
+                    mode = 0644,
+                    rpm = r.srpm)
+
+        r.addSource('blank-secmod.db',
+                    dest = '%(sysconfdir)s/pki/nssdb/secmod.db',
+                    mode = 0644,
+                    rpm = r.srpm)
+
+        # Copy the development libraries we want
+        for file in [ 'libcrmf.a',
+                      'libnssb.a',
+                      'libnssckfw.a'
+                      ]:
+            r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '%(libdir)s/', mode=0755)
+
+        # Copy the binaries we want
+        for file in [ 'certutil',
+                      'cmsutil',
+                      'crlutil',
+                      'modutil',
+                      'pk12util',
+                      'signtool',
+                      'signver',
+                      'ssltap'
+                      ]:
+            r.Install('mozilla/dist/*.OBJ/bin/%s' % file, '%(bindir)s/')
+
+        # Copy the binaries we ship as unsupported
+
+        for file in [ 'addbuiltin',
+                      'atob', 
+                      'btoa',
+                      'derdump',
+                      'ocspclnt',
+                      'pp',
+                      'selfserv',
+                      'shlibsign',
+                      'strsclnt',
+                      'symkeyutil',
+                      'tstclnt',
+                      'vfyserv',
+                      'vfychain'
+                      ]:
+            r.Install('mozilla/dist/*.OBJ/bin/%s' % file, '%(unsupported_tools_directory)s/',
+                      package=':runtime')
+
+        # Copy the include files we want
+        r.Install('mozilla/dist/public/nss/*.h', '%(includedir)s/nss3/')
+
+        r.Config(exceptions = '%(sysconfdir)s/pki/nssdb/.*')
+        r.InitialContents('%(sysconfdir)s/pki/nssdb/.*')
+
+        r.Transient('/%(lib)s/libsoftokn3.chk')
+        r.Transient('/%(lib)s/libfreebl3.chk')
+
+
+
+
+
+
