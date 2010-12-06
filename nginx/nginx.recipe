@@ -1,13 +1,13 @@
 #
-# Copyright (c) 2007-2008 rPath, Inc.
+# Copyright (c) 2010 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Nginx(AutoPackageRecipe):
+class Nginx(CPackageRecipe):
 
     name = 'nginx'
-    version = '0.7.65'
+    version = '0.9.2'
 
     buildRequires = [
         'chkconfig:runtime',
@@ -17,31 +17,33 @@ class Nginx(AutoPackageRecipe):
         'zlib:devel',
       ]
 
-    def unpack(r):
-        r.addArchive('http://sysoev.ru/%(name)s/')
+    def setup(r):
+        r.addArchive('http://nginx.org/download/')
+        modules = 'rtsig poll'.split()
+        http_modules = 'ssl flv gzip_static'.split()
+        r.ManualConfigure(
+            '--prefix=%(prefix)s '
+            '--sbin-path=%(sbindir)s/%(name)s '
+            '--conf-path=%(sysconfdir)s/%(name)s/%(name)s.conf '
+            '--pid-path=%(localstatedir)s/run/%(name)s/%(name)s.pid '
+            '--lock-path=%(localstatedir)s/lock/subsys/%(name)s '
+            '--http-log-path=%(localstatedir)s/log/%(name)s/access.log '
+            '--error-log-path=%(localstatedir)s/log/%(name)s/error.log '
+            '--http-client-body-temp-path=%(localstatedir)s/cache/%(name)s/client/ '
+            '--http-proxy-temp-path=%(localstatedir)s/cache/%(name)s/proxy/ '
+            '--http-fastcgi-temp-path=%(localstatedir)s/cache/%(name)s/fastcgi/ '
 
-    def configure(r):
-        r.ManualConfigure('--prefix=%(prefix)s '
-              '--sbin-path=%(sbindir)s/%(name)s '
-              '--conf-path=%(sysconfdir)s/%(name)s/%(name)s.conf '
-              '--pid-path=%(localstatedir)s/run/%(name)s/%(name)s.pid '
-              '--lock-path=%(localstatedir)s/lock/subsys/%(name)s '
-              '--http-log-path=%(localstatedir)s/log/%(name)s/access.log '
-              '--error-log-path=%(localstatedir)s/log/%(name)s/error.log '
-              '--http-client-body-temp-path=%(localstatedir)s/cache/%(name)s/client/ '
-              '--http-proxy-temp-path=%(localstatedir)s/cache/%(name)s/proxy/ '
-              '--http-fastcgi-temp-path=%(localstatedir)s/cache/%(name)s/fastcgi/ '
+            '--with-cc-opt="%(cflags)s `pkg-config --cflags openssl`" '
+            '--with-ld-opt="%(ldflags)s" '
+            '--user=nobody --group=nobody '
 
-              '--with-poll_module '
-              '--with-http_ssl_module ',
-              '--with-http_flv_module ',
-              '--with-http_gzip_static_module ',
+            '--with-file-aio '
+            '--with-ipv6 '
+            + ' '.join('--with-%s_module' % x for x in modules) + ' '
+            + ' '.join('--with-http_%s_module' % x for x in http_modules) + ' '
+            )
 
-              '--with-cc-opt="%(cflags)s `pkg-config --cflags openssl`" '
-              '--with-ld-opt="%(ldflags)s" '
-              '--user=nobody --group=nobody')
-
-    def makeinstall(r):
+        r.Make()
         r.MakeInstall()
 
 
@@ -49,12 +51,12 @@ class Nginx(AutoPackageRecipe):
                    '%(localstatedir)s/log/%(name)s',
                    '%(localstatedir)s/run/%(name)s',
                    '%(servicedir)s/%(name)s/html/')
-        r.ExcludeDirectories(exceptions=(
+        r.ExcludeDirectories(exceptions=[
             '%(localstatedir)s/cache/%(name)s.*',
             '%(localstatedir)s/log/%(name)s',
             '%(localstatedir)s/run/%(name)s',
             '%(servicedir)s/%(name)s/html',
-          ))
+          ])
         r.Move('%(prefix)s/html/*', '%(servicedir)s/%(name)s/html/')
 
         # Replace the default script with something more sane
