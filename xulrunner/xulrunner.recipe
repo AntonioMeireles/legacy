@@ -45,13 +45,27 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
                    'mozilla-gdk-pixbuf.patch',
                    'mozilla-192-pkgconfig.patch',
                     ]
-    rhelPatches = [ 'xulrunner-gtkmozembed-compatibility.patch',
-                    ]
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
-        for p in r.rhelPatches:
-            r.addPatch(p)
+
+        RPMPackageRecipe.unpack(r)
+        #
+        # block bellow pasted from ffox recipe
+        # here to just to make sure that apps 
+        # that embed xulrunner won't bust if they consume hunspell 
+        #
+        # after we changed to gc44 we got ffox to segfault
+        # cause is https://bugzilla.redhat.com/show_bug.cgi?id=506952
+        # (current RH doesn't because they are using system hunspell
+        # and this happens in the hunspell code base - it is ffox's
+        # built-in one that is buggy
+        # upstream moz bug is https://bugzilla.mozilla.org/show_bug.cgi?id=500607
+        # instead of trying to get default built-inplace unspell minimally
+        # behaving with gcc44
+        # we do the right thing and following https://bugzilla.mozilla.org/show_bug.cgi?id=564608
+        # just bump hunpsell to a gcc44/fortify version.
+        r.addPatch('https://bugzilla.mozilla.org/attachment.cgi?id=446913&action=diff&context=patch&collapsed=&headers=1&format=raw')
 
     def configure(r):
         r.macros.longVersion =  r.macros.version
@@ -70,10 +84,6 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
 
         r.macros.ldflags += ' -Wl,-rpath,%(MOZ_APP_DIR)s '
 
-        r.Run('echo "ac_cv_visibility_pragma=no" >> .mozconfig')
-        r.Run('echo "ac_cv_visibility_hidden=no" >> .mozconfig')
-        r.Run('echo "ac_cv_visibility_default=no" >> .mozconfig')
-
         r.Configure( ' --with-system-nspr'
                      ' --with-system-nss'
                      ' --with-system-jpeg'
@@ -82,7 +92,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
                      ' --enable-system-lcms'
                      ' --disable-system-hunspell'
                      ' --disable-system-sqlite'
-                     ' --disable-system-cairo'
+                     ' --enable-system-cairo'
                      ' --with-pthreads'
                      ' --disable-strip'
                      ' --disable-tests'
@@ -97,7 +107,7 @@ class XULRunner(RPMPackageRecipe,AutoPackageRecipe):
                      ' --enable-application=xulrunner'
                      ' --disable-javaxpcom'
                      ' --enable-extensions=default'
-                     ' --disable-libnotify'
+                     ' --enable-libnotify'
                      ' --enable-safe-browsing'
                      ' --disable-crashreporter'
                      ' --enable-startup-notification'
