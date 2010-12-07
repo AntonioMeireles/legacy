@@ -26,7 +26,7 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
                      'startup-notification:devel', 'libXinerama:devel', 'dbus-glib:devel',
                      'dbus:devel', 'libnotify:devel' ]
 
-    rpmRelease = '1.fc13'
+    rpmRelease = '1.fc14'
 
     tarballName = 'firefox-%(version)s.source.tar.bz2'
     rpmArchives = ['firefox-langpacks-%(version)s-20101027.tar.bz2']
@@ -37,8 +37,18 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
 
     def unpack(r):
         RPMPackageRecipe.unpack(r)
-        # taken from xulrunner 
-#        r.addPatch('nspr-build.patch')
+        # after we changed to gc44 we got ffox to segfault
+        # cause is https://bugzilla.redhat.com/show_bug.cgi?id=506952 
+        # (current RH doesn't because they are using system hunspell 
+        # and this happens in the hunspell code base - it is ffox's 
+        # built-in one that is buggy
+        # upstream moz bug is https://bugzilla.mozilla.org/show_bug.cgi?id=500607
+        # instead of trying to get default built-inplace unspell minimally
+        # behaving with gcc44 
+        # we do the right thing and following https://bugzilla.mozilla.org/show_bug.cgi?id=564608
+        # just bump hunpsell to a gcc44/fortify version.
+
+        r.addPatch('https://bugzilla.mozilla.org/attachment.cgi?id=446913&action=diff&context=patch&collapsed=&headers=1&format=raw')
 
         # macros bellow called by taghandler
         r.macros.fflib = '%(libdir)s/%(name)s-%(version)s/'
@@ -72,10 +82,6 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         r.Replace('\$\(MOZ_APP_NAME\)-\$\(MOZ_APP_VERSION\)','$(MOZ_APP_NAME)-%(version)s', 'config/autoconf.mk.in')
         r.Replace('\$\(MOZ_APP_NAME\)-devel-\$\(MOZ_APP_VERSION\)','$(MOZ_APP_NAME)-devel-%(version)s', 'config/autoconf.mk.in')
 
-        r.Run('echo "ac_cv_visibility_pragma=no" >> .mozconfig')
-        r.Run('echo "ac_cv_visibility_hidden=no" >> .mozconfig')
-        r.Run('echo "ac_cv_visibility_default=no" >> .mozconfig')
-
         r.Configure(
             ' --with-system-nspr'
             ' --with-system-nss'
@@ -93,14 +99,14 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
             ' --disable-strip'
 
             ' --disable-system-hunspell'
-            ' --disable-system-cairo'
+#            ' --disable-system-cairo'
 
             ' --enable-pango'
             ' --enable-svg'
             ' --enable-canvas'
             ' --disable-startup-notification'
             ' --enable-libxul'
-            ' --with-system-libxul '
+
             ' --disable-crashreporter'
             ' --enable-safe-browsing'
             ' --enable-official-branding'
