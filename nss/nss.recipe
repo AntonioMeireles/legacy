@@ -3,36 +3,35 @@
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
-loadSuperClass('rpmpackage')
-class NSS(RPMPackageRecipe,CPackageRecipe):
+loadInstalled('nspr')
+class NSS(CPackageRecipe):
     name = 'nss'
-    version = '3.12.6'
-    rpmRelease = '12.fc12'
+    version = '3.12.8'
+
+    
+    # rpmRelease = '4.fc14'
 
 
     buildRequires = [ 'nspr:devel', 'perl:runtime', 'sqlite:devel', 'zlib:devel']
-    # FIXME - get the PKI flayout consistent  
-    # probably f3 material ...
-
-    # XXX get nss-utils stuff pkged
 
     def setup(r):
         r.disableParallelMake()
-        r.addArchive('%(name)s-%(version)s-stripped.tar.bz2', rpm=r.srpm)
-        r.addArchive('%(name)s-pem-20100809.tar.bz2', rpm=r.srpm, dir = '%(name)s-%(version)s/')
+        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_12_8_RTM/src/')
+        r.addArchive('%(name)s-pem-20101125.tar.bz2', dir = '%(name)s-%(version)s/')
+        r.addSource('mkpkgconfigfiles.sh', macros = True)
+        r.addSource('nss.pc.in')
+        r.addSource('nss-config.in')
+        r.addSource('nss-util.pc.in')
+        r.addSource('nss-util-config.in')
+        r.addSource('nss-softokn.pc.in')
+        r.addSource('nss-softokn-config.in')
 
-        rpmPatches = [ 'nss-nolocalsql.patch',
-                       'nss-enable-pem.patch',
-                       'renegotiate-transitional.patch',
-                       'validate-arguments.patch',
-                       'nsspem-596674.patch',
-                       'nss-sysinit-userdb-first.patch',
-                       '0001-Add-support-for-PKCS-8-encoded-private-keys.patch',
-                       '0001-Do-not-define-SEC_SkipTemplate.patch',
-                       ]
-
-        for p in  rpmPatches:
-            r.addPatch(p, rpm=r.srpm, dir='mozilla')
+        # taken from nss pk from RH
+        for p in [ 'nss-enable-pem.patch',
+                   'renegotiate-transitional.patch',
+                   'nss-sysinit-userdb-first.patch',
+                   ]:
+            r.addPatch(p, dir='mozilla')
 
         if Arch.x86_64:
             r.Environment('USE_64', '1')
@@ -45,11 +44,11 @@ class NSS(RPMPackageRecipe,CPackageRecipe):
         r.Environment('PKG_CONFIG_ALLOW_SYSTEM_LIBS', '1')
         r.Environment('PKG_CONFIG_ALLOW_SYSTEM_CFLAGS', '1')
 
-        # r.Environment('NSS_ENABLE_ECC','1')
-
         r.Environment('NSPR_INCLUDE_DIR','%(includedir)s/nspr4')
         r.Environment('NSPR_LIB_DIR','%(libdir)s')
 
+        r.Environment('NSS_USE_SYSTEM_SQLITE', '1')
+        
         ## Add custom CA certificates
         # First, obtain a DER file of the root certificate and feed
         # it to addbuiltin, which is provided by this package:
@@ -65,100 +64,82 @@ class NSS(RPMPackageRecipe,CPackageRecipe):
         r.Run('cat custom_builtins/*.txt >>mozilla/security/nss/lib/ckfw/'
             'builtins/certdata.txt')
         r.Make('generate', dir='mozilla/security/nss/lib/ckfw/builtins')
+        # 
 
         r.Make(dir='mozilla/security/coreconf')
         r.Make(dir='mozilla/security/dbm')
         r.Make(dir='mozilla/security/nss')
 
         r.MakeDirs('%(libdir)s/pkgconfig')
-        # Set up our package file
-        r.macros.nspr_version = '4.6.99'
-        r.addSource('nss.pc.in', rpm=r.srpm)
-        r.addSource('nss-config.in', rpm=r.srpm)
-        r.Run(""" cat nss.pc.in | sed -e "s,%%libdir%%,%(libdir)s,g" \
-                          -e "s,%%prefix%%,%(prefix)s,g" \
-                          -e "s,%%exec_prefix%%,%(prefix)s,g" \
-                          -e "s,%%includedir%%,%(includedir)s/nss3,g" \
-                          -e "s,%%NSPR_VERSION%%,%(nspr_version)s,g" \
-                          -e "s,%%NSS_VERSION%%,%(version)s,g" > \
-                          %(destdir)s/%(libdir)s/pkgconfig/nss.pc
+        # Set up our package files
+        r.macros.nspr_version = Nspr.version
 
-NSS_VMAJOR=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VMAJOR" | awk '{print $3}'`
-NSS_VMINOR=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VMINOR" | awk '{print $3}'`
-NSS_VPATCH=`cat mozilla/security/nss/lib/nss/nss.h | grep "#define.*NSS_VPATCH" | awk '{print $3}'`
+        r.Run('sh %(builddir)s/mkpkgconfigfiles.sh')
 
-export NSS_VMAJOR 
-export NSS_VMINOR 
-export NSS_VPATCH
-
-sed -i 's/, nss-util >= %%NSSUTIL_VERSION%%//' -i 's/-lnssutil3//' %(destdir)s/%(libdir)s/pkgconfig/nss.pc
-
-mkdir %(destdir)s/%(bindir)s
-cat nss-config.in | sed -e "s,@libdir@,%(libdir)s,g" \
-                          -e "s,@prefix@,%(prefix)s,g" \
-                          -e "s,@exec_prefix@,%(prefix)s,g" \
-                          -e "s,@includedir@,%(includedir)s/nss3,g" \
-                          -e "s,@MOD_MAJOR_VERSION@,$NSS_VMAJOR,g" \
-                          -e "s,@MOD_MINOR_VERSION@,$NSS_VMINOR,g" \
-                          -e "s,@MOD_PATCH_VERSION@,$NSS_VPATCH,g" \
-                          > %(destdir)s/%(bindir)s/nss-config
-
-chmod 755 %(destdir)s/%(bindir)s/nss-config
-	""")
+        r.Install('mozilla/dist/pkgconfig/*.pc', '%(libdir)s/pkgconfig/', mode=0644)
+        r.Install('mozilla/dist/pkgconfig/*config', '%(bindir)s/', mode=0755)
+        
 
         r.macros.unsupported_tools_directory='%(libdir)s/nss/unsupported-tools'
 
-        # There is no make install target so we'll do it ourselves.
+        # Copy the pkcs #11 configuration script
+        r.addSource('setup-nsssysinit.sh', dir='%(bindir)s/setup-nsssysinit.sh', mode = 0755)
 
-        for file in [ 'libsoftokn3.so',
-                      'libfreebl3.so',
-                      'libnss3.so',
-                      'libnssutil3.so',
-                      'libssl3.so',
-                      'libsmime3.so',
+
+
+        # There is no make install target so we'll do it ourselves.
+        for file in [ 'libnss3.so',
                       'libnssckbi.so',
                       'libnsspem.so',
-                      'libnssdbm3.so'
+                      'libnsssysinit.so',
+                      'libsmime3.so',
+                      'libssl3.so',
+                      # nss-util
+                      'libnssutil3.so',
+                      # nss-softokn
+                      'libsoftokn3.so',
+                      'libnssdbm3.so',
+                      'libfreebl.a',
                       ]:
+            r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '%(libdir)s/', mode=0755)
+
+        # softokn
+        for file in [ #'libfreebl3.so',
+                      #'libsoftokn3.so',
+                      # ^^ just here to ease updates
+                      # see bottom
+                      'libnssdbm3.so',]:
             r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '/%(lib)s/', mode=0755)
             r.Symlink('/%(lib)s/' + file, '%(libdir)s/' + file)
-
-        # These ghost files will be (re)generated in the post/taghandler step bellow
-        for file in [ 'libsoftokn3.chk', 'libfreebl3.chk' ]:
-            r.Create('/%(lib)s/' + file)
-            r.Symlink('/%(lib)s/' + file, '%(libdir)s/' + file)
-
-        r.addSource('nss_shlibsign.tagdescription',
-                    macros=True,
-                    dest='%(tagdescriptiondir)s/nss_shlibsign')
-
-        r.addSource('nss_shlibsign.taghandler',
-                    macros=True,
-                    dest='%(taghandlerdir)s/nss_shlibsign',
-                    mode=0755)
-
-        r.Requires('nss:runtime', '%(taghandlerdir)s/nss_shlibsign')
-
-        for i in  [ 'libsoftokn3.so', 'libfreebl3.so']:
-            r.TagSpec('nss_shlibsign', '/%(lib)s/' + i )
 
         # Install the empty NSS db files
         r.MakeDirs('%(sysconfdir)s/pki/nssdb')
 
         r.addSource('blank-cert8.db',
                     dest = '%(sysconfdir)s/pki/nssdb/cert8.db',
-                    mode = 0644,
-                    rpm = r.srpm)
+                    mode = 0644,)
+
 
         r.addSource('blank-key3.db',
                     dest = '%(sysconfdir)s/pki/nssdb/key3.db',
-                    mode = 0644,
-                    rpm = r.srpm)
+                    mode = 0644,)
 
         r.addSource('blank-secmod.db',
                     dest = '%(sysconfdir)s/pki/nssdb/secmod.db',
-                    mode = 0644,
-                    rpm = r.srpm)
+                    mode = 0644,)
+
+        # Shared db
+        r.addSource('blank-cert9.db',
+                    dest = '%(sysconfdir)s/pki/nssdb/cert9.db',
+                    mode = 0644,)
+
+        r.addSource('blank-key4.db',
+                    dest = '%(sysconfdir)s/pki/nssdb/key4.db',
+                    mode = 0644,)
+
+        r.addSource('system-pkcs11.txt',
+                    dest = '%(sysconfdir)s/pki/nssdb/pkcs11.txt',
+                    mode = 0644,)
 
         # Copy the development libraries we want
         for file in [ 'libcrmf.a',
@@ -180,20 +161,19 @@ chmod 755 %(destdir)s/%(bindir)s/nss-config
             r.Install('mozilla/dist/*.OBJ/bin/%s' % file, '%(bindir)s/')
 
         # Copy the binaries we ship as unsupported
-
-        for file in [ 'addbuiltin',
-                      'atob', 
+        for file in [ 'atob', 
                       'btoa',
                       'derdump',
                       'ocspclnt',
                       'pp',
                       'selfserv',
-                      'shlibsign',
                       'strsclnt',
                       'symkeyutil',
                       'tstclnt',
                       'vfyserv',
-                      'vfychain'
+                      'vfychain',
+                      # softokn
+                      'shlibsign',
                       ]:
             r.Install('mozilla/dist/*.OBJ/bin/%s' % file, '%(unsupported_tools_directory)s/',
                       package=':runtime')
@@ -201,14 +181,51 @@ chmod 755 %(destdir)s/%(bindir)s/nss-config
         # Copy the include files we want
         r.Install('mozilla/dist/public/nss/*.h', '%(includedir)s/nss3/')
 
+        # softokn
+        r.Install('mozilla/dist/private/nss/blapi.h', '%(includedir)s/nss3/')
+
         r.Config(exceptions = '%(sysconfdir)s/pki/nssdb/.*')
         r.InitialContents('%(sysconfdir)s/pki/nssdb/.*')
 
-        r.Transient('/%(lib)s/libsoftokn3.chk')
-        r.Transient('/%(lib)s/libfreebl3.chk')
+        # segfaults under rMake (!) 
+#        for file in [ 'libsoftokn3.so', 'libnssdbm3.so',  ]:
+#            r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s%(libdir)s/' + file)
 
+#        for file in [ 'libfreebl3.so' ]:
+#            r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/%(lib)s/' + file)
+        # plan B
+        # r.addSource('nss_shlibsign.tagdescription',
+        #             macros=True,
+        #             dest='%(tagdescriptiondir)s/nss_shlibsign')
 
+        # r.addSource('nss_shlibsign.taghandler',
+        #             macros=True,
+        #             dest='%(taghandlerdir)s/nss_shlibsign',
+        #             mode=0755)
 
+        # r.Requires('nss:runtime', '%(taghandlerdir)s/nss_shlibsign')
+
+        for file in [ 'libsoftokn3', 'libnssdbm3' ]:
+            sign = '%(libdir)s/' + file + '.chk'
+            so = '%(libdir)s/' + file + '.so'
+#            r.Create(sign)
+#            r.Transient(sign)
+            r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so)
+            r.Symlink(sign, '/%(lib)s/')
+#            r.TagSpec('nss_shlibsign', so)
+
+        for file in [ 'libfreebl3',]:
+                      # those two bellow should had been in %(libdir)s
+                      # and symlinked to /%(lib)s and bot the other way around
+                      # that breaks updates from prev versions (symlink turning file)
+                      # 'libsoftokn3', 'libnssdbm3' ]:
+            sign = '/%(lib)s/' + file + '.chk'
+            so = '/%(lib)s/' + file + '.so'
+#            r.Create(sign)
+#            r.Transient(sign)
+            r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so)
+            r.Symlink(sign, '%(libdir)s/')
+#            r.TagSpec('nss_shlibsign', so)
 
 
 
