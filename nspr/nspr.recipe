@@ -4,41 +4,45 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class Nspr(RPMPackageRecipe,CPackageRecipe):
+class Nspr(CPackageRecipe):
     name = 'nspr'
     version = '4.8.6'
-    rpmRelease = '1.fc13'
 
     buildRequires = [ 'libstdc++:devel',]
 
+    extraConfig = (' --enable-optimize="%(optflags)s" '
+                   ' --includedir=%(includedir)s/nspr4 '
+                   ' --disable-debug')
 
     if Arch.x86_64:
-        extraConfig = ' --enable-64bit '
-    else:
-        extraConfig = ' '
+        extraConfig += ' --enable-64bit '
 
     def setup(r):
-        r.addArchive('%(name)s-%(version)s.tar.bz2', rpm=r.srpm)
+        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/%(name)s/releases/v%(version)s/src/')
 
-        r.macros.subDir = 'mozilla/nsprpub'
-        r.addAction('cp ./mozilla/nsprpub/config/nspr-config.in ./mozilla/nsprpub/config/nspr-config-pc.in')
-        r.addPatch('nspr-config-pc.patch', rpm=r.srpm)
-        r.addSource('nspr-config-vars.in', dest = 'mozilla/nsprpub/config/', rpm=r.srpm)
+        # patch bellow == cp ./mozilla/nsprpub/config/nspr-config.in ./mozilla/nsprpub/config/nspr-config-pc.in
+        # rebase anytime we bump
+        r.addPatch('nspr-config-pc.in.%(version)s.patch', dir = '../..')
+        r.addPatch('nspr-config-pc.patch', dir = '../..')
+        r.addSource('nspr-config-vars.in', 'config/')
 
-        r.Configure(r.extraConfig + '--includedir=%(includedir)s/nspr4 --prefix=%(prefix)s --libdir=%(libdir)s '
-                    ' --includedir=%(includedir)s/nspr4 '
-                    ' --disable-debug ',
-                    dir='%(subDir)s')
-        r.Make(dir='%(subDir)s')
-        r.MakeInstall(dir='%(subDir)s')
+        r.mainDir('%(name)s-%(version)s/mozilla/nsprpub')
 
-        r.addSource('%(name)s.pc.in', dest='%(subDir)s/', rpm=r.srpm)
+        r.Configure(r.extraConfig)
+        r.Make()
+        r.MakeInstall()
+
+        r.addSource('%(name)s.pc.in')
+
+        r.MakeDirs('%(libdir)s/pkgconfig/')
+       
         r.Run("""
 export NSPR_LIBS=`./config/nspr-config --libs`; 
 export NSPR_CFLAGS=`./config/nspr-config --cflags`; 
 export NSPR_VERSION=`./config/nspr-config --version`;  
-mkdir %(destdir)s/%(libdir)s/pkgconfig;  
+
+cat ./config/nspr-config-vars > nspr.pc
+
 cat %(name)s.pc.in | sed -e "s,%%libdir%%,%(libdir)s,g" \
                      -e "s,%%prefix%%,%(prefix)s,g" \
                      -e "s,%%exec_prefix%%,%(prefix)s,g" \
@@ -46,16 +50,21 @@ cat %(name)s.pc.in | sed -e "s,%%libdir%%,%(libdir)s,g" \
                      -e "s,%%NSPR_VERSION%%,$NSPR_VERSION,g" \
                      -e "s,%%FULL_NSPR_LIBS%%,$NSPR_LIBS,g" \
                      -e "s,%%FULL_NSPR_CFLAGS%%,$NSPR_CFLAGS,g" >> \
-                     %(destdir)s/%(libdir)s/pkgconfig/nspr.pc; 
-""", dir = '%(subDir)s')
+                     nspr.pc; 
+""")
 
-        r.Install('%(subDir)s/config/nspr-config-pc', '%(bindir)s/nspr-config', mode = 0755)
+
+        r.Install('%(name)s.pc', '%(libdir)s/pkgconfig/', mode = 0644)
+
+        r.Install('config/nspr-config-pc',
+                  '%(bindir)s/nspr-config', mode = 0755)
 
         # Get rid of the things we don't want installed (per upstream)
-        r.Remove('%(bindir)s/{compile-et.pl,prerr.properties}')
-        r.Remove('%(libdir)s/{libnspr4.a,libplc4.a,libplds4.a}')
-        r.Remove('%(datadir)s/aclocal/nspr.m4')
-        r.Remove('%(includedir)s/nspr4/md', recursive = True)
+        for f in [ '%(bindir)s/{compile-et.pl,prerr.properties}',
+                   '%(libdir)s/*.a',
+                   '%(datadir)s/aclocal/nspr.m4',
+                   '%(includedir)s/nspr4/md',]:
+            r.Remove(f, recursive = True)
 
         for i in ['libnspr4.so', 'libplc4.so', 'libplds4.so']:
             r.Move('%(libdir)s/' + i, '/%(lib)s/' +i)
