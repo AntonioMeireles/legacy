@@ -6,18 +6,30 @@
 
 class LVM2(CPackageRecipe):
     name = 'lvm2'
-    version = '2.02.24'
+    version = '2.02.56'
 
-    buildRequires = [ 'device-mapper:devel', 'ncurses:devel', 'readline:devel',
+    buildRequires = [ 'ncurses:devel', 'readline:devel',
         'userspace-kernel-headers:devel', ]
 
     def setup(r):
-        r.addArchive('ftp://sources.redhat.com/pub/lvm2/old/LVM2.%(version)s.tgz', keyid='567E2C17')
+        r.addArchive('ftp://sources.redhat.com/pub/lvm2/LVM2.%(version)s.tgz') # , keyid='567E2C17')
+        r.mainDir('LVM2.%(version)s')
 
-        r.Configure('--enable-static_link --enable-readline'
-            ' --with-cluster=internal --with-pool=internal'
-            ' --enable-lvm1_fallback --with-staticdir=%(essentialsbindir)s'
-            ' --with-user= --with-group=')
+        r.Configure('--enable-static_link'
+            ' --enable-readline'
+            ' --with-cluster=internal'
+            ' --with-pool=internal'
+            ' --enable-lvm1_fallback'
+            ' --with-staticdir=%(essentialsbindir)s'
+            ' --with-user='
+            ' --with-group='
+            ' --enable-dmeventd'
+            ' --enable-cmdlib'
+            ' --enable-fsadm'
+            ' --enable-pkgconfig'
+            ' --enable-units-compat'
+            ' --disable-selinux'
+            )
         r.Make()
         r.MakeInstall()
 
@@ -25,3 +37,52 @@ class LVM2(CPackageRecipe):
             r.Symlink('lvm.static', '%(essentialsbindir)s/' + x)
         r.Doc('VERSION', 'WHATS_NEW')
         r.ComponentProvides('dm-prefix')
+
+        # Most additions below come from Foresight, to deal with the merging
+        # of device-mapper and lvm2 source code.
+        r.Remove('%(sbindir)s/dmeventd.static')
+        r.Move('%(sbindir)s/dm*', '%(essentialsbindir)s/')
+        r.Move('%(libdir)s/libdevmapper*', '%(essentiallibdir)s/')
+        r.PackageSpec('device-mapper',
+            '%(essentiallibdir)s/libdevmapper.*',
+            '%(essentialsbindir)s/dmsetup.*',
+            '%(includedir)s/libdevmapper.h',
+            '%(libdir)s/pkgconfig/devmapper.pc',
+            '%(mandir)s/man8/dmsetup.8.gz'
+            )
+        # put oddly named libdevmapper.a.1.00 in the right place
+        r.ComponentSpec('device-mapper:devellib', 
+            r'%(essentiallibdir)s/lib.*\.a\..*')
+        r.ComponentSpec('device-mapper:static',
+            r'%(essentialsbindir)s/dmsetup.static')
+        r.PackageSpec('device-mapper-event',
+            '%(essentialsbindir)s/dmeventd'
+            )
+
+        for i in ('archive', 'backup', 'cache'):
+            d = '%(sysconfdir)s/lvm/' + i
+            r.MakeDirs(d)
+            r.SetModes(d, 0700)
+            r.ExcludeDirectories(exceptions = d)
+            r.ComponentSpec('config', d)
+
+        r.MakeDirs('%(localstatedir)s/lock/lvm')
+        r.SetModes('%(localstatedir)s/lock/lvm', 0700)
+        r.ExcludeDirectories(exceptions = '%(localstatedir)s/lock/lvm')
+
+    # Policy customizations come from the deprecated rPL 2 
+    # device-mapper source recipe.
+    def policy(r):
+        # Policy tries to move /usr/lib/pkgconfig/devmapper.pc to
+        # /lib/pkgconfig/, don't let it.
+        r.NormalizePkgConfig(exceptions='%(prefix)s/%(lib)s/pkgconfig/devmapper.pc')
+        # If on x86_64 move package config to lib64
+        if Arch.x86_64:
+            r.MakeDirs('%(prefix)s/%(lib)s/pkgconfig')
+            r.Move('%(prefix)s/lib/pkgconfig/devmapper.pc',
+                   '%(prefix)s/%(lib)s/pkgconfig/devmapper.pc')
+        # the makefile installs it to lib even on 64 bit. conary-policy
+        # will move it to the correct place
+        r.Replace('Libs.private:.*', '',
+                  '%(prefix)s/%(lib)s/pkgconfig/devmapper.pc')
+
