@@ -134,6 +134,17 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
         r.ComponentSpec('locale','%(prefix)s/lib/locale/')
         r.ComponentSpec('locale','%(datadir)s/i18n/')
 
+        # XXX part of CNY-3596 'fix' XXX
+        # the fact that we need to do 'soname: ld-linux...'
+        # bellow and not 'soname: ELF(32|64)/ld-linux...' is 
+        # a complete mistery for me
+        if Arch.x86:
+            r.Provides( 'soname: ld-linux.so.2(Linux)',
+                        '%(essentiallibdir)s/ld-linux.so.2')
+        else:
+            r.Provides( 'soname: ld-linux-x86-64.so.2(Linux)',
+                        '%(essentiallibdir)s/ld-linux-x86-64.so.2')
+
         if not Use.bootstrap:
             # libpthread-using applications cannot be debugged without
             # glibc:debuginfo installed, unless we leave some extra
@@ -166,16 +177,6 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
             r.Run('strip -g --remove-section=.comment --remove-section=.note'
                   ' %(destdir)s/%(essentiallibdir)s/libpthread-*.so')
 
-            # XXX part of CNY-3596 'fix' XXX
-            # the fact that we need to do 'soname: ld-linux...'
-            # bellow and not 'soname: ELF(32|64)/ld-linux...' is 
-            # a complete mistery for me
-            if Arch.x86:
-                r.Provides( 'soname: ld-linux.so.2(Linux)',
-                            '%(essentiallibdir)s/ld-linux.so.2')
-            else:
-                r.Provides( 'soname: ld-linux-x86-64.so.2(Linux)',
-                            '%(essentiallibdir)s/ld-linux-x86-64.so.2')
 
         # Remove tzselect from the ~bootstrap :runtime as tzdata:data req
         # perl which we do not want to bootstrap.
@@ -226,36 +227,6 @@ class Glibc(RPMPackageRecipe, PackageRecipe):
         r.macros.objdir = objDir
         r.ManualConfigure(conf, objDir=objDir)
         r.Make("PARALLELMFLAGS='%(parallelmflags)s'", dir=objDir)
-
-    def buildExtraLibraries(r, conf, threadmodel, subdir):
-        """
-        build and install only the libraries needed into the destdir
-
-        @param conf: the configuration flags to pass to configure.
-        @param threadmodel: the threadding model to use
-        @param subdir: the subdirectory of /lib/ that the libraries should
-                       be installed in
-        """
-        objdir = 'obj-' + subdir
-
-        # XXX add rtkio if enabled
-        subdirs = 'math rt'
-        if threadmodel == 'nptl':
-            subdirs += ' nptl nptl_db'
-        else:
-            raise ValueError, threadmodel
-
-        r.build(conf, objdir)
-        # normally glibc uses elf/sln to create symlinks, but we didn't
-        # build that.  So use the system copy instead.
-        r.Make('install_root=%%(destdir)s/%s symbolic-link-prog=/sbin/sln '
-               '"subdirs=%s" install' %(subdir, subdirs), dir=objdir)
-        for f in ('libc', 'libm', 'libpthread', 'libthread_db',
-                  'librtkio', 'librt'):
-            r.Move('/%s/%%(essentiallibdir)s/%s[.-]*' %(subdir, f),
-                   '%%(essentiallibdir)s/%s/' %subdir)
-        r.Remove('/%s' %subdir, recursive=True)
-        r.SharedLibrary(subtrees='/lib/%s' %subdir)
 
     def buildBootstrap(r):
         r.Environment('BUILD_CC', '%(buildcc)s')
@@ -366,3 +337,17 @@ done""")
         r.FixupMultilibPaths(exceptions='/usr/lib/debug/') 
 
         # 
+
+        r.Remove('%(libdir)s/librtkaio.*')
+        r.Remove('%(essentiallibdir)s/librtkaio.*')
+        r.Remove('%(libdir)s/librt.so.*', allowNoMatch = True)
+        
+        r.MakeDirs('%(essentiallibdir)s/rtkaio')
+        r.Move('%(essentiallibdir)s/librtkaio-*.so', '%(essentiallibdir)s/rtkaio/')
+
+        librtso = 'librt.so.1'
+        r.Remove('%(essentiallibdir)s/' + librtso)
+
+        r.Symlink('%(essentiallibdir)s/librt-2.12.so',  '%(essentiallibdir)s/' + librtso )
+        r.Symlink('%(essentiallibdir)s/rtkaio/librtkaio-2.12.so', '%(essentiallibdir)s/rtkaio/' + librtso )
+
