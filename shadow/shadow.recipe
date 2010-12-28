@@ -9,7 +9,7 @@ class Shadow(RPMPackageRecipe, CPackageRecipe):
     name = 'shadow'
     version = '4.1.4.2'
     rpmName = 'shadow-utils'
-    rpmRelease = '7.fc13'
+    rpmRelease = '8.fc14'
 
     buildRequires = [ 'bison:runtime', 'gettext:runtime', 'pam:devel',
                       'audit:devel',
@@ -23,6 +23,8 @@ class Shadow(RPMPackageRecipe, CPackageRecipe):
                    'shadow-4.1.4.2-leak.patch',
                    'shadow-4.1.4.2-fixes.patch',
                    'shadow-4.1.4.2-infoParentDir.patch',
+                   # broken for non selinux it seems
+                   # 'shadow-4.1.4.2-acl.patch',
                    'shadow-4.1.4.2-underflow.patch',
                    'shadow-4.1.4.2-uflg.patch'
                  ]
@@ -39,36 +41,14 @@ class Shadow(RPMPackageRecipe, CPackageRecipe):
         r.addSource('user-info.tagdescription',
                     dest='%(tagdescriptiondir)s/user-info')
 
-        # Convert manpages with different encodings to UTF-8
-        encodedManPages = [ ('EUC-JP', 'man/ja/*.*'),
-                            ('ISO_8859-2', 'man/hu/* man/pl/* man/cs/*'),
-                            ('KOI8-U', 'man/ru/*'),
-                            ('EUC-KR', 'man/ko/*.*'),
-                            ('GB2312', 'man/zh_CN/*.*'),
-                            ('BIG5', 'man/zh_TW/*.*') ]
-        for encoding, manPageGroup in encodedManPages:
-            r.Run("""
-                    for page in %s ; do
-                        if ! iconv -f UTF-8 -t UTF-8 ${page} > /dev/null 2> /dev/null ; then
-                            if iconv -f %s -t UTF-8 ${page} > /dev/null 2> /dev/null ; then
-                                iconv -f %s -t UTF-8 ${page} > ${page}.conv
-                                mv ${page}.conv ${page}
-                            fi
-                        fi
-                    done """ % (manPageGroup, encoding, encoding))
-
-
-        r.addAction('rm po/*.gmo')
-        r.addAction('rm po/stamp-po')
-
         r.Configure(' --enable-shadowgrp'
                     ' --with-audit'
                     ' --with-sha-crypt'
                     ' --with-selinux=no'
                     ' --without-libcrack'
-                    # --with-libcrypt'
                     ' --disable-shared'
-                    ' --without-libpam' )
+                    ' --without-libpam' 
+                    ' --with-group-name-max-length=32')
 
         r.Make()
         r.MakeInstall('gnulocaledir=%(destdir)s/%(datadir)s/locale'
@@ -95,20 +75,56 @@ class Shadow(RPMPackageRecipe, CPackageRecipe):
         r.Symlink('%(mandir)s/man8/useradd.8', '%(mandir)s/man8/adduser.8')
 
         # Files below are packaged in util-linux
-        r.Remove('%(bindir)s/'
-                 '{chfn,chsh,expiry,groups,login,newgrp,nologin,passwd,su,vipw}')
-        r.Remove('%(sbindir)s/{dpasswd,logoutd,mkpasswd,vipw,vigr}')
-        r.Remove('%(mandir)s/{*/,}man1/'
-                 '{chfn,chsh,expiry,groups,login,newgrp,passwd,su}.*')
-        r.Remove('%(mandir)s/{*/,}man5/'
-                 '{d_passwd,limits,login.{access,defs},passwd,porttime,suauth}.*')
-        r.Remove('%(mandir)s/{*/,}man8/{logoutd,mkpasswd,vipw,vigr,nologin}.*')
+        for x in [ '%(bindir)s/chfn',
+                   '%(bindir)s/chsh',
+                   '%(bindir)s/expiry',
+                   '%(bindir)s/groups',
+                   '%(bindir)s/login',
+                   '%(bindir)s/passwd',
+                   '%(bindir)s/su',
+                   '%(sysconfdir)s/login.access',
+                   '%(sysconfdir)s/limits',
+                   '%(sbindir)s/logoutd',
+                   '%(sbindir)s/nologin',
+                   '%(sbindir)s/chgpasswd',
+                   '%(mandir)s/man1/chfn.*',
+                   '%(mandir)s/*/man1/chfn.*',
+                   '%(mandir)s/man1/chsh.*',
+                   '%(mandir)s/*/man1/chsh.*',
+                   '%(mandir)s/man1/expiry.*',
+                   '%(mandir)s/*/man1/expiry.*',
+                   '%(mandir)s/man1/groups.*',
+                   '%(mandir)s/*/man1/groups.*',
+                   '%(mandir)s/man1/login.*',
+                   '%(mandir)s/*/man1/login.*',
+                   '%(mandir)s/man1/passwd.*',
+                   '%(mandir)s/*/man1/passwd.*',
+                   '%(mandir)s/man1/su.*',
+                   '%(mandir)s/*/man1/su.*',
+                   '%(mandir)s/man5/limits.*',
+                   '%(mandir)s/*/man5/limits.*',
+                   '%(mandir)s/man5/login.access.*',
+                   '%(mandir)s/*/man5/login.access.*',
+                   '%(mandir)s/man5/passwd.*',
+                   '%(mandir)s/*/man5/passwd.*',
+                   '%(mandir)s/man5/porttime.*',
+                   '%(mandir)s/*/man5/porttime.*',
+                   '%(mandir)s/man5/suauth.*',
+                   '%(mandir)s/*/man5/suauth.*',
+                   '%(mandir)s/man8/logoutd.*',
+                   '%(mandir)s/*/man8/logoutd.*',
+                   '%(mandir)s/man8/nologin.*',
+                   '%(mandir)s/*/man8/nologin.*',
+                   '%(mandir)s/man8/chgpasswd.*',
+                   '%(mandir)s/*/man8/chgpasswd.*',
+                   '%(mandir)s/man3/getspnam.*',
+                   '%(mandir)s/*/man3/getspnam.*']:
+            r.Remove(x)
 
-        # sg is just shadow's name for newgrp, let this dangle
-        r.DanglingSymlinks(exceptions='%(bindir)s/sg')
-        r.Requires('%(bindir)s/newgrp', '%(bindir)s/sg')
         r.UtilizeGroup('users', '%(sysconfdir)s/default/useradd')
 
+        r.SetModes('%(sbindir)s/user*', 0750)
+        r.SetModes('%(sbindir)s/group*', 0750)
 
         for req in ('%(bindir)s/id', '%(essentialbindir)s/basename',
             '/dev/null'):
