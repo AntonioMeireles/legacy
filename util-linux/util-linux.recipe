@@ -7,13 +7,14 @@
 loadSuperClass('rpmpackage')
 class Utillinux(RPMPackageRecipe,CPackageRecipe):
     name = 'util-linux'
-    version = '2.17.2'
-    rpmRelease = '5.fc13'
+    version = '2.18'
+    rpmRelease = '4.6.fc14'
     rpmName = '%(name)s-ng'
     tarballName = '%(name)s-ng-%(version)s.tar.bz2'
     rpmPatches = [ 
                    # add note about ATAPI IDE floppy to fdformat.8
                    'util-linux-ng-2.13-fdformat-man-ide.patch',
+                   # 199745 - Non-existant simpleinit(8) mentioned in ctrlaltdel(8)
                    'util-linux-ng-2.13-ctrlaltdel-man.patch',
                    # /etc/blkid.tab --> /etc/blkid/blkid.tab
                    'util-linux-ng-2.16-blkid-cachefile.patch',
@@ -21,19 +22,33 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                    'util-linux-ng-2.13-login-lastlog.patch',
                    # 231192 - ipcs is not printing correct values on pLinux
                    'util-linux-ng-2.15-ipcs-32bit.patch',
-                   # 575734 - use microsecond resolution for blkid cache entries
-                   'util-linux-ng-2.17-blkid-usec.patch',
-                   # 580296 - "rtcwake" does miss the "off" option
-                   'util-linux-ng-2.17-rtcwake-off.patch',
-                   # 588668 - F13: don't probe for RAIDs on CD-ROMs
-                   'util-linux-ng-2.17-blkid-cdrom.patch',
-                   # 543749 - After upgrade from Fedora 11, RAID-1 mdraid assembles incorrectly 
-                   # 592958 - whole disk raid members to not be identified
-                   'util-linux-ng-2.17-blkid-raid.patch',
-                   # 592061 - partx infinite loop  
-                   'util-linux-ng-2.17-partx.patch',
-        ]
-    rpmSources = [ 'nologin.c', 'nologin.8', 'util-linux-ng-60-raw.rules', 
+                   # 623685 - please extend agetty to not require a baud rate to be specified
+                   # 645640 - new "-s" parameter parsing in agetty does not work
+                   'util-linux-ng-2.18-agetty-baudrate.patch',
+                   # 598631 - shutdown, reboot, halt and C-A-D don't work
+                   'util-linux-ng-2.18-agetty-clocal.patch',
+                   # 618957 - ISO images listed in fstab are mounted twice at boot
+                   'util-linux-ng-2.17-mount-loopdev.patch',
+                   # 630340 - cfdisk cannot read default installer partitioning
+                   'util-linux-ng-2.18-cfdisk-cyl.patch',
+                   # don't truncate findmnt(1) output
+                   'util-linux-ng-2.18-libmount-optsmerge.patch',
+                   # 538551 - Dual-filesystem (ISO9660/HFS) CD-ROMs not mounted automatically
+                   'util-linux-ng-blkid-HFS.patch',
+                   # 625064 - fuse-sshfs mounts are not displayed in Nautilus
+                   'util-linux-ng-2.18-mount-subtype.patch',
+                   # 641169 - cfdisk does not accept two-character partition type
+                   'util-linux-ng-2.18-cfdisk-parttype.patch',
+                   # 563267 - Remount fails if current mount used the "context" option
+                   'util-linux-ng-2.18-mount-context.patch',
+                   # fix wipefs(8) for LUKS
+                   'util-linux-ng-2.18-blkid-offset.patch',
+                   # fix blkid cache usage
+                   'util-linux-ng-2.18-blkid-revalidate.patch',
+                   ]
+    rpmSources = [ 'nologin.c',
+                   'nologin.8',
+                   'util-linux-ng-60-raw.rules', 
                    'uuidd.init',
                    #'util-linux-ng-login.pamd',
                    #'util-linux-ng-remote.pamd',
@@ -51,7 +66,7 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                       'e2fsprogs:runtime', 'intltool:runtime', 'udev:devel',
                       'udev:runtime', 'chkconfig:runtime', 'libtool:devel',
                       'libtool:runtime',  'pkgconfig:devel', 'gtk-doc:runtime',
-                      'gtk-doc:devel', 'libxslt:runtime'
+                      'gtk-doc:devel', 'libxslt:runtime', 'utempter:devel'
                       ]
 
     def setup(r):
@@ -94,7 +109,8 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                           '--enable-raw '
                           '--enable-write '
                           '--with-audit '
-                          '--with-fsprobe=builtin '
+#                          '--with-fsprobe=builtin '
+                          '--with-utempter '
                           '--disable-makeinstall-chown '
                           )
         # note: we install to /bin and /usr/bin, so there's $bindir and $usrbindir in
@@ -102,7 +118,7 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # macros (where is prefix=/usr)
         r.Make()
         r.Run('%(cc)s %(cflags)s -o nologin nologin.c')
-        r.Run('cd sys-utils; makeinfo --number-sections ipc.texi')
+        r.Run('makeinfo --number-sections ipc.texi', dir = 'sys-utils')
         r.MakeInstall(preMake='INSTALLDIR="install -d -m 755"'
                               ' INSTALLSUID="install -m 755"'
                               ' INSTALLBIN="install -m 755"'
@@ -111,6 +127,7 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         r.Install('nologin', '%(essentialsbindir)s/', mode=0755)
         r.Install('nologin.8', '%(mandir)s/man8/', mode=0644)
         r.Symlink('raw.8', '%(mandir)s/man8/rawdevices.8')
+        r.Symlink('hwclock.8', '%(mandir)s/man8/clock.8')
         r.Symlink('%(essentialsbindir)s/clock', '%(sbindir)s/clock'),
         r.Symlink('hwclock', '%(essentialsbindir)s/clock'),
         r.Symlink('%(essentialbindir)s/kill', '%(bindir)s/kill'),
@@ -121,7 +138,9 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         r.Move('%(bindir)s/taskset', '%(essentialbindir)s/')
         r.Move('%(essentialsbindir)s/raw', '%(bindir)s/')
 
-        r.Install('util-linux-ng-60-raw.rules', '%(sysconfdir)s/udev/rules.d/60-raw.rules', mode = 0644)
+        r.Install('util-linux-ng-60-raw.rules',
+                  '%(sysconfdir)s/udev/rules.d/60-raw.rules',
+                  mode = 0644)
 
         # FIXME install tmpfs mount helper
         ## r.Install('mount.tmpfs', '%(essentialsbindir)s/mount.tmpfs', mode = 0755)
@@ -139,7 +158,9 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
 
         r.MakeDirs('%(sysconfdir)s/blkid')
         
-        r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/uuidd', '%(localstatedir)s/lib/libuuid', '%(sysconfdir)s/blkid'])
+        r.ExcludeDirectories(exceptions=['%(localstatedir)s/run/uuidd',
+                                         '%(localstatedir)s/lib/libuuid',
+                                         '%(sysconfdir)s/blkid'])
 
         r.Ownership('uuidd', 'uuidd', '%(sbindir)s/uuidd')
         r.UtilizeUser('uuidd', '%(localstatedir)s/lib/libuuid')
@@ -163,12 +184,15 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # mkcramfs link needed for anaconda:
         r.Symlink('%(essentialsbindir)s/mkfs.cramfs', '%(essentialbindir)s/mkcramfs')
 
-        r.Requires(exceptions='%(datadir)s/getopt/.*')
+        r.Remove('%(datadir)s/getopt/', recursive = True)
         r.TagSpec('shell', '%(essentialsbindir)s/nologin')
 
-        r.ComponentSpec('perl', '%(essentialbindir)s/(scriptreplay|chkdupexe)')
+        r.ComponentSpec('perl', '%(essentialbindir)s/scriptreplay')
 
         # 
+        r.Remove('%(bindir)s/cytune')
+        r.Remove('%(mandir)s/man8/cytune.*')
+
         r.PackageSpec('%(name)s', 
                       '%(sysconfdir)s/udev/rules.d/60-raw.rules',
                       '%(mandir)s/man3/uuid_is_.*')
@@ -176,11 +200,36 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # RPL-1178
         for x in ('ddate', 'ctrlaltdel',):
             r.RemoveNonPackageFiles('.*%s.*'%x)
-        for x in ('ul', 'cfdisk', 'setfdperm', 'isosize', 'minix', 'bfs',
-                  'write', 'tailf',):
-            r.PackageSpec('util-linux-extras', '.*%s.*'%x)
+        # deprecated 
+        for x in ('%(essentialsbindir)s/fsck.minix',
+                  '%(essentialsbindir)s/mkfs.{bfs,minix}',
+                  '%(essentialsbindir)s/sln',
+                  '%(bindir)s/chkdupexe',
+                  '%(bindir)s/line',
+                  '%(bindir)s/pg', 
+                  '%(bindir)s/newgrp',
+                  '%(essentialbindir)s/shutdown',
+                  '%(sbindir)s/vipw',
+                  '%(sbindir)s/vigr'):
+            r.Remove(x)
+        for x in ('man1/chkdupexe.1',
+                  'man1/line.1',
+                  'man1/pg.1',
+                  'man1/newgrp.1',
+                  'man8/fsck.minix.8',
+                  'man8/mkfs.minix.8',
+                  'man8/mkfs.bfs.8',
+                  'man8/vipw.8',
+                  'man8/vigr.8'):
+            r.Remove('%(mandir)s/' + x)
 
         # setarch as standalone package/recipe goes the way of the dodo...
         for x in ('setarch', 'linux32', 'linux64', 'i386', 'x86_64'):
             r.PackageSpec('setarch', '.*%s.*'%x)
 
+        # remove static libs
+        r.Remove('%(libdir)s/lib{uuid,blkid,mount}.a')
+
+        # HARD obsolete util-linux-extras
+        r.Create('%(datadir)s/%(name)s/obsoletes/' + 'util-linux-extras' + '/' + 'runtime',
+                 package='util-linux-extras:runtime')
