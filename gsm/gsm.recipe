@@ -10,29 +10,36 @@ class Gsm(AutoPackageRecipe):
 
     def unpack(r):
 
-        r.addArchive('http://howto-pages.org/ffmpeg/libgsm-%(version)s.tar.bz2')
-
-        r.MakeDirs((
-            '%(mandir)s/man1', '%(mandir)s/man3',
-            '%(bindir)s', '%(libdir)s', '%(includedir)s'
-        ))
-
+        # r.addArchive('http://kbs.cs.tu-berlin.de/~jutta/gsm/')
+        # canonic source looks missing
+        r.addArchive('gsm-1.0.13.tar.gz')
+        r.addPatch('gsm-makefile.patch', macros = True)
+        r.addPatch('gsm-warnings.patch')
+        r.addPatch('gsm-64bit.patch')
 
     def configure(r):
+        r.macros.optflags +=  ' -fPIC'
+        r.MakeDirs((
+                '%(mandir)s/man1',
+                '%(mandir)s/man3',
+                '%(bindir)s',
+                '%(libdir)s',
+                '%(includedir)s/gsm'
+                ))
 
-        r.Replace(
-            ('^CCFLAGS.*= ', 'CCFLAGS = -fPIC '),
-            ('^INSTALL_ROOT.*', 'INSTALL_ROOT = %(destdir)s'),
-            ('_INSTALL_BIN = .*', '_INSTALL_BIN = $(INSTALL_ROOT)/%(bindir)s'),
-            ('_INSTALL_LIB = .*', '_INSTALL_LIB = $(INSTALL_ROOT)/%(libdir)s'),
-            ('_INSTALL_INC = .*', '_INSTALL_INC = $(INSTALL_ROOT)/%(includedir)s'),
-            ('_INSTALL_MAN = .*/man/', '_INSTALL_MAN = $(INSTALL_ROOT)/%(mandir)s/'),
-            'Makefile'
-        )
+    def make(r):
+        r.Make('all')
 
-    def policy(r):
-        if Arch.x86_64:
-            r.Requires(exceptDeps=r'soname\:\ ELF64\/libgsm\.so\.1\(SysV\ x86\_64\)')
-        else:
-            r.Requires(exceptDeps=r'soname\:\ ELF32\/libgsm\.so\.1\(SysV\ x86\)')
-            
+    def makeinstall(r):
+        r.MakeInstall(' INSTALL_ROOT=%(destdir)s%(prefix)s'
+                      ' GSM_INSTALL_INC=%(destdir)s%(includedir)s/gsm'
+                      ' GSM_INSTALL_LIB=%(destdir)s%(libdir)s')
+        r.macros.soname = '1.0.12'
+        r.Copy('lib/libgsm.so.%(soname)s', '%(libdir)s/')
+        r.Symlink('libgsm.so.%(soname)s', '%(libdir)s/libgsm.so.1')
+        r.Symlink('libgsm.so.%(soname)s', '%(libdir)s/libgsm.so')
+
+        # some apps look for this in /usr/include
+        r.Symlink('gsm/gsm.h', '%(includedir)s/')
+
+        r.Remove('%(libdir)s/lib*.a')
