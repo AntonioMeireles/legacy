@@ -1,40 +1,44 @@
 #
-# Copyright (c) 2004-2007 rPath, Inc.
+# Copyright (c) 2011 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Qemu(AutoPackageRecipe):
     name = 'qemu'
-    version = '0.9.0'
+    version = '0.13.0'
 
-    buildRequires = [ 'SDL:devel', 'zlib:devel' ]
+    buildRequires = [
+        'curl:devel',
+        'e2fsprogs:devel',
+        'libX11:devel',
+        'ncurses:devel',
+        'openssl:devel',
+        'SDL:devel',
+        'zlib:devel',
+        ]
 
     def unpack(r):
-        r.addArchive('http://fabrice.bellard.free.fr/qemu/')
-        r.addPatch('http://www.kju-app.org/proj/browser/trunk/patches/qemu-0.9.0-gcc4.patch?format=raw')
-        r.Create('kqemu/Makefile',
-                 contents="#Just a dummy file to get kqemu support to be built")
-        r.addSource('kqemu.h', dir='kqemu')
-        # On x86 only, the compiler has trouble optimizing -O1 or higher
-        # http://gcc.gnu.org/ml/gcc-bugs/2007-04/msg02285.html
-        if Arch.x86:
-            r.macros.optflags = '-O0'
+        r.addArchive('http://wiki.qemu.org/download/')
 
     def configure(r):
-        extraConfig = ('--enable-kqemu --datadir=%(datadir)s/%(name)s'
-                       ' --interp-prefix=%(datadir)s/%(name)s/%%m'
-                       ' --disable-gcc-check')
-        r.Configure(extraConfig)
+        r.ManualConfigure(
+            '--prefix=%(prefix)s '
+            '--bindir=%(bindir)s '
+            '--sysconfdir=%(sysconfdir)s '
+            '--datadir=%(datadir)s/%(name)s '
+            '--docdir=%(thisdocdir)s '
+            '--interp-prefix=%(datadir)s/%(name)s/%%m '
+            )
 
     def makeinstall(r):
         r.MakePathsInstall('datadir=%(destdir)s/%(datadir)s/%(name)s'
                            ' docdir=%(destdir)s%(thisdocdir)s')
 
     def policy(r):
-        # qemu ships some ELF files that are the same across
-        # all architectures, so placing them in /usr/share/qemu is fine
-        r.ImproperlyShared(exceptions='%(datadir)s/%(name)s/.*elf')
-        r.Flavor(exceptions='%(datadir)s/%(name)s/.*elf')
-        r.ImproperlyShared(exceptions='%(datadir)s/%(name)s/openbios-.*')
-        r.Flavor(exceptions='%(datadir)s/%(name)s/openbios-.*')
+        # qemu-img package contains just the image handling tools
+        r.PackageSpec('%(name)s-img',
+            r'%(bindir)s/qemu-(img|io)',
+            r'%(mandir)s/man1/qemu-img.*',
+            )
+        r.Requires('%(bindir)s/qemu-img', '%(bindir)s/qemu')
