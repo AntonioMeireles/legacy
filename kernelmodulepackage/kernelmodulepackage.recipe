@@ -52,18 +52,12 @@ class KernelModulePackageRecipe(CPackageRecipe):
         Pick a kernel to build against. The algorithm is as follows:
 
         * If the kver macro is already set, use that.
-        * If bootloader.conf exists, we are likely building with cvc
-          on an actual system. Use the running kernel, or die if it's
-          not present.
-        * If bootloader.conf does not exist, we are probably chrooted
-          (e.g. building in rMake). If a single kernel is in
-          /lib/modules, use that, otherwise die.
+        * If in loading stages of rMake build (r._lightInstance) return
+        * If only one build-tree, use that one
+        * If more than one build-tree, use `uname -r` to determine
         """
         if 'kver' in r.macros:
             return
-        # in rbuild/rmake land, the recipe code evaluates 3 times but we should
-        # only attempt to discover build-tree in last step (build).
-        # lightInstance is False during 3rd stage.
         elif r._lightInstance:
             # Not building
             r.macros.kver = ''
@@ -78,7 +72,6 @@ class KernelModulePackageRecipe(CPackageRecipe):
             kver = os.uname()[2]
             if not os.path.exists(testPath % kver):
                 raise RuntimeError("No build tree for running kernel %r" % kver)
-            #raise RuntimeError("Multiple kernels installed; please set the kver macro")
         kver = buildTrees[0].split('/')[3]
         log.info('Selected kver %s', kver)
         r.macros.kver = kver
