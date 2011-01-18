@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2005-2009 rPath, Inc.
+# Copyright (c) 2005-2010 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -8,40 +8,90 @@ loadSuperClass('kernelpackage')
 class Kernel(KernelPackageRecipe):
 
     name = 'kernel'
-    version = '2.6.29.6'
+    rpmVersion = '2.6.32'
+    rpmRelease = '71.7.1.el6'
+    version = rpmVersion + '_' + rpmRelease
+    isRHEL = True
+
+    buildRequires = [ 'rpm:runtime' ]
+
+    configs = [
+        ('x86', (), (
+            {},
+        )),
+        ('x86', ('i586',), (
+            {},
+            {'smp':True}
+        )),
+        ('x86', ('i686',), (
+            {},
+            {'smp':True},
+            {'smp':True, 'pae':True},
+        )),
+        ('x86_64', (), (
+            {},
+            {'smp':True},
+        )),
+    ]
+
+    def setMacros(r):
+        KernelPackageRecipe.setMacros(r)
+        r.macros.rpmRelease = r.rpmRelease
+        r.macros.rpmVersion = r.rpmVersion
+        if Arch.x86:
+            r.macros.variant = 'i386'
+        else:
+            r.macros.variant = 'x86_64'
+        # Make sure that xen and domU are only "preferred", not "required"
+        if Use.xen and Use.domU and not Use.dom0:
+            Use.xen.setRequired(False)
+            Use.domU.setRequired(False)
+        if not Use.xen:
+            Use.domU._set(False)
+            Use.dom0._set(False)
+            if Use.domU: pass
+            if Use.dom0: pass
+        if Use.vmware:
+            Use.vmware.setRequired(False)
+        else:
+            Use.vmware._setUsed(False)
+
+    def addNonInteractiveConfig(r):
+        pass
+
+    def unpackBase(r):
+        r.addSource('rpmmacros', macros=True)
+        r.addSource('ftp://ftp.redhat.com/redhat/linux/enterprise/6Server/en/os/SRPMS/%(name)s-%(rpmVersion)s-%(rpmRelease)s.src.rpm',
+                    apply='rpm -i --nodeps --macros /usr/lib/rpm/macros:rpmmacros '
+                          '--dbpath %(builddir)s/db %(name)s-%(rpmVersion)s-%(rpmRelease)s.src.rpm')
+        r.addAction("sed -i -e 's/define signmodules 1/define signmodules 0/' %(name)s.spec", dir='../SPECS')
+        r.addAction("sed -i -e 's/define fancy_debuginfo 1/define fancy_debuginfo 0/' %(name)s.spec", dir='../SPECS')
+        r.addAction('rpmbuild -bp %(name)s.spec --nodeps --macros /usr/lib/rpm/macros:../%(name)s-%(version)s/rpmmacros', dir='../SPECS' )
+        r.addAction('mv ../BUILD/kernel-%(rpmVersion)s-%(rpmRelease)s/linux-%(rpmVersion)s-%(rpmRelease)s.%(variant)s/* .')
+
+    def createLocalVersion(r):
+        r.Create('localversion.rpl', contents='-%(rpmRelease)s%(localversion)s')
 
     def unpack(r):
         # VMware support
         r.addPatch('vmware_mptbase_workaround.patch')
-        r.macros.ovmtoolsver = '2009.07.22-179896'
-        r.buildvmmodules = not Use.xen
+        r.buildvmmodules = True
+        r.macros.ovmtoolsver = '2010.12.19-339835'
         r.addArchive('mirror://sourceforge/open-vm-tools/'
                      'open-vm-tools-%(ovmtoolsver)s.tar.gz',
-                     dir='linux-%(archive_version)s',
+                     dir='kernel-%s' % r.macros.archive_version.replace('-','_'),
                      use=r.buildvmmodules)
-        r.addPatch('linux-2.6-ata-ahci-add-ids-for-ibex-peak-ahci-controllers.patch') # RPL-3154
-        # Security updates
-        r.addPatch('CVE-2009-1895.patch')
-        r.addPatch('no-delete-null-pointer-checks.patch')
-        r.addPatch('CVE-2009-2962.patch')
-        r.addPatch('http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=bbf31bf18d34caa87dd01f08bf713635593697f2') # RPL-3156 CVE-2009-1298
-        r.addPatch('CVE-2009-3288.patch') # RPL-3196
-        r.addPatch('165e5c818c62d7315229fef15c06ed937bd6d04a.patch') # RPL-3197
-        r.addPatch('9f557cd8073104b39528794d44e129331ded649f.patch') # RPL-3198
-        r.addPatch('CVE-2010-3081.patch') # RPL-3243
 
     def build(r):
         # Build VMware kernel modules
         if r.buildvmmodules:
-            r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
-            for m in ('drivers/misc/vmci',
-                      'drivers/misc/vmmemctl',
-                      'drivers/misc/vmsync',
-                      'drivers/net/vmxnet',
-                      'drivers/net/vmxnet3',
-                      'drivers/scsi/pvscsi',
-                      'fs/vmblock',
-                      'fs/vmhgfs'):
+            r.macros.kmoddir = '/lib/modules/%(kver)s/kernel'
+            for m in ('vmblock',
+                      'vmci',
+                      'vmhgfs',
+                      'vmsync',
+                      'vmxnet',
+                      'vsock'):
                 module = os.path.basename(m)
                 modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
                 r.Run('make -C %(builddir)s SUBDIRS=$PWD SRCROOT=$PWD/.'
@@ -51,5 +101,6 @@ class Kernel(KernelPackageRecipe):
                       ' modules',
                       dir=modsrc)
                 kmod = module + '.ko'
-                r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod,
+                r.Install(modsrc + kmod, '%(kmoddir)s/extra/open-vm-tools/' + m + '/' + kmod,
                           package=':vmware')
+
