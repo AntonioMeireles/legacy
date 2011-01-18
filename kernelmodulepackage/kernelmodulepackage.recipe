@@ -61,26 +61,25 @@ class KernelModulePackageRecipe(CPackageRecipe):
         """
         if 'kver' in r.macros:
             return
+        # in rbuild/rmake land, the recipe code evaluates 3 times but we should
+        # only attempt to discover build-tree in last step (build).
+        # lightInstance is False during 3rd stage.
         elif r._lightInstance:
             # Not building
             r.macros.kver = ''
             return
 
         testPath = '/lib/modules/%s/build/Makefile'
-        if (os.path.exists('/boot/grub/grub.conf')
-                or os.path.exists('/boot/extlinux/extlinux.conf')):
-            # Local system - use running kernel
+        # the dep chain for mkinitrd:runtime now (1/18/10) includes extlinux.
+        buildTrees = glob.glob(testPath % '*')
+        if len(buildTrees) == 0:
+            raise RuntimeError("No kernel build tree installed")
+        elif len(buildTrees) > 1:
             kver = os.uname()[2]
             if not os.path.exists(testPath % kver):
                 raise RuntimeError("No build tree for running kernel %r" % kver)
-        else:
-            # Chrooted - use the only kernel
-            buildTrees = glob.glob(testPath % '*')
-            if len(buildTrees) == 0:
-                raise RuntimeError("No kernel build tree installed")
-            elif len(buildTrees) > 1:
-                raise RuntimeError("Multiple kernels installed; please set the kver macro")
-            kver = buildTrees[0].split('/')[3]
+            #raise RuntimeError("Multiple kernels installed; please set the kver macro")
+        kver = buildTrees[0].split('/')[3]
         log.info('Selected kver %s', kver)
         r.macros.kver = kver
 
