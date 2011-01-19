@@ -6,20 +6,32 @@
 
 class Libproxy(AutoPackageRecipe):
     name = 'libproxy'
-    version = '0.2.3'
+    version = '0.4.6'
  
-    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'WebKit:devel', 'atk:devel', 'cairo:devel', 'dbus:devel', 'expat:devel', 'fontconfig:devel', 'freetype:devel', 'glib:devel', 'gtk:devel', 'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXmu:devel', 'libXrender:devel', 'libXt:devel', 'libpng:devel', 'libxcb:devel', 'pango:devel', 'pixman:devel', 'pkgconfig:devel', 'python:bin', 'xcb-util:devel', 'xulrunner:devel', 'zlib:devel', 'gnome-common:devel', 'gnome-common:runtime', 'autoconf:runtime', 'libtool:devel', 'libtool:runtime', 'gettext:devel', 'gettext:runtime', 'NetworkManager:devel' ]
+    buildRequires = [ 'GConf:devel', 'ORBit2:devel', 'WebKit:devel', 'atk:devel', 'cairo:devel', 'dbus:devel', 'expat:devel', 'fontconfig:devel', 'freetype:devel', 'glib:devel', 'gtk:devel', 'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXau:devel', 'libXdmcp:devel', 'libXext:devel', 'libXmu:devel', 'libXrender:devel', 'libXt:devel', 'libpng:devel', 'libxcb:devel', 'pango:devel', 'pixman:devel', 'pkgconfig:devel', 'python:bin', 'xcb-util:devel', 'xulrunner:devel', 'zlib:devel', 'gnome-common:devel', 'gnome-common:runtime', 'autoconf:runtime', 'libtool:devel', 'libtool:runtime', 'gettext:devel', 'gettext:runtime', 'NetworkManager:devel', 'cmake:runtime', 'automoc:runtime', 'bzr:runtime', 'cvs:runtime', 'gcc-c++:runtime', 'git:runtime', 'kdelibs:config', 'kdelibs:devel', 'libXScrnSaver:devel', 'libXcomposite:devel', 'libXcursor:devel', 'libXdamage:devel', 'libXfixes:devel', 'libXi:devel', 'libXinerama:devel', 'libXpm:devel', 'libXrandr:devel', 'libXtst:devel', 'libXv:devel', 'libXxf86misc:devel', 'libmodman:devel', 'libstdc++:devel', 'libxkbfile:devel', 'mercurial:runtime', 'openssh:runtime', 'openssl:devel', 'perl:devel', 'phonon:devel', 'python:devel', 'qt4-core:devellib', 'qt4:devel', 'subversion:runtime' ]
  
-    def unpack(r):
+    def setup(r):
         r.addArchive('http://libproxy.googlecode.com/files/')
-        r.addPatch('dbus-fix.patch')
-        r.Run('autoreconf')
 
-    def configure(r):
-        r.Configure(' --with-file --with-gnome --with-gnome --with-webkit --with-mozjs --with-networkmanager --with-python')
+        r.Replace('@PROJECT_VERSION@','%(version)s',
+                  'libproxy/libproxy-1.0.pc.in')
 
-    def make(r):
-        r.Make('LIBTOOL=%(bindir)s/libtool')
+        r.CMake('-DLIBEXEC_INSTALL_DIR=%(libexecdir)s '
+                # XXX find why line bellow needed
+                '-DCMAKE_MODULE_PATH="%(datadir)s/apps/cmake/modules" '
 
-    def makeinstall(r):
-        r.MakeInstall('LIBTOOL=%(bindir)s/libtool')
+                '-DMODULE_INSTALL_DIR=%(libdir)s/%(name)s/%(version)s/modules '
+                '-DCMAKE_CXX_FLAGS="%(cxxflags)s" '
+                '-DCMAKE_C_FLAGS="%(cflags)s"' 
+                '-DCMAKE_SKIP_RPATH=TRUE '
+                '-DCMAKE_BUILD_TYPE=None '
+                '-DWITH_PERL=OFF ', objDir='build')
+        r.Make(dir='build')
+        r.MakeInstall(dir='build')
+
+        # XXX fixme
+        # CMAKE_SKIP_RPATH=TRUE doesn't work in all cases
+        if Arch.x86_64:
+            r.Requires(exceptDeps=r'soname\:\ ELF64\/usr\/lib64\/xulrunner\-sdk\-1\.9\.2\/lib\/libmozjs\.so\(SysV\ x86\_64\)')
+        else:
+            r.Requires(exceptDeps=r'soname\:\ ELF32\/usr\/lib\/xulrunner\-sdk\-1\.9\.2\/lib\/libmozjs\.so\(SysV\ x86\)')
