@@ -1,0 +1,984 @@
+diff -up gwibber-894bzr/gwibber/microblog/brightkite.py.kitchen gwibber-894bzr/gwibber/microblog/brightkite.py
+--- gwibber-894bzr/gwibber/microblog/brightkite.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/brightkite.py	2010-10-13 15:13:02.791909001 -0400
+@@ -8,6 +8,7 @@ SegPhault (Ryan Paul) - 10/19/2008
+ from . import support
+ import urllib2, urllib, base64, re, simplejson
+ from xml.dom import minidom
++from kitchen.text.converters import to_unicode
+ 
+ PROTOCOL_INFO = {
+   "name": "BrightKite",
+@@ -34,62 +35,62 @@ class Message:
+   def __init__(self, client, data):
+     self.client = client
+     self.account = client.account
+-    self.service = client.account["service"]
+-    self.username = client.account["username"]
++    self.service = to_unicode(client.account["service"])
++    self.username = to_unicode(client.account["username"])
+ 
+-    self.sender = data["creator"]["fullname"]
+-    self.sender_nick = data["creator"]["login"]
+-    self.sender_id = data["creator"]["login"]
+-    self.image = data["creator"]["small_avatar_url"]
++    self.sender = to_unicode(data["creator"]["fullname"])
++    self.sender_nick = to_unicode(data["creator"]["login"])
++    self.sender_id = to_unicode(data["creator"]["login"])
++    self.image = to_unicode(data["creator"]["small_avatar_url"])
+     
+     self.time = support.parse_time(data["created_at"])
+-    self.text = data["body"] or ""
+-    self.bgcolor = "message_color"
+-    self.id = data["id"]
++    self.text = to_unicode(data["body"]) or u""
++    self.bgcolor = u"message_color"
++    self.id = to_unicode(data["id"])
+     
+-    self.url = "http://brightkite.com/objects/%s" % data["id"]
+-    self.profile_url = "http://brightkite.com/people/%s" % self.sender_nick
++    self.url = to_unicode("http://brightkite.com/objects/%s" % data["id"])
++    self.profile_url = to_unicode("http://brightkite.com/people/%s" % self.sender_nick)
+     
+-    self.html_string = '<span class="text">%s</span>' % \
++    self.html_string = to_unicode('<span class="text">%s</span>' % \
+       NICK_PARSE.sub('@<a class="inlinenick" href="http://brightkite.com/people/\\1">\\1</a>',
+-        support.linkify(self.text))
++        support.linkify(self.text)))
+     
+     self.is_reply = ("@%s" % self.username) in self.text
+     self.can_thread = data["comments_count"] > 0
+ 
+     # Geolocation
+-    self.location_lon = data["place"]["longitude"]
+-    self.location_lat = data["place"]["latitude"]
+-    self.location_id = data["place"]["id"]
+-    self.location_name = data["place"]["name"]
+-    self.location_fullname = data["place"]["display_location"]
++    self.location_lon = to_unicode(data["place"]["longitude"])
++    self.location_lat = to_unicode(data["place"]["latitude"])
++    self.location_id = to_unicode(data["place"]["id"])
++    self.location_name = to_unicode(data["place"]["name"])
++    self.location_fullname = to_unicode(data["place"]["display_location"])
+     self.geo_position = (self.location_lat, self.location_lon)
+ 
+     if "photo" in data:
+-      self.thumbnails = [{"src": data["photo"], "href": data["photo"]}]
++      self.thumbnails = [{"src": to_unicode(data["photo"]), "href": to_unicode(data["photo"])}]
+ 
+ class Comment:
+   def __init__(self, client, data):
+     self.client = client
+     self.account = client.account
+-    self.service = client.account["service"]
+-    self.username = client.account["username"]
++    self.service = to_unicode(client.account["service"])
++    self.username = to_unicode(client.account["username"])
+ 
+-    self.sender = data["user"]["fullname"]
+-    self.sender_nick = data["user"]["login"]
+-    self.sender_id = data["user"]["login"]
+-    self.image = data["user"]["small_avatar_url"]
++    self.sender = to_unicode(data["user"]["fullname"])
++    self.sender_nick = to_unicode(data["user"]["login"])
++    self.sender_id = to_unicode(data["user"]["login"])
++    self.image = to_unicode(data["user"]["small_avatar_url"])
+     
+     self.time = support.parse_time(data["created_at"])
+-    self.text = data["comment"]
+-    self.bgcolor = "message_color"
++    self.text = to_unicode(data["comment"])
++    self.bgcolor = u"message_color"
+     
+-    self.url = "http://brightkite.com/objects/%s" % data["place_object"]["id"]
+-    self.profile_url = "http://brightkite.com/people/%s" % self.sender_nick
++    self.url = to_unicode("http://brightkite.com/objects/%s" % data["place_object"]["id"])
++    self.profile_url = to_unicode("http://brightkite.com/people/%s" % self.sender_nick)
+     
+-    self.html_string = '<span class="text">%s</span>' % \
++    self.html_string = to_unicode('<span class="text">%s</span>' % \
+       NICK_PARSE.sub('@<a class="inlinenick" href="http://brightkite.com/people/\\1">\\1</a>',
+-        support.linkify(self.text))
++        support.linkify(self.text)))
+     
+     self.is_reply = ("@%s" % self.username) in self.text
+ 
+@@ -97,26 +98,26 @@ class FriendPosition:
+   def __init__(self, client, data):
+     self.client = client
+     self.account = client.account
+-    self.service = client.account["service"]
+-    self.username = client.account["username"]
+-    self.sender = data["fullname"]
+-    self.sender_nick = data["login"]
++    self.service = to_unicode(client.account["service"])
++    self.username = to_unicode(client.account["username"])
++    self.sender = to_unicode(data["fullname"])
++    self.sender_nick = to_unicode(data["login"])
+     self.sender_id = self.sender_nick
+     self.time = support.parse_time(data["last_checked_in"])
+-    self.text = data["place"]["display_location"]
+-    self.image = data["small_avatar_url"]
+-    self.image_small = data["smaller_avatar_url"]
+-    self.bgcolor = "message_color"
+-    self.url = "http://brightkite.com" # TODO
+-    self.profile_url = "http://brightkite.com" # TODO
++    self.text = to_unicode(data["place"]["display_location"])
++    self.image = to_unicode(data["small_avatar_url"])
++    self.image_small = to_unicode(data["smaller_avatar_url"])
++    self.bgcolor = u"message_color"
++    self.url = u"http://brightkite.com" # TODO
++    self.profile_url = u"http://brightkite.com" # TODO
+     self.is_reply = False
+ 
+     # Geolocation
+-    self.location_lon = data["place"]["longitude"]
+-    self.location_lat = data["place"]["latitude"]
+-    self.location_id = data["place"]["id"]
+-    self.location_name = data["place"]["name"]
+-    self.location_fullname = data["place"]["display_location"]
++    self.location_lon = to_unicode(data["place"]["longitude"])
++    self.location_lat = to_unicode(data["place"]["latitude"])
++    self.location_id = to_unicode(data["place"]["id"])
++    self.location_name = to_unicode(data["place"]["name"])
++    self.location_fullname = to_unicode(data["place"]["display_location"])
+ 
+ class Client:
+   def __init__(self, acct):
+diff -up gwibber-894bzr/gwibber/microblog/buzz.py.kitchen gwibber-894bzr/gwibber/microblog/buzz.py
+--- gwibber-894bzr/gwibber/microblog/buzz.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/buzz.py	2010-10-13 15:13:02.792909001 -0400
+@@ -1,5 +1,6 @@
+ import network, util, json
+ from oauth import oauth
++from kitchen.text.converters import to_unicode
+ 
+ PROTOCOL_INFO = {
+   "name": "Buzz",
+@@ -41,32 +42,32 @@ class Client:
+ 
+   def _actor(self, user):
+     return {
+-        "name": user["name"],
+-        "nick": user["id"],
+-        "id": user["id"],
+-        "image": user.get("thumbnailUrl", "https://mail.google.com/mail/images/blue_ghost.jpg?sz=45"),
+-        "url": user.get("profileUrl", None),
++        "name": to_unicode(user["name"]),
++        "nick": to_unicode(user["id"]),
++        "id": to_unicode(user["id"]),
++        "image": to_unicode(user.get("thumbnailUrl", "https://mail.google.com/mail/images/blue_ghost.jpg?sz=45")),
++        "url": to_unicode(user.get("profileUrl", None)),
+         "is_me": user["id"] == self.account["user_id"],
+     }
+ 
+   def _message(self, data):
+     m = {
+         "mid": data["id"],
+-        "service": "buzz",
+-        "account": self.account["id"],
++        "service": u"buzz",
++        "account": to_unicode(self.account["id"]),
+         "time": util.parsetime(data["published"]),
+-        "url": data.get("links", {})["alternate"][0].get("href", ""),
+-        "source": data.get("source", {}).get("title", None),
++        "url": to_unicode(data.get("links", {})["alternate"][0].get("href", "")),
++        "source": to_unicode(data.get("source", {}).get("title", None)),
+         "sender": self._actor(data["actor"]),
+     }
+ 
+-    m["text"] = data["object"]["content"]
++    m["text"] = to_unicode(data["object"]["content"])
+ 
+     if data.get("source", {}).get("title", 0) == "Twitter":
+       m["text"] = m["text"].split(">:", 1)[1].strip()
+     
+-    m["html"] = m["text"]
+-    m["content"] = m["text"]
++    m["html"] = to_unicode(m["text"])
++    m["content"] = to_unicode(m["text"])
+ 
+     if data.get("geocode", 0):
+       m["location"] = {
+@@ -75,24 +76,24 @@ class Client:
+       }
+ 
+       if data.get("address", 0):
+-        m["location"]["address"] = data["address"]
++        m["location"]["address"] = to_unicode(data["address"])
+ 
+     m["images"] = []
+     for a in data["object"].get("attachments", []):
+       if a["type"] == "photo":
+         m["images"].append({
+-          "src": a["links"]["preview"][0]["href"],
+-          "url": a["links"]["enclosure"][0]["href"]
++          "src": to_unicode(a["links"]["preview"][0]["href"]),
++          "url": to_unicode(a["links"]["enclosure"][0]["href"])
+         })
+ 
+       if a["type"] == "video":
+         m["images"].append({
+-          "src": a["links"]["preview"][0]["href"],
+-          "url": a["links"]["alternate"][0]["href"],
++          "src": to_unicode(a["links"]["preview"][0]["href"]),
++          "url": to_unicode(a["links"]["alternate"][0]["href"]),
+         })
+ 
+       if a["type"] == "article":
+-        m["content"] += "<p><b><a href=\"%s\">%s</a></b></p>" % (a["links"]["alternate"][0]["href"], a["title"])
++        m["content"] += to_unicode("<p><b><a href=\"%s\">%s</a></b></p>" % (a["links"]["alternate"][0]["href"], a["title"]))
+ 
+     return m
+ 
+diff -up gwibber-894bzr/gwibber/microblog/digg.py.kitchen gwibber-894bzr/gwibber/microblog/digg.py
+--- gwibber-894bzr/gwibber/microblog/digg.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/digg.py	2010-10-13 15:13:02.794909001 -0400
+@@ -1,5 +1,6 @@
+ import network, util
+ from gettext import lgettext as _
++from kitchen.text.converters import to_unicode
+ 
+ PROTOCOL_INFO = {
+   "name": "Digg",
+@@ -32,33 +33,33 @@ class Client:
+   def _story(self, data):
+     m = {}; 
+     m["mid"] = str(data["id"])
+-    m["service"] = "digg"
+-    m["account"] = self.account["id"]
++    m["service"] = u"digg"
++    m["account"] = to_unicode(self.account["id"])
+     m["time"] = data["submit_date"]
+ 
+-    m["text"] = data["title"] + "\n" + data["description"]
+-    m["content"] = "<b>%(title)s</b><br />%(description)s" % data
+-    m["html"] = "<b>%(title)s</b><br />%(description)s" % data
++    m["text"] = to_unicode(data["title"]) + u"\n" + to_unicode(data["description"])
++    m["content"] = to_unicode("<b>%(title)s</b><br />%(description)s" % data)
++    m["html"] = to_unicode("<b>%(title)s</b><br />%(description)s" % data)
+     user = data["friends"]["users"][0]
+ 
+     m["sender"] = {}
+-    m["sender"]["nick"] = user["name"]
+-    m["sender"]["id"] = user["name"]
+-    m["sender"]["image"] = user["icon"]
+-    m["sender"]["url"] = "http://digg.com/users/%s" % user["name"]
++    m["sender"]["nick"] = to_unicode(user["name"])
++    m["sender"]["id"] = to_unicode(user["name"])
++    m["sender"]["image"] = to_unicode(user["icon"])
++    m["sender"]["url"] = to_unicode("http://digg.com/users/%s" % user["name"])
+     m["sender"]["is_me"] = user["name"] == self.account["username"]
+-    if user.get("fullname", 0): m["sender"]["name"] = user["fullname"]
++    if user.get("fullname", 0): m["sender"]["name"] = to_unicode(user["fullname"])
+     
+-    m["url"] = data["link"]
++    m["url"] = to_unicode(data["link"])
+     m["likes"] = {"count": data["diggs"]}
+ 
+-    m["html"] = util.linkify(m["text"],
++    m["html"] = to_unicode(util.linkify(m["text"],
+       ((util.PARSE_HASH, '#<a class="hash" href="%s#search?q=\\1">\\1</a>' % URL_PREFIX),
+-      (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX)))
++      (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX))))
+ 
+-    m["content"] = util.linkify(m["text"],
++    m["content"] = to_unicode(util.linkify(m["text"],
+       ((util.PARSE_HASH, '#<a class="hash" href="gwibber:/tag?acct=%s&query=\\1">\\1</a>' % m["account"]),
+-      (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"])))
++      (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"]))))
+ 
+     return m
+ 
+diff -up gwibber-894bzr/gwibber/microblog/dispatcher.py.kitchen gwibber-894bzr/gwibber/microblog/dispatcher.py
+--- gwibber-894bzr/gwibber/microblog/dispatcher.py.kitchen	2010-10-13 15:13:02.741909001 -0400
++++ gwibber-894bzr/gwibber/microblog/dispatcher.py	2010-10-13 15:14:31.667909005 -0400
+@@ -8,6 +8,7 @@ import qaiku, friendfeed, digg, buzz, pi
+ import foursquare, gowalla
+ import sqlite3, mx.DateTime, re, uuid
+ import urlshorter, storage, network, util, config
++from kitchen.text.converters import to_unicode
+ 
+ from util import log
+ from util import resources
+@@ -86,9 +87,9 @@ def perform_operation((account, opname, 
+     if message_data is not None:
+       for m in message_data:
+         if isinstance(m, dict) and m.has_key("mid"):
+-          m["id"] = uuid.uuid1().hex
+-          m["operation"] = opname
+-          m["stream"] = stream
++          m["id"] = to_unicode(uuid.uuid1().hex)
++          m["operation"] = to_unicode(opname)
++          m["stream"] = to_unicode(stream)
+           m["transient"] = transient
+           m["rtl"] = util.isRTL(re.sub(text_cleaner, "", m["text"].decode('utf-8')))
+ 
+diff -up gwibber-894bzr/gwibber/microblog/facebook.py.kitchen gwibber-894bzr/gwibber/microblog/facebook.py
+--- gwibber-894bzr/gwibber/microblog/facebook.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/facebook.py	2010-10-13 15:13:02.798909001 -0400
+@@ -6,6 +6,7 @@ import hashlib, mx.DateTime, time
+ from os.path import join, getmtime, exists
+ from gettext import lgettext as _
+ from util.const import *
++from kitchen.text.converters import to_unicode
+ # Try to import * from custom, install custom.py to include packaging 
+ # customizations like distro API keys, etc
+ try:
+@@ -91,44 +92,44 @@ class Client:
+ 
+   def _sender(self, user):
+     sender = {
+-      "nick": user.get("username", str(user.get("id", user.get("uid", "")))),
+-      "name": user["name"],
++      "nick": to_unicode(user.get("username", str(user.get("id", user.get("uid", ""))))),
++      "name": to_unicode(user["name"]),
+       "id": str(user.get("id", user.get("uid", ''))),
+       "is_me": str(user.get("id", user.get("uid", ''))) == self.user_id,
+-      "url": user.get("url", user.get("profile_url", "")),
+-      "image": user["pic_square"],
++      "url": to_unicode(user.get("url", user.get("profile_url", ""))),
++      "image": to_unicode(user["pic_square"]),
+     }
+     
+     if user.has_key("username"):
+-      sender["nick"] = user["username"]
++      sender["nick"] = to_unicode(user["username"])
+     elif sender["url"] and not "?" in sender["url"]:
+       sender["nick"] = sender["url"].rsplit("/", 1)[-1]
+     elif user.has_key("id"):
+-      sender["nick"] = str(user["id"])
++      sender["nick"] = to_unicode(user["id"])
+     else:
+-      sender["nick"] = str(user.get("uid", ""))
++      sender["nick"] = to_unicode(user.get("uid", ""))
+     return sender
+   
+   def _message(self, data, profiles):
+     m = {}
+-    m["mid"] = str(data["post_id"])
+-    m["service"] = "facebook"
++    m["mid"] = to_unicode(data["post_id"])
++    m["service"] = u"facebook"
+     m["account"] = self.account["id"]
+     m["time"] = int(mx.DateTime.DateTimeFrom(int(data.get("updated_time", data["created_time"]))).gmtime())
+-    m["url"] = data["permalink"]
++    m["url"] = to_unicode(data["permalink"])
+     m["to_me"] = ("@%s" % self.account["username"]) in data["message"]
+ 
+     if data.get("attribution", 0):
+-      m["source"] = util.strip_urls(data["attribution"]).replace("via ", "")
++      m["source"] = to_unicode(util.strip_urls(data["attribution"]).replace("via ", ""))
+     
+     if data.get("message", "").strip():
+-      m["text"] = data["message"]
+-      m["html"] = util.linkify(data["message"])
+-      m["content"] = m["html"]
++      m["text"] = to_unicode(data["message"])
++      m["html"] = to_unicode(util.linkify(data["message"]))
++      m["content"] = to_unicode(m["html"])
+     else:
+-      m["text"] = ""
+-      m["html"] = ""
+-      m["content"] = ""
++      m["text"] = u""
++      m["html"] = u""
++      m["content"] = u""
+ 
+     if data.get("actor_id", 0) in profiles:
+       m["sender"] = self._sender(profiles[data["actor_id"]])
+@@ -139,8 +140,8 @@ class Client:
+ 
+     if data.get("likes", {}).get("count", None):
+       m["likes"] = {
+-        "count": data["likes"]["count"],
+-        "url": data["likes"]["href"],
++        "count": to_unicode(data["likes"]["count"]),
++        "url": to_unicode(data["likes"]["href"]),
+       }
+ 
+     if data.get("comments", 0):
+@@ -148,43 +149,43 @@ class Client:
+       for item in data["comments"]["comment_list"]:
+         if item["fromid"] in profiles:
+           m["comments"].append({
+-            "text": item["text"],
++            "text": to_unicode(item["text"]),
+             "time": int(mx.DateTime.DateTimeFrom(int(item["time"])).gmtime()),
+             "sender": self._sender(profiles[item["fromid"]]),
+           })
+ 
+     if data.get("attachment", 0):
+       if data["attachment"].get("name", 0):
+-        m["content"] += "<p><b>%s</b></p>" % data["attachment"]["name"]
++        m["content"] += to_unicode("<p><b>%s</b></p>" % data["attachment"]["name"])
+ 
+       if data["attachment"].get("description", 0):
+-        m["content"] += "<p>%s</p>" % data["attachment"]["description"]
++        m["content"] += to_unicode("<p>%s</p>" % data["attachment"]["description"])
+ 
+       m["images"] = []
+       for a in data["attachment"].get("media", []):
+         if a["type"] in ["photo", "video", "link"]:
+           if a.get("src", 0):
+             if a["src"].startswith("/"):
+-              a["src"] = "http://facebook.com" + a["src"]
+-            m["images"].append({"src": a["src"], "url": a["href"]})
++              a["src"] = u"http://facebook.com" + to_unicode(a["src"])
++            m["images"].append({"src": a["src"], "url": to_unicode(a["href"])})
+ 
+     return m
+ 
+   def _comment(self, data, profiles):
+     user = profiles[int(data["fromid"])]
+     m = {
+-      "mid": str(data["id"]),
+-      "service": "facebook",
++      "mid": to_unicode(data["id"]),
++      "service": u"facebook",
+       "account": self.account["id"],
+       "time": int(mx.DateTime.DateTimeFrom(int(data['time'])).gmtime()),
+-      "text": "@%s: %s" % (self.account["username"], data["text"]),
+-      "content": "@%s: %s" % (self.account["username"], data["text"]),
+-      "html": "@%s: %s" % (self.account["username"], data["text"]),
++      "text": to_unicode("@%s: %s" % (self.account["username"], data["text"])),
++      "content": to_unicode("@%s: %s" % (self.account["username"], data["text"])),
++      "html": to_unicode("@%s: %s" % (self.account["username"], data["text"])),
+       "to_me": True,
+       "reply": {
+         "id": data["post_id"],
+-        "nick": self.account["username"],
+-        "url": POST_URL % (self.user_id, data["object_id"]),
++        "nick": to_unicode(self.account["username"]),
++        "url": to_unicode(POST_URL % (self.user_id, data["object_id"])),
+       },
+       "sender": self._sender(user),
+     }
+@@ -194,51 +195,51 @@ class Client:
+   def _image(self, data, profiles):
+     user = profiles[int(data["owner"])]
+     return {
+-      "mid": str(data["object_id"]),
+-      "service": "facebook",
++      "mid": to_unicode(data["object_id"]),
++      "service": u"facebook",
+       "account": self.account["id"],
+       "time": int(mx.DateTime.DateTimeFrom(int(data['created'])).gmtime()),
+-      "content": data["caption"],
+-      "text": data["caption"],
+-      "html": data["caption"],
++      "content": to_unicode(data["caption"]),
++      "text": to_unicode(data["caption"]),
++      "html": to_unicode(data["caption"]),
+       "images": [{
+-        "full": data["src_big"],
+-        "src": data["src_big"],
+-        "thumb": data["src_small"],
+-        "url": data["link"],
++        "full": to_unicode(data["src_big"]),
++        "src": to_unicode(data["src_big"]),
++        "thumb": to_unicode(data["src_small"]),
++        "url": to_unicode(data["link"]),
+       }],
+       "sender": {
+-        "nick": user["username"] or str(user["uid"]),
+-        "name": user["name"],
++        "nick": to_unicode(user["username"]) or to_unicode(user["uid"]),
++        "name": to_unicode(user["name"]),
+         "id": str(user["uid"]),
+-        "url": user["profile_url"],
+-        "image": user["pic_square"],
++        "url": to_unicode(user["profile_url"]),
++        "image": to_unicode(user["pic_square"]),
+       }
+     }
+ 
+   def _list(self, data, user):
+     return {
+         "mid": data["value"],
+-        "service": "facebook",
++        "service": u"facebook",
+         "account": self.account["id"],
+         "time": 0,
+-        "text": "",
+-        "html": "",
+-        "content": "",
+-        "url": "#", # http://www.facebook.com/friends/?filter=flp_%s" % data["flid"],
+-        "name": data["name"],
+-        "nick": data["name"],
+-        "key": data["filter_key"],
+-        "full": "",
+-        "type": data["type"],
+-        "kind": "list",
+-        "fbstreamicon": data["icon_url"],
++        "text": u"",
++        "html": u"",
++        "content": u"",
++        "url": u"#", # http://www.facebook.com/friends/?filter=flp_%s" % data["flid"],
++        "name": to_unicode(data["name"]),
++        "nick": to_unicode(data["name"]),
++        "key": to_unicode(data["filter_key"]),
++        "full": u"",
++        "type": to_unicode(data["type"]),
++        "kind": u"list",
++        "fbstreamicon": to_unicode(data["icon_url"]),
+         "sender": {
+-          "nick": user["username"] or str(user["uid"]),
+-          "name": user["name"],
++          "nick": to_unicode(user["username"]) or to_unicode(user["uid"]),
++          "name": to_unicode(user["name"]),
+           "id": str(user["uid"]),
+-          "url": user["profile_url"],
+-          "image": user["pic_square"],
++          "url": to_unicode(user["profile_url"]),
++          "image": to_unicode(user["pic_square"]),
+         }
+     }
+ 
+diff -up gwibber-894bzr/gwibber/microblog/gowalla.py.kitchen gwibber-894bzr/gwibber/microblog/gowalla.py
+--- gwibber-894bzr/gwibber/microblog/gowalla.py.kitchen	2010-10-13 15:13:02.743909001 -0400
++++ gwibber-894bzr/gwibber/microblog/gowalla.py	2010-10-13 15:13:02.799909001 -0400
+@@ -26,6 +26,7 @@ import network, json, util, htmllib, re
+ from util import log
+ from util import exceptions
+ from gettext import lgettext as _
++from kitchen.text.converters import to_unicode
+ log.logger.name = "Gowalla"
+ 
+ PROTOCOL_INFO = {
+@@ -60,47 +61,47 @@ class Client:
+   def _message(self, data):
+ 
+     m = {}; 
+-    m["mid"] = str(data["user"]["first_name"]) + str(data["user"]["last_name"])
+-    m["service"] = "gowalla"
++    m["mid"] = to_unicode(str(data["user"]["first_name"]) + str(data["user"]["last_name"]))
++    m["service"] = u"gowalla"
+     m["account"] = self.account["id"]
+     m["time"] = util.parsetime(data["created_at"])
+ 
+-    messagetext = ""
+-    text = ""
++    messagetext = u""
++    text = u""
+     if data.has_key("spot"):
+         if data.has_key("message"):
+             messagetext += data["message"] + "<br/><br/>"
+             text += data["message"] + "\n"
+-	m["url"] = "<a href='http://gowalla.com%s'>" % data["spot"]["url"]
+-	m["url"] = "http://gowalla.com%s" % data["spot"]["url"]
+-        img = "<table><tr><td><img src='%s'/></td><td>" % data["spot"]["image_url"]
+-        messagetext += img + "Checked in at <a href='" + m["url"] + "'>" + data["spot"]["name"] + "</a>"
+-	text += "Checked in at " + data["spot"]["name"]
++	m["url"] = to_unicode("<a href='http://gowalla.com%s'>" % data["spot"]["url"])
++	m["url"] = to_unicode("http://gowalla.com%s" % data["spot"]["url"])
++        img = to_unicode("<table><tr><td><img src='%s'/></td><td>" % data["spot"]["image_url"])
++        messagetext += img + "Checked in at <a href='" + m["url"] + "'>" + to_unicode(data["spot"]["name"]) + "</a>"
++	text += u"Checked in at " + to_unicode(data["spot"]["name"])
+     else:
+         if data.has_key("message"):
+-            messagetext += data["message"] + "<br/><br/>"
+-            text += data["message"] + "\n"
++            messagetext += to_unicode(data["message"]) + u"<br/><br/>"
++            text += to_unicode(data["message"]) + u"\n"
+         else:
+-            text= "Checked in off the grid"
+-            messagetext= "<table><tr><td><img src='http://gowalla.com/favicon.ico'/></td><td>Checked in off the grid"
++            text= u"Checked in off the grid"
++            messagetext= u"<table><tr><td><img src='http://gowalla.com/favicon.ico'/></td><td>Checked in off the grid"
+ 
+     m["text"] = text
+-    m["content"] = messagetext + "</td></tr></table>"
+-    m["html"] = messagetext + "</td></tr></table>"
++    m["content"] = messagetext + u"</td></tr></table>"
++    m["html"] = messagetext + u"</td></tr></table>"
+ 
+     m["sender"] = {}
+-    m["sender"]["image"] = data["user"]["image_url"]
+-    m["sender"]["url"] = "http://gowalla.com%s" % data["user"]["url"]
+-    fullname = ""
++    m["sender"]["image"] = to_unicode(data["user"]["image_url"])
++    m["sender"]["url"] = to_unicode("http://gowalla.com%s" % data["user"]["url"])
++    fullname = u""
+     if data["user"].has_key("first_name"):
+-        fullname += data["user"]["first_name"] + " "
++        fullname += to_unicode(data["user"]["first_name"]) + u" "
+     if data["user"].has_key("last_name"):
+-        fullname += data["user"]["last_name"]
++        fullname += to_unicode(data["user"]["last_name"])
+ 
+     m["sender"]["name"] = fullname
+     m["sender"]["nick"] = fullname
+         
+-    m["source"] = "<a href='http://gowalla.com/'>Gowalla</a>"
++    m["source"] = u"<a href='http://gowalla.com/'>Gowalla</a>"
+ 
+     return m
+ 
+diff -up gwibber-894bzr/gwibber/microblog/identica.py.kitchen gwibber-894bzr/gwibber/microblog/identica.py
+--- gwibber-894bzr/gwibber/microblog/identica.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/identica.py	2010-10-13 15:13:02.800909001 -0400
+@@ -2,6 +2,7 @@ import re, network, util
+ from util import log
+ from util import exceptions
+ from gettext import lgettext as _
++from kitchen.text.converters import to_unicode
+ log.logger.name = "Identi.ca"
+ 
+ PROTOCOL_INFO = {
+@@ -54,27 +55,27 @@ class Client:
+     m = {}
+     try:
+       m["mid"] = str(data["id"])
+-      m["service"] = "identica"
++      m["service"] = u"identica"
+       m["account"] = self.account["id"]
+       m["time"] = util.parsetime(data["created_at"])
+-      m["source"] = data.get("source", False)
+-      m["text"] = data["text"]
++      m["source"] = to_unicode(data.get("source", False))
++      m["text"] = to_unicode(data["text"])
+       m["to_me"] = ("@%s" % self.account["username"]) in data["text"]
+   
+-      m["html"] = util.linkify(m["text"],
++      m["html"] = to_unicode(util.linkify(m["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="%s#search?q=\\1">\\1</a>' % URL_PREFIX),
+-        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX)))
++        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX))))
+   
+-      m["content"] = util.linkify(m["text"],
++      m["content"] = to_unicode(util.linkify(m["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="gwibber:/tag?acct=%s&query=\\1">\\1</a>' % m["account"]),
+-        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"])))
++        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"]))))
+ 
+       images = []
+       if data.get("attachments", 0):
+         for a in data["attachments"]:
+           mime = a.get("mimetype", "")
+           if mime and mime.startswith("image") and a.get("url", 0):
+-            images.append({"src": a["url"], "url": a["url"]})
++            images.append({"src": to_unicode(a["url"]), "url": to_unicode(a["url"])})
+ 
+       images.extend(util.imgpreview(m["text"]))
+ 
+@@ -91,33 +92,33 @@ class Client:
+     if data.get("in_reply_to_status_id", 0) and data.get("in_reply_to_screen_name", 0):
+       m["reply"] = {}
+       m["reply"]["id"] = data["in_reply_to_status_id"]
+-      m["reply"]["nick"] = data["in_reply_to_screen_name"]
+-      m["reply"]["url"] = "/".join((URL_PREFIX, "notice", str(m["reply"]["id"])))
++      m["reply"]["nick"] = to_unicode(data["in_reply_to_screen_name"])
++      m["reply"]["url"] = to_unicode("/".join((URL_PREFIX, "notice", str(m["reply"]["id"]))))
+ 
+     user = data.get("user", data.get("sender", 0))
+     
+     m["sender"] = {}
+-    m["sender"]["name"] = user["name"]
+-    m["sender"]["nick"] = user["screen_name"]
++    m["sender"]["name"] = to_unicode(user["name"])
++    m["sender"]["nick"] = to_unicode(user["screen_name"])
+     m["sender"]["id"] = user["id"]
+-    m["sender"]["location"] = user["location"]
++    m["sender"]["location"] = to_unicode(user["location"])
+     m["sender"]["followers"] = user["followers_count"]
+-    m["sender"]["image"] = user["profile_image_url"]
+-    m["sender"]["url"] = "/".join((URL_PREFIX, m["sender"]["nick"]))
++    m["sender"]["image"] = to_unicode(user["profile_image_url"])
++    m["sender"]["url"] = to_unicode("/".join((URL_PREFIX, m["sender"]["nick"])))
+     m["sender"]["is_me"] = m["sender"]["nick"] == self.account["username"]
+-    m["url"] = "/".join((URL_PREFIX, "notice", m["mid"]))
++    m["url"] = to_unicode("/".join((URL_PREFIX, "notice", m["mid"])))
+     return m
+ 
+   def _private(self, data):
+     m = self._message(data)
+     m["private"] = True
+     m["recipient"] = {}
+-    m["recipient"]["name"] = data["recipient"]["name"]
+-    m["recipient"]["nick"] = data["recipient"]["screen_name"]
++    m["recipient"]["name"] = to_unicode(data["recipient"]["name"])
++    m["recipient"]["nick"] = to_unicode(data["recipient"]["screen_name"])
+     m["recipient"]["id"] = data["recipient"]["id"]
+-    m["recipient"]["image"] = data["recipient"]["profile_image_url"]
+-    m["recipient"]["location"] = data["recipient"]["location"]
+-    m["recipient"]["url"] = "/".join((URL_PREFIX, m["recipient"]["nick"]))
++    m["recipient"]["image"] = to_unicode(data["recipient"]["profile_image_url"])
++    m["recipient"]["location"] = to_unicode(data["recipient"]["location"])
++    m["recipient"]["url"] = to_unicode("/".join((URL_PREFIX, m["recipient"]["nick"])))
+     m["recipient"]["is_me"] = m["recipient"]["nick"].lower() == self.account["username"].lower()
+     return m
+ 
+@@ -127,14 +128,14 @@ class Client:
+     if data["to_user_id"]:
+       m["reply"] = {}
+       m["reply"]["id"] = data["to_user_id"]
+-      m["reply"]["nick"] = data["to_user"]
++      m["reply"]["nick"] = to_unicode(data["to_user"])
+ 
+     m["sender"] = {}
+-    m["sender"]["nick"] = data["from_user"]
++    m["sender"]["nick"] = to_unicode(data["from_user"])
+     m["sender"]["id"] = data["from_user_id"]
+-    m["sender"]["image"] = data["profile_image_url"]
+-    m["sender"]["url"] = "/".join((URL_PREFIX, m["sender"]["nick"]))
+-    m["url"] = "/".join((URL_PREFIX, "notice", str(m["mid"])))
++    m["sender"]["image"] = to_unicode(data["profile_image_url"])
++    m["sender"]["url"] = to_unicode("/".join((URL_PREFIX, m["sender"]["nick"])))
++    m["url"] = to_unicode("/".join((URL_PREFIX, "notice", str(m["mid"]))))
+     return m
+ 
+   def _get(self, path, parse="message", post=False, single=False, **args):
+diff -up gwibber-894bzr/gwibber/microblog/statusnet.py.kitchen gwibber-894bzr/gwibber/microblog/statusnet.py
+--- gwibber-894bzr/gwibber/microblog/statusnet.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/statusnet.py	2010-10-13 15:13:02.802909001 -0400
+@@ -2,6 +2,7 @@ import re, network, util
+ from util import log
+ from util import exceptions
+ from gettext import lgettext as _
++from kitchen.text.converters import to_unicode
+ log.logger.name = "StatusNet"
+ 
+ PROTOCOL_INFO = {
+@@ -56,27 +57,27 @@ class Client:
+     m = {}
+     try:
+       m["mid"] = str(data["id"])
+-      m["service"] = "statusnet"
++      m["service"] = u"statusnet"
+       m["account"] = self.account["id"]
+       m["time"] = util.parsetime(data["created_at"])
+-      m["source"] = data.get("source", False)
+-      m["text"] = data["text"]
++      m["source"] = to_unicode(data.get("source", False))
++      m["text"] = to_unicode(data["text"])
+       m["to_me"] = ("@%s" % self.account["username"]) in data["text"]
+ 
+-      m["html"] = util.linkify(m["text"],
++      m["html"] = to_unicode(util.linkify(m["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="%s#search?q=\\1">\\1</a>' % self.url_prefix),
+-        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % self.url_prefix)))
++        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % self.url_prefix))))
+ 
+-      m["content"] = util.linkify(m["text"],
++      m["content"] = to_unicode(util.linkify(m["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="gwibber:/tag?acct=%s&query=\\1">\\1</a>' % m["account"]),
+-        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"])))
++        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"]))))
+ 
+       images = []
+       if data.get("attachments", 0):
+         for a in data["attachments"]:
+           mime = a.get("mimetype", "")
+           if mime and mime.startswith("image") and a.get("url", 0):
+-            images.append({"src": a["url"], "url": a["url"]})
++            images.append({"src": to_unicode(a["url"]), "url": to_unicode(a["url"])})
+ 
+       images.extend(util.imgpreview(m["text"]))
+   
+@@ -93,33 +94,33 @@ class Client:
+     if data.get("in_reply_to_status_id", 0) and data.get("in_reply_to_screen_name", 0):
+       m["reply"] = {}
+       m["reply"]["id"] = data["in_reply_to_status_id"]
+-      m["reply"]["nick"] = data["in_reply_to_screen_name"]
+-      m["reply"]["url"] = "/".join((self.url_prefix, "notice", str(m["reply"]["id"])))
++      m["reply"]["nick"] = to_unicode(data["in_reply_to_screen_name"])
++      m["reply"]["url"] = to_unicode("/".join((self.url_prefix, "notice", str(m["reply"]["id"]))))
+ 
+     user = data.get("user", data.get("sender", 0))
+     
+     m["sender"] = {}
+-    m["sender"]["name"] = user["name"]
+-    m["sender"]["nick"] = user["screen_name"]
++    m["sender"]["name"] = to_unicode(user["name"])
++    m["sender"]["nick"] = to_unicode(user["screen_name"])
+     m["sender"]["id"] = user["id"]
+-    m["sender"]["location"] = user["location"]
++    m["sender"]["location"] = to_unicode(user["location"])
+     m["sender"]["followers"] = user["followers_count"]
+-    m["sender"]["image"] = user["profile_image_url"]
+-    m["sender"]["url"] = "/".join((self.url_prefix, m["sender"]["nick"]))
++    m["sender"]["image"] = to_unicode(user["profile_image_url"])
++    m["sender"]["url"] = to_unicode("/".join((self.url_prefix, m["sender"]["nick"])))
+     m["sender"]["is_me"] = m["sender"]["nick"] == self.account["username"]
+-    m["url"] = "/".join((self.url_prefix, "notice", m["mid"]))
++    m["url"] = to_unicode("/".join((self.url_prefix, "notice", m["mid"])))
+     return m
+ 
+   def _private(self, data):
+     m = self._message(data)
+     m["private"] = True
+     m["recipient"] = {}
+-    m["recipient"]["name"] = data["recipient"]["name"]
+-    m["recipient"]["nick"] = data["recipient"]["screen_name"]
++    m["recipient"]["name"] = to_unicode(data["recipient"]["name"])
++    m["recipient"]["nick"] = to_unicode(data["recipient"]["screen_name"])
+     m["recipient"]["id"] = data["recipient"]["id"]
+-    m["recipient"]["image"] = data["recipient"]["profile_image_url"]
+-    m["recipient"]["location"] = data["recipient"]["location"]
+-    m["recipient"]["url"] = "/".join((self.url_prefix, m["recipient"]["nick"]))
++    m["recipient"]["image"] = to_unicode(data["recipient"]["profile_image_url"])
++    m["recipient"]["location"] = to_unicode(data["recipient"]["location"])
++    m["recipient"]["url"] = to_unicode("/".join((self.url_prefix, m["recipient"]["nick"])))
+     m["recipient"]["is_me"] = m["recipient"]["nick"].lower() == self.account["username"].lower()
+     return m
+ 
+@@ -132,11 +133,11 @@ class Client:
+       m["reply"]["nick"] = data["to_user"]
+ 
+     m["sender"] = {}
+-    m["sender"]["nick"] = data["from_user"]
++    m["sender"]["nick"] = to_unicode(data["from_user"])
+     m["sender"]["id"] = data["from_user_id"]
+-    m["sender"]["image"] = data["profile_image_url"]
+-    m["sender"]["url"] = "/".join((self.url_prefix, m["sender"]["nick"]))
+-    m["url"] = "/".join((self.url_prefix, "notice", str(m["mid"])))
++    m["sender"]["image"] = to_unicode(data["profile_image_url"])
++    m["sender"]["url"] = to_unicode("/".join((self.url_prefix, m["sender"]["nick"])))
++    m["url"] = to_unicode("/".join((self.url_prefix, "notice", str(m["mid"]))))
+     return m
+ 
+   def _get(self, path, parse="message", post=False, single=False, **args):
+diff -up gwibber-894bzr/gwibber/microblog/twitter.py.kitchen gwibber-894bzr/gwibber/microblog/twitter.py
+--- gwibber-894bzr/gwibber/microblog/twitter.py.kitchen	2010-10-13 15:02:57.000000000 -0400
++++ gwibber-894bzr/gwibber/microblog/twitter.py	2010-10-13 15:13:02.803909001 -0400
+@@ -3,6 +3,7 @@ import gnomekeyring
+ from oauth import oauth
+ from util import log, exceptions
+ from gettext import lgettext as _
++from kitchen.text.converters import to_unicode
+ log.logger.name = "Twitter"
+ 
+ PROTOCOL_INFO = {
+@@ -72,19 +73,19 @@ class Client:
+     m = {}; 
+     try:
+       m["mid"] = str(data["id"])
+-      m["service"] = "twitter"
++      m["service"] = u"twitter"
+       m["account"] = self.account["id"]
+       m["time"] = util.parsetime(data["created_at"])
+-      m["text"] = unescape(data["text"])
++      m["text"] = to_unicode(unescape(data["text"]))
+       m["to_me"] = ("@%s" % self.account["username"]) in data["text"]
+ 
+-      m["html"] = util.linkify(data["text"],
++      m["html"] = to_unicode(util.linkify(data["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="%s#search?q=\\1">\\1</a>' % URL_PREFIX),
+-        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX)), escape=False)
++        (util.PARSE_NICK, '@<a class="nick" href="%s/\\1">\\1</a>' % URL_PREFIX)), escape=False))
+ 
+-      m["content"] = util.linkify(data["text"],
++      m["content"] = to_unicode(util.linkify(data["text"],
+         ((util.PARSE_HASH, '#<a class="hash" href="gwibber:/tag?acct=%s&query=\\1">\\1</a>' % m["account"]),
+-        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"])), escape=False)
++        (util.PARSE_NICK, '@<a class="nick" href="gwibber:/user?acct=%s&name=\\1">\\1</a>' % m["account"])), escape=False))
+ 
+       images = util.imgpreview(m["text"])
+       if images:
+@@ -96,13 +97,13 @@ class Client:
+ 
+   def _user(self, user):
+     return {
+-        "name": user["name"],
+-        "nick": user["screen_name"],
++        "name": to_unicode(user["name"]),
++        "nick": to_unicode(user["screen_name"]),
+         "id": user["id"],
+-        "location": user["location"],
++        "location": to_unicode(user["location"]),
+         "followers": user.get("followers", None),
+-        "image": user["profile_image_url"],
+-        "url": "/".join((URL_PREFIX, user["screen_name"])),
++        "image": to_unicode(user["profile_image_url"]),
++        "url": to_unicode("/".join((URL_PREFIX, user["screen_name"]))),
+         "is_me": user["screen_name"] == self.account["username"],
+     }
+     
+@@ -116,11 +117,11 @@ class Client:
+     if "in_reply_to_status_id" in data and data["in_reply_to_status_id"]:
+       m["reply"] = {}
+       m["reply"]["id"] = data["in_reply_to_status_id"]
+-      m["reply"]["nick"] = data["in_reply_to_screen_name"]
+-      m["reply"]["url"] = "/".join((URL_PREFIX, m["reply"]["nick"], "statuses", str(m["reply"]["id"])))
++      m["reply"]["nick"] = to_unicode(data["in_reply_to_screen_name"])
++      m["reply"]["url"] = to_unicode("/".join((URL_PREFIX, m["reply"]["nick"], "statuses", str(m["reply"]["id"]))))
+ 
+     m["sender"] = self._user(data["user"] if "user" in data else data["sender"])
+-    m["url"] = "/".join((m["sender"]["url"], "statuses", str(m["mid"])))
++    m["url"] = to_unicode("/".join((m["sender"]["url"], "statuses", str(m["mid"]))))
+ 
+     return m
+ 
+@@ -129,12 +130,12 @@ class Client:
+     m["private"] = True
+ 
+     m["recipient"] = {}
+-    m["recipient"]["name"] = data["recipient"]["name"]
+-    m["recipient"]["nick"] = data["recipient"]["screen_name"]
++    m["recipient"]["name"] = to_unicode(data["recipient"]["name"])
++    m["recipient"]["nick"] = to_unicode(data["recipient"]["screen_name"])
+     m["recipient"]["id"] = data["recipient"]["id"]
+-    m["recipient"]["image"] = data["recipient"]["profile_image_url"]
+-    m["recipient"]["location"] = data["recipient"]["location"]
+-    m["recipient"]["url"] = "/".join((URL_PREFIX, m["recipient"]["nick"]))
++    m["recipient"]["image"] = to_unicode(data["recipient"]["profile_image_url"])
++    m["recipient"]["location"] = to_unicode(data["recipient"]["location"])
++    m["recipient"]["url"] = to_unicode("/".join((URL_PREFIX, m["recipient"]["nick"])))
+     m["recipient"]["is_me"] = m["recipient"]["nick"] == self.account["username"]
+ 
+     return m
+@@ -145,37 +146,37 @@ class Client:
+     if data["to_user_id"]:
+       m["reply"] = {}
+       m["reply"]["id"] = data["to_user_id"]
+-      m["reply"]["nick"] = data["to_user"]
++      m["reply"]["nick"] = to_unicode(data["to_user"])
+ 
+     m["sender"] = {}
+-    m["sender"]["nick"] = data["from_user"]
++    m["sender"]["nick"] = to_unicode(data["from_user"])
+     m["sender"]["id"] = data["from_user_id"]
+-    m["sender"]["image"] = data["profile_image_url"]
+-    m["sender"]["url"] = "/".join((URL_PREFIX, m["sender"]["nick"]))
++    m["sender"]["image"] = to_unicode(data["profile_image_url"])
++    m["sender"]["url"] = to_unicode("/".join((URL_PREFIX, m["sender"]["nick"])))
+     m["sender"]["is_me"] = m["sender"]["nick"] == self.account["username"]
+-    m["url"] = "/".join((m["sender"]["url"], "statuses", str(m["mid"])))
++    m["url"] = to_unicode("/".join((m["sender"]["url"], "statuses", str(m["mid"]))))
+     return m
+ 
+   def _list(self, data):
+     return {
+         "mid": data["id"],
+-        "service": "twitter",
++        "service": u"twitter",
+         "account": self.account["id"],
+         "time": 0,
+-        "text": data["description"],
+-        "html": data["description"],
+-        "content": data["description"],
+-        "url": "/".join((URL_PREFIX, data["uri"])),
+-        "sender": self._user(data["user"]),
+-        "name": data["name"],
+-        "nick": data["slug"],
++        "text": to_unicode(data["description"]),
++        "html": to_unicode(data["description"]),
++        "content": to_unicode(data["description"]),
++        "url": to_unicode("/".join((URL_PREFIX, data["uri"]))),
++        "sender": to_unicode(self._user(data["user"])),
++        "name": to_unicode(data["name"]),
++        "nick": to_unicode(data["slug"]),
+         "key": data["slug"],
+-        "full": data["full_name"],
+-        "uri": data["uri"],
++        "full": to_unicode(data["full_name"]),
++        "uri": to_unicode(data["uri"]),
+         "mode": data["mode"],
+         "members": data["member_count"],
+         "followers": data["subscriber_count"],
+-        "kind": "list",
++        "kind": u"list",
+     }
+ 
+   def _get(self, path, parse="message", post=False, single=False, **args):
