@@ -8,30 +8,55 @@ class LibdesktopAgnostic(CPackageRecipe):
     name = 'libdesktop-agnostic'
     version = '0.3.90'
  
-    buildRequires = ['GConf:devel', 
-		'atk:devel', 
-		'cairo:devel', 
-		'fontconfig:devel', 
-		'freetype:devel', 
-		
-		'glib:devel', 
-		'gobject-introspection:devel',
-		'gtk:devel', 
-		'pango:devel', 
-		'pkgconfig:devel',
-		'pygobject:devellib',
-		'pygobject:runtime',
-		'pygtk:devel',
-		'python:devel', 
-		'make:runtime', 
-		'vala:runtime'
+    buildRequires = [ 'GConf:devel', 
+                      'atk:devel', 
+                      'cairo:devel', 
+                      'fontconfig:devel', 
+                      'freetype:devel', 
+                      'glib:devel', 
+                      'gobject-introspection:devel',
+                      'gtk:devel', 
+                      'pango:devel', 
+                      'pkgconfig:devel',
+                      'pygobject:devellib',
+                      'pygobject:runtime',
+                      'pygtk:devel',
+                      'python:devel', 
+                      'make:runtime', 
+                      'vala:runtime',
+                      'glade:devel',
+                      'gettext:runtime',
+                      'intltool:runtime'
 		]
  
     def setup(r):
         r.addArchive('http://code.launchpad.net/libdesktop-agnostic/0.4/%(version)s/+download/')
-        r.Run(''' sed -i 's|repository version="1.0"|repository version="1.2"|' \
-    gen_src/libdesktop-agnostic/DesktopAgnostic*.gir ''')
-	r.Run('./waf --prefix=%(prefix)s --libdir=%(libdir)s --sysconfdir=%(sysconfdir)s --config-backends=gconf --vfs-backends=gio --desktop-entry-backends=glib --with-glade configure')
-	r.Make(makeName='./waf')
-	r.Run('./waf --destdir=%(destdir)s install')
-        r.FixupMultilibPaths(exceptions='.*')
+        # fix build 
+        # Diff from various-fixes branch (revision 425)
+        # https://code.launchpad.net/~awn-core/libdesktop-agnostic/various-fixes
+        r.addPatch('http://projects.archlinux.org/svntogit/community.git/plain/libdesktop-agnostic/trunk/various-fixes.patch')
+        # force source regeneration
+        r.Remove('gen_src', recursive = True)
+
+	r.ManualConfigure(' --prefix=%(prefix)s'
+                          ' --libdir=%(libdir)s'
+                          ' --sysconfdir=%(sysconfdir)s'
+                          ' --config-backends=gconf,keyfile'
+                          ' --vfs-backends=gio'
+                          ' --desktop-entry-backends=gio,glib'
+                          ' --disable-gi'
+                          ' --with-glade ', configureName = './waf configure')
+
+        # making sure python stuff lands in right places 
+        r.Replace('#define PYTHONDIR.*',
+                  '#define PYTHONDIR "%(libdir)s/python%(pyver)s/site-packages"',
+                  'build/default/build-config.h')
+        r.Replace('/usr/lib/python2.6/site-package',
+                  '%(libdir)s/python%(pyver)s/site-packages',
+                  'build/c4che/default.cache.py')
+
+	r.Make(makeName='./waf -v')
+	r.Make('--destdir=%(destdir)s install',
+               makeName='./waf')
+        # man pages
+        r.Install('debian/lda*1', '%(mandir)s/man1/', mode = 0644)
