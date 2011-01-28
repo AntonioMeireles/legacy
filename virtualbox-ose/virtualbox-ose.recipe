@@ -30,7 +30,7 @@ class VirtualboxOse(AutoPackageRecipe):
                      'libXfixes:devel', 'libXinerama:devel', 'libXmu:devel',
                      'libXrandr:devel', 'libXt:devel', 'dev86:runtime',
                      'pam:devel', 'qt4:devel', 'qt4-core:devellib',
-                     'qt4-gui:devellib', 'which:runtime']
+                     'qt4-gui:devellib', 'which:runtime', 'gsoap:devel']
  
     def setup(r):
 	r.macros.archive_version = 'OSE-%(version)s'
@@ -67,7 +67,10 @@ class VirtualboxOse(AutoPackageRecipe):
                    # 'VirtualBox-OSE-3.2.6-gcc45.patch',
                    ]:
             r.addPatch('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + p + '?root=free')
-                  
+        # https://bugzilla.redhat.com/show_bug.cgi?id=645500
+        # https://bugzilla.rpmfusion.org/show_bug.cgi?id=1465
+        r.addPatch('https://bugzilla.rpmfusion.org/attachment.cgi?id=518')
+
         r.Replace('lGL', 'lGL -L%(libdir)s/xorg.mesa.3d ', 'configure')
         # brute force approach as upstream build system not specially sane
         r.Replace('m32', 'm32 -L%(libdir)s/xorg.mesa.3d ', 'Config.kmk')
@@ -76,7 +79,7 @@ class VirtualboxOse(AutoPackageRecipe):
 	r.macros.optflags += ' -L%(libdir)s/xorg.mesa.3d '
         r.Run('KBUILDDIR=%(builddir)s/kBuild ./configure --disable-kmods --enable-webservice ')
 
-	r.Run('. env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
+	r.Run('. ./env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
               ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= '
               ' VBOX_WITH_UPDATE_REQUEST= KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
               ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" '
@@ -147,6 +150,11 @@ class VirtualboxOse(AutoPackageRecipe):
         # Icon
         r.Install('obj/bin/VBox.png', '%(datadir)s/pixmaps/', mode = 0644)
         
+
+        r.Replace('DocPath=.*', '', 'src/VBox/Installer/linux/virtualbox.desktop')
+        r.Install('src/VBox/Installer/linux/virtualbox.desktop',
+                  '%(sysconfdir)s/xdg/autostart/virtualbox.desktop', mode = 0755)
+
         # Guest X.Org drivers
         r.macros.x11_api = '18'
         
