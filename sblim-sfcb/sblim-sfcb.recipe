@@ -1,0 +1,107 @@
+#
+# Copyright (c) 2008-2009 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+class SblimSfcb(AutoPackageRecipe):
+    name = 'sblim-sfcb'
+    version = '1.3.9'
+
+    buildRequires = [
+        'chkconfig:runtime',
+        'curl:devel',
+        'flex:runtime',
+        'info-sfcb:user',
+        'openslp:devel',
+        'pam:devel',
+        'perl:devel',
+        'perl:runtime',
+        'perl-URI:perl',
+        'perl-libwww-perl:perl',
+        'sblim-sfcc:devel',
+        'unzip:runtime',
+        'zlib:devel',
+    ]
+
+    def unpack(r):
+        r.macros.sfcbDir = '%(localstatedir)s/lib/sfcb'
+        r.macros.sfcbRegDir = '%(sfcbDir)s/registration'
+        r.addArchive('mirror://sourceforge/sblim/')
+        r.addSource('cim-mof.tagdescription',
+                    dest='%(tagdescriptiondir)s/cim-mof', macros = True)
+        r.addSource('cim-mof.taghandler', dest='%(taghandlerdir)s/cim-mof',
+                    mode=0755, macros = True)
+        r.addSource('provider-register.sh', dest='%(sbindir)s/', mode=0755)
+        # Require a client cert
+        r.Replace(
+            "sslClientCertificate:.*",
+            "sslClientCertificate: require",
+            "sfcb.cfg.pre.in")
+        # Use a directory for client certs
+        r.Replace("sslClientTrustStore:.*",
+                  "sslClientTrustStore: @sysconfdir@/sfcb/clients/",
+                  "sfcb.cfg.pre.in")
+        # Turn off basic authentication
+        r.Replace("doBasicAuth:.*",
+                  "doBasicAuth:    false",
+                  "sfcb.cfg.pre.in")
+        # Run http component as user sfcb
+        r.Replace(r"^#httpUserSFCB:true$", "httpUserSFCB: false",
+            "sfcb.cfg.pre.in")
+        r.Replace(r"^#httpUser:.*$", "httpUser: sfcb",
+            "sfcb.cfg.pre.in")
+
+        # Create certs
+        r.Replace(
+            "daemon",
+            "[ -f @sysconfdir@/sfcb/server.pem ] || @datadir@/sfcb/genSslCert.sh @sysconfdir@/sfcb > /dev/null 2>&1 && chown sfcb.sfcb @sysconfdir@/sfcb/{client,file,server}.pem\n\tdaemon",
+            "sfcb.init-redhat.in")
+        # Start on more runlevels
+        r.Replace(
+            "chkconfig: 35",
+            "chkconfig: 2345",
+            "sfcb.init-redhat.in")
+
+        # Fix init script
+        r.Replace(r"&& restart", "&& ( stop && start )", "sfcb.init-redhat.in")
+
+        # Expire certificates after 10 years instead of 1 year
+        r.Replace(" 365 ", " 3655 ", "genSslCert.sh")
+
+    def configure(r):
+        r.Configure("--enable-ssl --enable-pam --enable-uds --enable-ipv6 --enable-slp")
+
+    def makeinstall(r):
+        r.MakeInstall()
+        r.Install('sfcb.init-redhat', "%(initdir)s/sfcb", mode=0755)
+        r.Install('%(sfcbDir)s/stage/default.reg',
+                  '%(sfcbRegDir)s/providerRegister')
+
+        r.Replace('sfcbmof', '$DESTDIR/usr/bin/sfcbmof', "sfcbrepos")
+
+        # Copy header files, they are not installed automatically
+        # We no longer do that, because we expect to use cmpi-devel
+        #for f in ['cmpidt.h', 'cmpift.h', 'cmpimacs.h', 'cmpios.h', 'cmpipl.h']:
+        #    r.Install(f, "%(includedir)s/cmpi/")
+
+        # Create the interop dir
+        r.MakeDirs("%(sfcbRegDir)s/repository/root/interop")
+
+        # Client trust store
+        r.MakeDirs("%(sysconfdir)s/sfcb/clients")
+        r.ExcludeDirectories(exceptions="%(sysconfdir)s/sfcb/clients")
+
+    def policy(r):
+        r.ExcludeDirectories(exceptions="%(sfcbRegDir)s/repository/root/.*")
+        # .so gets put in :devellib, which makes the provider choke if we only
+        # require :runtime plus :lib
+        r.ComponentSpec("lib", "%(libdir)s/sfcb/.*\.so")
+        # Package wbemcat separately, we don't want to carry perl deps
+        r.PackageSpec("sblim-wbemcat", "wbemcat.*")
+        r.PackageSpec("sblim-wbemcat", "xmltest.*")
+        # /var/lib/sfcb/registration/providerRegister gets created by
+        # provider-register.sh, which is run from tag scripts
+        r.InitialContents('%(sfcbRegDir)s/providerRegister')
+
+        r.Requires('info-sfcb:user', '/usr/sbin/sfcbd')
