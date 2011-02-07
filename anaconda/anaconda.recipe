@@ -7,7 +7,7 @@ import datetime
 class Anaconda(CPackageRecipe):
     name = 'anaconda'
     baseVersion = '11.3.0.44'
-    rplVersion = '20100304'
+    rplVersion = '2011020701'
     version = '%s+%s' % (baseVersion,datetime.date.today().strftime("%Y.%m.%d"))
 
     buildRequires = ['atk:devel', 'audit:devel', 'bzip2:devel', 'cairo:devel',
@@ -31,19 +31,6 @@ class Anaconda(CPackageRecipe):
         r.addMercurialSnapshot('http://hg.rpath.com/anaconda-rpl2',
                                tag='%(name)s-'+r.rplVersion)
 
-        # Workaround for SUP-3331 spot by mull
-        # loader was blowing when one was using pxe/ks installs
-        # with later kernels.
-        r.Replace('RPM_OPT_FLAGS =.*',
-                  'RPM_OPT_FLAGS = -O1 -Wp,-D_FORTIFY_SOURCE=2 -g -pipe -fexceptions',
-                  'Makefile.inc')
-        # above looks and smells like an optimization bug present
-        # in rPL2's gcc we consume when building this.
-
-        # Fix definition of __libc_setlocale_lock for recent glibc (#441940).
-        r.addPatch('http://git.fedorahosted.org/git/?p=anaconda.git;'
-                   'a=commitdiff_plain;h=b78f0712419b60692077886dd9c324c0113871fa')
-
         r.Replace((re.escape('/usr/lib/'), '%(libdir)s/',),
                   (re.escape('/lib/'), '%(essentiallibdir)s/',),
                   'loader2/Makefile')
@@ -54,14 +41,9 @@ class Anaconda(CPackageRecipe):
         # as we are
         r.addPatch('foresightSpecificStuff.patch')
 
-        # FIXME: patch bellow breaks x86 install sets. 
-        # 
-        if Arch.x86_64:
-            r.addPatch('add-all-firmware.patch')
-        
-        # update the list of modules that we ship default
-        # to match the one of upstream anaconda
-        r.addPatch('neededModules.patch')
+        # There is apparently an optimization bug in the compiler
+        # which breaks getFileFromUrl calls when fetching ks files.
+        r.Replace('-O2', '-O1', 'Makefile.inc')
 
         # XXX until we rebase...
         # this is a brute force approach to (try to) get around some of our Xorg issues
