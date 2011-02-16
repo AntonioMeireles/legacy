@@ -8,11 +8,11 @@
 
 class Sqlite(CPackageRecipe):
     name = 'sqlite'
-    version = '3.6.22'
+    version = '3.7.5'
 
     extraConfig = ' --enable-threadsafe  --enable-threads-override-locks --enable-load-extension '
 
-    buildRequires = [ 'autoconf:runtime', 'automake:runtime']
+    buildRequires = [ 'autoconf:runtime', 'automake:runtime', 'unzip:runtime']
     if Use.bootstrap:
         keepBuildReqs = 'glibc:devel', 'userspace-kernel-headers:devel'
         buildRequires += ['binutils[!cross]', 'gcc[!cross]', 'tcl:runtime']
@@ -26,12 +26,21 @@ class Sqlite(CPackageRecipe):
     patches = ( # Fix build with --enable-load-extension, upstream ticket #3137
                 'sqlite-3.6.12-libdl.patch',
                 # Avoid insecure sprintf(), use a system path for lempar.c, patch from Debian
-                'sqlite-3.6.6.2-lemon-snprintf.patch',
+                'sqlite-3.6.23-lemon-system-template.patch',
+                # Fixup test-suite expectations wrt SQLITE_DISABLE_DIRSYNC 
+                'sqlite-3.7.4-wal2-nodirsync.patch'
                 )
 
     def setup(r):
         r.disableParallelMake()
-        r.addArchive('http://sqlite.org/')
+
+        r.macros.realver = '3070500'
+        r.addArchive('http://sqlite.org/sqlite-src-%(realver)s.zip')
+        r.addArchive('http://sqlite.org/sqlite-doc-%(realver)s.zip')
+
+        # Remove cgi-script erroneously included in sqlite-doc-3070500
+        r.Remove('%(name)s-doc-%(realver)s/search')
+
         for p in r.patches:
             r.addPatch(p)
             
@@ -39,7 +48,9 @@ class Sqlite(CPackageRecipe):
         r.ComponentProvides('threadsafe')
 
         r.macros.cflags += (' -DSQLITE_ENABLE_COLUMN_METADATA=1 -DSQLITE_DISABLE_DIRSYNC=1 '
-                            ' -DSQLITE_ENABLE_FTS3=3 -DSQLITE_ENABLE_RTREE=1 -Wall -fno-strict-aliasing ')
+                            ' -DSQLITE_ENABLE_FTS3=3 -DSQLITE_ENABLE_RTREE=1 '
+                            ' -DSQLITE_SECURE_DELETE=1 -DSQLITE_ENABLE_UNLOCK_NOTIFY=1 '
+                            ' -Wall -fno-strict-aliasing ')
         if Use.bootstrap:
             # add hints for autoconf -- otherwise it can't figure
             # out which compilers to use for builing files to be run
@@ -72,7 +83,7 @@ class Sqlite(CPackageRecipe):
 
         r.MakeInstall('prefix=%(prefix)s')
 
-        r.Doc('doc/*')
+        r.Doc('%(name)s-doc-%(realver)s/*')
         
         r.Install('sqlite3.1', '%(mandir)s/man1/sqlite3.1',  mode = 0644)
         r.Install('lemon', '%(bindir)s/lemon', mode = 0755)
