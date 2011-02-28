@@ -9,16 +9,46 @@ class Ruby(CPackageRecipe):
     version = '1.8.7_p334'
 
     buildRequires = [ 'db:devel', 'ncurses:devel', 'openssl:devel',
-        'readline:devel', 'zlib:devel', ]
-
+                      'readline:devel', 'zlib:devel',
+                      'bison:runtime', 'gdbm:devel', 'groff:runtime',
+                      'libX11:devel', 'libtermcap:devel',
+                      'tcl:devel', 'tk:devel'
+                      ]
     def setup(r):
         r.macros.myver = r.version.replace('_', '-')
         r.addArchive('ftp://ftp.ruby-lang.org/pub/ruby/%(major_version)s/%(name)s-%(myver)s.tar.bz2')
 
-        # Fix mkconfig.rb to set TOPDIR correctly on x86_64
-        r.addPatch('ruby-mkconfig-topdir.patch')
+        # Patches 23, 29, and 33 brought over from ruby 1.8.6
+        #  (updated to apply against 1.8.7 source)
+        # If building against a 64bit arch, use 64bit libdir
+        r.addPatch('ruby-1.8.7-p330-multilib.patch')
+        # Mark all i.86 arch's (eg i586, i686, etc) as i386
+        r.addPatch('ruby-1.8.7-always-use-i386.patch')
+        # Use shared libs as opposed to static for mkmf
+        # See bug RH 428384
+        r.addPatch('ruby-1.8.7-p249-mkmf-use-shared.patch')
+        # Change ruby load path to conform to Foresight/ruby
+        # library placement (various 1.8.6 patches consolidated into this)
+        r.addPatch('ruby-1.8.7-lib-paths.patch')
+        
+        # system-wide macros
+        # we are placing invariant stuff under %(libdir)s
+        # and not %(prefix)s/lib to reduce flavor mismatches
+        # r.macros.ruby_vendorlibbase = '%(prefix)s/lib/%(name)s'
+        r.macros.ruby_vendorlibbase = '%(libdir)s/%(name)s'
+        r.macros.ruby_vendorarchbase = '%(libdir)s/%(name)s'
+        r.macros.ruby_sitelibbase = '%(ruby_vendorlibbase)s/site_ruby'
+        r.macros.ruby_sitearchbase = '%(ruby_vendorarchbase)s/site_ruby'
 
-        configOpts = '--enable-shared --enable-install-doc'
+        configOpts = (' --enable-shared --enable-install-doc'
+                      ' --with-default-kcode=none '
+                      ' --enable-pthread '
+                      ' --disable-rpath '
+                      ' --with-sitedir=%(ruby_sitelibbase)s' 
+                      ' --with-sitearchdir=%(ruby_sitearchbase)s'
+                      ' --with-vendordir=%(ruby_vendorlibbase)s' 
+                      ' --with-vendorarchdir=%(ruby_vendorarchbase)s')
+
         r.macros.cppflags += ' -I%(krbprefix)s/include'
         r.macros.ldflags  += ' -L%(krbprefix)s/lib'
 
