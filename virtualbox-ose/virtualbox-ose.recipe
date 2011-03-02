@@ -6,7 +6,7 @@
 loadInstalled('python')
 class VirtualboxOse(AutoPackageRecipe):
     name = 'virtualbox-ose'
-    version = '3.2.8'
+    version = '4.0.2'
  
     buildRequires = ['chkconfig:runtime',
 		     'desktop-file-utils:runtime', 
@@ -20,9 +20,9 @@ class VirtualboxOse(AutoPackageRecipe):
 		     'libIDL:devel',
 		     'libxml2:devel',
 		     'openssl:devel',
-		     'python:devel',
-		     'PIL:python',
-		     'libpng:devel', 'libcap:devel',
+		     'python:devel', 'icedtea-jdk',
+		     'PIL:python', 'tetex:runtime',
+		     'libpng:devel', 'libcap:devel', 'mkisofs:runtime',
                      'iasl:runtime', 'pulseaudio:devel', 'libxslt:runtime',
                      'diffutils:runtime', 'libxslt:devel', 'pkgconfig:devel',
                      'Mesa:devel', 'SDL:devel', 'libX11:devel', 'libXcomposite:devel',
@@ -37,8 +37,8 @@ class VirtualboxOse(AutoPackageRecipe):
         r.macros.cflags += ' -L%(libdir)s/xorg.mesa.3d'
         r.Environment('KBUILDDIR', '%(builddir)s')
 
-        r.addArchive('http://download.virtualbox.org/virtualbox/%(version)s/'
-                     'VirtualBox-%(version)s-OSE.tar.bz2')
+        r.addArchive('http://dlc.sun.com.edgesuite.net//virtualbox/%(version)s/'
+                     'VirtualBox-%(version)s.tar.bz2')
 
         # FIXME - locate new location of file bellow
         # r.addSource('http://download.virtualbox.org/download/%(version)s/UserManual.pdf')
@@ -55,34 +55,36 @@ class VirtualboxOse(AutoPackageRecipe):
                         dest = f)
 
         for p in [ 'VirtualBox-OSE-3.2.0-noupdate.patch',
-                   'VirtualBox-OSE-3.2.0-strings.patch',
-                   'VirtualBox-OSE-3.2.4-libcxx.patch',
-                   # 'VirtualBox-OSE-3.2.0-xorg17.patch',
+                   'VirtualBox-OSE-4.0.2-strings.patch',
+                   'VirtualBox-OSE-4.0.2-libcxx.patch',
+                   # 'VirtualBox-OSE-4.0.2-xorg17.patch',
                    ## 'VirtualBox-OSE-3.2.4-optflags.patch',
-                   'VirtualBox-OSE-3.2.0-32bit.patch',
+                   'VirtualBox-OSE-4.0.0-32bit.patch',
                    'VirtualBox-OSE-3.2.0-visibility.patch',
-                   # 'VirtualBox-OSE-3.2.0-noansi.patch',
-                   'VirtualBox-OSE-3.2.0-cpuid.patch',
+                   'VirtualBox-OSE-3.2.10-noansi.patch',
                    'VirtualBox-OSE-3.2.6-vboxkeyboard.patch',
-                   # 'VirtualBox-OSE-3.2.6-gcc45.patch',
+                   'VirtualBox-OSE-4.0.0-makeself.patch',
+                   'VirtualBox-OSE-4.0.0-usblib.patch',
+                   'VirtualBox-OSE-4.0.0-beramono.patch',
+                   'VirtualBox-OSE-4.0.2-aiobug.patch',
+                   'VirtualBox-OSE-4.0.2-gcc46.patch',
                    ]:
             r.addPatch('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + p + '?root=free')
-        # https://bugzilla.redhat.com/show_bug.cgi?id=645500
-        # https://bugzilla.rpmfusion.org/show_bug.cgi?id=1465
-        r.addPatch('https://bugzilla.rpmfusion.org/attachment.cgi?id=518')
 
         r.Replace('lGL', 'lGL -L%(libdir)s/xorg.mesa.3d ', 'configure')
         # brute force approach as upstream build system not specially sane
         r.Replace('m32', 'm32 -L%(libdir)s/xorg.mesa.3d ', 'Config.kmk')
         r.Replace('m64', 'm64 -L%(libdir)s/xorg.mesa.3d ', 'Config.kmk')
-
+        
 	r.macros.optflags += ' -L%(libdir)s/xorg.mesa.3d '
         r.Run('KBUILDDIR=%(builddir)s/kBuild ./configure --disable-kmods --enable-webservice ')
 
 	r.Run('. ./env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
-              ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= '
+              ' VBOX_PATH_APP_PRIVATE=%(libdir)s/virtualbox'
+              ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= VBOX_WITH_DOCS= '
               ' VBOX_WITH_UPDATE_REQUEST= KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
-              ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" '
+              ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" VBOX_GCC_WERR="" '
+              ' VBOX_JAVA_HOME=%(libdir)s/jvm/java-1.6.0-icedtea'
               ' VBOX_GCC_R0_OPT="%(optflags)s" VBOX_XCURSOR_LIBS="Xcursor Xext X11 GL" ')
 
         # 
@@ -112,7 +114,8 @@ class VirtualboxOse(AutoPackageRecipe):
             r.Install(f, '%(libdir)s/virtualbox/', mode = 0644)
 
         # Documentation
-        # r.Install('UserManual.pdf', '%(docdir)s/virtualbox/', mode = 0644)
+        # upstream doesn't like our pdflatex
+        # r.Install('obj/bin/UserManual.pdf', '%(docdir)s/virtualbox/', mode = 0644)
 
         # Executables
         for f in [ 'obj/bin/EfiThunk',
@@ -150,8 +153,8 @@ class VirtualboxOse(AutoPackageRecipe):
         # Icon
         r.Install('obj/bin/VBox.png', '%(datadir)s/pixmaps/', mode = 0644)
         
-        r.Replace('DocPath=.*', '', 'src/VBox/Installer/linux/virtualbox.desktop')
-        r.Desktopfile('src/VBox/Installer/linux/virtualbox.desktop')
+        r.Replace('DocPath=.*', '', 'obj/bin/virtualbox.desktop')
+        r.Desktopfile('obj/bin/virtualbox.desktop')
 
         # Guest X.Org drivers
         r.macros.x11_api = '18'
