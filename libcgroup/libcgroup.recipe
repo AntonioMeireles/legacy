@@ -4,35 +4,59 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Libcgroup(AutoPackageRecipe):
+loadSuperClass('rpmpackage')
+class Libcgroup(RPMPackageRecipe):
     name = 'libcgroup'
-    version = '0.36.1'
+    version = '0.36.2'
+    rpmRelease = '5.fc14'
+    distroVersion = '14'
+    rpmPatches = [
+        'fedora-config.patch',
+        'fedora-fix-initscripts.patch',
+        'libcgroup-0.36.2-initscripts.patch',
+        'fedora-nochdir.patch',
+    ]
  
     packageSummary = 'Tools and libraries to control and monitor control groups'
 
     buildRequires = [
+        'binutils:runtime',
         'bison:runtime',
         'chkconfig:runtime',
+        'file:runtime',
         'flex:runtime',
         'gcc-c++:runtime',
+        'make:runtime',
         'pam:devel',
-        ]
+    ]
  
-    def unpack(r):
-        r.addArchive('mirror://sourceforge/libcg/%(name)s/v%(version)s/')
+    def setup(r):
+        r.unpack()
+        r.configure()
+        r.make()
+        r.makeinstall()
+        r.policy()
+
+    def configure(r):
+        r.Configure('--enable-initscript-install '
+            '--enable-pam-module-dir=%(essentiallibdir)s/security ')
+
+    def make(r):
+        r.Make()
 
     def makeinstall(r):
         r.MakeInstall()
 
         # config files are needed for libcgroup to run
-        r.Install('samples/cgconfig.sysconfig', '%(sysconfdir)s/sysconfig/')
         r.Install('samples/cgred.conf', '%(sysconfdir)s/sysconfig/')
+        r.Install('samples/cgconfig.sysconfig', '%(sysconfdir)s/sysconfig/')
         r.Install('samples/cgconfig.conf', '%(sysconfdir)s/')
         r.Install('samples/cgrules.conf', '%(sysconfdir)s/')
+        r.Move('%(sysconfdir)s/rc.d/init.d/*', '%(initdir)s/')
+        r.Move('%(libdir)s/*.so*', '%(essentiallibdir)s/')
+        r.MakeDirs("/cgroup")
 
     def policy(r):
+        r.SetModes('%(initdir)s/cgconfig', '%(initdir)s/cgred', 0755)
         r.SetModes('%(bindir)s/cgexec', 04755) # explicitly setuid
-
-        # werid that the actuall installed files are /etc/init.d/cgconfig and /etc/init.d/cgred
-        r.SetModes('%(sysconfdir)s/rc.d/init.d/cgred', 0755)
-        r.SetModes('%(sysconfdir)s/rc.d/init.d/cgconfig', 0755)
+        r.ExcludeDirectories(exceptions="/cgroup")
