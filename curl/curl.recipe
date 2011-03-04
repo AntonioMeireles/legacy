@@ -6,11 +6,12 @@
 
 class Curl(AutoPackageRecipe):
     name = 'curl'
-    version = '7.19.6'
+    version = '7.21.4'
 
     buildRequires = [ 'libtool:runtime', 'pkgconfig:devel', 'krb5:devel',
                       'zlib:devel', 'perl:runtime', 'openssl:devel', 
-                      'libidn:devel', 'openldap:devel', 'perl:devel',]
+                      'libidn:devel', 'openldap:devel', 'perl:devel',
+                      'rtmpdump:devel']
     # requires: openssl:runtime for shared ca-bundle
 
     def unpack(r):
@@ -20,14 +21,19 @@ class Curl(AutoPackageRecipe):
         r.macros.cppflags += ' $(pkg-config --cflags openssl)'
         r.macros.ldflags += ' $(pkg-config --libs openssl)'
 
-        r.Configure(' --enable-ipv6 --with-openssl=%(prefix)s'
-                    ' --with-ca-bundle=%(sysconfdir)s/ssl/certs/ca-bundle.crt')
+        r.Configure(' --enable-ipv6 --with-openssl=%(prefix)s --without-ssl --with-nss '
+                    ' --enable-crypto-auth --enable-ldaps --with-libidn'
+                    ' --enable-tls-srp  --enable-cookies --disable-static'
+                    ' --with-gssapi=%(prefix)s/kerberos'
+                    ' --without-ca-bundle '
+                    )
+        r.Replace(('^hardcode_libdir_flag_spec=.*',
+                   'hardcode_libdir_flag_spec=""'),
+                  ('^runpath_var=LD_RUN_PATH',
+                   'runpath_var=DIE_RPATH_DIE'),
+                  'libtool')
 
     def policy(r):
-        # Use system default, not curl version
-        r.Remove('%(datadir)s/curl/curl-ca-bundle.crt',
-                 '%(sysconfdir)s/ssl/certs/ca-bundle.crt')
-
         r.Doc('docs/BUGS', 'docs/CONTRIBUTE', 'docs/FAQ',
               'docs/FEATURES', 'docs/INSTALL', 'docs/INTERNALS',
               'docs/MANUAL', 'docs/RESOURCES',
@@ -36,10 +42,10 @@ class Curl(AutoPackageRecipe):
             '%(bindir)s/curl-config',
             '%(mandir)s/man1/curl-config.*')
 
-        # testing
-        if Use.buildtests:
-            for dir in [ 'libtest', 'server' ]:
-                r.Make(dir='tests/%s' % dir)
-        r.TestSuiteLinks(fileMap={'src/curl' : '%(bindir)s/curl'})
-        r.TestSuite('tests', 'perl ./runtests.pl')
+        # # testing
+        # if Use.buildtests:
+        #     for dir in [ 'libtest', 'server' ]:
+        #         r.Make(dir='tests/%s' % dir)
+        # r.TestSuiteLinks(fileMap={'src/curl' : '%(bindir)s/curl'})
+        # r.TestSuite('tests', 'perl ./runtests.pl')
         r.EnforceConfigLogBuildRequirements(exceptions=['groff:runtime'])
