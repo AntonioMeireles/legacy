@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2007, 2009-2010 rPath, Inc.
+#               2011 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -8,7 +9,34 @@ class MemCached(AutoPackageRecipe):
     name = 'memcached'
     version = '1.4.5'
 
-    buildRequires = [ 'cyrus-sasl:devel', 'libxslt:runtime', 'libevent:devel', ]
+    buildRequires = [ 'cyrus-sasl:devel', 'libxslt:runtime', 'libevent:devel', 
+                      'chkconfig:runtime', 'perl:devel' ]
 
     def unpack(r):
         r.addArchive('http://memcached.googlecode.com/files/')
+        # http://code.google.com/p/memcached/issues/detail?id=60
+        r.addPatch('memcached-1.4.5-issue60.diff')
+        
+        r.addSource('memcached.sysv')
+        r.addSource('memcached.config')
+
+
+    def policy(r):
+        r.Remove('%(bindir)s/memcached-debug')
+
+        # Perl script for monitoring memcached
+        r.Install('scripts/memcached-tool',
+                  '%(bindir)s/memcached-tool',
+                  mode = 0755)
+
+        # Init script
+        r.Install('memcached.sysv', '%(initdir)s/memcached',
+                  mode = 0755)
+        # Default configs
+        r.Install('memcached.config', '%(sysconfdir)s/sysconfig/%(name)s',
+                  mode = 0644)
+        # pid directory
+        d = '%(localstatedir)s/run/%(name)s'
+        r.MakeDirs(d)
+        r.UtilizeUser('%(name)s', d)
+        r.ExcludeDirectories(exceptions = d)
