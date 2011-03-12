@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2007-2008 Foresight Linux
+# Copyright (c) 2007-2011 Foresight Linux
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -7,21 +7,47 @@
 class x264(CPackageRecipe):
 
     name = 'x264'
-    version = '0.85.f0da96145cb0'
+    version = '0.114.429af213842178f77ab33bbfc9f6b9cac56c7e7a'
 
     buildRequires = [
         'yasm:runtime',
+        'ffmpeg:devel', 'libX11:devel',
       ]
 
     def setup(r):
         _, r.macros.soversion, r.macros.commit = r.version.split('.')
-        r.addGitSnapshot('git://git.videolan.org/x264.git', tag='%(commit)s')
+        # http://repo.or.cz/w/x264.git/shortlog/refs/heads/stable
+        r.addArchive('http://repo.or.cz/w/x264.git/snapshot/%(commit)s.tar.gz')
+#        r.addGitSnapshot('git://git.videolan.org/x264.git/', tag='%(commit)s')
 
-        r.Configure('--enable-shared --enable-pthread --enable-pic')
+        # don't remove config.h and don't re-run version.sh
+        # r.addPatch('x264-nover.patch')
+        # link with shared libx264
+        r.addPatch('x264-shared.patch')
+
+        config = (' --enable-visualize --enable-shared '
+                  ' --enable-pthread --enable-pic ')
+        config += ' --extra-cflags=\"%(cflags)s\" ' 
+        if Arch.x86:
+            config += ' --disable-asm ' 
+            r.MakeDirs('simd')
+            r.Run('cp -a `ls -1|grep -v simd` simd/')
+
+        r.Configure(config)
         r.Make()
         r.MakeInstall()
+
+        if Arch.x86:
+            r.Configure('--libdir=%(libdir)s/sse2', dir = 'simd')
+            r.Make(dir = 'simd')
+            r.MakeInstall(dir = 'simd')
 
         r.Move('%(libdir)s/libx264.so.%(soversion)s', '%(libdir)s/libx264.so.%(soversion)s.%(commit)s')
         r.Symlink('%(libdir)s/libx264.so.%(soversion)s.%(commit)s', '%(libdir)s/libx264.so.%(soversion)s')
         r.Symlink('%(libdir)s/libx264.so.%(soversion)s.%(commit)s', '%(libdir)s/libx264.so')
+
+        if Arch.x86:
+                    r.Move('%(libdir)s/sse2/libx264.so.%(soversion)s', '%(libdir)s/sse2/libx264.so.%(soversion)s.%(commit)s')
+                    r.Symlink('%(libdir)s/sse2/libx264.so.%(soversion)s.%(commit)s', '%(libdir)s/sse2/libx264.so.%(soversion)s')
+                    r.Symlink('%(libdir)s/sse2/libx264.so.%(soversion)s.%(commit)s', '%(libdir)s/sse2/libx264.so')
 
