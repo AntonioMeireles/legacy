@@ -6,18 +6,31 @@
 
 class Libvpx(CPackageRecipe):
     name = 'libvpx'
-    version = '0.9.5'
+    version = '0.9.6'
  
     buildRequires = ['yasm:runtime', 'which:runtime']
  
     def setup(r):
         r.addArchive('http://webm.googlecode.com/files/libvpx-v%(version)s.tar.bz2')
-        r.addPatch('CVE-2010-4203.patch')
-        r.ManualConfigure(' --enable-vp8'
-                          ' --enable-shared'
-                          ' --enable-runtime-cpu-detect '
-                          ' --enable-postproc '
-                          ' --enable-pic '
+        r.addPatch('libvpx-0.9.0-no-explicit-dep-on-static-lib.patch')
+        r.addSource('%(name)s.pc', macros=True)
+
+        if Arch.x86:
+            r.macros.vpxtarget = 'x86-linux-gcc'
+        else: 
+            r.macros.vpxtarget = 'x86_64-linux-gcc'
+
+        r.ManualConfigure(#' --enable-vp8'
+                           ' --target=%(vpxtarget)s' 
+                           ' --enable-shared'
+                          #' --enable-runtime-cpu-detect '
+                          #' --enable-postproc '
+                          #' --enable-pic '
+                          ' --disable-install-srcs'
                           ' --prefix=%(prefix)s')
-        r.Make()
+
+        r.Make('target=libs')
         r.MakeInstall('DESTDIR=%(destdir)s')
+        r.Remove('%(prefix)s/lib/*.a')
+        r.Install('%(name)s.pc', '%(libdir)s/pkgconfig/',
+                  mode = 0644)
