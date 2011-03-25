@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2004-2009 rPath, Inc.
+#               2009-2011 The Foresight Linux Priject
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -10,17 +11,28 @@ class MicrocodeCtl(CPackageRecipe):
 
     def setup(r):
         r.addArchive('http://www.urbanmyth.org/microcode/')
-        r.addSource('microcode_ctl.init')
-        r.addSource('microcode-20090927.dat',
+        r.addPatch('microcode_ctl.patch')
+        r.addPatch('microcode_ctl-manpage-0.patch')
+
+        r.addSource('microcode-20101123.dat',
                     dest='/lib/firmware/microcode.dat',
                     mode=0644)
-        # http://cvs.fedoraproject.org/viewvc/devel/microcode_ctl/microcode_ctl.patch?view=co
-        r.addPatch('microcode_ctl.patch')
+        r.addSource('microcode_ctl.rules',
+                    dest = '/lib/udev/rules.d/89-microcode.rules',
+                    mode = 0644)
+        r.addArchive('amd-ucode-2011-01-11.tar')
 
         r.Make(forceFlags=True)
-        r.MakeInstall('PREFIX=%(prefix)s INSDIR=%(essentialsbindir)s')
-        # Must come after MakeInstall because the local copy of the
-        # initscript overrides the installed version
-        # initscript from RH
-        r.Install('microcode_ctl.init', '%(initdir)s/microcode_ctl', mode=0755)
-        r.TagSpec('initscript', '%(initdir)s/')
+        r.MakeInstall('PREFIX=%(prefix)s INSDIR=%(essentialsbindir)s '
+                      'RCDIR=%(sysconfdir)s')
+
+        r.Install('../amd-ucode-2011-01-11/microcode_amd.bin',
+                  '/lib/firmware/amd-ucode/microcode_amd.bin',
+                  mode = 0644)
+        # we rely on udev now...
+        r.Remove('%(sysconfdir)s/init.d', recursive = True)
+        # AMD lic
+        for x in ['LICENSE', 'README', 'INSTALL']:
+            r.Copy('../amd-ucode-2011-01-11/'+x, 
+                   x + '.microcode.AMD')
+            r.Doc(x + '.microcode.AMD')
