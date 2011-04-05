@@ -1,12 +1,12 @@
 #
 # Copyright (c) 2004-2009 rPath, Inc.
-#               2008-2009 The Foresight Linux Project
+#               2008-2011 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 loadInstalled('gcc')
-
+loadInstalled('python')
 class KernelPackageRecipe(CPackageRecipe):
     buildRequires = [ 'perl:runtime', 'perl:perl',
                       'module-init-tools:runtime' ]
@@ -115,6 +115,7 @@ class KernelPackageRecipe(CPackageRecipe):
         if r.__class__.__name__ == 'KernelPackageRecipe':
             return
         r.setMacros()
+        r.setImageTargetMacro()
         r.unpackBase()
         r.fixPermissions()
         r.addNonInteractiveConfig()
@@ -130,25 +131,29 @@ class KernelPackageRecipe(CPackageRecipe):
         r.policy() # extra policy goes here
 
     def setMacros(r):
+        # set most custom macros; see setImageTargetMacro() for imagetarget
         r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
         r.macros.kseries = ".".join(r.version.split('.')[0:3])
         r.macros.sublevel = r.version.split('.')[2].split('_')[0]
 
-        if 'serial' in r.__dict__:
+        # Versions of Conary since 1.2.6 print the methods that are
+        # called, but hasattr always returns a proxy function, so
+        # we have to check whether we're getting the real thing or not:
+        if hasattr(r, 'serial') and isinstance(r.serial, basestring):
             r.macros.serial = r.serial
         else:
-            if 'sourceVersion' in r.__dict__:
-                if hasattr(r.sourceVersion, 'trailingRevision'):
-                    # if r.sourceVersion is a NewVersion object, it may
-                    # not have a trailingRevision object
-                    r.macros.serial = str(r.sourceVersion.trailingRevision(
-                        ).getSourceCount())
-                else:
-                    r.macros.serial = ''
+            if 'sourceVersion' in r.__dict__ and hasattr(r.sourceVersion,
+                                                         'trailingRevision'):
+                    r.macros.serial = str(
+                        r.sourceVersion.trailingRevision().getSourceCount())
             else:
-                raise KernelPackageError(
-                    'no serial number set and source version is unavailable')
+                # If r.sourceVersion does not exist (rmake build from a
+                # recipe, for instance) or r.sourceVersion is a NewVersion
+                # object without a trailingRevision object, we'll set it
+                # to something unlikely to conflict
+                r.macros.serial = '0.NEW'
+
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
         r.macros.localversion = '-%(serial)s-fl%(cfgver)s'
@@ -179,6 +184,18 @@ class KernelPackageRecipe(CPackageRecipe):
             else:
                 r.macros.archive_dir = ''
 
+    def setImageTargetMacro(r):
+        # The imagetarget macro might reasonably need to be overridden,
+        # so this is broken out from setMacros() for convenience
+        # We assume that building a Xen kernel with 2.6.29 or later,
+        # we have bzImage support in xen loader for domU and in the
+        # xen hypervisor for dom0.  Override this method if this
+        # heuristic is incorrect for your case.
+        if Use.xen and int(r.macros.sublevel) < 29:
+            r.macros.imagetarget = 'vmlinuz'
+        else:
+            r.macros.imagetarget = 'bzImage'
+
     def unpackBase(r):
         r.addArchive(
             'http://ftp.kernel.org/pub/linux/kernel/v%(majorversion)s/'
@@ -194,8 +211,10 @@ class KernelPackageRecipe(CPackageRecipe):
         r.addAction('chmod -R go-w .')
 
     def addNonInteractiveConfig(r):
-        # avoid requests for interactive response
-        r.addPatch('linux-2.6-build-nonintconfig.patch')
+        if int(r.macros.sublevel) < 38:
+            # avoid requests for interactive response
+            r.addPatch('linux-2.6-build-nonintconfig.patch')
+        # upstreamed in 38+ kernels
 
     def setCompileInfo(r):
         r.addAction(r"""sed -i '
@@ -222,9 +241,22 @@ class KernelPackageRecipe(CPackageRecipe):
     def createLocalVersion(r):
         r.Create('localversion.rpl', contents='%(localversion)s')
 
-    def configure(r):
+    def addConfiguration(r):
+        # broken out from configure() to allow make nonint_oldconfig
+        # with custom complete configuration instead of config.* files
+        # by overriding this method
         r.extraSource(addConfigs(r))
-        r.Make('nonint_oldconfig 2>oc.err ||'
+
+    def configure(r):
+        r.addConfiguration()
+
+        # complements addNonInteractiveConfig()
+        if int(r.macros.sublevel) < 38:
+            r.macros.makeCfg = 'nonint_oldconfig'
+        else: 
+            r.macros.makeCfg = 'oldnoconfig'
+
+        r.Make('%(makeCfg)s 2>oc.err ||'
                ' { diff -u .config.old .config > config.changes;'
                '   cat config.changes ;'
                '   echo "missing config items:"; cat oc.err ;'
@@ -233,19 +265,17 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Remove('oc.err')
 
     def buildBase(r):
-        if Use.xen:
-            r.Make('vmlinuz modules')
-        else:
-            r.Make('bzImage modules')
+        r.Make('%(imagetarget)s modules')
+               # Override $(mod-fw) bellow because we don't want it to
+               # install any firmware. We would do that ourselves later
+               # with 'make firmware_install' or externally as we 
+               # actually are doing atm
         r.Make('-s INSTALL_MOD_PATH=%(destdir)s modules_install'
                ' KERNELRELEASE=%(kver)s'
-               # Override $(mod-fw) because we don't want it to install any firmware
-               # We would do that ourselves with 'make firmware_install'
-               # or externally
                ' mod-fw=')
         r.Install('System.map', '/boot/System.map-%(kver)s', mode=0644)
         r.Install('.config', '/boot/config-%(kver)s', mode=0644)
-        if Use.xen:
+        if Use.xen and r.macros.imagetarget == 'vmlinuz':
             r.Install('vmlinuz', '/boot/vmlinuz-%(kver)s', mode=0644)
         # Unified arch leaves x86_64 with a symlink so */boot/bzImage doesnt work.
         elif Arch.x86_64 or Arch.x86 and int(r.macros.sublevel) > 23:
@@ -268,11 +298,6 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Symlink('build', '/lib/modules/%(kver)s/source')
         r.Install('configs/*', '/lib/modules/%(kver)s/configs/')
         r.Install('localversion.rpl', '/lib/modules/%(kver)s/build/')
-
-        # block bellow superseeded by linux-firmware pkg.
-        # firmware blobs
-        # r.Make('INSTALL_FW_PATH=%(destdir)s/lib/firmware firmware_install')
-        # r.PackageSpec('userspace-kernel-firmware', '/lib/firmware/.*')
 
         r.vmwareComponent()
         r.ComponentSpec('configs', '/lib/modules/[^/]*/configs/')
@@ -304,10 +329,11 @@ class KernelPackageRecipe(CPackageRecipe):
     def vmwareComponent(r):
         # Place open-vm-tools modules into a seperate component.  This
         # allows easy removal for people who wish to run a vmware host.
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/fs/vm.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/misc/v.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/net/vm.*')
-        r.ComponentSpec('vmware', '/lib/modules/%(kver)s/kernel/drivers/net/vsock/v.*')
+        r.ComponentSpec('vmware',
+                        '/lib/modules/%(kver)s/kernel/fs/vm.*',
+                        '/lib/modules/%(kver)s/kernel/drivers/misc/v.*',
+                        '/lib/modules/%(kver)s/kernel/drivers/net/vm.*',
+                        '/lib/modules/%(kver)s/kernel/drivers/net/vsock/v.*')
 
     def policyBase(r):
         # Disable Autodoc. Users tend to have more than 1 kernel installed
@@ -322,6 +348,19 @@ class KernelPackageRecipe(CPackageRecipe):
         r.Requires('mkinitrd:runtime',
                    r'/lib/modules/%(kver)s/.*\.ko$')
         r.ComponentProvides(('%(kver)s', '%(gccver)s'))
+
+        # we don't want spurious deps on py24 in :build-tree as it will create odd
+	# chroots when building external kmods with consequent assorted breackage
+        r.macros.pyver = Python.majversion
+        pybin = '%(bindir)s/python%(pyver)s'
+        r.NormalizePythonInterpreterVersion(versionMap=(
+                ('%(bindir)s/python2.4', pybin),
+                ('%(bindir)s/python2.5', pybin),
+                ('%(bindir)s/python', pybin),
+                ))
+        # rm cruft
+        r.Remove('/lib/modules/%(kver)s/source/open-vm-tools-%(ovmtoolsver)s/', recursive = True)
+
 
     def policy(r):
         """
@@ -456,6 +495,8 @@ class addConfigs(action.RecipeAction):
 
         if self.recipe.Flags.debug:
             self.mergefile(config, 'config.debug', unamePrefix=True)
+        else:
+            self.mergefile(config, 'config.nodebug', unamePrefix=True)
 
         if smp:
             self.mergefile(config, 'config.smp', unamePrefix=True)
