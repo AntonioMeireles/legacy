@@ -1,3 +1,15 @@
+--- linux-2.6.26.noarch/drivers/base/power/main.c~	2008-08-22 20:57:57.000000000 -0400
++++ linux-2.6.26.noarch/drivers/base/power/main.c	2008-08-22 20:58:05.000000000 -0400
+@@ -69,9 +69,6 @@ void device_pm_unlock(void)
+  */
+ void device_pm_add(struct device *dev)
+ {
+-	pr_debug("PM: Adding info for %s:%s\n",
+-		 dev->bus ? dev->bus->name : "No Bus",
+-		 kobject_name(&dev->kobj));
+ 	mutex_lock(&dpm_list_mtx);
+ 	if (dev->parent) {
+ 		if (dev->parent->power.status >= DPM_SUSPENDING)
 From b4e96f34c17e5a79cd28774cc722bb33e7e02c6e Mon Sep 17 00:00:00 2001
 From: Peter Jones <pjones@redhat.com>
 Date: Thu, 25 Sep 2008 16:23:33 -0400
@@ -19,7 +31,7 @@ index 170f71e..4f3e632 100644
  static int i8042_controller_check(void)
  {
 -	if (i8042_flush() == I8042_BUFFER_SIZE) {
--		pr_err("No controller found\n");
+-		printk(KERN_ERR "i8042.c: No controller found.\n");
 +	if (i8042_flush() == I8042_BUFFER_SIZE)
  		return -ENODEV;
 -	}
@@ -52,21 +64,26 @@ Signed-off-by: Dave Jones <davej@redhat.com>
  	}
  #endif
  
-This was removed in revision 1.6 of linux-2.6-silence-noise.patch
-in ye olde CVS tree. I have no idea why. Originally the pr_debug in
-device_pm_remove was nuked as well, but that seems to have gotten lost in
-the r1.634 of kernel.spec (2.6.26-rc2-git5.)
+Some devices (like the nuforce udac) spew this quite a lot.
+This patch kinda sucks, but it'll shut things up for now.
 
-diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
-index 2a52270..bacbdd2 100644
---- a/drivers/base/power/main.c
-+++ b/drivers/base/power/main.c
-@@ -87,8 +87,6 @@ void device_pm_unlock(void)
-  */
- void device_pm_add(struct device *dev)
- {
--	pr_debug("PM: Adding info for %s:%s\n",
--		 dev->bus ? dev->bus->name : "No Bus", dev_name(dev));
- 	mutex_lock(&dpm_list_mtx);
- 	if (dev->parent && dev->parent->power.in_suspend)
- 		dev_warn(dev, "parent %s should not be sleeping\n",
+Probably not an upstream candidate. I suspect the answer would be 
+"don't turn SND_DEBUG then"
+
+--- linux-2.6.34.noarch/sound/usb/clock.c~	2010-07-16 22:11:41.000000000 -0400
++++ linux-2.6.34.noarch/sound/usb/clock.c	2010-07-16 22:15:21.000000000 -0400
+@@ -212,8 +212,13 @@ static int set_sample_rate_v1(struct snd
+ 
+ 	/* if endpoint doesn't have sampling rate control, bail out */
+ 	if (!(fmt->attributes & UAC_EP_CS_ATTR_SAMPLE_RATE)) {
+-		snd_printk(KERN_WARNING "%d:%d:%d: endpoint lacks sample rate attribute bit, cannot set.\n",
++		static int once;
++
++		if (!once) {
++			snd_printk(KERN_WARNING "%d:%d:%d: endpoint lacks sample rate attribute bit, cannot set.\n",
+ 				   dev->devnum, iface, fmt->altsetting);
++			once = 1;
++		}
+ 		return 0;
+ 	}
+ 

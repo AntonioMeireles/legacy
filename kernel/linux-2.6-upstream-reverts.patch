@@ -1,1 +1,559 @@
-nil
+From foo
+From: David Howells <dhowells@redhat.com>
+Subject: Fix cred leak in AF_NETLINK
+
+Patch cab9e9848b9a8283b0504a2d7c435a9f5ba026de to the 2.6.35.y stable tree
+stored a ref to the current cred struct in struct scm_cookie.  This was fine
+with AF_UNIX as that calls scm_destroy() from its packet sending functions, but
+AF_NETLINK, which also uses scm_send(), does not call scm_destroy() - meaning
+that the copied credentials leak each time SCM data is sent over a netlink
+socket.
+
+This can be triggered quite simply on a Fedora 13 or 14 userspace with the
+2.6.35.11 kernel (or something based off of that) by calling:
+
+	#!/bin/bash
+	for ((i=0; i<100; i++))
+	do
+		su - -c /bin/true
+		cut -d: -f1 /proc/slabinfo | grep 'cred\|key\|task_struct'
+		cat /proc/keys | wc -l
+	done
+
+This leaks the session key that pam_keyinit creates for 'su -', which appears
+in /proc/keys as being revoked (has the R flag set against it) afterward su is
+called.
+
+Furthermore, if CONFIG_SLAB=y, then the cred and key slab object usage counts
+can be viewed and seen to increase.  The key slab increases by one object per
+loop, and this can be seen after the system has had a couple of minutes to
+stand after the script above has been run on it.
+
+If the system is working correctly, the key and cred counts should return to
+roughly what they were before.
+
+Signed-off-by: David Howells <dhowells@redhat.com>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+---
+
+ net/netlink/af_netlink.c |   14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+Index: linux-2.6.35.y/net/netlink/af_netlink.c
+===================================================================
+--- linux-2.6.35.y.orig/net/netlink/af_netlink.c	2011-03-29 22:52:05.032059161 -0700
++++ linux-2.6.35.y/net/netlink/af_netlink.c	2011-03-29 23:53:42.295455441 -0700
+@@ -1330,12 +1330,16 @@
+ 		return err;
+ 
+ 	if (msg->msg_namelen) {
+-		if (addr->nl_family != AF_NETLINK)
+-			return -EINVAL;
++		if (addr->nl_family != AF_NETLINK) {
++			err = -EINVAL;
++			goto out;
++		}
+ 		dst_pid = addr->nl_pid;
+ 		dst_group = ffs(addr->nl_groups);
+-		if (dst_group && !netlink_capable(sock, NL_NONROOT_SEND))
+-			return -EPERM;
++		if (dst_group && !netlink_capable(sock, NL_NONROOT_SEND)) {
++			err = -EPERM;
++			goto out;
++		}
+ 	} else {
+ 		dst_pid = nlk->dst_pid;
+ 		dst_group = nlk->dst_group;
+@@ -1387,6 +1391,8 @@
+ 	err = netlink_unicast(sk, skb, dst_pid, msg->msg_flags&MSG_DONTWAIT);
+ 
+ out:
++	scm_destroy(siocb->scm);
++	siocb->scm = NULL;
+ 	return err;
+ }
+ 
+From c4ff4b829ef9e6353c0b133b7adb564a68054979 Mon Sep 17 00:00:00 2001
+From: Rajiv Andrade <srajiv@linux.vnet.ibm.com>
+Date: Fri, 12 Nov 2010 22:30:02 +0100
+Subject: TPM: Long default timeout fix
+
+From: Rajiv Andrade <srajiv@linux.vnet.ibm.com>
+
+commit c4ff4b829ef9e6353c0b133b7adb564a68054979 upstream.
+
+If duration variable value is 0 at this point, it's because
+chip->vendor.duration wasn't filled by tpm_get_timeouts() yet.
+This patch sets then the lowest timeout just to give enough
+time for tpm_get_timeouts() to further succeed.
+
+This fix avoids long boot times in case another entity attempts
+to send commands to the TPM when the TPM isn't accessible.
+
+Signed-off-by: Rajiv Andrade <srajiv@linux.vnet.ibm.com>
+Signed-off-by: James Morris <jmorris@namei.org>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+---
+ drivers/char/tpm/tpm.c |   10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+Index: linux-2.6.35.y/drivers/char/tpm/tpm.c
+===================================================================
+--- linux-2.6.35.y.orig/drivers/char/tpm/tpm.c	2011-03-29 22:51:41.259667437 -0700
++++ linux-2.6.35.y/drivers/char/tpm/tpm.c	2011-03-29 23:55:12.337151500 -0700
+@@ -354,12 +354,14 @@
+ 		    tpm_protected_ordinal_duration[ordinal &
+ 						   TPM_PROTECTED_ORDINAL_MASK];
+ 
+-	if (duration_idx != TPM_UNDEFINED)
++	if (duration_idx != TPM_UNDEFINED) {
+ 		duration = chip->vendor.duration[duration_idx];
+-	if (duration <= 0)
++		/* if duration is 0, it's because chip->vendor.duration wasn't */
++		/* filled yet, so we set the lowest timeout just to give enough */
++		/* time for tpm_get_timeouts() to succeed */
++		return (duration <= 0 ? HZ : duration);
++	} else
+ 		return 2 * 60 * HZ;
+-	else
+-		return duration;
+ }
+ EXPORT_SYMBOL_GPL(tpm_calc_ordinal_duration);
+ 
+From 9b29050f8f75916f974a2d231ae5d3cd59792296 Mon Sep 17 00:00:00 2001
+From: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Date: Tue, 11 Jan 2011 14:37:29 -0500
+Subject: tpm_tis: Use timeouts returned from TPM
+
+From: Stefan Berger <stefanb@linux.vnet.ibm.com>
+
+commit 9b29050f8f75916f974a2d231ae5d3cd59792296 upstream.
+
+The current TPM TIS driver in git discards the timeout values returned
+from the TPM. The check of the response packet needs to consider that
+the return_code field is 0 on success and the size of the expected
+packet is equivalent to the header size + u32 length indicator for the
+TPM_GetCapability() result + 3 timeout indicators of type u32.
+
+I am also adding a sysfs entry 'timeouts' showing the timeouts that are
+being used.
+
+Signed-off-by: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+Tested-by: Guillaume Chazarain <guichaz@gmail.com>
+Signed-off-by: Rajiv Andrade <srajiv@linux.vnet.ibm.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/char/tpm/tpm.c     |   18 ++++++++++++++++--
+ drivers/char/tpm/tpm.h     |    2 ++
+ drivers/char/tpm/tpm_tis.c |    4 +++-
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+Index: linux-2.6.35.y/drivers/char/tpm/tpm.c
+===================================================================
+--- linux-2.6.35.y.orig/drivers/char/tpm/tpm.c	2011-03-29 23:02:59.667308683 -0700
++++ linux-2.6.35.y/drivers/char/tpm/tpm.c	2011-03-29 23:02:59.685308223 -0700
+@@ -567,9 +567,11 @@
+ 	if (rc)
+ 		return;
+ 
+-	if (be32_to_cpu(tpm_cmd.header.out.return_code)
+-	    != 3 * sizeof(u32))
++	if (be32_to_cpu(tpm_cmd.header.out.return_code) != 0 ||
++	    be32_to_cpu(tpm_cmd.header.out.length)
++	    != sizeof(tpm_cmd.header.out) + sizeof(u32) + 3 * sizeof(u32))
+ 		return;
++
+ 	duration_cap = &tpm_cmd.params.getcap_out.cap.duration;
+ 	chip->vendor.duration[TPM_SHORT] =
+ 	    usecs_to_jiffies(be32_to_cpu(duration_cap->tpm_short));
+@@ -913,6 +915,18 @@
+ }
+ EXPORT_SYMBOL_GPL(tpm_show_caps_1_2);
+ 
++ssize_t tpm_show_timeouts(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++	struct tpm_chip *chip = dev_get_drvdata(dev);
++
++	return sprintf(buf, "%d %d %d\n",
++	               jiffies_to_usecs(chip->vendor.duration[TPM_SHORT]),
++	               jiffies_to_usecs(chip->vendor.duration[TPM_MEDIUM]),
++	               jiffies_to_usecs(chip->vendor.duration[TPM_LONG]));
++}
++EXPORT_SYMBOL_GPL(tpm_show_timeouts);
++
+ ssize_t tpm_store_cancel(struct device *dev, struct device_attribute *attr,
+ 			const char *buf, size_t count)
+ {
+Index: linux-2.6.35.y/drivers/char/tpm/tpm.h
+===================================================================
+--- linux-2.6.35.y.orig/drivers/char/tpm/tpm.h	2011-03-29 22:51:40.876677237 -0700
++++ linux-2.6.35.y/drivers/char/tpm/tpm.h	2011-03-29 23:02:59.685308223 -0700
+@@ -56,6 +56,8 @@
+ 				char *);
+ extern ssize_t tpm_show_temp_deactivated(struct device *,
+ 					 struct device_attribute *attr, char *);
++extern ssize_t tpm_show_timeouts(struct device *,
++				 struct device_attribute *attr, char *);
+ 
+ struct tpm_chip;
+ 
+Index: linux-2.6.35.y/drivers/char/tpm/tpm_tis.c
+===================================================================
+--- linux-2.6.35.y.orig/drivers/char/tpm/tpm_tis.c	2011-03-29 22:51:40.877677211 -0700
++++ linux-2.6.35.y/drivers/char/tpm/tpm_tis.c	2011-03-29 23:02:59.686308198 -0700
+@@ -355,6 +355,7 @@
+ 		   NULL);
+ static DEVICE_ATTR(caps, S_IRUGO, tpm_show_caps_1_2, NULL);
+ static DEVICE_ATTR(cancel, S_IWUSR | S_IWGRP, NULL, tpm_store_cancel);
++static DEVICE_ATTR(timeouts, S_IRUGO, tpm_show_timeouts, NULL);
+ 
+ static struct attribute *tis_attrs[] = {
+ 	&dev_attr_pubek.attr,
+@@ -364,7 +365,8 @@
+ 	&dev_attr_owned.attr,
+ 	&dev_attr_temp_deactivated.attr,
+ 	&dev_attr_caps.attr,
+-	&dev_attr_cancel.attr, NULL,
++	&dev_attr_cancel.attr,
++	&dev_attr_timeouts.attr, NULL,
+ };
+ 
+ static struct attribute_group tis_attr_grp = {
+From c6c14330717f9850b4b4c054b81424b9979cd07d Mon Sep 17 00:00:00 2001
+From: Jean-Francois Moine <moinejf@free.fr>
+Date: Tue, 14 Dec 2010 16:15:37 -0300
+Subject: [media] gspca - sonixj: Add a flag in the driver_info table
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+From: Jean-Francois Moine <moinejf@free.fr>
+
+commit c6c14330717f9850b4b4c054b81424b9979cd07d upstream.
+
+Signed-off-by: Jean-François Moine <moinejf@free.fr>
+Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+---
+ drivers/media/video/gspca/sonixj.c |   10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+Index: linux-2.6.35.y/drivers/media/video/gspca/sonixj.c
+===================================================================
+--- linux-2.6.35.y.orig/drivers/media/video/gspca/sonixj.c
++++ linux-2.6.35.y/drivers/media/video/gspca/sonixj.c
+@@ -57,6 +57,7 @@ struct sd {
+ 	u8 jpegqual;			/* webcam quality */
+ 
+ 	u8 reg18;
++	u8 flags;
+ 
+ 	s8 ag_cnt;
+ #define AG_CNT_START 13
+@@ -1777,7 +1778,8 @@ static int sd_config(struct gspca_dev *g
+ 	struct cam *cam;
+ 
+ 	sd->bridge = id->driver_info >> 16;
+-	sd->sensor = id->driver_info;
++	sd->sensor = id->driver_info >> 8;
++	sd->flags = id->driver_info;
+ 
+ 	cam = &gspca_dev->cam;
+ 	if (sd->sensor == SENSOR_ADCM1700) {
+@@ -3001,7 +3003,11 @@ static const struct sd_desc sd_desc = {
+ /* -- module initialisation -- */
+ #define BS(bridge, sensor) \
+ 	.driver_info = (BRIDGE_ ## bridge << 16) \
+-			| SENSOR_ ## sensor
++			| (SENSOR_ ## sensor << 8)
++#define BSF(bridge, sensor, flags) \
++	.driver_info = (BRIDGE_ ## bridge << 16) \
++			| (SENSOR_ ## sensor << 8) \
++			| (flags)
+ static const __devinitdata struct usb_device_id device_table[] = {
+ #if !defined CONFIG_USB_SN9C102 && !defined CONFIG_USB_SN9C102_MODULE
+ 	{USB_DEVICE(0x0458, 0x7025), BS(SN9C120, MI0360)},
+From b2272a49e7df37732d73988f00468ce31e1ebc92 Mon Sep 17 00:00:00 2001
+From: Jean-Francois Moine <moinejf@free.fr>
+Date: Tue, 14 Dec 2010 16:16:16 -0300
+Subject: [media] gspca - sonixj: Set the flag for some devices
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+From: Jean-Francois Moine <moinejf@free.fr>
+
+commit b2272a49e7df37732d73988f00468ce31e1ebc92 upstream.
+
+The flag PDN_INV indicates that the sensor pin S_PWR_DN has not the same
+value as other webcams with the same sensor. For now, only two webcams have
+been so detected: the Microsoft's VX1000 and VX3000.
+
+Signed-off-by: Jean-François Moine <moinejf@free.fr>
+Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+---
+ drivers/media/video/gspca/sonixj.c |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+Index: linux-2.6.35.y/drivers/media/video/gspca/sonixj.c
+===================================================================
+--- linux-2.6.35.y.orig/drivers/media/video/gspca/sonixj.c
++++ linux-2.6.35.y/drivers/media/video/gspca/sonixj.c
+@@ -88,6 +88,9 @@ enum {
+ 	u8 jpeg_hdr[JPEG_HDR_SZ];
+ };
+ 
++/* device flags */
++#define PDN_INV	1		/* inverse pin S_PWR_DN / sn_xxx tables */
++
+ /* V4L2 controls supported by the driver */
+ static int sd_setbrightness(struct gspca_dev *gspca_dev, __s32 val);
+ static int sd_getbrightness(struct gspca_dev *gspca_dev, __s32 *val);
+@@ -3004,8 +3007,8 @@ static const __devinitdata struct usb_de
+ 	{USB_DEVICE(0x0458, 0x7025), BS(SN9C120, MI0360)},
+ 	{USB_DEVICE(0x0458, 0x702e), BS(SN9C120, OV7660)},
+ #endif
+-	{USB_DEVICE(0x045e, 0x00f5), BS(SN9C105, OV7660)},
+-	{USB_DEVICE(0x045e, 0x00f7), BS(SN9C105, OV7660)},
++	{USB_DEVICE(0x045e, 0x00f5), BSF(SN9C105, OV7660, PDN_INV)},
++	{USB_DEVICE(0x045e, 0x00f7), BSF(SN9C105, OV7660, PDN_INV)},
+ 	{USB_DEVICE(0x0471, 0x0327), BS(SN9C105, MI0360)},
+ 	{USB_DEVICE(0x0471, 0x0328), BS(SN9C105, MI0360)},
+ 	{USB_DEVICE(0x0471, 0x0330), BS(SN9C105, MI0360)},
+From 615661f3948a066fd22a36fe8ea0c528b75ee373 Mon Sep 17 00:00:00 2001
+From: Marcin Slusarz <marcin.slusarz@gmail.com>
+Date: Sun, 22 Aug 2010 20:54:08 +0200
+Subject: drm/nv50: initialize ramht_refs list for faked 0 channel
+
+From: Marcin Slusarz <marcin.slusarz@gmail.com>
+
+commit 615661f3948a066fd22a36fe8ea0c528b75ee373 upstream.
+
+We need it for PFIFO_INTR_CACHE_ERROR interrupt handling,
+because nouveau_fifo_swmthd looks for matching gpuobj in
+ramht_refs list.
+It fixes kernel panic in nouveau_gpuobj_ref_find.
+
+Signed-off-by: Marcin Slusarz <marcin.slusarz@gmail.com>
+Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+---
+ drivers/gpu/drm/nouveau/nv50_instmem.c |    2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/drivers/gpu/drm/nouveau/nv50_instmem.c
++++ b/drivers/gpu/drm/nouveau/nv50_instmem.c
+@@ -141,6 +141,8 @@ nv50_instmem_init(struct drm_device *dev
+ 	chan->file_priv = (struct drm_file *)-2;
+ 	dev_priv->fifos[0] = dev_priv->fifos[127] = chan;
+ 
++	INIT_LIST_HEAD(&chan->ramht_refs);
++
+ 	/* Channel's PRAMIN object + heap */
+ 	ret = nouveau_gpuobj_new_fake(dev, 0, c_offset, c_size, 0,
+ 							NULL, &chan->ramin);
+
+commit 6f1b1e1384b23cfab30c2bc02a8f94927274c10d
+Author: Geert Uytterhoeven <geert@linux-m68k.org>
+Date:   Sun Jan 16 10:09:13 2011 -0300
+
+    radio-aimslab.c needs #include <linux/delay.h>
+    
+    commit 2400982a2e8a8e4e95f0a0e1517bbe63cc88038f upstream.
+    
+    Commit e3c92215198cb6aa00ad38db2780faa6b72e0a3f ("[media] radio-aimslab.c: Fix
+    gcc 4.5+ bug") removed the include, but introduced new callers of msleep():
+    
+    | drivers/media/radio/radio-aimslab.c: In function ‘rt_decvol’:
+    | drivers/media/radio/radio-aimslab.c:76: error: implicit declaration of function ‘msleep’
+    
+    Signed-off-by: Geert Uytterhoeven <geert@linux-m68k.org>
+    Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+    Signed-off-by: Andi Kleen <ak@linux.intel.com>
+    Cc: dann frazier <dannf@debian.org>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+diff --git a/drivers/media/radio/radio-aimslab.c b/drivers/media/radio/radio-aimslab.c
+index 1944814..a91642c 100644
+--- a/drivers/media/radio/radio-aimslab.c
++++ b/drivers/media/radio/radio-aimslab.c
+@@ -31,6 +31,7 @@
+ #include <linux/module.h>	/* Modules 			*/
+ #include <linux/init.h>		/* Initdata			*/
+ #include <linux/ioport.h>	/* request_region		*/
++#include <linux/delay.h>	/* msleep			*/
+ #include <linux/videodev2.h>	/* kernel radio structs		*/
+ #include <linux/version.h>	/* for KERNEL_VERSION MACRO	*/
+ #include <linux/io.h>		/* outb, outb_p			*/
+
+commit 9c198dad83c19a05a11b5a195242f3e8dcbe55f4
+Author: Mauro Carvalho Chehab <mchehab@redhat.com>
+Date:   Thu Jan 6 08:16:04 2011 -0200
+
+    radio-aimslab.c: Fix gcc 4.5+ bug
+    
+    commit e3c92215198cb6aa00ad38db2780faa6b72e0a3f upstream.
+    
+    gcc 4.5+ doesn't properly evaluate some inlined expressions.
+    A previous patch were proposed by Andrew Morton using noinline.
+    However, the entire inlined function is bogus, so let's just
+    remove it and be happy.
+    
+    Reported-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+    Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+diff --git a/drivers/media/radio/radio-aimslab.c b/drivers/media/radio/radio-aimslab.c
+index 5bf4985..1944814 100644
+--- a/drivers/media/radio/radio-aimslab.c
++++ b/drivers/media/radio/radio-aimslab.c
+@@ -31,7 +31,6 @@
+ #include <linux/module.h>	/* Modules 			*/
+ #include <linux/init.h>		/* Initdata			*/
+ #include <linux/ioport.h>	/* request_region		*/
+-#include <linux/delay.h>	/* udelay			*/
+ #include <linux/videodev2.h>	/* kernel radio structs		*/
+ #include <linux/version.h>	/* for KERNEL_VERSION MACRO	*/
+ #include <linux/io.h>		/* outb, outb_p			*/
+@@ -71,27 +70,17 @@ static struct rtrack rtrack_card;
+ 
+ /* local things */
+ 
+-static void sleep_delay(long n)
+-{
+-	/* Sleep nicely for 'n' uS */
+-	int d = n / msecs_to_jiffies(1000);
+-	if (!d)
+-		udelay(n);
+-	else
+-		msleep(jiffies_to_msecs(d));
+-}
+-
+ static void rt_decvol(struct rtrack *rt)
+ {
+ 	outb(0x58, rt->io);		/* volume down + sigstr + on	*/
+-	sleep_delay(100000);
++	msleep(100);
+ 	outb(0xd8, rt->io);		/* volume steady + sigstr + on	*/
+ }
+ 
+ static void rt_incvol(struct rtrack *rt)
+ {
+ 	outb(0x98, rt->io);		/* volume up + sigstr + on	*/
+-	sleep_delay(100000);
++	msleep(100);
+ 	outb(0xd8, rt->io);		/* volume steady + sigstr + on	*/
+ }
+ 
+@@ -120,7 +109,7 @@ static int rt_setvol(struct rtrack *rt, int vol)
+ 
+ 	if (vol == 0) {			/* volume = 0 means mute the card */
+ 		outb(0x48, rt->io);	/* volume down but still "on"	*/
+-		sleep_delay(2000000);	/* make sure it's totally down	*/
++		msleep(2000);	/* make sure it's totally down	*/
+ 		outb(0xd0, rt->io);	/* volume steady, off		*/
+ 		rt->curvol = 0;		/* track the volume state!	*/
+ 		mutex_unlock(&rt->lock);
+@@ -155,7 +144,7 @@ static void send_0_byte(struct rtrack *rt)
+ 		outb_p(128+64+16+8+  1, rt->io);  /* on + wr-enable + data low */
+ 		outb_p(128+64+16+8+2+1, rt->io);  /* clock */
+ 	}
+-	sleep_delay(1000);
++	msleep(1);
+ }
+ 
+ static void send_1_byte(struct rtrack *rt)
+@@ -169,7 +158,7 @@ static void send_1_byte(struct rtrack *rt)
+ 		outb_p(128+64+16+8+4+2+1, rt->io); /* clock */
+ 	}
+ 
+-	sleep_delay(1000);
++	msleep(1);
+ }
+ 
+ static int rt_setfreq(struct rtrack *rt, unsigned long freq)
+@@ -427,7 +416,7 @@ static int __init rtrack_init(void)
+ 
+ 	/* this ensures that the volume is all the way down  */
+ 	outb(0x48, rt->io);		/* volume down but still "on"	*/
+-	sleep_delay(2000000);	/* make sure it's totally down	*/
++	msleep(2000);	/* make sure it's totally down	*/
+ 	outb(0xc0, rt->io);		/* steady volume, mute card	*/
+ 
+ 	return 0;
+
+commit 515884e98dc4f1c99387000d420394c3bc47c0d7
+Author: Dan Carpenter <error27@gmail.com>
+Date:   Fri Jan 7 16:41:54 2011 -0300
+
+    av7110: check for negative array offset
+    
+    commit cb26a24ee9706473f31d34cc259f4dcf45cd0644 upstream.
+    
+    info->num comes from the user.  It's type int.  If the user passes
+    in a negative value that would cause memory corruption.
+    
+    Signed-off-by: Dan Carpenter <error27@gmail.com>
+    Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+    Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+diff --git a/drivers/media/dvb/ttpci/av7110_ca.c b/drivers/media/dvb/ttpci/av7110_ca.c
+index 4eba35a..c38dd67 100644
+--- a/drivers/media/dvb/ttpci/av7110_ca.c
++++ b/drivers/media/dvb/ttpci/av7110_ca.c
+@@ -277,7 +277,7 @@ static int dvb_ca_ioctl(struct file *file, unsigned int cmd, void *parg)
+ 	{
+ 		ca_slot_info_t *info=(ca_slot_info_t *)parg;
+ 
+-		if (info->num > 1)
++		if (info->num < 0 || info->num > 1)
+ 			return -EINVAL;
+ 		av7110->ci_slot[info->num].num = info->num;
+ 		av7110->ci_slot[info->num].type = FW_CI_LL_SUPPORT(av7110->arm_app) ?
+
+commit 9e5ad61f8d81da0b58535ac2cf60d36e26ca567a
+Author: Mauro Carvalho Chehab <mchehab@redhat.com>
+Date:   Mon Oct 25 17:51:15 2010 -0300
+
+    em28xx: Fix audio input for Terratec Grabby
+    
+    commit a3fa904ec79b94f0db7faed010ff94d42f7d1d47 upstream.
+    
+    The audio input line was wrong. Fix it.
+    
+    Signed-off-by: Mauro Carvalho Chehab <mchehab@redhat.com>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+    Signed-off-by: Andi Kleen <ak@linux.intel.com>
+
+diff --git a/drivers/media/video/em28xx/em28xx-cards.c b/drivers/media/video/em28xx/em28xx-cards.c
+index 3a4fd85..2fa5bb4 100644
+--- a/drivers/media/video/em28xx/em28xx-cards.c
++++ b/drivers/media/video/em28xx/em28xx-cards.c
+@@ -1605,11 +1605,11 @@ struct em28xx_board em28xx_boards[] = {
+ 		.input           = { {
+ 			.type     = EM28XX_VMUX_COMPOSITE1,
+ 			.vmux     = SAA7115_COMPOSITE0,
+-			.amux     = EM28XX_AMUX_VIDEO2,
++			.amux     = EM28XX_AMUX_LINE_IN,
+ 		}, {
+ 			.type     = EM28XX_VMUX_SVIDEO,
+ 			.vmux     = SAA7115_SVIDEO3,
+-			.amux     = EM28XX_AMUX_VIDEO2,
++			.amux     = EM28XX_AMUX_LINE_IN,
+ 		} },
+ 	},
+ 	[EM2860_BOARD_TERRATEC_AV350] = {
