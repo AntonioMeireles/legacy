@@ -1,7 +1,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '11.0.696.61' 
+    baseVersion = '11.0.696.62' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
@@ -108,6 +108,8 @@ class Chromium(AutoPackageRecipe):
                                 # 
                                 'linux_strip_binary=1 '
                                 'remove_webcore_debug_symbols=1 '
+                                #
+                                'linux_sandbox_path=%(libdir)s/chromium-browser/chrome_sandbox '
                                 'disable_sse2=1 '
                                 )
         if Arch.x86_64:
@@ -129,17 +131,16 @@ class Chromium(AutoPackageRecipe):
               )
 
         # Make.
-        r.Make('chrome V=1 BUILDTYPE=Release ')
+        r.Make('chrome chrome_sandbox BUILDTYPE=Release ')
 
         # Install.
-        r.addSource('chromium-browser')
-        r.Replace('@@LIBDIR@@', '%(libdir)s', 'chromium-browser')
-        r.Install('chromium-browser', '%(bindir)s/chromium-browser')
-        r.Symlink('%(bindir)s/chromium-browser', '%(bindir)s/chromium')
+        r.addSource('chromium-browser', macros=True )
+        r.Install('chromium-browser', '%(bindir)s/chromium-browser', mode = 0755)
+
 
         buildLoc = 'out/Release/'
         artifacts = ['chrome.pak', 'locales', 'resources.pak', 'resources', 
-                     'xdg-settings', 'chrome',
+                     'xdg-settings', 'chrome', 'chrome_sandbox',
                      # bellow needed while we use internal ffmpeg
                      'libffmpegsumo.so'
                      ]
@@ -148,6 +149,8 @@ class Chromium(AutoPackageRecipe):
 
         for artifact in artifacts:
             r.Install(buildLoc + artifact, '%(libdir)s/chromium-browser/')
+
+        r.SetModes('%(libdir)s/chromium-browser/chrome_sandbox', 04555)
 
         r.addSource('chromium-browser.desktop')
         r.Desktopfile('chromium-browser.desktop')
@@ -163,7 +166,6 @@ class Chromium(AutoPackageRecipe):
 
         r.Install(buildLoc + 'product_logo_48.png', 
                   '%(datadir)s/pixmaps/chromium-browser.png')
-
 
         # Chromium doesn't look in the mozilla plugins dir by default.
         r.Symlink('%(libdir)s/mozilla/plugins',
