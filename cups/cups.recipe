@@ -7,11 +7,12 @@
 loadSuperClass('rpmpackage')
 class Cups(RPMPackageRecipe, CPackageRecipe):
     name = 'cups'
-    version = '1.4.3'
-    rpmRelease = '2.fc12'
+    version = '1.4.6'
+    rpmRelease = '12.fc15'
 
     buildRequires = [
         'acl:devel',
+        'avahi:devel',
         'autoconf:runtime',
         'automake:runtime',
         'chkconfig:runtime',
@@ -68,21 +69,31 @@ class Cups(RPMPackageRecipe, CPackageRecipe):
                    'cups-filter-debug.patch',
                    'cups-uri-compat.patch',
                    'cups-cups-get-classes.patch',
-                   'cups-avahi.patch',
                    'cups-str3382.patch',
-                   'cups-str3503.patch',
-                   'cups-str3399.patch',
+                   'cups-serialize-gnutls.patch',
 #                   'cups-gnutls-gcrypt-threads.patch',
                    'cups-0755.patch',
-                   'cups-EAI_AGAIN.patch',
-                   'cups-str3505.patch',
-                   'cups-str3541.patch',
+                   'cups-hostnamelookups.patch',
+                   'cups-snmp-quirks.patch',
+                   'cups-hp-deviceid-oid.patch',
+                   'cups-dnssd-deviceid.patch',
+                   'cups-ricoh-deviceid-oid.patch',
+                   'cups-texttops-rotate-page.patch',
+                   'cups-autotype-crash.patch',
+                   'cups-str3754.patch',
+                   'cups-avahi.patch',
+                   'cups-icc.patch',
+                   'cups-usb-parallel.patch',
+                   'cups-job-state-changed.patch',
+
                    ## SECURITY PATCHES:
-                   'cups-CVE-2010-0302.patch'
 
                    #        'cups-lspp.patch', # selinux support
                    ]
     externalArchive = 'ftp://ftp.easysw.com/pub/cups/%(version)s/cups-%(version)s-source.tar.bz2'
+
+    # XXX remove when f15 is released
+    rpmURL = 'http://download.fedora.redhat.com/pub/fedora/linux/releases/test/15-Beta/Fedora/source/SRPMS'
 
     def setup(r):
         r.unpack()
@@ -104,16 +115,9 @@ class Cups(RPMPackageRecipe, CPackageRecipe):
             dest="%(datadir)s/cups/model/")
         r.addSource('textonly.filter' , rpm=r.srpm,
             dest="%(prefix)s/lib/cups/filter/textonly")
-        r.addSource('pstoraster', rpm=r.srpm,
-            dest="%(prefix)s/lib/cups/filter/", mode=0755)
 
-        r.addSource('pstoraster.convs', rpm=r.srpm,
-            dest="%(sysconfdir)s/cups/", mode=0644)
 	# r.addPatch('http://patches.ubuntu.com/c/cups/extracted/rootbackends-worldreadable.dpatch')
 	# r.addPatch('http://patches.ubuntu.com/c/cups/extracted/runloop-backchannel-eof-spin.dpatch')
-
-        # This was fixed in the lspp patch, but we don't want it
-        r.Replace('method', 'scheme', 'scheduler/job.c')
 
         r.Replace('DefaultAuthType Basic',
             'DefaultAuthType Basic\n\nMaxLogSize 0',
@@ -134,17 +138,20 @@ class Cups(RPMPackageRecipe, CPackageRecipe):
 
         r.Configure(' --with-optim="%(cflags)s" --with-docdir=%(thisdocdir)s '
             '--enable-slp --enable-libpaper --enable-ssl '
-            '--enable-gnutls --enable-static --enable-pie --enable-relro'
+            '--enable-gnutls --enable-static --enable-relro '
             '--enable-avahi --enable-dbus --with-dbusdir=%(sysconfdir)s/dbus-1 '
-            '--enable-pdftops --with-pdftops=pdftops '
-            '--enable-gssapi --enable-pdftops --disable-launchd '
+            '--with-pdftops=pdftops '
+            '--enable-gssapi --disable-launchd '
             '--with-cups-group=lp --with-printcap=/var/run/cups/printcap '
             '--with-system-groups=wheel '
-            '--with-log-file-perm=0600 --with-config-file-perm=0644 '
+            '--with-log-file-perm=0600 '
+            '--with-config-file-perm=0644 '
             '--with-php=/usr/bin/php-cgi '
+            '--enable-threads '
             '--localedir=%(datadir)s/locale')
 
-        r.Make('OPTIM="%(cflags)s"')
+        # --misa: for some reason I get EAI_NODATA errors. Force _GNU_SOURCE
+        r.Make('OPTIM="%(cflags)s -D_GNU_SOURCE"')
 
         r.MakeInstall(rootVar='BUILDROOT')
 
