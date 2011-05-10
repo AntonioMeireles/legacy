@@ -7,13 +7,14 @@
 loadSuperClass('rpmpackage')
 class Utillinux(RPMPackageRecipe,CPackageRecipe):
     name = 'util-linux'
-    version = '2.18'
-    rpmRelease = '4.6.fc14'
-    rpmName = '%(name)s-ng'
-    tarballName = '%(name)s-ng-%(version)s.tar.bz2'
-    rpmPatches = [ 
+    version = '2.19.1'
+    rpmRelease = '1.fc15'
+    rpmPatches = [ # add a missing header
+                   'util-linux-ng-2.13-floppy-locale.patch',
                    # add note about ATAPI IDE floppy to fdformat.8
                    'util-linux-ng-2.13-fdformat-man-ide.patch',
+                   # 169628 - /usr/bin/floppy doesn't work with /dev/fd0
+                   'util-linux-ng-2.13-floppy-generic.patch',
                    # 199745 - Non-existant simpleinit(8) mentioned in ctrlaltdel(8)
                    'util-linux-ng-2.13-ctrlaltdel-man.patch',
                    # /etc/blkid.tab --> /etc/blkid/blkid.tab
@@ -22,40 +23,15 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                    'util-linux-ng-2.13-login-lastlog.patch',
                    # 231192 - ipcs is not printing correct values on pLinux
                    'util-linux-ng-2.15-ipcs-32bit.patch',
-                   # 623685 - please extend agetty to not require a baud rate to be specified
-                   # 645640 - new "-s" parameter parsing in agetty does not work
-                   'util-linux-ng-2.18-agetty-baudrate.patch',
-                   # 598631 - shutdown, reboot, halt and C-A-D don't work
-                   'util-linux-ng-2.18-agetty-clocal.patch',
-                   # 618957 - ISO images listed in fstab are mounted twice at boot
-                   'util-linux-ng-2.17-mount-loopdev.patch',
-                   # 630340 - cfdisk cannot read default installer partitioning
-                   'util-linux-ng-2.18-cfdisk-cyl.patch',
-                   # don't truncate findmnt(1) output
-                   'util-linux-ng-2.18-libmount-optsmerge.patch',
-                   # 538551 - Dual-filesystem (ISO9660/HFS) CD-ROMs not mounted automatically
-                   'util-linux-ng-blkid-HFS.patch',
-                   # 625064 - fuse-sshfs mounts are not displayed in Nautilus
-                   'util-linux-ng-2.18-mount-subtype.patch',
-                   # 641169 - cfdisk does not accept two-character partition type
-                   'util-linux-ng-2.18-cfdisk-parttype.patch',
-                   # 563267 - Remount fails if current mount used the "context" option
-                   'util-linux-ng-2.18-mount-context.patch',
-                   # fix wipefs(8) for LUKS
-                   'util-linux-ng-2.18-blkid-offset.patch',
-                   # fix blkid cache usage
-                   'util-linux-ng-2.18-blkid-revalidate.patch',
+
                    ]
     rpmSources = [ 'nologin.c',
                    'nologin.8',
-                   'util-linux-ng-60-raw.rules', 
+                   'util-linux-60-raw.rules', 
                    'uuidd.init',
                    #'util-linux-ng-login.pamd',
                    #'util-linux-ng-remote.pamd',
-                   'util-linux-ng-chsh-chfn.pamd',
-                   ## FIXME
-                   ## only seems to be relevant when selinux is around...
-                   ## 'mount.tmpfs',
+                   'util-linux-chsh-chfn.pamd',
                    ]
     rpmArchives = ['floppy-0.16.tar.bz2']
     buildRequires = [ 'install-info:runtime',
@@ -82,7 +58,8 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         
         r.addPatch('po_Makefile.in.in.mkinstalldirs')
 
-        r.Automake(autoMakeArgs='-a')
+        #r.Automake(autoMakeArgs='-a')
+        r.Run('autoreconf -fi')
         # note: we disable tty group (USE_TTY_GROUP) in Makefiles to prevent call chgrp
         # during the "make install". But we define -DUSE_TTY_GROUP that enable tty groups in
         # *.c files only.
@@ -109,8 +86,9 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
                           '--enable-raw '
                           '--enable-write '
                           '--with-audit '
-#                          '--with-fsprobe=builtin '
                           '--with-utempter '
+                          # for f3
+                          # '--enable-libmount-mount '
                           '--disable-makeinstall-chown '
                           )
         # note: we install to /bin and /usr/bin, so there's $bindir and $usrbindir in
@@ -118,7 +96,7 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         # macros (where is prefix=/usr)
         r.Make()
         r.Run('%(cc)s %(cflags)s -o nologin nologin.c')
-        r.Run('makeinfo --number-sections ipc.texi', dir = 'sys-utils')
+
         r.MakeInstall(preMake='INSTALLDIR="install -d -m 755"'
                               ' INSTALLSUID="install -m 755"'
                               ' INSTALLBIN="install -m 755"'
@@ -132,18 +110,22 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
         r.Symlink('hwclock', '%(essentialsbindir)s/clock'),
         r.Symlink('%(essentialbindir)s/kill', '%(bindir)s/kill'),
 
+
+
         for x in ['addpart', 'delpart', 'partx']:
             r.Move('%(sbindir)s/' + x, '%(essentialsbindir)s/')
 
         r.Move('%(bindir)s/taskset', '%(essentialbindir)s/')
         r.Move('%(essentialsbindir)s/raw', '%(bindir)s/')
 
-        r.Install('util-linux-ng-60-raw.rules',
+        r.Install('util-linux-60-raw.rules',
                   '%(sysconfdir)s/udev/rules.d/60-raw.rules',
                   mode = 0644)
 
-        # FIXME install tmpfs mount helper
-        ## r.Install('mount.tmpfs', '%(essentialsbindir)s/mount.tmpfs', mode = 0755)
+        # f3
+        #r.Symlink('/proc/mounts', '%(sysconfdir)s/mtab')
+
+
 
         # Our own initscript for uuidd
         r.Install('uuidd.init', '%(initdir)s/uuidd', mode = 0755)
@@ -167,8 +149,8 @@ class Utillinux(RPMPackageRecipe,CPackageRecipe):
 
         r.Install('util-linux-login.pamd', '%(sysconfdir)s/pam.d/login',  mode = 0644)
         r.Install('util-linux-remote.pamd', '%(sysconfdir)s/pam.d/remote',  mode = 0644)
-        r.Install('util-linux-ng-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chsh',  mode = 0644)
-        r.Install('util-linux-ng-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chfn', mode = 0644)
+        r.Install('util-linux-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chsh',  mode = 0644)
+        r.Install('util-linux-chsh-chfn.pamd', '%(sysconfdir)s/pam.d/chfn', mode = 0644)
 
         # A few su/gid programs
         r.SetModes('%(bindir)s/ch{fn,sh}', 04711)
