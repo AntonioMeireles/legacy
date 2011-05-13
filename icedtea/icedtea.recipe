@@ -7,7 +7,7 @@ loadSuperClass('jvmpackage')
 class IcedTea(JVMPackageRecipe, CPackageRecipe):
 
     name = 'icedtea'
-    version = '1.6.0.0_b20_1.8+r2138'
+    version = '1.6.0.0_b22_1.10.1'
 
     vendor = 'icedtea'
     release = '1.6.0'
@@ -51,9 +51,11 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         xalan = 'xalan-j_2_7_1'
         xalan_site = 'http://www.apache.org/dist/xml/xalan-j/binaries/'
 
+        ecj_jar = 'http://archive.eclipse.org/eclipse/downloads/drops/R-3.4.2-200902111700/ecj-3.4.2.jar'
+
         # For cooking
         openjdk_snapshot = r.version.split('_')[1]
-        openjdk_date = '21_jun_2010'
+        openjdk_date = '28_feb_2011'
         openjdk_dist = (
             'http://download.java.net/openjdk'
             '/jdk6/promoted/'+openjdk_snapshot+'/openjdk-6-src-'+openjdk_snapshot+'-'+openjdk_date+'.tar.gz'
@@ -62,21 +64,20 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         # To make local cook with installed jre possible
         r.Environment('JAVA_HOME', '')
 
-        icedtea_version=r.version.split('+')[1][1:]
-        r.addMercurialSnapshot('http://icedtea.classpath.org/hg/icedtea6', tag=icedtea_version)
+        r.macros.archive_name = 'icedtea6'
+        r.macros.archive_version = r.version.split('_')[-1]
+        r.addArchive('http://icedtea.classpath.org/download/source/')
 
-        r.Replace('wget', 'false', 'configure.ac')
+        r.Replace('wget', 'false', 'configure.ac', 'configure')
 
         r.addSource(openjdk_dist)
+        r.addSource(ecj_jar, dest='ecj.jar')
 
-        r.addSource('https://jax-ws.dev.java.net/files/documents/4202/150724/jdk6-jaxws-b20.zip', dir='drops/')
-        r.addSource('https://jax-ws.dev.java.net/files/documents/4202/150725/jdk6-jaf-b20.zip', dir='drops/')
-        r.addSource('https://jaxp.dev.java.net/files/documents/913/150648/jdk6-jaxp-b20.zip', dir='drops/')
+        for f in ('jdk6-jaxws-b20.zip', 'jdk6-jaf-b20.zip', 'jaxp144_01.zip'):
+            r.addSource('http://icedtea.classpath.org/download/drops/'+f, dir='drops/')
 
         r.addArchive(ant_site+ant+'-bin.tar.gz', dir='%(maindir)s')
         r.addArchive(xalan_site+xalan+'-bin.zip', dir='%(maindir)s')
-
-        r.Run('autoreconf -fi')
 
         jarch = ('x86_64','i686')[Arch.x86==True]
         for arch in ('i686', 'x86_64'):
@@ -100,13 +101,13 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         bootstrap_path='PATH=$PATH:'+openjdk_home+'/bin:'+openjdk_home+'/jre/bin:%(builddir)s/'+ant+'/bin'
 
         conf = (
-            '--with-openjdk '
             '--without-rhino '
             '--with-ant-home=%(builddir)s/'+ant+' '
             '--with-xalan2-jar=%(builddir)s/'+xalan+'/xalan.jar '
             '--with-xalan2-serializer-jar=%(builddir)s/'+xalan+'/serializer.jar '
             '--with-xerces2-jar=%(builddir)s/'+xalan+'/xercesImpl.jar '
-            '--with-openjdk='+openjdk_home
+            '--with-jdk-home='+openjdk_home+' '
+            '--with-ecj-jar=%(builddir)s/ecj.jar '
         )
 
         # prevent random breakage, at least in x86_64
