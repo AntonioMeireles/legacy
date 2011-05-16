@@ -1,5 +1,4 @@
 #
-# Copyright (c) 2008-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -7,8 +6,8 @@
 class EclipseSDK(AutoPackageRecipe):
 
     name = 'eclipse-sdk'
-    version = '3.6.1'
-    build_version = '0.6.2'
+    version = '3.6.2'
+    build_version = '0.6_2edc608'
 
     buildRequires = [
         # XXX HACK ALERT 
@@ -17,7 +16,6 @@ class EclipseSDK(AutoPackageRecipe):
         # 'icedtea-jdk:runtime',
         'sun-jre:runtime',
         'sun-jdk:runtime',
-        'rpm:runtime',
 
         'pkgconfig:devel',
         'glib:devel',
@@ -53,39 +51,21 @@ class EclipseSDK(AutoPackageRecipe):
     def setup(r):
         r.macros.build_version = r.build_version
         r.macros.build_site = 'http://download.eclipse.org/technology/linuxtools/eclipse-build/3.6.x_Helios/'
-        r.macros.bundles = 'http://download.eclipse.org/tools/orbit/downloads/drops/R201009090800/bundles'
-        r.macros.fedora_site = 'http://download.fedora.redhat.com/pub/fedora/linux/development'
-
-        arch = ('x86', 'x86_64')[Arch.x86_64==True]
-        awt_arch = ('i386', 'amd64')[Arch.x86_64==True]
-
-
-        r.macros.rpm_arch = ('i386', 'x86_64')[Arch.x86_64==True]
-        r.macros.eclipsebuild = 'RPM/BUILD/eclipse-build-'+r.build_version
-        r.macros.rpmbuild = (
-            "rpmbuild"
-            " -vv --nodeps"
-            " --macros='%(prefix)s/lib/rpm/macros"
-                ":%(prefix)s/lib/rpm/platform/%(rpm_arch)s-linux/macros:rpm.macros'"
-        )
+        r.macros.bundles = 'http://download.eclipse.org/tools/orbit/downloads/drops/R20100519200754/bundles'
 
         r.macros.eclipsedir = '%(libdir)s/eclipse'
 
-        r.addArchive('%(fedora_site)s/14/source/SRPMS/eclipse-3.6.1-1.fc14.src.rpm', dir='eclipse-build')
+#        r.addArchive('%(build_site)s/eclipse-build-%(build_version)s.tar.bz2')
+        r.addArchive('eclipse-build-%(build_version)s.tar.bz2')
 
-        r.addSource('rpm.macros')
-        r.addSource('eclipse.spec')
-        r.addAction("%(rpmbuild)s -bp eclipse.spec")
+        r.addSource('%(build_site)s/eclipse-%(version)s-src.tar.bz2')
 
-        for p in ('eclipse-swt-mesa-fix.patch', 'eclipse-sdk-iterators.patch', 'eclipse-swt-webkit-buildfix.patch'):
-            r.addPatch(p, dir='%(eclipsebuild)s/build/eclipse-%(version)s-src', macros=True)
+        r.addSource('eclipse.wrapper', macros = True)
 
         def updateDependencies(name, bundles):
-            dependencies = []
             for bundle in bundles:
-                dependencies.append(bundle+'=%(destdir)s%(eclipsedir)s/dependencies/'+bundle)
-                r.addSource('%%(bundles)s/%s' % bundle, dir='%(destdir)s%(eclipsedir)s/dependencies')
-            r.Run("echo '%s' > %%(eclipsebuild)s/%s.properties" % ('\n'.join(dependencies), name))
+                r.addSource('%%(bundles)s/%s' % bundle)
+                r.Replace(bundle+'=.*', bundle+'=%(builddir)s/'+bundle, name+'.properties')
 
         # JTD
         updateDependencies('jdtdependencies', [
@@ -114,54 +94,84 @@ class EclipseSDK(AutoPackageRecipe):
             'org.sat4j.pb_2.2.0.v20100429.jar',
         ])
 
-        r.addArchive('%(bundles)s/org.junit_3.8.2.v3_8_2_v20100427-1100.zip', dir='eclipse-build/')
+        r.addArchive('http://download.eclipse.org/tools/orbit/downloads/drops/R20100519200754/bundles/org.junit_3.8.2.v3_8_2_v20100427-1100.zip', dir='eclipse-build-%(build_version)s/')
         r.addSource('mirror://sourceforge/junit/junit/4.5/junit-4.5.jar')
 
         r.Replace(
             ('/usr/share/java/ant.jar', '%(datadir)s/ant/ant.jar'),
             ('/usr/share/java/ant.*.jar:/usr/share/java/', '%(datadir)s/ant/'),
-            '%(eclipsebuild)s/nonosgidependencies.properties'
+            'nonosgidependencies.properties'
         )
+        r.Run("echo 'org.apache.ant_1.7.1.v20100518-1145/lib/ant-nodeps.jar=/usr/share/ant/ant-nodeps.jar' >> nonosgidependencies.properties")
+
         r.Replace(
             ('/usr/share/java/junit4.jar', '%(builddir)s/junit-4.5.jar'),
             ('/usr/share/java/junit.jar', '%(builddir)s/org.junit_3.8.2.v3_8_2_v20100427-1100/junit.jar'),
-            '%(eclipsebuild)s/jdtnonosgidependencies.properties'
+            'jdtnonosgidependencies.properties'
         )
+
+        patches = [
+            'eclipse-swt-mesa-fix.patch',
+            'eclipse-sdk-iterators.patch',
+            'eclipse-sdk-bug317829.patch',
+#            'eclipse-sdk-bug309059.patch',
+        ]
+
+        for patch in patches:
+            r.addSource(patch, dir='patches/', macros = True)
+
+        r.addPatch('eclipse-build.xml-patches.patch')
+
+        r.addPatch('eclipse-build-no-symlink.patch')
+
+        # buildfix
+        r.Replace('.*/remove-old-ant-plugins.patch.*', '', 'build.xml')
 
         bootClassPath = [
             '$JAVA_HOME/jre/lib/rt.jar',
             '$JAVA_HOME/jre/lib/jce.jar',
             '$JAVA_HOME/jre/lib/jsse.jar',
         ]
-        r.Run('sed -r -i "s#=.+jce.jar#='+':'.join(bootClassPath)+'#" %(eclipsebuild)s/build.properties')
-        r.Run('sed -r -i "s#=.+jce.jar#='+':'.join(bootClassPath)+'#" %(eclipsebuild)s/pdebuild.properties')
+        r.Run('sed -r -i "s#=.+jce.jar#='+':'.join(bootClassPath)+'#" build.properties')
+        r.Run('sed -r -i "s#=.+jce.jar#='+':'.join(bootClassPath)+'#" pdebuild.properties')
 
-        r.Run('AWT_LIB_PATH=$JAVA_HOME/jre/lib/%s ant' % awt_arch, dir='%(eclipsebuild)s')
+        arch = ('x86', 'x86_64')[Arch.x86_64==True]
+        awt_arch = ('i386', 'amd64')[Arch.x86_64==True]
 
-        r.Run("%(rpmbuild)s --short-circuit -bi eclipse.spec")
+        # TODO
+        # Don't build for non-linux,gtk,%(arch)s targets
+        # Don't build for arches other than the one on which we're building
 
-        r.Install('RPM/BUILDROOT/eclipse-%(version)s-1.%(rpm_arch)s/*', '/', preserveSymlinks=True)
+        r.Run('AWT_LIB_PATH=$JAVA_HOME/jre/lib/%s ant -DbuildArch=%s provision.cvs' % (awt_arch, arch))
+        r.Run('ant -DdestDir=%%(destdir)s -Dprefix=/usr -DbuildArch=%s -Dmultilib=true installSDKinDropins' % arch)
 
-        r.Install('junit-4.5.jar', '%(eclipsedir)s/dependencies/junit4.jar')
-        r.Install('org.junit_3.8.2.v3_8_2_v20100427-1100/junit.jar', '%(eclipsedir)s/dependencies/junit.jar'),
+        # use our own wrapper to get update sites pre-populated
+        r.Install('eclipse.wrapper', '%(bindir)s/eclipse', mode = 0755)
 
-        r.macros.jdtdir = '%(destdir)s%(eclipsedir)s/dropins/jdt/plugins'
-        r.macros.sdkdir = '%(destdir)s%(eclipsedir)s/dropins/sdk/plugins'
-
-        jar = 'org.hamcrest.core_1.1.0.v20090501071000.jar'
-        r.Run('ln -v -s -f "%%(eclipsedir)s/dependencies/%s" "%%(jdtdir)s/%s"' % (jar, jar))
-        jar = 'org.objectweb.asm_3.2.0.v200909071300.jar'
-        r.Run('ln -v -s -f "%%(eclipsedir)s/dependencies/%s" "%%(sdkdir)s/%s"' % (jar, jar))
-        jar = 'org.junit_3.8.2.v3_8_2_v20100427-1100/junit.jar'
-        r.Run('ln -v -s -f "%%(eclipsedir)s/dependencies/junit.jar" "%%(jdtdir)s/%s"' % jar)
-        for jar in ('%(jdtdir)s/org.junit_4.8.1.v4_8_1_v20100427-1100/junit.jar', '%(sdkdir)s/junit4.jar', '%(sdkdir)s/org.junit4/junit.jar'):
-            r.Run('ln -v -s -f "%%(eclipsedir)s/dependencies/junit4.jar" "%s"' % jar)
+        r.Install('junit-4.5.jar', '%(eclipsedir)s/dropins/jdt/plugins/junit4.jar')
 
         r.AutoDoc(exceptions='.*')
 
-        r.ComponentSpec('lib', '%(eclipsedir)s/.*.so')
+        r.Requires(exceptDeps='java: org.apache.tools.ant.*')
+        r.Requires(exceptDeps='java: org.eclipse.pde.internal.build.publisher.BrandP2Task')
 
-        r.Requires(exceptDeps='java: .*')
-        r.Provides(exceptDeps='java: .*')
         r.Requires(exceptDeps=r'soname: ELF.*/libjawt.so.*')
+
+        r.Remove('%(libdir)s/eclipse/eclipse.ini')
+        r.Symlink('%(sysconfdir)s/eclipse.ini', '%(libdir)s/eclipse/' )
+
+        # http://wiki.eclipse.org/WTP_FAQ#Why_am_I_getting_a_java.lang.OutOfMemoryError:_PermGen_space.3F
+        # r.Replace('256m', '384m', '%(sysconfdir)s/eclipse.ini')
+        # https://bugs.eclipse.org/bugs/show_bug.cgi?id=294877
+        r.Run(
+            """
+echo "" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/eclipse/core/internal/dtree/DataTreeNode,forwardDeltaWith" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/eclipse/jdt/internal/compiler/lookup/ParameterizedMethodBinding,<init>" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/eclipse/cdt/internal/core/dom/parser/cpp/semantics/CPPTemplates,instantiateTemplate" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/eclipse/cdt/internal/core/pdom/dom/cpp/PDOMCPPLinkage,addBinding" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/python/pydev/editor/codecompletion/revisited/PythonPathHelper,isValidSourceFile" >> %(destdir)s/%(sysconfdir)s/eclipse.ini
+echo "-XX:CompileCommand=exclude,org/python/pydev/ui/filetypes/FileTypesPreferencesPage,getDottedValidSourceFiles" >> %(destdir)s/%(sysconfdir)s/eclipse.ini 
+            """
+            )
 
