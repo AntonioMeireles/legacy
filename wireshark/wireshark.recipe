@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2004-2008 rPath, Inc.
+#               2008-2011 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -8,17 +9,25 @@ loadInstalled('python')
 loadSuperClass('rpmpackage')
 class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
     name = 'wireshark'
-    version = '1.1.3'
+    version = '1.4.6'
 
     externalArchive = 'http://www.wireshark.org/download/src/'
-    rpmRelease = '1.fc11'
+    rpmRelease = '2.fc15'
     rpmPatches = [ 'wireshark-nfsv4-opts.patch',
-                   'wireshark-0.99.7-path.patch',
-                   'wireshark-1.1.2-nfs41-backchnl-decode.patch' ]
+                   'wireshark-1.2.4-enable_lua.patch',
+                   'wireshark-libtool-pie.patch',
+                   'wireshark-1.4.0-doc-path.patch',
+                   'wireshark-1.4.2-group-msg.patch' ]
 
     rpmSources = [ 'wireshark.pam',
-                  'wireshark.console',
-                  'wireshark.desktop'
+                   'wireshark.console',
+                   'wireshark.desktop',
+                   'wireshark-autoconf.m4',
+                   'wireshark-mime-package.xml',
+                   'wiresharkdoc-16x16.png',
+                   'wiresharkdoc-32x32.png',
+                   'wiresharkdoc-48x48.png',
+                   'wiresharkdoc-256x256.png'
                   ]
 
     buildRequires = [
@@ -43,12 +52,15 @@ class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
         r.macros.python_version = Python.majversion
         # --with-pcre= does not work for our pcre installation
 
-        r.macros.ldflags += ' -lm -lcrypto '
+        r.macros.ldflags += ' -lm -lcrypto -pie '
+        r.Environment('PIEFLAGS', '-fpie')
+        r.macros.cflags += ' -D_LARGEFILE64_SOURCE -fpie '
+        r.macros.cxxflags += ' -D_LARGEFILE64_SOURCE -fpie '
 
         # unlike fedora, we don't put the version in the plugindir; this is
         # in order to preserve local changes.
         r.Configure(' --bindir=%(sbindir)s'
-                    ' --enable-zlib'
+                    ' --enable-zlib=no'
                     ' --enable-ipv6'
                     '  --with-libsmi'
                     ' --with-gnu-ld'
@@ -58,13 +70,25 @@ class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
                     ' --with-ssl'
                     ' --with-net-snmp'
                     ' --with-pic'
+                    ' --with-lua'
+
                     ' --disable-warnings-as-errors'
-                    ' --with-plugins=%(libdir)s/%(name)s/plugins/'
+                    ' --with-python'
+                    ' --with-plugins=%(libdir)s/%(name)s/plugins/%(version)s/'
                     # no adns support so...
                     ' --with-adns=no',
                     )
+        # Don't use rpath!
+        r.Replace(('^hardcode_libdir_flag_spec=.*',
+                   'hardcode_libdir_flag_spec=""'),
+                  ('^runpath_var=LD_RUN_PATH',
+                   'runpath_var=DIE_RPATH_DIE'),
+                  'libtool')
+
 
     def policy(r):
+        # The evil plugins hack
+        r.Run("""perl -pi -e 's|-L../../epan|-L../../epan/.libs|' plugins/*/*.la""")
         # empty?!
         # rm -f $RPM_BUILD_ROOT%{_sbindir}/idl2wrs
         r.Install('wireshark.pam', '%(sysconfdir)s/pam.d/wireshark', mode = 0644)
@@ -72,7 +96,6 @@ class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
 
         r.ConsoleHelper('%(bindir)s/wireshark', '%(sbindir)s/wireshark',
                         session=True, fallback=True, timestamp=True)
-        r.Install('*.1', '%(mandir)s/man1/', mode=0644)
 
         r.Install('tools/wireshark_be.py', 'tools/wireshark_gen.py',
                   '%(libdir)s/python%(python_version)s/site-packages/',
@@ -87,3 +110,20 @@ class Wireshark(RPMPackageRecipe,AutoPackageRecipe):
         r.PackageSpec('wireshark', '(%(sbindir)s|%(bindir)s)/wireshark')
         r.PackageSpec('tshark', '/')
         r.Requires('tshark:runtime', '%(sbindir)s/wireshark')
+
+        r.Install('image/wsicon16.png', '%(datadir)s/icons/hicolor/16x16/apps/wireshark.png', mode = 0644)
+        r.Install('image/wsicon32.png', '%(datadir)s/icons/hicolor/32x32/apps/wireshark.png', mode = 0644)
+        r.Install('image/wsicon48.png', '%(datadir)s/icons/hicolor/48x48/apps/wireshark.png', mode = 0644)
+        r.Install('image/wsicon64.png', '%(datadir)s/icons/hicolor/64x64/apps/wireshark.png', mode = 0644)
+        r.Install('image/wsicon256.png', '%(datadir)s/icons/hicolor/256x256/apps/wireshark.png', mode = 0644)
+
+        r.Install('wireshark-mime-package.xml', '%(datadir)s/mime/packages/wireshark.xml', mode = 0644)
+        r.Install('wiresharkdoc-16x16.png', '%(datadir)s/icons/gnome/16x16/mimetypes/application-x-pcap.png', mode = 0644)
+        r.Install('wiresharkdoc-32x32.png', '%(datadir)s/icons/gnome/32x32/mimetypes/application-x-pcap.png', mode = 0644)
+        r.Install('wiresharkdoc-48x48.png', '%(datadir)s/icons/gnome/48x48/mimetypes/application-x-pcap.png', mode = 0644)
+        r.Install('wiresharkdoc-256x256.png', '%(datadir)s/icons/gnome/256x256/mimetypes/application-x-pcap.png', mode = 0644)
+        # do we want the devel stuff ?
+        # atm nothing depends on this
+
+        # XXX do a proper info-wireshark pkg
+        r.Group('%(name)s', 9124)
