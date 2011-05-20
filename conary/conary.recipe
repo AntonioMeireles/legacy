@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2004-2011 rPath, Inc.
+#                     
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -7,29 +8,32 @@
 loadInstalled('python')
 class Conary(CPackageRecipe, Python.VersionMixIn):
     name = 'conary'
-    #changeset = 'dcc239c62f4b'
-    version = '2.2.15'# + '+' + changeset 
+    version = '2.3.2'
+    tag = 'b46bc0528329'
+
+    if tag:
+        version += '_' + tag
 
     buildRequires = [ 'python:devel', 'python:lib', 
                       'libelf-lgpl:devel', 'pycrypto:python',
                       'openssl:devel', 'zlib:devel', 'python:bin',
                       'elementtree:python', 'kid:python', 'm2crypto:python',
-                      'perl:runtime',
+                      'perl:runtime', 'kid:runtime'
                     ]
     def setup(r):
         r.setDefaultPython()
         r.macros.sitepkgs = '%s/%%(name)s' % Python.sitepkgs
-        #r.addMercurialSnapshot('http://hg.rpath.com/conary-2.2/', tag = r.changeset)
-        r.addArchive('ftp://download.rpath.com/conary/')
-        r.macros.sqlitever = '3070500'
+        r.macros.sqlitever = '3070602'
         r.macros.sqlite = 'sqlite-autoconf-%(sqlitever)s'
+        if r.tag:
+            r.addMercurialSnapshot('http://hg.rpath.com/conary-2.3/', tag=r.tag)
+        else:
+            r.addArchive('ftp://download.rpath.com/conary/')
+        r.addPatch('rpl2-build-flags.patch')            
+
+        # Use embedded sqlite
         r.addArchive('http://sqlite.org/%(sqlite)s.tar.gz',
                      dir='%(maindir)s/conary/pysqlite3/')
-
-        r.addPatch('rpl2-build-flags.patch')
-
-        # temporary hack until RPL-1510 is properly resolved
-        r.Replace(re.escape('--hash-style=gnu'), '', 'config/macros')
 
         # %(x11prefix)s deprecated in rPL2 (CNY-1205)
         r.Replace('^x11prefix.*$', 'x11prefix = \'%(exec_prefix)s\'',
@@ -48,7 +52,12 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
 
             # Makefiles need to know where to find include files
             r.Environment('SYSROOT', '%(sysroot)s')
-        preMake='NO_KID=1'
+
+        if Use.bootstrap:
+            preMake='NO_KID=1'
+        else:
+            preMake = ''
+
 
         # Build internal sqlite library for Conary to use
         r.Configure('--disable-shared --enable-threadsafe',
@@ -126,8 +135,7 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
         r.UtilizeUser('emerge', '%(libdir)s/.*/conary/cvc.py')
         # emerge really requires all of conary-build, so if
         # it moves to cvc we can remove this whiteout
-        r.Requires(exceptDeps=('(%(bindir)s/conary|'
-                                '%(libdir)s/.*/conary/cmds/conarycmd.py)',
+        r.Requires(exceptDeps=('(%(bindir)s/conary|conarycmd.py)',
                                'python: conary.build.cook'))
         # CNY-3314 -- conary.commit should not depend on conary.cvc
         r.Requires(exceptDeps=('.*/conary/commit\.py.*$',
@@ -139,9 +147,8 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
                                'python: conary.repository.*'))
 
         # keyutils should not be a dep as it is included conditionally
-        r.Requires(exceptDeps=('.*/conary/callbacks.py.*$', 
+        r.Requires(exceptDeps=('.*/conary/callbacks.py.*$',
                                'python: keyutils.*'))
-
         # This exception needs to be here in order to bootstrap perl;
         # if we don't have perl, we won't be using this file or those
         # modules anyway.
@@ -155,7 +162,7 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
         # MySQL is optional.
         r.Requires(exceptDeps='python: MySQLdb.*')
         # postgresql is also optional
-        r.Requires(exceptDeps='python: pgdb')
+        r.Requires(exceptDeps='python: pgsql')
 
         r.AutoDoc('EULA_Conary_Dual_License.txt')
 
@@ -165,4 +172,3 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
             r.Requires('python:lib', '%(sitepkgs)s/.*')
             r.Requires('pycrypto:python', '%(sitepkgs)s/lib/sha1helper.py')
             r.Requires('elementtree:python', '%(sitepkgs)s/build/packagepolicy.py')
-
