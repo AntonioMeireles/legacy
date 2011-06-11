@@ -9,92 +9,116 @@
 import datetime
 class Seamonkey(AutoPackageRecipe):
     name = 'seamonkey'
-    version = '2.0.13'
+    version = '2.1'
 
     buildRequires = [ 'GConf:devel', 'ORBit2:devel',
-                    'atk:devel', 'cairo:devel',
-                    'fontconfig:devel', 'freetype:devel',
+                    'atk:devel', 'bzip2:devel', 'cairo:devel',
+                    'ccache:runtime', 'fontconfig:devel', 'freetype:devel',
                     'glib:devel', 'perl:runtime',
                     'gnome-keyring:devel', 'gnome-vfs:devel',
                     'gtk:devel', 'libIDL:devel',
                     'libart_lgpl:devel', 'libbonobo:devel',
                     'libbonoboui:devel', 'libgnome:devel',
                     'libgnomecanvas:devel', 'libgnomeui:devel',
-                    'libjpeg:devel', 'libpng:devel',
-                    'libstdc++:devel', 'libxml2:devel',
-                    'pango:devel', 'popt:devel',
-                    'zlib:devel', 'zip:runtime',
-                    'pkgconfig:devel', 'libX11:devel',
-                    'libXau:devel', 'libXdmcp:devel',
-                    'libXt:devel', 'libXext:devel',
-                    'libXi:devel', 'libXinerama:devellib',
-                    'libXft:devel', 'libXrender:devel',
-                    'libdmx:devel', 'libICE:devel',
-                    'libSM:devel', 'expat:devel',
-                    'alsa-lib:devel', 'dbus-glib:devel',
-                    'wireless-tools:devel', 'nspr:devel',
-                    'nss:devel', 'desktop-file-utils:runtime',
-                    'curl:devel', 'unzip:runtime' ] 
+                    'libjpeg:devel', 'libnotify:devel',
+                    'libpng:devel', 'libstdc++:devel',
+                    'libxml2:devel', 'pango:devel',
+                    'popt:devel', 'zlib:devel',
+                    'zip:runtime', 'pkgconfig:devel',
+                    'libX11:devel', 'libXau:devel',
+                    'libXdmcp:devel', 'libXt:devel',
+                    'libXext:devel', 'libXi:devel',
+                    'libXinerama:devellib', 'libXft:devel',
+                    'libXrender:devel', 'libdmx:devel',
+                    'libICE:devel', 'libSM:devel',
+                    'expat:devel', 'alsa-lib:devel',
+                    'dbus-glib:devel', 'wireless-tools:devel',
+                    'nspr:devel', 'nss:devel',
+                    'desktop-file-utils:runtime', 'curl:devel',
+                    'unzip:runtime', 'yasm:devel',
+                    'startup-notification:devel',
+                     ] 
+
+    langpacks = [        'be',
+                         'ca',
+                         'cs',
+                         'de',
+                         'en-GB',
+                         'es-AR',
+                         'es-ES',
+                         'fi',
+                         'fr',
+                         'it',
+                         'ja',
+                         'lt',
+                         'nb-NO',
+                         'nl',
+                         'pl',
+                         'pt-PT',
+                         'ru',
+                         'sk',
+                         'sv-SE',
+                         'tr',
+                         ]
 
     packageSummary = 'SeaMonkey is an all-in-one Internet application suite.'
     packageDescription = 'SeaMonkey is an all-in-one Internet application suite. It includes a browser, mail/news client, IRC client, JavaScript debugger, and a tool to inspect the DOM for web pages. It is derived from the application formerly known as Mozilla Application Suite.'
     
     def defmacros(r):
         r.macros.MOZ_APP_DIR = '%(libdir)s/%(name)s-%(version)s'
-        #r.macros.MOZ_SMP_FLAGS = '-j1'
         r.macros.ldflags += ' -Wl,-rpath,%(MOZ_APP_DIR)s '
-        r.macros.langpack = 'seamonkey-langpacks-%(version)s-'+ datetime.date.today().strftime("%Y.%m.%d") + '.tar.bz2'
-        #r.macros.langpack = 'seamonkey-langpacks-%(version)s-2011.03.02.tar.bz2'
         r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d/ '
+        r.macros.langpackdir = '%(MOZ_APP_DIR)s/extensions/'
 
     def unpack(r):
         r.addArchive('http://releases.mozilla.org/pub/mozilla.org/seamonkey/releases/%(version)s/source/%(name)s-%(version)s.source.tar.bz2')
-        r.addPatch('mozilla-191-path.patch')
-        r.addPatch('mozilla-jemalloc.patch')
         r.addSource('seamonkey.desktop')
         r.addSource('seamonkey.png')
-        r.addSource('%(langpack)s')
+
+        for langs in r.langpacks:
+            r.addSource('http://releases.mozilla.org/pub/mozilla.org/seamonkey/releases/%(version)s/langpack/seamonkey-%(version)s.'+ langs + '.langpack.xpi', dir='seamonkey-langpacks')
+            r.Move('seamonkey-langpacks/%(name)s-%(version)s.'+ langs + '.langpack.xpi', 'seamonkey-langpacks/'+ langs + '.xpi')
+
         r.addSource('seamonkey-mozconfig', apply='mv seamonkey-mozconfig .mozconfig', macros='true')
         r.addSource('seamonkey.sh.in', macros='true')
         r.addSource('seamonkey-default-prefs.js', macros='true')
 
-    def configure(r):
-        r.Configure('--prefix=%(prefix)s --libdir=%(libdir)s --enable-application=suite --with-system-zlib --enable-canvas --with-system-nspr --with-system-nss --with-system-jpeg --enable-default-toolkit=cairo-gtk2 --with-pthreads --disable-tests --disable-installer --disable-debug --enable-xinerama --disable-xprint --disable-strip --enable-pango --disable-system-cairo --enable-svg --enable-extensions=default,irc --enable-crypto --enable-safe-browsing --disable-crashreporter --enable-static')
-
     def make(r):
-        r.Make('-f client.mk build STRIP="/bin/true"')
+        r.Make('-f client.mk build MOZ_MAKE_FLAGS="%(parallelmflags)s" MOZ_SERVICE_SYNC="1" STRIP="/bin/true"')
 
     def makeinstall(r):
-        r.MakeInstall()
+        r.MakeInstall('-f client.mk')
         r.Remove('%(bindir)s/seamonkey')
         r.Install('seamonkey.sh.in', '%(bindir)s/seamonkey', mode=0755) 
         r.Install('seamonkey-default-prefs.js', '%(MOZ_APP_DIR)s/defaults/pref/all-foresight.js')
-        r.Install('mozilla/dist/bin/components/*.xpt', '%(MOZ_APP_DIR)s/components/', mode=0644)
         r.Install('seamonkey.png', '%(datadir)s/pixmaps/')
         r.Desktopfile('seamonkey.desktop')
 
-    #install language packs
+    # install language packs
     def languages(r):
-        r.Install('%(langpack)s', '%(destdir)s/%(MOZ_APP_DIR)s/extensions/')
-        r.Run('tar xjf %(langpack)s', dir='%(destdir)s/%(MOZ_APP_DIR)s/extensions/')
-        r.Run(""" cd %(destdir)s/%(MOZ_APP_DIR)s/extensions/
-                for langpack in `ls seamonkey-langpacks/*.xpi`; do
-                  language=`basename $langpack .xpi`
-                  extensiondir=%(destdir)s/%(MOZ_APP_DIR)s/extensions/langpack-$language@seamonkey.mozilla.org
-                  mkdir  $extensiondir
-                  unzip $langpack -d $extensiondir
-                  find $extensiondir -type f | xargs chmod 644
+        r.MakeDirs('%(langpackdir)s')
+        r.Run("""
+for langpack in `ls seamonkey-langpacks/*.xpi`; do
+  language=`basename $langpack .xpi`
+  extensionID=langpack-$language@seamonkey.mozilla.org
+  mkdir $extensionID
+  unzip $langpack -d $extensionID
+  find $extensionID -type f | xargs chmod 644
 
-                done
-                rm -rf seamonkey-langpacks
+  cd $extensionID
+  zip -r9mX ../${extensionID}.xpi *
+  cd -
+  cp ${extensionID}.xpi %(destdir)s/%(langpackdir)s/
+done
 
-            """)
+""")
+
         r.Run('''echo 'pref("intl.locale.matchOS", true)' >> %(destdir)s%(libdir)s/%(name)s-%(version)s/defaults/pref/suite-l10n.js ''')
+        r.ComponentSpec('locale', '%(destdir)s/%(langpackdir)s/')
 
     def setup(r):
         r.defmacros()
         r.unpack()
-        #r.configure()
         r.make()
         r.makeinstall()
         r.languages()
