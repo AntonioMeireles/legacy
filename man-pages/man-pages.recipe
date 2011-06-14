@@ -7,78 +7,79 @@
 loadSuperClass('rpmpackage')
 class ManPages(RPMPackageRecipe, CPackageRecipe):
     name = 'man-pages'
-    version = '2.79'
-    rpmUpVer = '2.78'
-    rpmRelease = '2.fc9'
+    version = '3.32'
+    rpmRelease = '8.fc15'
 
     # glibc provides iconv
     buildRequires = [ 'glibc:runtime', 'diffutils:runtime'  ]
 
+    rpmPatches = [
+        'man-pages-2.46-nscd.patch',
+        'man-pages-2.63-unimplemented.patch',
+        'man-pages-2.48-passwd.patch',
+        'man-pages-2.51-nscd-conf.patch',
+        'man-pages-2.78-stream.patch',
+        'man-pages-3.22-nsswitch.conf.patch',
+        'man-pages-3.23-proc.patch',
+        'man-pages-3.23-ld.so.patch',
+        'man-pages-3.22-sched_setaffinity.patch',
+        'man-pages-3.23-printf.patch',
+        'man-pages-3.24-getnameinfo.patch',
+        'man-pages-3.24-mmap64.patch',
+        'man-pages-3.26-rcmd.patch',
+        'man-pages-3.27-sd.patch',
+        'man-pages-3.29-uri.patch',
+        'man-pages-posix-2003-awk.patch',
+        'man-pages-posix-2003-man.patch',
+        'man-pages-posix-2003-printf.patch',
+        'man-pages-3.30-prctl.patch',
+        'man-pages-3.32-strtol.patch',
+        'man-pages-3.32-readdir.patch',
+        ]
+
     def setup(r):
+        r.macros.posix_version = "2003"
+        r.macros.posix_release = "a"
+        r.macros.posix_archive = 'man-pages-posix-%(posix_version)s-%(posix_release)s'
+
         r.addArchive('http://www.kernel.org/pub/linux/docs/manpages/')
-        r.addArchive('man-pages-extralocale.tar.bz2', rpm=r.srpm,
-            dir='man-pages-%(version)s')
+        r.addArchive('http://www.kernel.org/pub/linux/docs/man-pages/man-pages-posix/%(posix_archive)s.tar.bz2')
+        # Have to use plain cp, or else the following r.addPatch runs first
+        r.addAction('cp -r ../%(posix_archive)s/man[0-9]* .')
+        r.addAction('cp ../%(posix_archive)s/POSIX-COPYRIGHT .')
 
-        r.addSource('rpcgen.1', rpm=r.srpm,
-            dir='man1')
+        for patch in r.rpmPatches:
+            r.addPatch(patch, rpm=r.srpm)
 
-        r.addPatch('man-pages-1.51-iconv.patch', rpm=r.srpm)
-        r.addPatch('man-pages-2.63-iconv.patch', rpm=r.srpm)
-        r.addPatch('man-pages-2.63-getent.patch', rpm=r.srpm)
-        r.addPatch('man-pages-2.63-unimplemented.patch', rpm=r.srpm)
-        r.addPatch('man-pages-2.75-crypt.patch', rpm=r.srpm)
-
+        # FIXME update this section
         # Convert some strange manpages to UTF-8
-        brokenManPages = [ ('iso_8859-15', '7'),
-                           ('iso_8859-16', '7'),
-                           ('iso_8859-1',  '7'),
-                           ('iso_8859-2',  '7'),
-                           ('iso_8859-9',  '7'),
-                           ('koi8-r',      '7') ]
+#        brokenManPages = [ ('iso_8859-15', '7'),
+#                           ('iso_8859-16', '7'),
+#                           ('iso_8859-1',  '7'),
+#                           ('iso_8859-2',  '7'),
+#                           ('iso_8859-9',  '7'),
+#                           ('koi8-r',      '7') ]
+#
+#        for manpage, section in brokenManPages:
+#            manFile = 'man' + section + '/' + manpage + '.' + section
+#
+#            r.Run('iconv -f %s -t UTF-8 %s -o %s.conv' %
+#                  (manpage.upper(), manFile, manFile))
+#            r.Move(manFile+'.conv', manFile)
 
-        for manpage, section in brokenManPages:
-            manFile = 'man' + section + '/' + manpage + '.' + section
+        ### And now remove those we are not going to use:
 
-            r.Run('iconv -f %s -t UTF-8 %s -o %s.conv' %
-                  (manpage.upper(), manFile, manFile))
-            r.Move(manFile+'.conv', manFile)
+        # Part of libattr-devel
+        r.Remove('man2/{,f,l}{get,list,remove,set}xattr.2')
 
+        # Problem with db x db4 (#198597) - man pages are obsolete
+        r.Remove('man3/{db,btree,dbopen,hash,mpool,recno}.3')
+
+        # Deprecated
+        r.Remove('man2/pciconfig_{write,read,iobase}.2')
 
         # Install appropriate man pages
         r.Install('man[0-9]*', '%(mandir)s/')
 
         r.Doc('man-pages-%(version)s.Announce')
-
-        # These are parts of fileutils
-        r.Remove('%(mandir)s/man1/'
-                        '{chgrp,chmod,chown,cp,dd,df,dircolors,du,install}.1')
-        r.Remove('%(mandir)s/man1/{ln,ls,mkdir,mkfifo,mknod,mv,rm,rmdir,touch}.1')
-        r.Remove('%(mandir)s/man1/{dir,vdir}.1')
-
-        # Part of diffutils
-        r.Remove('%(mandir)s/man1/diff.1')
-
-        # Part of quota
-        r.Remove('%(mandir)s{,/en}/man2/quotactl.2')
-
-        # Part of console-tools
-        r.Remove('%(mandir)s/man4/console.4')
-
-        # Part of bind-utils
-        r.Remove('%(mandir)s/man5/resolver.5')
-
-        # Only briefly part of a devel version of glibc
-        r.Remove('%(mandir)s/man3/freehostent.3')
-
-        # Part of libcap
-        r.Remove('%(mandir)s/man2/capget.2')
-        r.Remove('%(mandir)s/man2/capset.2')
-
-        # Part of libattr-devel
-        r.Remove('%(mandir)s{,/en}/man2/{fgetxattr,flistxattr,fremovexattr,fsetxattr,getxattr,lgetxattr,listxattr,llistxattr,lremovexattr,lsetxattr,removexattr,setxattr}.2*')
-
-        # Part of shadow
-        r.Remove('%(mandir)s/man3/getspnam.3')
-
-        # Provided by bind-utils
-        r.DanglingSymlinks(exceptions='/usr/share/man/man5/resolv.conf.5.gz')
+        r.Doc('POSIX-COPYRIGHT')
