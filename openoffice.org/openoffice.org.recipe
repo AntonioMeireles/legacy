@@ -209,12 +209,30 @@ class OpenOffice(CPackageRecipe):
         r.Replace('MOC4, moc,', 'MOC4, moc-qt4,', 'configure.in')
         r.Replace('dummy moc;', 'dummy moc-qt4;', 'configure')
 
-        r.addPatch('0001-bubble-down-configure-test-findings-on-visibility.patch')
-        r.addPatch('solenv-enable-soname.patch')
-
         r.addSource('libreoffice-slideshow-mesa.patch', macros = True)
-        r.addSource('vbahelper.visibility.patch')
-
+        rhPatches = [ ('rhPatch_openoffice.org-2.0.2.rh188467.printingdefaults.patch', 1),
+                      ('rhPatch_openoffice.org-2.4.0.ooo86080.unopkg.bodge.patch', 1),
+                      ('rhPatch_openoffice.org-3.0.0.ooo88341.sc.verticalboxes.patch', 1),
+                      # ('rhPatch_openoffice.org-3.1.0.oooXXXXX.solenv.allowmissing.patch', 1),
+                      # ('rhPatch_openoffice.org-3.1.0.ooo101274.opening-a-directory.patch', 0),
+                      # ('rhPatch_openoffice.org-3.1.1.ooo105784.vcl.sniffscriptforsubs.patch', 0),
+                      # ('rhPatch_openoffice.org-3.3.0.ooo108637.sfx2.uisavedir.patch', 1),
+                      ('rhPatch_openoffice.org-3.3.0.ooo113273.desktop.resolvelinks.patch', 0),
+                      ('rhPatch_libreoffice-installfix.patch', 1),
+                      ('rhPatch_0001-helgrind-Related-rhbz-655686-get-order-of-shutdown-c.patch', 1),
+                      ('rhPatch_kde4configure.patch', 0),
+                      ('rhPatch_0001-Resolves-rhbz-695509-crash-in-RefreshDocumentLB.patch', 1),
+                      ('rhPatch_0001-bubble-down-configure-test-findings-on-visibility.patch', 1),
+                      ('rhPatch_vbahelper.visibility.patch', 0),
+                      ('rhPatch_0001-rhbz-702635-set-correct-page-number-when-exporting-s.patch', 1),
+                      ('rhPatch_0001-handle-NULL-display-gracefully.patch', 1),
+                      ('rhPatch_0001-Related-rhbz-652604-better-survive-exceptions-thrown.patch', 1),
+                      ('rhPatch_0001-Resolves-rhbz-713154-pdf-export-dialog-too-tall-to-f.patch', 1),
+                      ('rhPatch_0001-Related-rhbz-702833-addEventListener-without-removeE.patch', 1),
+                      ]
+        for p, l in rhPatches:
+            r.addSource(p)
+        
         # --------------------------
         #
         # configuration and install
@@ -336,7 +354,9 @@ class OpenOffice(CPackageRecipe):
         r.Make('fetch')
 
         r.Run('cat libreoffice-slideshow-mesa.patch | patch -p0')
-        r.Run('cat vbahelper.visibility.patch | patch -p0')
+
+        for p, l in rhPatches:
+            r.Run('cat %s | patch -p%s' % (p,l))
 
         # next 2 lines are a brute force attempt to reduce noise a lot
         # when handling localization. without this we quickly get into
@@ -364,7 +384,25 @@ class OpenOffice(CPackageRecipe):
         r.Install('src/libreoffice-libs-core-%(version)s/sysui/unxlng%(foo)s6.pro/misc/libreoffice/openoffice.org.xml',
                   '%(datadir)s/mime/packages/libreoffice.xml')
 
+        r.Remove('%(basedir)s/share/xdg/printeradmin.desktop')
         r.Replace('Icon=libreoffice34-', 'Icon=', '%(basedir)s/share/xdg/*.desktop', allowNoChange=True)
+        # add X-GIO-NoFuse so we get url:// instead of file://~.gvfs/
+        r.Replace('Terminal=false', 'Terminal=false\nX-GIO-NoFuse=true', '%(basedir)s/share/xdg/*.desktop')
+        for app in ['base', 'calc',  'draw', 'impress', 'math', 'writer',]:
+            r.Replace('Terminal=false', 'Terminal=false\nStartupNotify=true', '%(basedir)s/share/xdg/' + app + '.desktop')
+            r.Replace('Terminal=false', 'Terminal=false\nTryExec=oo' + app, '%(basedir)s/share/xdg/' + app + '.desktop')
+        # rhbz#156677# / rhbz#186515#
+        r.Replace('Terminal=false', 'Terminal=false\nNoDisplay=true', '%(basedir)s/share/xdg/math.desktop')
+        r.Replace('Terminal=false', 'Terminal=false\nNoDisplay=true', '%(basedir)s/share/xdg/startcenter.desktop')
+        # rhbz#491159 temporarily remove NoDisplay=true from qstart.desktop
+        r.Replace('NoDisplay=true', '', '%(basedir)s/share/xdg/qstart.desktop')
+
+        # backward compat hooks
+        # rhbz#499474 provide a /usr/bin/soffice for .recently-used.xbel
+        r.Symlink('%(basedir)s/program/soffice',  '%(bindir)s/soffice')
+        # rhbz#499474 provide a /usr/bin/openoffice.org for backwards compat
+        r.Symlink('%(basedir)s/program/libreoffice', '%(bindir)s/openoffice.org')
+
         r.Copy('%(libdir)s/libreoffice/share/xdg/*.desktop', '%(datadir)s/applications/')
 
         r.Install('src/libreoffice-libs-core-%(version)s/sysui/desktop/icons/hicolor', '%(datadir)s/icons/')
