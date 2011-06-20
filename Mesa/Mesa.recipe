@@ -7,8 +7,8 @@
 loadSuperClass('rpmpackage')
 class Mesa(RPMPackageRecipe,AutoPackageRecipe):
     name = 'Mesa'
-    version = '7.8.2'
-    rpmRelease = '31.1'
+    version = '7.10.2'
+    rpmRelease = '74.2'
     isOPENsuse = True
     isXOrgFactory = True
     tarballName = 'MesaLib-%(version)s.tar.bz2'
@@ -21,32 +21,24 @@ class Mesa(RPMPackageRecipe,AutoPackageRecipe):
                       'userspace-kernel-headers:devel', 'imake:runtime', 'ed:runtime',
                       'gccmakedep:runtime', 'xorg-cf-files:data', 'dri2proto:devel', 
                       'automake:runtime', 'autoconf:runtime', 'openmotif:devel', 
-                      'printproto:devel',]
+                      'printproto:devel', 'libtalloc:devel', 
+                      'udev:devel']
 
     # DRI
     buildRequires.extend([ 'expat:devel', 'glproto:devel', 'libXxf86vm:devellib',
                            'libdrm:devel', 'userspace-kernel-headers:devel' ])
 
-    rpmPatches = [
-        'dri_driver_dir.diff',
-        'egl-buildfix.diff',
-        'Mesa_indirect_old_xserver_compatibility.diff',
-        'mesa-commit-06c72da.diff',
-        'libdrm_nouveau.diff.bz2',
-        ]
+    rpmPatches = [ 'egl-buildfix.diff',
+                   'u_GLX-SWrast-Make-GLX-with-SWrast-enabled-work-on-olde.patch',
+                   'u_Fix-crash-in-swrast-when-setting-a-texture-for-a-pix.patch',
+               ]
     
     rpmSources = ['drirc']
 
     def setup(r):
         r.unpack()
         # (fixes conflict with fortify printf redirect in glibc)
-        r.addPatch('Mesa-tgsi_dump.patch')
-
-        # FIXME XXX this one is interesting.
-        # a symlink is not being done correctly when libdrm_nouveau.diff.bz2 patch
-        # is applied (!) 
-        r.Remove('src/mesa/drivers/dri/nouveau/nouveau_class.h')
-        r.Symlink('../../../../gallium/drivers/nouveau/nouveau_class.h', 'src/mesa/drivers/dri/nouveau/nouveau_class.h')
+        # r.addPatch('Mesa-tgsi_dump.patch')
 
         r.macros.version = r.version.replace('_','-')
         r.macros.optflags += ' -fno-strict-aliasing '
@@ -54,9 +46,9 @@ class Mesa(RPMPackageRecipe,AutoPackageRecipe):
 	r.macros.cxxflags += r.macros.optflags 
 	# 
         r.addArchive('manual-pages.tar.bz2', dir='%(name)s-%(version)s', rpm=r.srpm)
-        r.addArchive('MesaDemos-%(version)s.tar.bz2', dir='%(name)s-%(version)s', rpm=r.srpm)
-
-        r.addAction(' cp -ar %(name)s-%(version)s/* .; rm -rf %(name)s-%(version)s')
+        # XXX fixme - should now be a separate pkg
+        r.addArchive('mesa-demos-8.0.1.tar.bz2', dir='%(name)s-%(version)s',
+                     rpm='http://widehat.opensuse.org/repositories/X11:/XOrg/openSUSE_11.4/src/Mesa-demos-8.0.1-1.1.src.rpm')
 
         r.Run(""" sed -i 's/REPLACE/%(lib)s/g' src/glx/Makefile """)
         r.Run(""" sed -i 's/REPLACE/%(lib)s/g' src/egl/drivers/dri2/Makefile """)
@@ -67,10 +59,10 @@ class Mesa(RPMPackageRecipe,AutoPackageRecipe):
         # we (will) use freeglut
 
         r.Remove('src/glut', recursive=True)
-        r.Move('progs/xdemos','progs/xxdemos')
+        # r.Move('mesa-demos-8.0.1/src/xdemos','x_demos')
 
         r.Remove('include/GL/{glut.h,uglglutshapes.h,glutf90.h}')
-	r.Remove('progs/{demos,redbook,samples,glsl}', recursive = True)
+        r.Remove('progs/{demos,redbook,samples,glsl}', recursive = True)
 
         r.macros.mesaArch = ''
 
@@ -83,13 +75,17 @@ class Mesa(RPMPackageRecipe,AutoPackageRecipe):
 
         #
         r.Remove('src/mesa/depend')
+        r.Environment('TALLOC_LIBS', '-ltalloc')
+        r.Environment('TALLOC_CFLAGS', '-I%(includedir)s')
         r.Run('autoreconf -fi')
         r.Configure(' --with-driver=dri  '
-                    ' --with-dri-drivers=i810,i915,i965,mach64,r128,r200,r300,r600,radeon,sis,tdfx,unichrome,swrast,mga,nouveau'
+                    ' --enable-gles2'
+                    ' --with-dri-searchpath=/usr/%(lib)s/dri/updates:/usr/%(lib)s/dri '
+                    ' --with-dri-drivers=i810,i915,i965,mach64,r128,r200,r300,r600,radeon,sis,tdfx,unichrome,swrast,nouveau,mga'
                     ' --disable-glut '
-                    ' --enable-gallium-nouveau'
-	  	    ' --with-state-trackers=dri,glx'
-                    ' --enable-gallium' 
+                    #' --enable-gallium-nouveau'
+                    # ' --enable-gallium-radeon'
+                    # ' --enable-gallium-r600'
                     # glw stuff
                     ' --enable-glw --enable-motif',
                     preConfigure = 'MOTIF_CONFIG=/bin/true MOTIF_CFLAGS="-I%(includedir)s/Xm" MOTIF_LIBS="-lXm"')
@@ -97,9 +93,13 @@ class Mesa(RPMPackageRecipe,AutoPackageRecipe):
         r.MakeInstall()
 
         #
-        r.Make('glxgears glxinfo', dir = 'progs/xxdemos')
-        r.Install('progs/xxdemos/glxgears', '%(bindir)s/', mode = 0755, package = 'glx-utils')
-        r.Install('progs/xxdemos/glxinfo', '%(bindir)s/', mode = 0755, package = 'glx-utils')
+        r.Configure('', dir = 'mesa-demos-8.0.1',
+                    preConfigure = 'CFLAGS="%(cflags)s -I%(destdir)s/%(includedir)s/GL -L%(destdir)s/%(libdir)s/xorg.mesa.3d/"')
+        r.Make('glxgears glxinfo',
+               dir = 'mesa-demos-8.0.1/src/xdemos/')
+               # preMake = 'CFLAGS="%(cflags)s -I%(destdir)s/include/GL"')
+        r.Install('mesa-demos-8.0.1/src/xdemos/glxgears', '%(bindir)s/', mode = 0755, package = 'glx-utils')
+        r.Install('mesa-demos-8.0.1/src/xdemos/glxinfo', '%(bindir)s/', mode = 0755, package = 'glx-utils')
         # build and install Indirect Rendering only libGL
         r.Make('realclean')
         r.Configure(' --with-driver=xlib'
