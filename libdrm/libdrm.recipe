@@ -21,26 +21,31 @@ class LibDRM(RPMPackageRecipe, AutoPackageRecipe):
 
     def configure(r):
         r.macros.optflags += ' -fno-strict-aliasing '
+        # hardcode the 666 instead of 660 for device nodes
+        r.addPatch('libdrm-make-dri-perms-okay.patch')
+        # remove backwards compat not needed
+        # r.addPatch('libdrm-2.4.0-no-bc.patch')
+        # make rule to print the list of test programs
+        r.addPatch('libdrm-2.4.25-check-programs.patch')
+
+        r.addSource('91-drm-modeset.rules')
 
         r.Run('autoreconf -fi')
         r.Configure(' --with-pic'
                     ' --enable-nouveau-experimental-api '
-                    ' --enable-radeon-experimental-api '
                     ' --enable-vmwgfx-experimental-api'
-                    ' --enable-udev')
+                    ' --enable-udev'
+                    ' --enable-libkms' )
 
     def makeinstall(r):
-        r.Make(dir = 'tests/modeprint')
-        r.Make(dir = 'tests/modetest')
-        r.Make('dristat drmstat', dir = 'tests')
-
         r.MakeInstall()
 
-        r.MakeInstall(dir = 'tests/modeprint')
-        r.MakeInstall(dir = 'tests/modetest')
-        
-        for f in ['tests/.libs/dristat',
-                  'tests/.libs/drmstat',
-                  'tests/modeprint/.libs/modeprint',
-                  'tests/modetest/.libs/modetest',]:
-            r.Install(f, '%(bindir)s/', mode = 0755)
+        r.Make('$(make check-programs)', dir = 'tests')
+        r.MakeDirs('%(bindir)s')
+        r.Run(""" for foo in $(make check-programs) ;do cp .libs/$foo %(destdir)s%(bindir)s/ ; done ;""",
+              dir = 'tests')
+
+
+        r.Install('91-drm-modeset.rules',
+                  '%(sysconfdir)s/udev/rules.d/',
+                  mode = 0644)
