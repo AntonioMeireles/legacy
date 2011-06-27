@@ -6,7 +6,7 @@
 loadInstalled('python')
 class VirtualboxOse(AutoPackageRecipe):
     name = 'virtualbox-ose'
-    version = '4.0.6'
+    version = '4.0.8'
  
     buildRequires = ['chkconfig:runtime',
 		     'desktop-file-utils:runtime', 
@@ -62,14 +62,23 @@ class VirtualboxOse(AutoPackageRecipe):
                    'VirtualBox-OSE-3.2.10-noansi.patch',
                    'VirtualBox-OSE-3.2.6-vboxkeyboard.patch',
                    'VirtualBox-OSE-4.0.0-makeself.patch',
-                   'VirtualBox-OSE-4.0.0-usblib.patch',
                    'VirtualBox-OSE-4.0.0-beramono.patch',
                    'VirtualBox-OSE-4.0.2-aiobug.patch',
-                   'VirtualBox-OSE-4.0.2-gcc46.patch',
                    ]:
             r.addPatch('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + p + '?root=free')
-        r.addSource('VirtualBox-OSE-4.0.2-xorg17.fl.patch')
-        r.addPatch('VirtualBox-OSE-4.0.2-xorg17.fl.patch')
+
+        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/18-system-xorg.patch')
+        # but with /usr/include/x11/ -> /usr/include/X11
+        # r.addPatch('fl-18-system-xorg.patch')
+        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/28-no-selinux-fedora.patch')
+        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/29-fix-ftbfs-as-needed.patch')
+        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/30-usb-warning-filters.patch')
+
+        # Fix path to USBLib
+        # kmk: *** No rule to make target `out/linux.x86/release/lib/USBLib.a',
+        # needed by `out/linux.x86/release/obj/tstHostHardwareLinux/tstHostHardwareLinux'.
+        # Stop.
+        r.Replace('lib/USBLib.a', 'obj/USBLib/USBLib.o', 'src/VBox/Main/testcase/Makefile.kmk')
 
         r.Replace('lGL', 'lGL -L%(libdir)s/xorg.mesa.3d ', 'configure')
         # brute force approach as upstream build system not specially sane
@@ -77,11 +86,20 @@ class VirtualboxOse(AutoPackageRecipe):
         r.Replace('m64', 'm64 -L%(libdir)s/xorg.mesa.3d ', 'Config.kmk')
         
 	r.macros.optflags += ' -L%(libdir)s/xorg.mesa.3d '
-        r.Run('KBUILDDIR=%(builddir)s/kBuild ./configure --disable-kmods --enable-webservice ')
+        # make sure we build against as much system libs as possible
+        r.Remove('src/libs/{libpng-*,libxml2-*,libxslt-*,zlib-*,boost-*}', recursive=True)
+
+        r.Run('KBUILDDIR=%(builddir)s/kBuild ./configure '
+              ' --disable-kmods '
+              ' --enable-webservice '
+              # ' --disable-java '
+              ' --nofatal')
 
 	r.Run('. ./env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
-              ' VBOX_PATH_APP_PRIVATE=%(libdir)s/virtualbox'
+              ' VBOX_PATH_APP_PRIVATE=%(libdir)s/virtualbox '
+              # ' VBOX_WITH_VNC:=1 '
               ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= VBOX_WITH_DOCS= '
+              ' VBOX_WITH_TESTCASES= VBOX_WITH_TESTSUITE= VBOX_WITH_ORIGIN:='
               ' VBOX_WITH_UPDATE_REQUEST= KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
               ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" VBOX_GCC_WERR="" '
               ' VBOX_JAVA_HOME=%(libdir)s/jvm/java-1.6.0-icedtea'
@@ -159,12 +177,12 @@ class VirtualboxOse(AutoPackageRecipe):
         r.Desktopfile('obj/bin/virtualbox.desktop')
 
         # Guest X.Org drivers
-        r.macros.x11_api = '18'
+        r.macros.x11_api = '19'
         
-        r.Install('obj/bin/additions/vboxmouse_drv_%(x11_api)s.so',
+        r.Install('obj/bin/additions/vboxmouse_drv.so',
                   '%(libdir)s/xorg/modules/drivers/vboxmouse_drv.so',
                   mode = 0755)
-        r.Install('obj/bin/additions/vboxvideo_drv_%(x11_api)s.so',
+        r.Install('obj/bin/additions/vboxvideo_drv.so',
                   '%(libdir)s/xorg/modules/drivers/vboxvideo_drv.so',
                   mode = 0755)
 
