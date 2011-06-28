@@ -75,8 +75,10 @@ class Python(CPackageRecipe):
         r.Replace(*substs, **kw)
 
     def setup(r):
-        r.macros.cflags += ' -fPIC'
-        r.macros.cppflags += ' -fPIC'
+        r.macros.cflags += ' -D_GNU_SOURCE -fPIC -fwrapv '
+        r.macros.cppflags += ' -D_GNU_SOURCE -fPIC -fwrapv '
+
+        r.Environment('LINKCC', 'gcc')
         r.mainDir('Python-%(version)s')
         r.addArchive("http://www.python.org/ftp/python/%(version)s/Python-%(version)s.tar.bz2")
         r.addArchive("http://www.python.org/ftp/python/doc/%(version)s/python-docs-html.tar.bz2",
@@ -127,6 +129,13 @@ class Python(CPackageRecipe):
                   r"find_library_file(lib_dirs, 'curses-disabled'):",
                   "setup.py")
 
+        # Ensure that we're using the system copy of various libraries, rather than
+        # copies shipped by upstream in the tarball
+        for x in ['expat', 'zlib',
+                  # '_ctypes/{darwin,libffi_}*'
+                  ]:
+            r.Remove('Modules/' + x, recursive = True)
+
         # arguments to pass to r.Make() and r.MakeInstall()
         makeargs = ''
         conf = '--enable-unicode=ucs4 --enable-shared'
@@ -155,9 +164,9 @@ class Python(CPackageRecipe):
             # set up the native python -- need to be able to run
             # python during the build
             makeargs = 'sysroot=%(sysroot)s HOSTPYTHON=./hostpython HOSTPGEN=./Parser/hostpgen'
-
         r.Configure(conf)
-        r.Make('"OPT=%(cflags)s"', makeargs)
+        # r.Make(makeargs + 'OPT=\"%(cflags)s\"')
+        r.Make(makeargs)
         r.MakeInstall(makeargs)
 
         # Place tk support in :tk so we don't end up bringing in all
