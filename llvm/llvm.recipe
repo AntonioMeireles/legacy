@@ -7,66 +7,37 @@
 class LLVM(AutoPackageRecipe):
 
     name = 'llvm'
-    version = '2.6'
+    version = '2.9'
 
     buildRequires = [
-        'bison:runtime', 'byacc:runtime', 'flex:devel', 'flex:runtime',
-        'groff:runtime', 'libelf:devel', 'libstdc++:devel', 'perl:runtime', 
-        'dejagnu:runtime', 'doxygen:runtime', 'graphviz:runtime',  'tcl:runtime', 'zip:runtime'
+        'bison:runtime', 'byacc:runtime', 'cmake:runtime',
+        'dejagnu:runtime', 'doxygen:runtime', 'flex:devel', 'flex:runtime',
+        'groff:runtime', 'graphviz:runtime', 'libelf:devel', 'libstdc++:devel',
+        'perl:runtime', 'perl:devel', 'pkgconfig:devel', 'python:devel',
+        'subversion:runtime', 'tcl:runtime', 'zip:runtime'
     ]
 
     def unpack(r):
-
-        r.addArchive('http://ftp.de.debian.org/debian/pool/main/l/llvm/llvm_2.6.orig.tar.gz')
-
-        # Fix install dirs
-        r.Replace(('^PROJ_docsdir.*',
-                   'PROJ_docsdir := $(DESTDIR)$(PROJ_prefix)/share/doc/'
-                   '%(name)s-%(version)s'),
-                  ('^PROJ_etcdir.*', 'PROJ_etcdir := $(DESTDIR)/%(sysconfdir)s/llvm'),
-                  ('^PROJ_libdir.*', 'PROJ_libdir := $(DESTDIR)/%(libdir)s'),
-                  'Makefile.config.in')
-
-        # Fix gccld and gccas
-        r.Replace('^TOOLDIR.*', 'TOOLDIR=%(bindir)s',
-                  'tools/gccld/gccld.sh',
-                  'tools/gccas/gccas.sh')
-
-        # Fix rpath
-        r.Replace(('\$\(RPATH\) -Wl,\$\(ToolDir\)', ''),
-                  ('\$\(RPATH\) -Wl,\$\(LibDir\)', ''),
-                  'Makefile.rules')
-
-        # Fix docs installation
-        r.Replace('\$',
-                  '$(DST_MAN_DIR)tblgen.1 $(DST_MAN_DIR)llvmgcc.1 $(DST_MAN_DIR)llvmgxx.1',
-                  'docs/CommandGuide/Makefile',
-                  lines='^NO_INSTALL_MANS')
-
+        r.addArchive('http://llvm.org/releases/%(version)s/%(name)s-%(version)s.tgz')
+        r.addArchive('http://llvm.org/releases/%(version)s/clang-%(version)s.tgz')
+        r.Move('../clang-%(version)s/', 'tools/clang')
 
     def configure(r):
         extraConfig = (
-            ' --enable-optimized'
-            ' --disable-assertions'
-            ' --disable-expensive-checks'
-            ' --enable-targets=host-only'
+            ' -DCMAKE_BUILD_TYPE=RelWithDebInfo'
+            ' -DLLVM_ENABLE_ASSERTIONS=OFF'
             )
 
         if Arch.x86_64:
-            extraConfig += ' --enable-pic'
+            extraConfig += ' -DLLVM_LIBDIR_SUFFIX=64'
 
-        extraConfig += (
-            ' --enable-bindings=none' # Add ocaml bindings if ocaml is built
-            ' --enable-libffi'
-            )
-
-        r.Configure(extraConfig)
+        r.CMake(extraConfig,  objDir='build')
 
     def make(r):
-        r.Make('VERBOSE=1 KEEP_SYMBOLS=1')
+        r.Make('LD_LIBRARY_PATH=%(builddir)s/build/%(lib)s VERBOSE=1 KEEP_SYMBOLS=1', dir='build')
 
     def makeinstall(r):
-        r.MakeInstall('KEEP_SYMBOLS=1')
+        r.MakeInstall('KEEP_SYMBOLS=1', dir='build')
 
         # Fix llvm-config if libs are not in /usr/lib
         if r.macros.lib != 'lib':
