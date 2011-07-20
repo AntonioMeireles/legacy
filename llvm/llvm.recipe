@@ -11,15 +11,16 @@ class LLVM(AutoPackageRecipe):
 
     buildRequires = [
         'bison:runtime', 'byacc:runtime', 'cmake:runtime',
-        'dejagnu:runtime', 'doxygen:runtime', 'flex:devel',
-        'groff:runtime', 'graphviz:runtime', 'libelf:devel', 'libstdc++:devel',
+        'dejagnu:runtime', 'doxygen:runtime',  'libstdc++:devel',
+        'groff:runtime', 'graphviz:runtime', 'libelf:devel',
         'perl:runtime', 'perl:devel', 'pkgconfig:devel', 'python:devel',
         'subversion:runtime', 'tcl:runtime', 'zip:runtime'
     ]
 
     def unpack(r):
-        r.addArchive('http://llvm.org/releases/%(version)s/%(name)s-%(version)s.tgz')
-        r.addArchive('http://llvm.org/releases/%(version)s/clang-%(version)s.tgz')
+        r.macros.url = 'http://llvm.org/releases//%(version)s'
+        r.addArchive('%(url)s/%(name)s-%(version)s.tgz')
+        r.addArchive('%(url)s/clang-%(version)s.tgz')
         r.Move('../clang-%(version)s/', 'tools/clang')
 
     def configure(r):
@@ -31,10 +32,12 @@ class LLVM(AutoPackageRecipe):
         if Arch.x86_64:
             extraConfig += ' -DLLVM_LIBDIR_SUFFIX=64'
 
-        r.CMake(extraConfig,  objDir='build')
+        r.CMake(extraConfig,
+                objDir='build')
 
     def make(r):
-        r.Make('LD_LIBRARY_PATH=%(builddir)s/build/lib VERBOSE=1 KEEP_SYMBOLS=1',
+        r.Make(' LD_LIBRARY_PATH=%(builddir)s/build/lib'
+               ' VERBOSE=1 KEEP_SYMBOLS=1',
                dir='build')
 
     def makeinstall(r):
@@ -43,7 +46,8 @@ class LLVM(AutoPackageRecipe):
 
         # Fix llvm-config if libs are not in /usr/lib
         if r.macros.lib != 'lib':
-            r.Replace('ABS_RUN_DIR/lib', 'ABS_RUN_DIR/%(lib)s',
+            r.Replace('ABS_RUN_DIR/lib',
+                      'ABS_RUN_DIR/%(lib)s',
                       '%(bindir)s/llvm-config')
 
         # Static analyzer not installed by default:
@@ -56,22 +60,22 @@ class LLVM(AutoPackageRecipe):
         r.Copy('tools/clang/tools/scan-{build,view}',
                '%(libdir)s/clang-analyzer/')
 
-    def policy(r):
-        r.Create('%(sysconfdir)s/ld.so.conf.d/llvm-%(targetarch)s.conf',
-                 contents = '%(libdir)s/llvm/')
+        # cruft
+        r.Remove('%(libdir)s/*LLVMHello.*')
 
+    def policy(r):
+        r.PackageSpec('clang-analyzer',
+                      '%(bindir)s/clang-analyzer',
+                      '%(bindir)s/scan-build',
+                      '%(bindir)s/scan-view',
+                      '%(libdir)s/clang-analyzer/',
+                      )
         r.PackageSpec('clang',
                       '.*clang.*',
                       '%(bindir)s/tblgen',
-                      '%(bindir)s/clang-analyzer',
-                      '%(bindir)s/scan-build',
-                      '%(bindir)s/scan-view',)
-                      
-        r.ComponentSpec('devel',
-                        '%(bindir)s/clang-analyzer',
-                        '%(bindir)s/scan-build',
-                        '%(bindir)s/scan-view',)
-
+                      )
         # :devel reqs :runtime byDefault
         r.Requires('llvm:runtime', 'llvm:devel')
         r.Requires('clang:runtime', 'clang:devel')
+        # 
+        r.Requires('clang:runtime', 'clang-analyzer:runtime')
