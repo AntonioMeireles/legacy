@@ -1,0 +1,92 @@
+From 5f1fc91746cfe4d287c46413a20d2fc90da8e86c Mon Sep 17 00:00:00 2001
+From: Dan Winship <danw@gnome.org>
+Date: Sun, 07 Aug 2011 15:52:42 +0000
+Subject: gnutls: fix a crash with a NULL GError
+
+GTlsClientConnectionGnutls's g_tls_connection_handshake()
+implementation would crash if you passed NULL for the GError**
+argument.
+---
+diff --git a/tls/gnutls/gtlsclientconnection-gnutls.c b/tls/gnutls/gtlsclientconnection-gnutls.c
+index b6fc2fb..aec001c 100644
+--- a/tls/gnutls/gtlsclientconnection-gnutls.c
++++ b/tls/gnutls/gtlsclientconnection-gnutls.c
+@@ -56,6 +56,7 @@ static gboolean g_tls_client_connection_gnutls_verify_peer      (GTlsConnectionG
+ 								 GTlsCertificate       *peer_certificate,
+ 								 GTlsCertificateFlags  *errors);
+ static void     g_tls_client_connection_gnutls_finish_handshake (GTlsConnectionGnutls  *conn,
++								 gboolean               success,
+ 								 GError               **inout_error);
+ 
+ static void g_tls_client_connection_gnutls_client_connection_interface_init (GTlsClientConnectionInterface *iface);
+@@ -363,11 +364,13 @@ g_tls_client_connection_gnutls_verify_peer (GTlsConnectionGnutls  *conn_gnutls,
+ 
+ static void
+ g_tls_client_connection_gnutls_finish_handshake (GTlsConnectionGnutls  *conn,
++						 gboolean               success,
+ 						 GError               **inout_error)
+ {
+   GTlsClientConnectionGnutls *gnutls = G_TLS_CLIENT_CONNECTION_GNUTLS (conn);
+ 
+-  if (g_error_matches (*inout_error, G_TLS_ERROR, G_TLS_ERROR_NOT_TLS) &&
++  if (inout_error &&
++      g_error_matches (*inout_error, G_TLS_ERROR, G_TLS_ERROR_NOT_TLS) &&
+       gnutls->priv->cert_requested)
+     {
+       g_clear_error (inout_error);
+@@ -379,7 +382,7 @@ g_tls_client_connection_gnutls_finish_handshake (GTlsConnectionGnutls  *conn,
+     {
+       gnutls_datum session_data;
+ 
+-      if (!*inout_error &&
++      if (success &&
+ 	  gnutls_session_get_data2 (g_tls_connection_gnutls_get_session (conn),
+ 				    &session_data) == 0)
+ 	{
+diff --git a/tls/gnutls/gtlsconnection-gnutls.c b/tls/gnutls/gtlsconnection-gnutls.c
+index da3f76e..71c8a2f 100644
+--- a/tls/gnutls/gtlsconnection-gnutls.c
++++ b/tls/gnutls/gtlsconnection-gnutls.c
+@@ -917,7 +917,7 @@ handshake_internal (GTlsConnectionGnutls  *gnutls,
+ 	}
+     }
+ 
+-  G_TLS_CONNECTION_GNUTLS_GET_CLASS (gnutls)->finish_handshake (gnutls, error);
++  G_TLS_CONNECTION_GNUTLS_GET_CLASS (gnutls)->finish_handshake (gnutls, ret == 0, error);
+ 
+   if (ret == 0)
+     {
+diff --git a/tls/gnutls/gtlsconnection-gnutls.h b/tls/gnutls/gtlsconnection-gnutls.h
+index fff49af..dd061c4 100644
+--- a/tls/gnutls/gtlsconnection-gnutls.h
++++ b/tls/gnutls/gtlsconnection-gnutls.h
+@@ -38,6 +38,7 @@ struct _GTlsConnectionGnutlsClass
+ 				GTlsCertificate       *peer_certificate,
+ 				GTlsCertificateFlags  *errors);
+   void     (*finish_handshake) (GTlsConnectionGnutls  *gnutls,
++				gboolean               success,
+ 				GError               **inout_error);
+ };
+ 
+diff --git a/tls/gnutls/gtlsserverconnection-gnutls.c b/tls/gnutls/gtlsserverconnection-gnutls.c
+index b9565ae..2b688f0 100644
+--- a/tls/gnutls/gtlsserverconnection-gnutls.c
++++ b/tls/gnutls/gtlsserverconnection-gnutls.c
+@@ -49,6 +49,7 @@ static gboolean g_tls_server_connection_gnutls_verify_peer      (GTlsConnectionG
+ 								 GTlsCertificate       *peer_certificate,
+ 								 GTlsCertificateFlags  *errors);
+ static void     g_tls_server_connection_gnutls_finish_handshake (GTlsConnectionGnutls  *conn,
++								 gboolean               success,
+ 								 GError               **inout_error);
+ 
+ static void g_tls_server_connection_gnutls_server_connection_interface_init (GTlsServerConnectionInterface *iface);
+@@ -204,6 +205,7 @@ g_tls_server_connection_gnutls_verify_peer (GTlsConnectionGnutls  *gnutls,
+ 
+ static void
+ g_tls_server_connection_gnutls_finish_handshake (GTlsConnectionGnutls  *gnutls,
++						 gboolean               success,
+ 						 GError               **inout_error)
+ {
+ }
+--
+cgit v0.9
