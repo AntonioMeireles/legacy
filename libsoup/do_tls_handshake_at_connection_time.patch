@@ -1,0 +1,514 @@
+From ca6f8d53ab3dbbfee1cfb56d080f44afc4b0e5b4 Mon Sep 17 00:00:00 2001
+From: Dan Winship <danw@gnome.org>
+Date: Sun, 07 Aug 2011 16:10:45 +0000
+Subject: SoupConnection: do TLS handshake at connection time
+
+Previously, when connecting to an https site, the TLS handshake didn't
+happen until we started writing the request. Change it so that it now
+happens as part of SoupConnection connecting.
+---
+diff --git a/libsoup/Makefile.am b/libsoup/Makefile.am
+index d5ab7b6..8dc8507 100644
+--- a/libsoup/Makefile.am
++++ b/libsoup/Makefile.am
+@@ -150,6 +150,7 @@ libsoup_2_4_la_SOURCES =		\
+ 	soup-message-server-io.c	\
+ 	soup-method.c     		\
+ 	soup-misc.c     		\
++	soup-misc-private.h		\
+ 	soup-multipart.c	     	\
+ 	soup-password-manager.c		\
+ 	soup-path-map.h     		\
+@@ -175,7 +176,6 @@ libsoup_2_4_la_SOURCES =		\
+ 	soup-ssl.c	     		\
+ 	soup-status.c			\
+ 	soup-uri.c			\
+-	soup-uri-private.h		\
+ 	soup-value-utils.c		\
+ 	soup-xmlrpc.c
+ 
+diff --git a/libsoup/soup-connection.c b/libsoup/soup-connection.c
+index c9a4841..977d3eb 100644
+--- a/libsoup/soup-connection.c
++++ b/libsoup/soup-connection.c
+@@ -24,6 +24,7 @@
+ #include "soup-message-private.h"
+ #include "soup-message-queue.h"
+ #include "soup-misc.h"
++#include "soup-misc-private.h"
+ #include "soup-socket.h"
+ #include "soup-ssl.h"
+ #include "soup-uri.h"
+@@ -423,43 +424,55 @@ typedef struct {
+ 	SoupConnection *conn;
+ 	SoupConnectionCallback callback;
+ 	gpointer callback_data;
++	GCancellable *cancellable;
+ } SoupConnectionAsyncConnectData;
+ 
+ static void
+-socket_connect_result (SoupSocket *sock, guint status, gpointer user_data)
++socket_connect_finished (SoupSocket *socket, guint status, gpointer user_data)
+ {
+ 	SoupConnectionAsyncConnectData *data = user_data;
+-	SoupConnectionPrivate *priv;
++	SoupConnectionPrivate *priv = SOUP_CONNECTION_GET_PRIVATE (data->conn);
+ 
+-	priv = SOUP_CONNECTION_GET_PRIVATE (data->conn);
+-
+-	if (!SOUP_STATUS_IS_SUCCESSFUL (status))
+-		goto done;
++	if (SOUP_STATUS_IS_SUCCESSFUL (status)) {
++		g_signal_connect (priv->socket, "disconnected",
++				  G_CALLBACK (socket_disconnected), data->conn);
+ 
+-	if (priv->ssl_creds && !priv->tunnel_addr) {
+-		if (!soup_socket_start_ssl (sock, NULL)) {
+-			status = SOUP_STATUS_SSL_FAILED;
+-			goto done;
+-		}
++		soup_connection_set_state (data->conn, SOUP_CONNECTION_IN_USE);
++		priv->unused_timeout = time (NULL) + SOUP_CONNECTION_UNUSED_TIMEOUT;
++		start_idle_timer (data->conn);
+ 	}
+ 
+-	g_signal_connect (priv->socket, "disconnected",
+-			  G_CALLBACK (socket_disconnected), data->conn);
+-
+-	soup_connection_set_state (data->conn, SOUP_CONNECTION_IN_USE);
+-	priv->unused_timeout = time (NULL) + SOUP_CONNECTION_UNUSED_TIMEOUT;
+-	start_idle_timer (data->conn);
+-
+- done:
+ 	if (data->callback) {
+ 		if (priv->proxy_uri != NULL)
+ 			status = soup_status_proxify (status);
+ 		data->callback (data->conn, status, data->callback_data);
+ 	}
+ 	g_object_unref (data->conn);
++	if (data->cancellable)
++		g_object_unref (data->cancellable);
+ 	g_slice_free (SoupConnectionAsyncConnectData, data);
+ }
+ 
++static void
++socket_connect_result (SoupSocket *sock, guint status, gpointer user_data)
++{
++	SoupConnectionAsyncConnectData *data = user_data;
++	SoupConnectionPrivate *priv = SOUP_CONNECTION_GET_PRIVATE (data->conn);
++
++	if (SOUP_STATUS_IS_SUCCESSFUL (status) &&
++	    priv->ssl_creds && !priv->tunnel_addr) {
++		if (soup_socket_start_ssl (sock, data->cancellable)) {
++			soup_socket_handshake_async (sock, data->cancellable,
++						     socket_connect_finished, data);
++			return;
++		}
++
++		status = SOUP_STATUS_SSL_FAILED;
++	}
++
++	socket_connect_finished (sock, status, data);
++}
++
+ void
+ soup_connection_connect_async (SoupConnection *conn,
+ 			       GCancellable *cancellable,
+@@ -479,6 +492,7 @@ soup_connection_connect_async (SoupConnection *conn,
+ 	data->conn = g_object_ref (conn);
+ 	data->callback = callback;
+ 	data->callback_data = user_data;
++	data->cancellable = cancellable ? g_object_ref (cancellable) : NULL;
+ 
+ 	priv->socket =
+ 		soup_socket_new (SOUP_SOCKET_REMOTE_ADDRESS, priv->remote_addr,
+@@ -522,10 +536,10 @@ soup_connection_connect_sync (SoupConnection *conn, GCancellable *cancellable)
+ 			  G_CALLBACK (socket_disconnected), conn);
+ 
+ 	if (priv->ssl_creds && !priv->tunnel_addr) {
+-		if (!soup_socket_start_ssl (priv->socket, cancellable)) {
++		if (!soup_socket_start_ssl (priv->socket, cancellable))
+ 			status = SOUP_STATUS_SSL_FAILED;
+-			goto fail;
+-		}
++		else
++			status = soup_socket_handshake_sync (priv->socket, cancellable);
+ 	}
+ 
+ 	if (SOUP_STATUS_IS_SUCCESSFUL (status)) {
+@@ -556,8 +570,9 @@ soup_connection_get_tunnel_addr (SoupConnection *conn)
+ 	return priv->tunnel_addr;
+ }
+ 
+-gboolean
+-soup_connection_start_ssl (SoupConnection *conn)
++guint
++soup_connection_start_ssl_sync (SoupConnection *conn,
++				GCancellable   *cancellable)
+ {
+ 	SoupConnectionPrivate *priv;
+ 	const char *server_name;
+@@ -568,7 +583,62 @@ soup_connection_start_ssl (SoupConnection *conn)
+ 	server_name = soup_address_get_name (priv->tunnel_addr ?
+ 					     priv->tunnel_addr :
+ 					     priv->remote_addr);
+-	return soup_socket_start_proxy_ssl (priv->socket, server_name, NULL);
++	if (!soup_socket_start_proxy_ssl (priv->socket, server_name,
++					  cancellable))
++		return SOUP_STATUS_SSL_FAILED;
++
++	return soup_socket_handshake_sync (priv->socket, cancellable);
++}
++
++static void
++start_ssl_completed (SoupSocket *socket, guint status, gpointer user_data)
++{
++	SoupConnectionAsyncConnectData *data = user_data;
++
++	data->callback (data->conn, status, data->callback_data);
++	g_object_unref (data->conn);
++	g_slice_free (SoupConnectionAsyncConnectData, data);
++}
++
++static gboolean
++idle_start_ssl_completed (gpointer user_data)
++{
++	SoupConnectionAsyncConnectData *data = user_data;
++
++	start_ssl_completed (NULL, SOUP_STATUS_SSL_FAILED, data);
++	return FALSE;
++}
++
++void
++soup_connection_start_ssl_async (SoupConnection   *conn,
++				 GCancellable     *cancellable,
++				 SoupConnectionCallback callback,
++				 gpointer          user_data)
++{
++	SoupConnectionPrivate *priv;
++	const char *server_name;
++	SoupConnectionAsyncConnectData *data;
++
++	g_return_if_fail (SOUP_IS_CONNECTION (conn));
++	priv = SOUP_CONNECTION_GET_PRIVATE (conn);
++
++	data = g_slice_new (SoupConnectionAsyncConnectData);
++	data->conn = g_object_ref (conn);
++	data->callback = callback;
++	data->callback_data = user_data;
++
++	server_name = soup_address_get_name (priv->tunnel_addr ?
++					     priv->tunnel_addr :
++					     priv->remote_addr);
++	if (!soup_socket_start_proxy_ssl (priv->socket, server_name,
++					  cancellable)) {
++		soup_add_completion (priv->async_context,
++				     idle_start_ssl_completed, data);
++		return;
++	}
++
++	soup_socket_handshake_async (priv->socket, cancellable,
++				     start_ssl_completed, data);
+ }
+ 
+ /**
+diff --git a/libsoup/soup-connection.h b/libsoup/soup-connection.h
+index ebdf9bc..f3b936c 100644
+--- a/libsoup/soup-connection.h
++++ b/libsoup/soup-connection.h
+@@ -44,6 +44,7 @@ typedef void  (*SoupConnectionCallback)        (SoupConnection   *conn,
+ #define SOUP_CONNECTION_PROXY_URI       "proxy-uri"
+ #define SOUP_CONNECTION_SSL_CREDENTIALS "ssl-creds"
+ #define SOUP_CONNECTION_SSL_STRICT      "ssl-strict"
++#define SOUP_CONNECTION_SSL_FALLBACK    "ssl-fallback"
+ #define SOUP_CONNECTION_ASYNC_CONTEXT   "async-context"
+ #define SOUP_CONNECTION_TIMEOUT         "timeout"
+ #define SOUP_CONNECTION_IDLE_TIMEOUT    "idle-timeout"
+@@ -60,7 +61,12 @@ void            soup_connection_connect_async  (SoupConnection   *conn,
+ guint           soup_connection_connect_sync   (SoupConnection   *conn,
+ 						GCancellable     *cancellable);
+ SoupAddress    *soup_connection_get_tunnel_addr(SoupConnection   *conn);
+-gboolean        soup_connection_start_ssl      (SoupConnection   *conn);
++guint           soup_connection_start_ssl_sync   (SoupConnection   *conn,
++						  GCancellable     *cancellable);
++void            soup_connection_start_ssl_async  (SoupConnection   *conn,
++						  GCancellable     *cancellable,
++						  SoupConnectionCallback callback,
++						  gpointer          user_data);
+ 
+ void            soup_connection_disconnect     (SoupConnection   *conn);
+ 
+@@ -79,7 +85,6 @@ void            soup_connection_send_request   (SoupConnection          *conn,
+ 						SoupMessageCompletionFn  completion_cb,
+ 						gpointer                 user_data);
+ 
+-
+ G_END_DECLS
+ 
+ #endif /* SOUP_CONNECTION_H */
+diff --git a/libsoup/soup-misc-private.h b/libsoup/soup-misc-private.h
+new file mode 100644
+index 0000000..8407101
+--- a/dev/null
++++ b/libsoup/soup-misc-private.h
+@@ -0,0 +1,21 @@
++/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
++/*
++ * Copyright 2011 Igalia, S.L.
++ * Copyright 2011 Red Hat, Inc.
++ */
++
++#ifndef SOUP_URI_PRIVATE_H
++#define SOUP_URI_PRIVATE_H 1
++
++#include "soup-socket.h"
++
++char *uri_decoded_copy (const char *str, int length);
++
++guint soup_socket_handshake_sync  (SoupSocket         *sock,
++				   GCancellable       *cancellable);
++void  soup_socket_handshake_async (SoupSocket         *sock,
++				   GCancellable       *cancellable,
++				   SoupSocketCallback  callback,
++				   gpointer            user_data);
++
++#endif /* SOUP_URI_PRIVATE_H */
+diff --git a/libsoup/soup-request-data.c b/libsoup/soup-request-data.c
+index dd64cf2..8a2e065 100644
+--- a/libsoup/soup-request-data.c
++++ b/libsoup/soup-request-data.c
+@@ -30,7 +30,7 @@
+ #include "soup-request-data.h"
+ 
+ #include "soup-requester.h"
+-#include "soup-uri-private.h"
++#include "soup-misc-private.h"
+ #include <libsoup/soup.h>
+ #include <glib/gi18n.h>
+ 
+diff --git a/libsoup/soup-session-async.c b/libsoup/soup-session-async.c
+index 598b734..94d72de 100644
+--- a/libsoup/soup-session-async.c
++++ b/libsoup/soup-session-async.c
+@@ -225,6 +225,43 @@ message_completed (SoupMessage *msg, gpointer user_data)
+ }
+ 
+ static void
++tunnel_complete (SoupMessageQueueItem *item)
++{
++	SoupSession *session = item->session;
++
++	soup_message_finished (item->msg);
++	if (item->related->msg->status_code)
++		item->related->state = SOUP_MESSAGE_FINISHING;
++
++	do_idle_run_queue (session);
++	soup_message_queue_item_unref (item->related);
++	soup_session_unqueue_item (session, item);
++	soup_message_queue_item_unref (item);
++	g_object_unref (session);
++}
++
++static void
++ssl_tunnel_completed (SoupConnection *conn, guint status, gpointer user_data)
++{
++	SoupMessageQueueItem *item = user_data;
++
++	if (SOUP_STATUS_IS_SUCCESSFUL (status)) {
++		g_signal_connect (item->conn, "disconnected",
++				  G_CALLBACK (connection_closed), item->session);
++		soup_connection_set_state (item->conn, SOUP_CONNECTION_IDLE);
++		soup_connection_set_state (item->conn, SOUP_CONNECTION_IN_USE);
++
++		item->related->state = SOUP_MESSAGE_READY;
++	} else {
++		if (item->conn)
++			soup_connection_disconnect (item->conn);
++		soup_message_set_status (item->related->msg, SOUP_STATUS_SSL_FAILED);
++	}
++
++	tunnel_complete (item);
++}
++
++static void
+ tunnel_message_completed (SoupMessage *msg, gpointer user_data)
+ {
+ 	SoupMessageQueueItem *item = user_data;
+@@ -251,33 +288,13 @@ tunnel_message_completed (SoupMessage *msg, gpointer user_data)
+ 			item->related->conn = NULL;
+ 		} else
+ 			soup_message_set_status (item->related->msg, msg->status_code);
+-		goto done;
+-	}
+ 
+-	if (!soup_connection_start_ssl (item->conn)) {
+-		if (item->conn)
+-			soup_connection_disconnect (item->conn);
+-		soup_message_set_status (item->related->msg, SOUP_STATUS_SSL_FAILED);
+-		goto done;
++		tunnel_complete (item);
++		return;
+ 	}
+ 
+-	g_signal_connect (item->conn, "disconnected",
+-			  G_CALLBACK (connection_closed), item->session);
+-	soup_connection_set_state (item->conn, SOUP_CONNECTION_IDLE);
+-	soup_connection_set_state (item->conn, SOUP_CONNECTION_IN_USE);
+-
+-	item->related->state = SOUP_MESSAGE_READY;
+-
+-done:
+-	soup_message_finished (msg);
+-	if (item->related->msg->status_code)
+-		item->related->state = SOUP_MESSAGE_FINISHING;
+-
+-	do_idle_run_queue (item->session);
+-	soup_message_queue_item_unref (item->related);
+-	soup_session_unqueue_item (session, item);
+-	soup_message_queue_item_unref (item);
+-	g_object_unref (session);
++	soup_connection_start_ssl_async (item->conn, item->cancellable,
++					 ssl_tunnel_completed, item);
+ }
+ 
+ static void
+diff --git a/libsoup/soup-session-sync.c b/libsoup/soup-session-sync.c
+index 3719dc2..a9498d6 100644
+--- a/libsoup/soup-session-sync.c
++++ b/libsoup/soup-session-sync.c
+@@ -140,8 +140,9 @@ soup_session_sync_new_with_options (const char *optname1, ...)
+ }
+ 
+ static guint
+-tunnel_connect (SoupSession *session, SoupConnection *conn)
++tunnel_connect (SoupSession *session, SoupMessageQueueItem *related)
+ {
++	SoupConnection *conn = related->conn;
+ 	SoupMessageQueueItem *item;
+ 	guint status;
+ 
+@@ -166,7 +167,7 @@ tunnel_connect (SoupSession *session, SoupConnection *conn)
+ 	soup_message_queue_item_unref (item);
+ 
+ 	if (SOUP_STATUS_IS_SUCCESSFUL (status)) {
+-		if (!soup_connection_start_ssl (conn))
++		if (!soup_connection_start_ssl_sync (conn, related->cancellable))
+ 			status = SOUP_STATUS_SSL_FAILED;
+ 	}
+ 
+@@ -215,7 +216,7 @@ try_again:
+ 	}
+ 
+ 	if (soup_connection_get_tunnel_addr (item->conn)) {
+-		status = tunnel_connect (session, item->conn);
++		status = tunnel_connect (session, item);
+ 		if (!SOUP_STATUS_IS_SUCCESSFUL (status)) {
+ 			soup_connection_disconnect (item->conn);
+ 			g_object_unref (item->conn);
+diff --git a/libsoup/soup-socket.c b/libsoup/soup-socket.c
+index b2216d3..935b761 100644
+--- a/libsoup/soup-socket.c
++++ b/libsoup/soup-socket.c
+@@ -20,6 +20,7 @@
+ #include "soup-socket.h"
+ #include "soup-marshal.h"
+ #include "soup-misc.h"
++#include "soup-misc-private.h"
+ #include "soup-ssl.h"
+ 
+ /**
+@@ -973,6 +974,62 @@ soup_socket_start_proxy_ssl (SoupSocket *sock, const char *ssl_host,
+ 	return TRUE;
+ }
+ 	
++guint
++soup_socket_handshake_sync (SoupSocket    *sock,
++			    GCancellable  *cancellable)
++{
++	SoupSocketPrivate *priv = SOUP_SOCKET_GET_PRIVATE (sock);
++
++	if (g_tls_connection_handshake (G_TLS_CONNECTION (priv->conn),
++					cancellable, NULL))
++		return SOUP_STATUS_OK;
++	else
++		return SOUP_STATUS_SSL_FAILED;
++}
++
++static void
++handshake_async_ready (GObject *source, GAsyncResult *result, gpointer user_data)
++{
++	SoupSocketAsyncConnectData *data = user_data;
++	SoupSocketPrivate *priv = SOUP_SOCKET_GET_PRIVATE (data->sock);
++	guint status;
++
++	if (priv->async_context)
++		g_main_context_pop_thread_default (priv->async_context);
++
++	if (g_tls_connection_handshake_finish (G_TLS_CONNECTION (priv->conn),
++					       result, NULL))
++		status = SOUP_STATUS_OK;
++	else
++		status = SOUP_STATUS_SSL_FAILED;
++
++	data->callback (data->sock, status, data->user_data);
++	g_object_unref (data->sock);
++	g_slice_free (SoupSocketAsyncConnectData, data);
++}
++
++void
++soup_socket_handshake_async (SoupSocket         *sock,
++			     GCancellable       *cancellable,
++			     SoupSocketCallback  callback,
++			     gpointer            user_data)
++{
++	SoupSocketPrivate *priv = SOUP_SOCKET_GET_PRIVATE (sock);
++	SoupSocketAsyncConnectData *data;
++
++	data = g_slice_new (SoupSocketAsyncConnectData);
++	data->sock = g_object_ref (sock);
++	data->callback = callback;
++	data->user_data = user_data;
++
++	if (priv->async_context)
++		g_main_context_push_thread_default (priv->async_context);
++	g_tls_connection_handshake_async (G_TLS_CONNECTION (priv->conn),
++					  G_PRIORITY_DEFAULT,
++					  cancellable, handshake_async_ready,
++					  data);
++}
++
+ /**
+  * soup_socket_is_ssl:
+  * @sock: a #SoupSocket
+diff --git a/libsoup/soup-uri-private.h b/libsoup/soup-uri-private.h
+deleted file mode 100644
+index 14cfd57..0000000
+--- a/libsoup/soup-uri-private.h
++++ b/dev/null
+@@ -1,11 +0,0 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+-/*
+- * Copyright (C) 2011 Igalia, S.L.
+- */
+-
+-#ifndef SOUP_URI_PRIVATE_H
+-#define SOUP_URI_PRIVATE_H 1
+-
+-char *uri_decoded_copy (const char *str, int length);
+-
+-#endif /* SOUP_URI_PRIVATE_H */
+diff --git a/libsoup/soup-uri.c b/libsoup/soup-uri.c
+index b3c0437..b5c247d 100644
+--- a/libsoup/soup-uri.c
++++ b/libsoup/soup-uri.c
+@@ -10,7 +10,7 @@
+ #include <stdlib.h>
+ 
+ #include "soup-uri.h"
+-#include "soup-uri-private.h"
++#include "soup-misc-private.h"
+ #include "soup-form.h"
+ #include "soup-misc.h"
+ 
+--
+cgit v0.9
