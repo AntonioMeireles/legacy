@@ -1,4 +1,44 @@
-utrace core
+From davej  Sun Aug  7 15:19:08 2011
+Return-Path: oleg@redhat.com
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:08 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:17:59 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id F09A8A5D58;
+	Sun,  7 Aug 2011 15:17:58 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id 6mY7uBb0+l7B; Sun,  7 Aug 2011 15:17:58 -0400 (EDT)
+Received: from int-mx10.intmail.prod.int.phx2.redhat.com (int-mx10.intmail.prod.int.phx2.redhat.com [10.5.11.23])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id D1DFE9C7FA;
+	Sun,  7 Aug 2011 15:17:58 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx10.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JHtc4027719;
+	Sun, 7 Aug 2011 15:17:56 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:19 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:17 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 01/22] utrace core
+Message-ID: <20110807191517.GA14365@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.23
+Status: RO
+Content-Length: 148212
+Lines: 4118
+
+From: Roland McGrath <roland@redhat.com>
 
 This adds the utrace facility, a new modular interface in the kernel for
 implementing user thread tracing and debugging.  This fits on top of the
@@ -14,35 +54,40 @@ When this is not enabled, no new code is added.
 It can only be enabled on machines that have all the
 prerequisites and select CONFIG_HAVE_ARCH_TRACEHOOK.
 
-In this initial version, utrace and ptrace do not play together at all.
-If ptrace is attached to a thread, the attach calls in the utrace kernel
-API return -EBUSY.  If utrace is attached to a thread, the PTRACE_ATTACH
-or PTRACE_TRACEME request will return EBUSY to userland.  The old ptrace
-code is otherwise unchanged and nothing using ptrace should be affected
-by this patch as long as utrace is not used at the same time.  In the
-future we can clean up the ptrace implementation and rework it to use
-the utrace API.
+In this initial version, utrace and ptrace do not play together at all,
+the next patches try to fix this.
+
+This is is same/old utrace-core patch except:
+
+	- use group_stop/GROUP_STOP_DEQUEUED instead of removed
+	  signal->flags/SIGNAL_STOP_DEQUEUED in utrace_get_signal()
+
+	- rediff the changes in tracehook.h against the current code
+	  without PT_PTRACED tweaks which were needed for ptrace-utrace
 
 Signed-off-by: Roland McGrath <roland@redhat.com>
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
 ---
  Documentation/DocBook/Makefile    |    2 +-
  Documentation/DocBook/utrace.tmpl |  589 +++++++++
  fs/proc/array.c                   |    3 +
  include/linux/sched.h             |    5 +
- include/linux/tracehook.h         |   87 ++-
+ include/linux/tracehook.h         |   85 ++-
  include/linux/utrace.h            |  692 +++++++++++
  init/Kconfig                      |    9 +
  kernel/Makefile                   |    1 +
  kernel/fork.c                     |    3 +
- kernel/ptrace.c                   |   14 +
  kernel/utrace.c                   | 2440 +++++++++++++++++++++++++++++++++++++
- 11 files changed, 3843 insertions(+), 2 deletions(-)
+ 10 files changed, 3827 insertions(+), 2 deletions(-)
+ create mode 100644 Documentation/DocBook/utrace.tmpl
+ create mode 100644 include/linux/utrace.h
+ create mode 100644 kernel/utrace.c
 
 diff --git a/Documentation/DocBook/Makefile b/Documentation/DocBook/Makefile
-index 8b6e00a..2740633 100644  
+index 3cebfa0..86c288b 100644
 --- a/Documentation/DocBook/Makefile
 +++ b/Documentation/DocBook/Makefile
-@@ -14,7 +14,7 @@ DOCBOOKS := z8530book.xml mcabook.xml de
+@@ -14,7 +14,7 @@ DOCBOOKS := z8530book.xml mcabook.xml device-drivers.xml \
  	    genericirq.xml s390-drivers.xml uio-howto.xml scsi.xml \
  	    80211.xml debugobjects.xml sh.xml regulator.xml \
  	    alsa-driver-api.xml writing-an-alsa-driver.xml \
@@ -53,7 +98,7 @@ index 8b6e00a..2740633 100644
  # The build process is as follows (targets):
 diff --git a/Documentation/DocBook/utrace.tmpl b/Documentation/DocBook/utrace.tmpl
 new file mode 100644
-index ...0c40add 100644  
+index 0000000..0c40add
 --- /dev/null
 +++ b/Documentation/DocBook/utrace.tmpl
 @@ -0,0 +1,589 @@
@@ -647,7 +692,7 @@ index ...0c40add 100644
 +
 +</book>
 diff --git a/fs/proc/array.c b/fs/proc/array.c
-index fff6572..a67bd83 100644  
+index 9b45ee8..496fef3 100644
 --- a/fs/proc/array.c
 +++ b/fs/proc/array.c
 @@ -81,6 +81,7 @@
@@ -658,7 +703,7 @@ index fff6572..a67bd83 100644
  
  #include <asm/pgtable.h>
  #include <asm/processor.h>
-@@ -192,6 +193,8 @@ static inline void task_state(struct seq
+@@ -192,6 +193,8 @@ static inline void task_state(struct seq_file *m, struct pid_namespace *ns,
  		cred->uid, cred->euid, cred->suid, cred->fsuid,
  		cred->gid, cred->egid, cred->sgid, cred->fsgid);
  
@@ -668,10 +713,10 @@ index fff6572..a67bd83 100644
  	if (p->files)
  		fdt = files_fdtable(p->files);
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 09f26df..e6fa5e9 100644  
+index a837b20..b87de83 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -1357,6 +1357,11 @@ struct task_struct {
+@@ -1397,6 +1397,11 @@ struct task_struct {
  #endif
  	seccomp_t seccomp;
  
@@ -684,7 +729,7 @@ index 09f26df..e6fa5e9 100644
     	u32 parent_exec_id;
     	u32 self_exec_id;
 diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
-index 98917e9..afba8f8 100644  
+index e95f523..7d7bdde 100644
 --- a/include/linux/tracehook.h
 +++ b/include/linux/tracehook.h
 @@ -49,6 +49,7 @@
@@ -704,7 +749,7 @@ index 98917e9..afba8f8 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -111,6 +114,9 @@ static inline void ptrace_report_syscall
+@@ -111,6 +114,9 @@ static inline void ptrace_report_syscall(struct pt_regs *regs)
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
  {
@@ -714,17 +759,17 @@ index 98917e9..afba8f8 100644
  	ptrace_report_syscall(regs);
  	return 0;
  }
-@@ -134,6 +140,9 @@ static inline __must_check int tracehook
+@@ -134,6 +140,9 @@ static inline __must_check int tracehook_report_syscall_entry(
   */
  static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
  {
 +	if (task_utrace_flags(current) & UTRACE_EVENT(SYSCALL_EXIT))
 +		utrace_report_syscall_exit(regs);
 +
- 	if (step && (task_ptrace(current) & PT_PTRACED)) {
+ 	if (step) {
  		siginfo_t info;
  		user_single_step_siginfo(current, regs, &info);
-@@ -201,6 +210,8 @@ static inline void tracehook_report_exec
+@@ -201,6 +210,8 @@ static inline void tracehook_report_exec(struct linux_binfmt *fmt,
  					 struct linux_binprm *bprm,
  					 struct pt_regs *regs)
  {
@@ -733,7 +778,7 @@ index 98917e9..afba8f8 100644
  	if (!ptrace_event(PT_TRACE_EXEC, PTRACE_EVENT_EXEC, 0) &&
  	    unlikely(task_ptrace(current) & PT_PTRACED))
  		send_sig(SIGTRAP, current, 0);
-@@ -218,10 +229,37 @@ static inline void tracehook_report_exec
+@@ -218,10 +229,37 @@ static inline void tracehook_report_exec(struct linux_binfmt *fmt,
   */
  static inline void tracehook_report_exit(long *exit_code)
  {
@@ -771,7 +816,7 @@ index 98917e9..afba8f8 100644
   * tracehook_prepare_clone - prepare for new child to be cloned
   * @clone_flags:	%CLONE_* flags from clone/fork/vfork system call
   *
-@@ -285,6 +323,8 @@ static inline void tracehook_report_clon
+@@ -285,6 +323,8 @@ static inline void tracehook_report_clone(struct pt_regs *regs,
  					  unsigned long clone_flags,
  					  pid_t pid, struct task_struct *child)
  {
@@ -780,7 +825,7 @@ index 98917e9..afba8f8 100644
  	if (unlikely(task_ptrace(child))) {
  		/*
  		 * It doesn't matter who attached/attaching to this
-@@ -317,6 +357,9 @@ static inline void tracehook_report_clon
+@@ -317,6 +357,9 @@ static inline void tracehook_report_clone_complete(int trace,
  						   pid_t pid,
  						   struct task_struct *child)
  {
@@ -790,7 +835,7 @@ index 98917e9..afba8f8 100644
  	if (unlikely(trace))
  		ptrace_event(0, trace, pid);
  }
-@@ -351,6 +394,10 @@ static inline void tracehook_report_vfor
+@@ -351,6 +394,10 @@ static inline void tracehook_report_vfork_done(struct task_struct *child,
   */
  static inline void tracehook_prepare_release_task(struct task_struct *task)
  {
@@ -801,7 +846,7 @@ index 98917e9..afba8f8 100644
  }
  
  /**
-@@ -365,6 +412,7 @@ static inline void tracehook_prepare_rel
+@@ -365,6 +412,7 @@ static inline void tracehook_prepare_release_task(struct task_struct *task)
  static inline void tracehook_finish_release_task(struct task_struct *task)
  {
  	ptrace_release_task(task);
@@ -809,16 +854,16 @@ index 98917e9..afba8f8 100644
  }
  
  /**
-@@ -386,6 +434,8 @@ static inline void tracehook_signal_hand
+@@ -386,6 +434,8 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
  					    const struct k_sigaction *ka,
  					    struct pt_regs *regs, int stepping)
  {
 +	if (task_utrace_flags(current))
 +		utrace_signal_handler(current, stepping);
- 	if (stepping && (task_ptrace(current) & PT_PTRACED))
+ 	if (stepping)
  		ptrace_notify(SIGTRAP);
  }
-@@ -403,6 +453,8 @@ static inline void tracehook_signal_hand
+@@ -403,6 +453,8 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
  static inline int tracehook_consider_ignored_signal(struct task_struct *task,
  						    int sig)
  {
@@ -827,7 +872,7 @@ index 98917e9..afba8f8 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -422,6 +474,9 @@ static inline int tracehook_consider_ign
+@@ -422,6 +474,9 @@ static inline int tracehook_consider_ignored_signal(struct task_struct *task,
  static inline int tracehook_consider_fatal_signal(struct task_struct *task,
  						  int sig)
  {
@@ -837,7 +882,7 @@ index 98917e9..afba8f8 100644
  	return (task_ptrace(task) & PT_PTRACED) != 0;
  }
  
-@@ -436,6 +491,8 @@ static inline int tracehook_consider_fat
+@@ -436,6 +491,8 @@ static inline int tracehook_consider_fatal_signal(struct task_struct *task,
   */
  static inline int tracehook_force_sigpending(void)
  {
@@ -846,7 +891,7 @@ index 98917e9..afba8f8 100644
  	return 0;
  }
  
-@@ -465,6 +522,8 @@ static inline int tracehook_get_signal(s
+@@ -465,6 +522,8 @@ static inline int tracehook_get_signal(struct task_struct *task,
  				       siginfo_t *info,
  				       struct k_sigaction *return_ka)
  {
@@ -855,16 +900,7 @@ index 98917e9..afba8f8 100644
  	return 0;
  }
  
-@@ -492,6 +551,8 @@ static inline int tracehook_get_signal(s
-  */
- static inline int tracehook_notify_jctl(int notify, int why)
- {
-+	if (task_utrace_flags(current) & UTRACE_EVENT(JCTL))
-+		utrace_report_jctl(notify, why);
- 	return notify ?: task_ptrace(current) ? why : 0;
- }
- 
-@@ -502,6 +563,8 @@ static inline int tracehook_notify_jctl(
+@@ -475,6 +534,8 @@ static inline int tracehook_get_signal(struct task_struct *task,
   */
  static inline void tracehook_finish_jctl(void)
  {
@@ -873,7 +909,7 @@ index 98917e9..afba8f8 100644
  }
  
  #define DEATH_REAP			-1
-@@ -524,6 +587,8 @@ static inline void tracehook_finish_jctl
+@@ -497,6 +558,8 @@ static inline void tracehook_finish_jctl(void)
  static inline int tracehook_notify_death(struct task_struct *task,
  					 void **death_cookie, int group_dead)
  {
@@ -882,7 +918,7 @@ index 98917e9..afba8f8 100644
  	if (task_detached(task))
  		return task->ptrace ? SIGCHLD : DEATH_REAP;
  
-@@ -560,6 +625,15 @@ static inline void tracehook_report_deat
+@@ -533,6 +596,15 @@ static inline void tracehook_report_death(struct task_struct *task,
  					  int signal, void *death_cookie,
  					  int group_dead)
  {
@@ -898,7 +934,7 @@ index 98917e9..afba8f8 100644
  }
  
  #ifdef TIF_NOTIFY_RESUME
-@@ -589,10 +663,21 @@ static inline void set_notify_resume(str
+@@ -562,10 +634,21 @@ static inline void set_notify_resume(struct task_struct *task)
   * asynchronously, this will be called again before we return to
   * user mode.
   *
@@ -923,7 +959,7 @@ index 98917e9..afba8f8 100644
  
 diff --git a/include/linux/utrace.h b/include/linux/utrace.h
 new file mode 100644
-index ...f251efe 100644  
+index 0000000..f251efe
 --- /dev/null
 +++ b/include/linux/utrace.h
 @@ -0,0 +1,692 @@
@@ -1620,10 +1656,10 @@ index ...f251efe 100644
 +
 +#endif	/* linux/utrace.h */
 diff --git a/init/Kconfig b/init/Kconfig
-index c972899..17483b7 100644  
+index 412c21b..a03ae51 100644
 --- a/init/Kconfig
 +++ b/init/Kconfig
-@@ -339,6 +339,15 @@ config AUDIT_TREE
+@@ -372,6 +372,15 @@ config AUDIT_TREE
  	depends on AUDITSYSCALL
  	select FSNOTIFY
  
@@ -1640,10 +1676,10 @@ index c972899..17483b7 100644
  
  menu "RCU Subsystem"
 diff --git a/kernel/Makefile b/kernel/Makefile
-index 0b5ff08..1172528 100644  
+index 2d64cfc..4a22e81 100644
 --- a/kernel/Makefile
 +++ b/kernel/Makefile
-@@ -70,6 +70,7 @@ obj-$(CONFIG_IKCONFIG) += configs.o
+@@ -68,6 +68,7 @@ obj-$(CONFIG_IKCONFIG) += configs.o
  obj-$(CONFIG_RESOURCE_COUNTERS) += res_counter.o
  obj-$(CONFIG_SMP) += stop_machine.o
  obj-$(CONFIG_KPROBES_SANITY_TEST) += test_kprobes.o
@@ -1652,10 +1688,10 @@ index 0b5ff08..1172528 100644
  obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
  obj-$(CONFIG_AUDIT_WATCH) += audit_watch.o
 diff --git a/kernel/fork.c b/kernel/fork.c
-index 5447dc7..10a39fe 100644  
+index 0276c30..62caf3d 100644
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
-@@ -162,6 +162,7 @@ void free_task(struct task_struct *tsk)
+@@ -168,6 +168,7 @@ void free_task(struct task_struct *tsk)
  	free_thread_info(tsk->stack);
  	rt_mutex_debug_task_free(tsk);
  	ftrace_graph_exit_task(tsk);
@@ -1663,7 +1699,7 @@ index 5447dc7..10a39fe 100644
  	free_task_struct(tsk);
  }
  EXPORT_SYMBOL(free_task);
-@@ -1018,6 +1019,8 @@ static struct task_struct *copy_process(
+@@ -1095,6 +1096,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
  	if (!p)
  		goto fork_out;
  
@@ -1672,55 +1708,9 @@ index 5447dc7..10a39fe 100644
  	ftrace_graph_init_task(p);
  
  	rt_mutex_init_task(p);
-diff --git a/kernel/ptrace.c b/kernel/ptrace.c
-index 84d9f8f..e275608 100644  
---- a/kernel/ptrace.c
-+++ b/kernel/ptrace.c
-@@ -15,6 +15,7 @@
- #include <linux/highmem.h>
- #include <linux/pagemap.h>
- #include <linux/ptrace.h>
-+#include <linux/utrace.h>
- #include <linux/security.h>
- #include <linux/signal.h>
- #include <linux/audit.h>
-@@ -163,6 +164,14 @@ bool ptrace_may_access(struct task_struc
- 	return !err;
- }
- 
-+/*
-+ * For experimental use of utrace, exclude ptrace on the same task.
-+ */
-+static inline bool exclude_ptrace(struct task_struct *task)
-+{
-+	return unlikely(!!task_utrace_flags(task));
-+}
-+
- int ptrace_attach(struct task_struct *task)
- {
- 	int retval;
-@@ -186,6 +195,8 @@ int ptrace_attach(struct task_struct *ta
- 
- 	task_lock(task);
- 	retval = __ptrace_may_access(task, PTRACE_MODE_ATTACH);
-+	if (!retval && exclude_ptrace(task))
-+		retval = -EBUSY;
- 	task_unlock(task);
- 	if (retval)
- 		goto unlock_creds;
-@@ -223,6 +234,9 @@ int ptrace_traceme(void)
- {
- 	int ret = -EPERM;
- 
-+	if (exclude_ptrace(current)) /* XXX locking */
-+		return -EBUSY;
-+
- 	write_lock_irq(&tasklist_lock);
- 	/* Are we already being traced? */
- 	if (!current->ptrace) {
 diff --git a/kernel/utrace.c b/kernel/utrace.c
 new file mode 100644
-index ...26d6faf 100644  
+index 0000000..f332d65
 --- /dev/null
 +++ b/kernel/utrace.c
 @@ -0,0 +1,2440 @@
@@ -4010,7 +4000,7 @@ index ...26d6faf 100644
 +		spin_lock_irq(&task->sighand->siglock);
 +
 +	if (sig_kernel_stop(signr))
-+		task->signal->flags |= SIGNAL_STOP_DEQUEUED;
++		task->group_stop |= GROUP_STOP_DEQUEUED;
 +
 +	return signr;
 +}
@@ -4164,3 +4154,2320 @@ index ...26d6faf 100644
 +{
 +	seq_printf(m, "Utrace:\t%lx\n", p->utrace_flags);
 +}
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:09 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:09 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:01 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id A1FB8D89A7;
+	Sun,  7 Aug 2011 15:18:01 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id JtiDMxvrW-Di; Sun,  7 Aug 2011 15:18:01 -0400 (EDT)
+Received: from int-mx10.intmail.prod.int.phx2.redhat.com (int-mx10.intmail.prod.int.phx2.redhat.com [10.5.11.23])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 7F0E6D8988;
+	Sun,  7 Aug 2011 15:18:01 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx10.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JHxlJ027726;
+	Sun, 7 Aug 2011 15:17:59 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:23 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:21 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 02/22] utrace: remove jobctl bits
+Message-ID: <20110807191521.GA14373@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.23
+Status: RO
+Content-Length: 1889
+Lines: 55
+
+- change utrace_get_signal() to check GROUP_STOP_PENDING instead of
+  signal->group_stop_count. With the recent changes group_stop_count
+  doesn't necessarily mean this task should participate in group stop.
+
+- remove the "participate in group stop" code from utrace_wakeup() and
+  utrace_stop(), this is no longer needed and wrong.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/utrace.c |   16 ++--------------
+ 1 files changed, 2 insertions(+), 14 deletions(-)
+
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index f332d65..6e7fafb 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -648,11 +648,7 @@ static void utrace_wakeup(struct task_struct *target, struct utrace *utrace)
+ {
+ 	lockdep_assert_held(&utrace->lock);
+ 	spin_lock_irq(&target->sighand->siglock);
+-	if (target->signal->flags & SIGNAL_STOP_STOPPED ||
+-	    target->signal->group_stop_count)
+-		target->state = TASK_STOPPED;
+-	else
+-		wake_up_state(target, __TASK_TRACED);
++	wake_up_state(target, __TASK_TRACED);
+ 	spin_unlock_irq(&target->sighand->siglock);
+ }
+ 
+@@ -805,14 +801,6 @@ relock:
+ 
+ 	__set_current_state(TASK_TRACED);
+ 
+-	/*
+-	 * If there is a group stop in progress,
+-	 * we must participate in the bookkeeping.
+-	 */
+-	if (unlikely(task->signal->group_stop_count) &&
+-			!--task->signal->group_stop_count)
+-		task->signal->flags = SIGNAL_STOP_STOPPED;
+-
+ 	spin_unlock_irq(&task->sighand->siglock);
+ 	spin_unlock(&utrace->lock);
+ 
+@@ -2036,7 +2024,7 @@ int utrace_get_signal(struct task_struct *task, struct pt_regs *regs,
+ 		ka = NULL;
+ 		memset(return_ka, 0, sizeof *return_ka);
+ 	} else if (!(task->utrace_flags & UTRACE_EVENT_SIGNAL_ALL) ||
+-		   unlikely(task->signal->group_stop_count)) {
++		   unlikely(task->group_stop & GROUP_STOP_PENDING)) {
+ 		/*
+ 		 * If no engine is interested in intercepting signals or
+ 		 * we must stop, let the caller just dequeue them normally
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:10 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:10 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:04 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 473EDD89A7;
+	Sun,  7 Aug 2011 15:18:04 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id uA3eVmUnKFQu; Sun,  7 Aug 2011 15:18:04 -0400 (EDT)
+Received: from int-mx10.intmail.prod.int.phx2.redhat.com (int-mx10.intmail.prod.int.phx2.redhat.com [10.5.11.23])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 29079D8988;
+	Sun,  7 Aug 2011 15:18:04 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx10.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JI1LH027738;
+	Sun, 7 Aug 2011 15:18:02 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:25 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:23 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 03/22] ptrace: take ->siglock around s/TRACED/RUNNING/
+Message-ID: <20110807191523.GA14376@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.23
+Status: RO
+Content-Length: 1623
+Lines: 55
+
+change ptrace_resume() and ptrace_stop() to take ->siglock around changing
+task->state from TRACED to RUNNING.
+
+With this patch __TASK_TRACED/STOPPED bits are fully protected by ->siglock,
+nobody can set or clear these bits without ->siglock held.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/ptrace.c |    8 +++++++-
+ kernel/signal.c |    3 +++
+ 2 files changed, 10 insertions(+), 1 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 2df1157..9988b13 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -534,6 +534,8 @@ static int ptrace_setsiginfo(struct task_struct *child, const siginfo_t *info)
+ static int ptrace_resume(struct task_struct *child, long request,
+ 			 unsigned long data)
+ {
++	unsigned long flags;
++
+ 	if (!valid_signal(data))
+ 		return -EIO;
+ 
+@@ -562,7 +564,11 @@ static int ptrace_resume(struct task_struct *child, long request,
+ 	}
+ 
+ 	child->exit_code = data;
+-	wake_up_state(child, __TASK_TRACED);
++
++	if (lock_task_sighand(child, &flags)) {
++		wake_up_state(child, __TASK_TRACED);
++		unlock_task_sighand(child, &flags);
++	}
+ 
+ 	return 0;
+ }
+diff --git a/kernel/signal.c b/kernel/signal.c
+index ff76786..2138cee 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1799,7 +1799,10 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
+ 		if (gstop_done)
+ 			do_notify_parent_cldstop(current, false, why);
+ 
++		spin_lock_irq(&current->sighand->siglock);
+ 		__set_current_state(TASK_RUNNING);
++		spin_unlock_irq(&current->sighand->siglock);
++
+ 		if (clear_code)
+ 			current->exit_code = 0;
+ 		read_unlock(&tasklist_lock);
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:11 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:11 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:06 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id D76B6A5D58;
+	Sun,  7 Aug 2011 15:18:06 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id xyKeY-zzvTgR; Sun,  7 Aug 2011 15:18:06 -0400 (EDT)
+Received: from int-mx12.intmail.prod.int.phx2.redhat.com (int-mx12.intmail.prod.int.phx2.redhat.com [10.5.11.25])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id BB0E49C7FA;
+	Sun,  7 Aug 2011 15:18:06 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx12.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JI4PF028668;
+	Sun, 7 Aug 2011 15:18:05 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:28 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:26 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 04/22] introduce wake_up_quiescent()
+Message-ID: <20110807191526.GA14383@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.25
+Status: RO
+Content-Length: 3103
+Lines: 92
+
+No functional changes. Add the new helper, wake_up_quiescent(task, state),
+which simply returns wake_up_state(task, state). Change all callers which
+do wake_up_state(STOPPED/TRACED) to use the new helper. ptrace_stop() is
+a bit special, it does __set_current_state(RUNNING) in the very unlikely
+case, change it as well.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/signal.h |    2 ++
+ kernel/ptrace.c        |    2 +-
+ kernel/signal.c        |   12 ++++++++++--
+ kernel/utrace.c        |    2 +-
+ 4 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/signal.h b/include/linux/signal.h
+index a822300..2be3712 100644
+--- a/include/linux/signal.h
++++ b/include/linux/signal.h
+@@ -239,6 +239,8 @@ static inline int valid_signal(unsigned long sig)
+ struct timespec;
+ struct pt_regs;
+ 
++extern int wake_up_quiescent(struct task_struct *p, unsigned int state);
++
+ extern int next_signal(struct sigpending *pending, sigset_t *mask);
+ extern int do_send_sig_info(int sig, struct siginfo *info,
+ 				struct task_struct *p, bool group);
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 9988b13..26ae214 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -566,7 +566,7 @@ static int ptrace_resume(struct task_struct *child, long request,
+ 	child->exit_code = data;
+ 
+ 	if (lock_task_sighand(child, &flags)) {
+-		wake_up_state(child, __TASK_TRACED);
++		wake_up_quiescent(child, __TASK_TRACED);
+ 		unlock_task_sighand(child, &flags);
+ 	}
+ 
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 2138cee..4fcf1c7 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -652,6 +652,14 @@ void signal_wake_up(struct task_struct *t, int resume)
+ }
+ 
+ /*
++ * wakes up the STOPPED/TRACED task, must be called with ->siglock held.
++ */
++int wake_up_quiescent(struct task_struct *p, unsigned int state)
++{
++	return wake_up_state(p, state);
++}
++
++/*
+  * Remove signals in mask from the pending set and queue.
+  * Returns 1 if any signals were found.
+  *
+@@ -811,7 +819,7 @@ static int prepare_signal(int sig, struct task_struct *p, int from_ancestor_ns)
+ 		do {
+ 			task_clear_group_stop_pending(t);
+ 			rm_from_queue(SIG_KERNEL_STOP_MASK, &t->pending);
+-			wake_up_state(t, __TASK_STOPPED);
++			wake_up_quiescent(t, __TASK_STOPPED);
+ 		} while_each_thread(p, t);
+ 
+ 		/*
+@@ -1800,7 +1808,7 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
+ 			do_notify_parent_cldstop(current, false, why);
+ 
+ 		spin_lock_irq(&current->sighand->siglock);
+-		__set_current_state(TASK_RUNNING);
++		wake_up_quiescent(current, __TASK_TRACED);
+ 		spin_unlock_irq(&current->sighand->siglock);
+ 
+ 		if (clear_code)
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index 6e7fafb..d7c547c 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -648,7 +648,7 @@ static void utrace_wakeup(struct task_struct *target, struct utrace *utrace)
+ {
+ 	lockdep_assert_held(&utrace->lock);
+ 	spin_lock_irq(&target->sighand->siglock);
+-	wake_up_state(target, __TASK_TRACED);
++	wake_up_quiescent(target, __TASK_TRACED);
+ 	spin_unlock_irq(&target->sighand->siglock);
+ }
+ 
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:13 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:13 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:09 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id C8DCF1322A2;
+	Sun,  7 Aug 2011 15:18:09 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id ZQXZL5xrzV21; Sun,  7 Aug 2011 15:18:09 -0400 (EDT)
+Received: from int-mx02.intmail.prod.int.phx2.redhat.com (int-mx02.intmail.prod.int.phx2.redhat.com [10.5.11.12])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id B3D6D128FDA;
+	Sun,  7 Aug 2011 15:18:09 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx02.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JI7P5029847;
+	Sun, 7 Aug 2011 15:18:07 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:31 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:28 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 05/22] introduce ptrace_signal_wake_up()
+Message-ID: <20110807191528.GA14386@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.12
+Status: RO
+Content-Length: 1974
+Lines: 67
+
+Add the new helper, ptrace_signal_wake_up(), change ptrace.c to use
+it instead of signal_wake_up().
+
+The new helper does almost the same, except:
+
+	- it doesn't use the TASK_WAKEKILL bit to wake up the TRACED
+	  or STOPPED task, it uses __TASK_STOPPED | __TASK_TRACED
+	  explicitly. This is what ptrace actually wants, it should
+	  never wake up a TASK_KILLABLE task.
+
+	  This should be cleanuped upatream, signal_wake_up() should
+	  take the state as an argument, not a boolean. Until then
+	  we add a new static helper.
+
+	- it uses wake_up_quiescent() instead of wake_up_state().
+
+Thereafter every change from STOPPED/TRACED to RUNNING is done via
+wake_up_quiescent().
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/ptrace.c |   16 ++++++++++++++--
+ 1 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 26ae214..0b2aba5 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -24,6 +24,18 @@
+ #include <linux/regset.h>
+ #include <linux/hw_breakpoint.h>
+ 
++static void ptrace_signal_wake_up(struct task_struct *p, int quiescent)
++{
++	unsigned int state;
++
++	set_tsk_thread_flag(p, TIF_SIGPENDING);
++
++	state = TASK_INTERRUPTIBLE;
++	if (quiescent)
++		state |= (__TASK_STOPPED | __TASK_TRACED);
++	if (!wake_up_quiescent(p, state))
++		kick_process(p);
++}
+ 
+ /*
+  * ptrace a task: make the debugger its new parent and
+@@ -92,7 +104,7 @@ void __ptrace_unlink(struct task_struct *child)
+ 	 * TASK_KILLABLE sleeps.
+ 	 */
+ 	if (child->group_stop & GROUP_STOP_PENDING || task_is_traced(child))
+-		signal_wake_up(child, task_is_traced(child));
++		ptrace_signal_wake_up(child, task_is_traced(child));
+ 
+ 	spin_unlock(&child->sighand->siglock);
+ }
+@@ -245,7 +257,7 @@ static int ptrace_attach(struct task_struct *task)
+ 	 */
+ 	if (task_is_stopped(task)) {
+ 		task->group_stop |= GROUP_STOP_PENDING | GROUP_STOP_TRAPPING;
+-		signal_wake_up(task, 1);
++		ptrace_signal_wake_up(task, 1);
+ 		wait_trap = true;
+ 	}
+ 
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:14 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:14 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:12 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 72BBDA5D58;
+	Sun,  7 Aug 2011 15:18:12 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id k8I1SMuU0ydh; Sun,  7 Aug 2011 15:18:12 -0400 (EDT)
+Received: from int-mx12.intmail.prod.int.phx2.redhat.com (int-mx12.intmail.prod.int.phx2.redhat.com [10.5.11.25])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 5DFAB9C7FA;
+	Sun,  7 Aug 2011 15:18:12 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx12.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIAjF028676;
+	Sun, 7 Aug 2011 15:18:10 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:34 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:31 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 06/22] wait_task_inactive: treat task->state and
+	match_state as bitmasks
+Message-ID: <20110807191531.GA14393@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.25
+Status: RO
+Content-Length: 1557
+Lines: 38
+
+Change wait_task_inactive() to check "state & match_state" instead of
+"state == match_state". This should not make any difference, but this
+allows us to add more "stopped" bits which can be set or cleared
+independently.
+
+IOW. wait_task_inactive() assumes that if task->state != 0, it can
+only be changed to TASK_RUNNING. Currently this is true, and in this
+case "state & match_state" continues to work. But, unlike the current
+check, it also works if task->state has other bits set while the caller
+is only interested in, say, __TASK_TRACED.
+
+Note: I think wait_task_inactive() should be cleanuped upstrean anyway,
+nowadays we have TASK_WAKING and task->state != 0 doesn't necessarily
+mean it is TASK_RUNNING. It also makes sense to exclude the !TASK_REPORT
+bits during the check. Finally, probably this patch makes sense anyway
+even without utrace. For example, a stopped _and_ traced thread could
+have task->state = TASK_STOPPED | TASK_TRACED, this can be useful.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/sched.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 3f2e502..ade7997 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -2277,7 +2277,7 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
+ 		 * is actually now running somewhere else!
+ 		 */
+ 		while (task_running(rq, p)) {
+-			if (match_state && unlikely(p->state != match_state))
++			if (match_state && !likely(p->state & match_state))
+ 				return 0;
+ 			cpu_relax();
+ 		}
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:15 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:15 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:15 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 1FD1B1322A2;
+	Sun,  7 Aug 2011 15:18:15 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id gfct30463vGS; Sun,  7 Aug 2011 15:18:15 -0400 (EDT)
+Received: from int-mx10.intmail.prod.int.phx2.redhat.com (int-mx10.intmail.prod.int.phx2.redhat.com [10.5.11.23])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 01C04128FDA;
+	Sun,  7 Aug 2011 15:18:15 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx10.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JICKL027777;
+	Sun, 7 Aug 2011 15:18:13 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:36 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:34 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 07/22] introduce TASK_UTRACED state
+Message-ID: <20110807191534.GA14396@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.23
+Status: RO
+Content-Length: 2912
+Lines: 83
+
+Introduce TASK_UTRACED state, will be used by utrace instead of TASK_TRACED.
+
+Note: this state is reported as "t (tracing stop)" to the user-space to
+avoid the confusion. IOW, it looks like TASK_TRACED in /proc/pid/status.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ fs/proc/array.c       |   11 ++++++-----
+ include/linux/sched.h |   20 +++++++++++---------
+ 2 files changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/fs/proc/array.c b/fs/proc/array.c
+index 496fef3..bfaa998 100644
+--- a/fs/proc/array.c
++++ b/fs/proc/array.c
+@@ -138,11 +138,12 @@ static const char * const task_state_array[] = {
+ 	"D (disk sleep)",	/*   2 */
+ 	"T (stopped)",		/*   4 */
+ 	"t (tracing stop)",	/*   8 */
+-	"Z (zombie)",		/*  16 */
+-	"X (dead)",		/*  32 */
+-	"x (dead)",		/*  64 */
+-	"K (wakekill)",		/* 128 */
+-	"W (waking)",		/* 256 */
++	"t (tracing stop)",	/*  16 (stopped by utrace) */
++	"Z (zombie)",		/*  32 */
++	"X (dead)",		/*  64 */
++	"x (dead)",		/* 128 */
++	"K (wakekill)",		/* 256 */
++	"W (waking)",		/* 512 */
+ };
+ 
+ static inline const char *get_task_state(struct task_struct *tsk)
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index b87de83..7a0008c 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -184,16 +184,17 @@ print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
+ #define TASK_UNINTERRUPTIBLE	2
+ #define __TASK_STOPPED		4
+ #define __TASK_TRACED		8
++#define __TASK_UTRACED		16
+ /* in tsk->exit_state */
+-#define EXIT_ZOMBIE		16
+-#define EXIT_DEAD		32
++#define EXIT_ZOMBIE		32
++#define EXIT_DEAD		64
+ /* in tsk->state again */
+-#define TASK_DEAD		64
+-#define TASK_WAKEKILL		128
+-#define TASK_WAKING		256
+-#define TASK_STATE_MAX		512
++#define TASK_DEAD		128
++#define TASK_WAKEKILL		256
++#define TASK_WAKING		512
++#define TASK_STATE_MAX		1024
+ 
+-#define TASK_STATE_TO_CHAR_STR "RSDTtZXxKW"
++#define TASK_STATE_TO_CHAR_STR "RSDTtUZXxKW"
+ 
+ extern char ___assert_task_state[1 - 2*!!(
+ 		sizeof(TASK_STATE_TO_CHAR_STR)-1 != ilog2(TASK_STATE_MAX)+1)];
+@@ -202,15 +203,16 @@ extern char ___assert_task_state[1 - 2*!!(
+ #define TASK_KILLABLE		(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
+ #define TASK_STOPPED		(TASK_WAKEKILL | __TASK_STOPPED)
+ #define TASK_TRACED		(TASK_WAKEKILL | __TASK_TRACED)
++#define TASK_UTRACED		(TASK_WAKEKILL | __TASK_UTRACED)
+ 
+ /* Convenience macros for the sake of wake_up */
+ #define TASK_NORMAL		(TASK_INTERRUPTIBLE | TASK_UNINTERRUPTIBLE)
+-#define TASK_ALL		(TASK_NORMAL | __TASK_STOPPED | __TASK_TRACED)
++#define TASK_ALL		(TASK_NORMAL | __TASK_STOPPED | __TASK_TRACED | __TASK_UTRACED)
+ 
+ /* get_task_state() */
+ #define TASK_REPORT		(TASK_RUNNING | TASK_INTERRUPTIBLE | \
+ 				 TASK_UNINTERRUPTIBLE | __TASK_STOPPED | \
+-				 __TASK_TRACED)
++				 __TASK_TRACED | __TASK_UTRACED)
+ 
+ #define task_is_traced(task)	((task->state & __TASK_TRACED) != 0)
+ #define task_is_stopped(task)	((task->state & __TASK_STOPPED) != 0)
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:17 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:17 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:17 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id B634FA5D5A;
+	Sun,  7 Aug 2011 15:18:17 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id 3vEyYZtZ8hD5; Sun,  7 Aug 2011 15:18:17 -0400 (EDT)
+Received: from int-mx12.intmail.prod.int.phx2.redhat.com (int-mx12.intmail.prod.int.phx2.redhat.com [10.5.11.25])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 9921A9C7FA;
+	Sun,  7 Aug 2011 15:18:17 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx12.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIFH8028686;
+	Sun, 7 Aug 2011 15:18:16 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:39 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:37 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 08/22] utrace: use TASK_UTRACED instead of TASK_TRACED
+Message-ID: <20110807191537.GA14403@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.25
+Status: RO
+Content-Length: 4315
+Lines: 129
+
+Change utrace.c to use TASK_UTRACED instead of TASK_TRACED.
+
+- utrace_stop/utrace_wakeup: simply use the new state
+
+- utrace_do_stop: do not clear STOPPED/TRACED, but add the new
+  __TASK_UTRACED bit to state the fact that both ptrace and utrace
+  want this task to be stopped
+
+- naturally, do not use task_is_traced() to check if this task was
+  stopped by utrace, use the new task_is_utraced() helper which
+  checks __TASK_UTRACED.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/utrace.c |   26 ++++++++++++++------------
+ 1 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index d7c547c..be98607 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -462,6 +462,8 @@ static void put_detached_list(struct list_head *list)
+  */
+ #define ENGINE_STOP		(1UL << _UTRACE_NEVENTS)
+ 
++#define task_is_utraced(task)	((task->state & __TASK_UTRACED) != 0)
++
+ static void mark_engine_wants_stop(struct task_struct *task,
+ 				   struct utrace_engine *engine)
+ {
+@@ -576,7 +578,7 @@ int utrace_set_events(struct task_struct *target,
+ 
+ 	ret = 0;
+ 	if ((old_flags & ~events) && target != current &&
+-	    !task_is_stopped_or_traced(target) && !target->exit_state) {
++	    !task_is_utraced(target) && !target->exit_state) {
+ 		/*
+ 		 * This barrier ensures that our engine->flags changes
+ 		 * have hit before we examine utrace->reporting,
+@@ -623,21 +625,21 @@ static void mark_engine_detached(struct utrace_engine *engine)
+  */
+ static bool utrace_do_stop(struct task_struct *target, struct utrace *utrace)
+ {
+-	if (task_is_stopped(target)) {
++	if (task_is_stopped_or_traced(target)) {
+ 		/*
+ 		 * Stopped is considered quiescent; when it wakes up, it will
+ 		 * go through utrace_finish_stop() before doing anything else.
+ 		 */
+ 		spin_lock_irq(&target->sighand->siglock);
+-		if (likely(task_is_stopped(target)))
+-			__set_task_state(target, TASK_TRACED);
++		if (likely(task_is_stopped_or_traced(target)))
++			target->state |= TASK_UTRACED;
+ 		spin_unlock_irq(&target->sighand->siglock);
+ 	} else if (utrace->resume > UTRACE_REPORT) {
+ 		utrace->resume = UTRACE_REPORT;
+ 		set_notify_resume(target);
+ 	}
+ 
+-	return task_is_traced(target);
++	return task_is_utraced(target);
+ }
+ 
+ /*
+@@ -648,7 +650,7 @@ static void utrace_wakeup(struct task_struct *target, struct utrace *utrace)
+ {
+ 	lockdep_assert_held(&utrace->lock);
+ 	spin_lock_irq(&target->sighand->siglock);
+-	wake_up_quiescent(target, __TASK_TRACED);
++	wake_up_quiescent(target, __TASK_UTRACED);
+ 	spin_unlock_irq(&target->sighand->siglock);
+ }
+ 
+@@ -710,7 +712,7 @@ static bool utrace_reset(struct task_struct *task, struct utrace *utrace)
+ 	/*
+ 	 * If no more engines want it stopped, wake it up.
+ 	 */
+-	if (task_is_traced(task) && !(flags & ENGINE_STOP)) {
++	if (task_is_utraced(task) && !(flags & ENGINE_STOP)) {
+ 		/*
+ 		 * It just resumes, so make sure single-step
+ 		 * is not left set.
+@@ -749,7 +751,7 @@ void utrace_finish_stop(void)
+ }
+ 
+ /*
+- * Perform %UTRACE_STOP, i.e. block in TASK_TRACED until woken up.
++ * Perform %UTRACE_STOP, i.e. block in TASK_UTRACED until woken up.
+  * @task == current, @utrace == current->utrace, which is not locked.
+  * Return true if we were woken up by SIGKILL even though some utrace
+  * engine may still want us to stay stopped.
+@@ -799,7 +801,7 @@ relock:
+ 		return;
+ 	}
+ 
+-	__set_current_state(TASK_TRACED);
++	__set_current_state(TASK_UTRACED);
+ 
+ 	spin_unlock_irq(&task->sighand->siglock);
+ 	spin_unlock(&utrace->lock);
+@@ -809,14 +811,14 @@ relock:
+ 	utrace_finish_stop();
+ 
+ 	/*
+-	 * While in TASK_TRACED, we were considered "frozen enough".
++	 * While in TASK_UTRACED, we were considered "frozen enough".
+ 	 * Now that we woke up, it's crucial if we're supposed to be
+ 	 * frozen that we freeze now before running anything substantial.
+ 	 */
+ 	try_to_freeze();
+ 
+ 	/*
+-	 * While we were in TASK_TRACED, complete_signal() considered
++	 * While we were in TASK_UTRACED, complete_signal() considered
+ 	 * us "uninterested" in signal wakeups.  Now make sure our
+ 	 * TIF_SIGPENDING state is correct for normal running.
+ 	 */
+@@ -1087,7 +1089,7 @@ int utrace_control(struct task_struct *target,
+ 	if (unlikely(IS_ERR(utrace)))
+ 		return PTR_ERR(utrace);
+ 
+-	reset = task_is_traced(target);
++	reset = task_is_utraced(target);
+ 	ret = 0;
+ 
+ 	/*
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:19 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:19 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:24 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 53AC0D89A9;
+	Sun,  7 Aug 2011 15:18:20 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id CGhyA84rXAKN; Sun,  7 Aug 2011 15:18:20 -0400 (EDT)
+Received: from int-mx12.intmail.prod.int.phx2.redhat.com (int-mx12.intmail.prod.int.phx2.redhat.com [10.5.11.25])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 36B2CD8988;
+	Sun,  7 Aug 2011 15:18:20 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx12.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIIFB028696;
+	Sun, 7 Aug 2011 15:18:18 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:41 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:39 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 09/22] tracehooks: kill tracehook_finish_jctl(), add
+	tracehook_finish_stop()
+Message-ID: <20110807191539.GA14406@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.25
+Status: RO
+Content-Length: 2781
+Lines: 85
+
+tracehook_finish_jctl() is needed to avoid the races with SIGKILL
+which wakes up UTRACED task, and thus it should be called every time
+after the STOPPED/TRACED/UTRACED returns from schedule(), remember
+that TASK_UTRACED can be added while the task is STOPPED/UTRACED.
+
+- rename it to tracehook_finish_stop(),jctl no longer matches the
+  reality.
+
+- change do_signal_state() to call this helper right after schedule(),
+  otherwise this logic is broken by the upstream changes
+
+- now that utrace doesn't control TASK_TRACED bit, ptrace_stop() must
+  call this helper too.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/tracehook.h |    6 +++---
+ kernel/signal.c           |    5 +++--
+ kernel/utrace.c           |    2 +-
+ 3 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
+index 7d7bdde..3c7b6b3 100644
+--- a/include/linux/tracehook.h
++++ b/include/linux/tracehook.h
+@@ -528,11 +528,11 @@ static inline int tracehook_get_signal(struct task_struct *task,
+ }
+ 
+ /**
+- * tracehook_finish_jctl - report about return from job control stop
++ * tracehook_finish_stop - report about return from STOPPED/TRACED
+  *
+- * This is called by do_signal_stop() after wakeup.
++ * This is called by do_signal_stop() and ptrace_stop after wakeup.
+  */
+-static inline void tracehook_finish_jctl(void)
++static inline void tracehook_finish_stop(void)
+ {
+ 	if (task_utrace_flags(current))
+ 		utrace_finish_stop();
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 4fcf1c7..a7979ad 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1816,6 +1816,7 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
+ 		read_unlock(&tasklist_lock);
+ 	}
+ 
++	tracehook_finish_stop();
+ 	/*
+ 	 * While in TASK_TRACED, we were considered "frozen enough".
+ 	 * Now that we woke up, it's crucial if we're supposed to be
+@@ -1952,6 +1953,8 @@ retry:
+ 		/* Now we don't run again until woken by SIGCONT or SIGKILL */
+ 		schedule();
+ 
++		tracehook_finish_stop();
++
+ 		spin_lock_irq(&current->sighand->siglock);
+ 	} else {
+ 		ptrace_stop(current->group_stop & GROUP_STOP_SIGMASK,
+@@ -1974,8 +1977,6 @@ retry:
+ 
+ 	spin_unlock_irq(&current->sighand->siglock);
+ 
+-	tracehook_finish_jctl();
+-
+ 	return 1;
+ }
+ 
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index be98607..daa96b9 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -741,7 +741,7 @@ static bool utrace_reset(struct task_struct *task, struct utrace *utrace)
+ void utrace_finish_stop(void)
+ {
+ 	/*
+-	 * If we were task_is_traced() and then SIGKILL'ed, make
++	 * If we were task_is_utraced() and then SIGKILL'ed, make
+ 	 * sure we do nothing until the tracer drops utrace->lock.
+ 	 */
+ 	if (unlikely(__fatal_signal_pending(current))) {
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:18 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:18 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:22 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id DD6839C7FA;
+	Sun,  7 Aug 2011 15:18:22 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id hZs6VyadcD7K; Sun,  7 Aug 2011 15:18:22 -0400 (EDT)
+Received: from int-mx01.intmail.prod.int.phx2.redhat.com (int-mx01.intmail.prod.int.phx2.redhat.com [10.5.11.11])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id C7B129C7DE;
+	Sun,  7 Aug 2011 15:18:22 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx01.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIKMe020605;
+	Sun, 7 Aug 2011 15:18:21 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:44 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:42 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 10/22] teach wake_up_quiescent() to do "selective" wake_up
+Message-ID: <20110807191542.GA14409@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.11
+Status: RO
+Content-Length: 1334
+Lines: 45
+
+Both utrace and ptrace can want the same thread to be quiescent, in this
+case its state is TASK_TRACED | TASK_UTRACED. And this also means that
+this task must not run unless both utrace and ptrace resume it.
+
+Change wake_up_quiescent(p, state) to do "p->state &= ~state" and return
+false unless there is no more "quiescent" bits in task->state.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/signal.c |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index a7979ad..57552e6 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -651,11 +651,26 @@ void signal_wake_up(struct task_struct *t, int resume)
+ 		kick_process(t);
+ }
+ 
++#define STATE_QUIESCENT	(__TASK_STOPPED | __TASK_TRACED | __TASK_UTRACED)
+ /*
+  * wakes up the STOPPED/TRACED task, must be called with ->siglock held.
+  */
+ int wake_up_quiescent(struct task_struct *p, unsigned int state)
+ {
++	unsigned int quiescent = (p->state & STATE_QUIESCENT);
++
++	WARN_ON(state & ~(STATE_QUIESCENT | TASK_INTERRUPTIBLE));
++
++	if (quiescent) {
++		state &= ~TASK_INTERRUPTIBLE;
++		if ((quiescent & ~state) != 0) {
++			p->state &= ~state;
++			WARN_ON(!(p->state & STATE_QUIESCENT));
++			WARN_ON(!(p->state & TASK_WAKEKILL));
++			return 0;
++		}
++	}
++
+ 	return wake_up_state(p, state);
+ }
+ 
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:20 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:20 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:25 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 7C2991322AA;
+	Sun,  7 Aug 2011 15:18:25 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id rHOxOwY4bOdr; Sun,  7 Aug 2011 15:18:25 -0400 (EDT)
+Received: from int-mx02.intmail.prod.int.phx2.redhat.com (int-mx02.intmail.prod.int.phx2.redhat.com [10.5.11.12])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 67ABD128FDA;
+	Sun,  7 Aug 2011 15:18:25 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx02.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JINVP029911;
+	Sun, 7 Aug 2011 15:18:23 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:47 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:45 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 11/22] ptrace_stop: do not assume the task is running after
+	wake_up_quiescent()
+Message-ID: <20110807191545.GA14416@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.12
+Status: RO
+Content-Length: 961
+Lines: 30
+
+If ptrace_stop() sets TASK_TRACED and then detects we should not stop,
+it can race with utrace_do_stop() which can see TASK_TRACED and add
+TASK_UTRACED. In this case we should stop for utrace needs.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/signal.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 57552e6..89e691d 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1829,6 +1829,14 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
+ 		if (clear_code)
+ 			current->exit_code = 0;
+ 		read_unlock(&tasklist_lock);
++
++		/*
++		 * It is possible that __TASK_UTRACED was added by utrace
++		 * while we were __TASK_TRACED and before we take ->siglock
++		 * for wake_up_quiescent(), we need to block in this case.
++		 * Otherwise this is unnecessary but absolutely harmless.
++		 */
++		schedule();
+ 	}
+ 
+ 	tracehook_finish_stop();
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:21 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:21 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:28 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 1B4B91322AE;
+	Sun,  7 Aug 2011 15:18:28 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id q5tv0cJeZqLD; Sun,  7 Aug 2011 15:18:28 -0400 (EDT)
+Received: from int-mx01.intmail.prod.int.phx2.redhat.com (int-mx01.intmail.prod.int.phx2.redhat.com [10.5.11.11])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 071461322A9;
+	Sun,  7 Aug 2011 15:18:28 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx01.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIPFB020635;
+	Sun, 7 Aug 2011 15:18:26 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:49 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:47 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 12/22] get_signal_to_deliver: restructure utrace/ptrace
+	signal reporting
+Message-ID: <20110807191547.GA14419@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.11
+Status: RO
+Content-Length: 2011
+Lines: 72
+
+get_signal_to_deliver() assumes that either tracehook_get_signal() does
+nothing (without CONFIG_UTRACE), or it also reports the signal to ptrace
+engine implemented on top of utrace. Now that ptrace works independently
+this doesn't work.
+
+Change the code to call ptrace_signal() after tracehook_get_signal().
+
+Move ->ptrace check from ptrace_signal() to get_signal_to_deliver(),
+we do not want to change *return_ka if it was initialized by utrace
+and the task is not traced.
+
+IOW, roughly, ptrace acts as if it is the last attached engine, it
+takes the final decision about the signal.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/signal.c |   24 +++++++++++-------------
+ 1 files changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 89e691d..d0e0c67 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -2006,9 +2006,6 @@ retry:
+ static int ptrace_signal(int signr, siginfo_t *info,
+ 			 struct pt_regs *regs, void *cookie)
+ {
+-	if (!task_ptrace(current))
+-		return signr;
+-
+ 	ptrace_signal_deliver(regs, cookie);
+ 
+ 	/* Let the debugger run.  */
+@@ -2110,6 +2107,7 @@ relock:
+ 		signr = tracehook_get_signal(current, regs, info, return_ka);
+ 		if (unlikely(signr < 0))
+ 			goto relock;
++
+ 		if (unlikely(signr != 0))
+ 			ka = return_ka;
+ 		else {
+@@ -2117,18 +2115,18 @@ relock:
+ 				     GROUP_STOP_PENDING) && do_signal_stop(0))
+ 				goto relock;
+ 
+-			signr = dequeue_signal(current, &current->blocked,
+-					       info);
++			signr = dequeue_signal(current, &current->blocked, info);
+ 
+-			if (!signr)
+-				break; /* will return 0 */
++			ka = &sighand->action[signr-1];
++		}
+ 
+-			if (signr != SIGKILL) {
+-				signr = ptrace_signal(signr, info,
+-						      regs, cookie);
+-				if (!signr)
+-					continue;
+-			}
++		if (!signr)
++			break; /* will return 0 */
++
++		if (signr != SIGKILL && current->ptrace) {
++			signr = ptrace_signal(signr, info, regs, cookie);
++			if (!signr)
++				continue;
+ 
+ 			ka = &sighand->action[signr-1];
+ 		}
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:22 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:22 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:30 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id BFD8F1322A2;
+	Sun,  7 Aug 2011 15:18:30 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id JczS8HsLYY6X; Sun,  7 Aug 2011 15:18:30 -0400 (EDT)
+Received: from int-mx02.intmail.prod.int.phx2.redhat.com (int-mx02.intmail.prod.int.phx2.redhat.com [10.5.11.12])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id A8F91128FDA;
+	Sun,  7 Aug 2011 15:18:30 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx02.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIS1m029940;
+	Sun, 7 Aug 2011 15:18:29 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:52 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:50 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 13/22] introduce ptrace_set_syscall_trace()
+Message-ID: <20110807191550.GA14426@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.12
+Status: RO
+Content-Length: 1580
+Lines: 51
+
+No functional changes. Add the new helper, ptrace_set_syscall_trace(),
+which should be used to set/clear TIF_SYSCALL_TRACE in ptrace code.
+Currently it does nothing more.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/ptrace.c |   15 ++++++++++-----
+ 1 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 0b2aba5..b6fd922 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -37,6 +37,14 @@ static void ptrace_signal_wake_up(struct task_struct *p, int quiescent)
+ 		kick_process(p);
+ }
+ 
++static void ptrace_set_syscall_trace(struct task_struct *p, bool on)
++{
++	if (on)
++		set_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
++	else
++		clear_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
++}
++
+ /*
+  * ptrace a task: make the debugger its new parent and
+  * move it to the ptrace list.
+@@ -364,7 +372,7 @@ static int ptrace_detach(struct task_struct *child, unsigned int data)
+ 
+ 	/* Architecture-specific hardware disable .. */
+ 	ptrace_disable(child);
+-	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
++	ptrace_set_syscall_trace(child, false);
+ 
+ 	write_lock_irq(&tasklist_lock);
+ 	/*
+@@ -551,10 +559,7 @@ static int ptrace_resume(struct task_struct *child, long request,
+ 	if (!valid_signal(data))
+ 		return -EIO;
+ 
+-	if (request == PTRACE_SYSCALL)
+-		set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
+-	else
+-		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
++	ptrace_set_syscall_trace(child, request == PTRACE_SYSCALL);
+ 
+ #ifdef TIF_SYSCALL_EMU
+ 	if (request == PTRACE_SYSEMU || request == PTRACE_SYSEMU_SINGLESTEP)
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:23 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:23 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:33 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 585699C7DE;
+	Sun,  7 Aug 2011 15:18:33 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id Zp+5oAzhYq2W; Sun,  7 Aug 2011 15:18:33 -0400 (EDT)
+Received: from int-mx01.intmail.prod.int.phx2.redhat.com (int-mx01.intmail.prod.int.phx2.redhat.com [10.5.11.11])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 44532909E4;
+	Sun,  7 Aug 2011 15:18:33 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx01.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIV6n020657;
+	Sun, 7 Aug 2011 15:18:31 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:54 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:52 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 14/22] introduce PT_SYSCALL_TRACE flag
+Message-ID: <20110807191552.GA14429@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.11
+Status: RO
+Content-Length: 2235
+Lines: 72
+
+Currently tracehooks assume that if the ptraced task has
+TIF_SYSCALL_TRACE set, the tracee should report the syscall.
+This is not true, this thread flag can be set by utrace.
+
+Add the new internal ptrace flag, PT_SYSCALL_TRACE. Change
+ptrace_set_syscall_trace() to set/clear this bit along with
+TIF_SYSCALL_TRACE, change ptrace_report_syscall() to check
+this flag instead of PT_PTRACED.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/ptrace.h    |    3 +++
+ include/linux/tracehook.h |    2 +-
+ kernel/ptrace.c           |    7 +++++--
+ 3 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
+index 9178d5c..98d995d 100644
+--- a/include/linux/ptrace.h
++++ b/include/linux/ptrace.h
+@@ -90,6 +90,8 @@
+ 
+ #define PT_TRACE_MASK	0x000003f4
+ 
++#define PT_SYSCALL_TRACE	0x00010000
++
+ /* single stepping state bits (used on ARM and PA-RISC) */
+ #define PT_SINGLESTEP_BIT	31
+ #define PT_SINGLESTEP		(1<<PT_SINGLESTEP_BIT)
+@@ -187,6 +189,7 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
+ 	child->ptrace = 0;
+ 	if (unlikely(ptrace) && (current->ptrace & PT_PTRACED)) {
+ 		child->ptrace = current->ptrace;
++		child->ptrace &= ~PT_SYSCALL_TRACE;
+ 		__ptrace_link(child, current->parent);
+ 	}
+ 
+diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
+index 3c7b6b3..6ce7a37 100644
+--- a/include/linux/tracehook.h
++++ b/include/linux/tracehook.h
+@@ -76,7 +76,7 @@ static inline void ptrace_report_syscall(struct pt_regs *regs)
+ {
+ 	int ptrace = task_ptrace(current);
+ 
+-	if (!(ptrace & PT_PTRACED))
++	if (!(ptrace & PT_SYSCALL_TRACE))
+ 		return;
+ 
+ 	ptrace_notify(SIGTRAP | ((ptrace & PT_TRACESYSGOOD) ? 0x80 : 0));
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index b6fd922..0825a01 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -39,10 +39,13 @@ static void ptrace_signal_wake_up(struct task_struct *p, int quiescent)
+ 
+ static void ptrace_set_syscall_trace(struct task_struct *p, bool on)
+ {
+-	if (on)
++	if (on) {
++		p->ptrace |= PT_SYSCALL_TRACE;
+ 		set_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
+-	else
++	} else {
++		p->ptrace &= ~PT_SYSCALL_TRACE;
+ 		clear_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
++	}
+ }
+ 
+ /*
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:24 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:24 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:35 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id F0377D89A9;
+	Sun,  7 Aug 2011 15:18:35 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id cBLqfABIHZ6h; Sun,  7 Aug 2011 15:18:35 -0400 (EDT)
+Received: from int-mx09.intmail.prod.int.phx2.redhat.com (int-mx09.intmail.prod.int.phx2.redhat.com [10.5.11.22])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id DC799D8988;
+	Sun,  7 Aug 2011 15:18:35 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx09.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIXU3007727;
+	Sun, 7 Aug 2011 15:18:34 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:15:57 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:55 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 15/22] utrace: don't clear TIF_SYSCALL_TRACE if it is
+	needed by ptrace
+Message-ID: <20110807191555.GA14436@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.22
+Status: RO
+Content-Length: 796
+Lines: 23
+
+TIF_SYSCALL_TRACE should be cleared only if both ptrace and utrace do
+not want it, change utrace_reset() to check PT_SYSCALL_TRACE before
+clear_tsk_thread_flag(TIF_SYSCALL_TRACE).
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/utrace.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index daa96b9..a824ac3 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -697,6 +697,7 @@ static bool utrace_reset(struct task_struct *task, struct utrace *utrace)
+ 		BUG_ON(utrace->death);
+ 		flags &= UTRACE_EVENT(REAP);
+ 	} else if (!(flags & UTRACE_EVENT_SYSCALL) &&
++		   !(task->ptrace & PT_SYSCALL_TRACE) &&
+ 		   test_tsk_thread_flag(task, TIF_SYSCALL_TRACE)) {
+ 		clear_tsk_thread_flag(task, TIF_SYSCALL_TRACE);
+ 	}
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:25 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:25 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:38 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id A6B3C9C7DE;
+	Sun,  7 Aug 2011 15:18:38 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id ln+MaW5alQl7; Sun,  7 Aug 2011 15:18:38 -0400 (EDT)
+Received: from int-mx09.intmail.prod.int.phx2.redhat.com (int-mx09.intmail.prod.int.phx2.redhat.com [10.5.11.22])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 8A6D2909E4;
+	Sun,  7 Aug 2011 15:18:38 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx09.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIaYf007737;
+	Sun, 7 Aug 2011 15:18:36 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:00 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:15:58 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 16/22] introduce task_utrace_lock/task_utrace_unlock
+Message-ID: <20110807191558.GA14440@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.22
+Status: RO
+Content-Length: 2189
+Lines: 80
+
+- Add task_utrace_lock(task). It simply takes task->utrace->lock if
+  this task was ever utraced. Otherwise it takes task_lock(), this
+  serializes with utrace_attach_task()->utrace_task_alloc(). In both
+  case the caller can be sure it can't race with anything which needs
+  utrace->lock.
+
+- Add task_utrace_unlock(task), it releases the corresponding lock.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/utrace.h |    9 +++++++++
+ kernel/utrace.c        |   26 ++++++++++++++++++++++++++
+ 2 files changed, 35 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/utrace.h b/include/linux/utrace.h
+index f251efe..5176f5f 100644
+--- a/include/linux/utrace.h
++++ b/include/linux/utrace.h
+@@ -109,6 +109,12 @@ void utrace_signal_handler(struct task_struct *, int);
+ 
+ #ifndef CONFIG_UTRACE
+ 
++static inline void task_utrace_lock(struct task_struct *task)
++{
++}
++static inline void task_utrace_unlock(struct task_struct *task)
++{
++}
+ /*
+  * <linux/tracehook.h> uses these accessors to avoid #ifdef CONFIG_UTRACE.
+  */
+@@ -131,6 +137,9 @@ static inline void task_utrace_proc_status(struct seq_file *m,
+ 
+ #else  /* CONFIG_UTRACE */
+ 
++extern void task_utrace_lock(struct task_struct *task);
++extern void task_utrace_unlock(struct task_struct *task);
++
+ static inline unsigned long task_utrace_flags(struct task_struct *task)
+ {
+ 	return task->utrace_flags;
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index a824ac3..508c13c 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -79,6 +79,32 @@ static int __init utrace_init(void)
+ }
+ module_init(utrace_init);
+ 
++void task_utrace_lock(struct task_struct *task)
++{
++	struct utrace *utrace = task_utrace_struct(task);
++
++	if (!utrace) {
++		task_lock(task);
++		utrace = task_utrace_struct(task);
++		if (!utrace)
++			return;
++
++		task_unlock(task);
++	}
++
++	spin_lock(&utrace->lock);
++}
++
++void task_utrace_unlock(struct task_struct *task)
++{
++	struct utrace *utrace = task_utrace_struct(task);
++
++	if (utrace)
++		spin_unlock(&utrace->lock);
++	else
++		task_unlock(task);
++}
++
+ /*
+  * Set up @task.utrace for the first time.  We can have races
+  * between two utrace_attach_task() calls here.  The task_lock()
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:27 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:27 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:41 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 41B111322A2;
+	Sun,  7 Aug 2011 15:18:41 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id ypKNrfgt9t+i; Sun,  7 Aug 2011 15:18:41 -0400 (EDT)
+Received: from int-mx12.intmail.prod.int.phx2.redhat.com (int-mx12.intmail.prod.int.phx2.redhat.com [10.5.11.25])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 2D805128FDA;
+	Sun,  7 Aug 2011 15:18:41 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx12.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIdnm028810;
+	Sun, 7 Aug 2011 15:18:39 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:02 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:00 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 17/22] teach ptrace_set_syscall_trace() to play well with
+	utrace
+Message-ID: <20110807191600.GA14443@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.25
+Status: RO
+Content-Length: 1512
+Lines: 48
+
+1. ptrace_set_syscall_trace(true)->set_tsk_thread_flag(TIF_SYSCALL_TRACE)
+   can race with utrace_control()->utrace_reset() path which can miss
+   PT_SYSCALL_TRACE and clear TIF_SYSCALL_TRACE after it was already set.
+
+2. ptrace_set_syscall_trace(false) clears TIF_SYSCALL_TRACE and this is
+   not utrace-friendly, it can need this flag.
+
+Change ptrace_set_syscall_trace() to take task_utrace_lock(), this is
+enough to fix the 1st problem. Check task_utrace_flags() before clearing
+TIF_SYSCALL_TRACE, this fixes 2.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/ptrace.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 0825a01..209ea2d 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -23,6 +23,7 @@
+ #include <linux/uaccess.h>
+ #include <linux/regset.h>
+ #include <linux/hw_breakpoint.h>
++#include <linux/utrace.h>
+ 
+ static void ptrace_signal_wake_up(struct task_struct *p, int quiescent)
+ {
+@@ -39,13 +40,16 @@ static void ptrace_signal_wake_up(struct task_struct *p, int quiescent)
+ 
+ static void ptrace_set_syscall_trace(struct task_struct *p, bool on)
+ {
++	task_utrace_lock(p);
+ 	if (on) {
+ 		p->ptrace |= PT_SYSCALL_TRACE;
+ 		set_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
+ 	} else {
+ 		p->ptrace &= ~PT_SYSCALL_TRACE;
+-		clear_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
++		if (!(task_utrace_flags(p) & UTRACE_EVENT_SYSCALL))
++			clear_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
+ 	}
++	task_utrace_unlock(p);
+ }
+ 
+ /*
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:27 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:27 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:43 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id E37B59C7DE;
+	Sun,  7 Aug 2011 15:18:43 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id NRVgSzxr7avy; Sun,  7 Aug 2011 15:18:43 -0400 (EDT)
+Received: from int-mx09.intmail.prod.int.phx2.redhat.com (int-mx09.intmail.prod.int.phx2.redhat.com [10.5.11.22])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id C6D6E909E4;
+	Sun,  7 Aug 2011 15:18:43 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx09.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIfAM007754;
+	Sun, 7 Aug 2011 15:18:42 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:05 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:03 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 18/22] introduce PT_SINGLE_STEP and PT_SINGLE_BLOCK
+Message-ID: <20110807191603.GA14450@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.22
+Status: RO
+Content-Length: 3724
+Lines: 107
+
+Add the new internal ptrace flags, PT_SINGLE_STEP and PT_SINGLE_BLOCK.
+
+Like PT_SYSCALL_TRACE, this is needed to avoid the unnecessary ptrace
+reports when TIF_SINGLESTEP was set by another engine, not by ptrace.
+Also, we need these bits to coordinate the user_*_single_step() calls
+from ptrace and utrace.
+
+TODO: update the !x86 ptrace code which does user_disable_single_step().
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ arch/x86/kernel/ptrace.c  |    1 +
+ include/linux/ptrace.h    |    5 ++++-
+ include/linux/tracehook.h |    7 +++++--
+ kernel/ptrace.c           |    3 +++
+ 4 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/arch/x86/kernel/ptrace.c b/arch/x86/kernel/ptrace.c
+index 807c2a2..7ab475f 100644
+--- a/arch/x86/kernel/ptrace.c
++++ b/arch/x86/kernel/ptrace.c
+@@ -807,6 +807,7 @@ static int ioperm_get(struct task_struct *target,
+  */
+ void ptrace_disable(struct task_struct *child)
+ {
++	child->ptrace &= ~(PT_SINGLE_STEP | PT_SINGLE_BLOCK);
+ 	user_disable_single_step(child);
+ #ifdef TIF_SYSCALL_EMU
+ 	clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
+diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
+index 98d995d..65b1e4f 100644
+--- a/include/linux/ptrace.h
++++ b/include/linux/ptrace.h
+@@ -91,6 +91,8 @@
+ #define PT_TRACE_MASK	0x000003f4
+ 
+ #define PT_SYSCALL_TRACE	0x00010000
++#define PT_SINGLE_STEP		0x00020000
++#define PT_SINGLE_BLOCK		0x00040000
+ 
+ /* single stepping state bits (used on ARM and PA-RISC) */
+ #define PT_SINGLESTEP_BIT	31
+@@ -189,7 +191,8 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
+ 	child->ptrace = 0;
+ 	if (unlikely(ptrace) && (current->ptrace & PT_PTRACED)) {
+ 		child->ptrace = current->ptrace;
+-		child->ptrace &= ~PT_SYSCALL_TRACE;
++		child->ptrace &=
++			~(PT_SYSCALL_TRACE | PT_SINGLE_STEP | PT_SINGLE_BLOCK);
+ 		__ptrace_link(child, current->parent);
+ 	}
+ 
+diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
+index 6ce7a37..06edb52 100644
+--- a/include/linux/tracehook.h
++++ b/include/linux/tracehook.h
+@@ -121,6 +121,9 @@ static inline __must_check int tracehook_report_syscall_entry(
+ 	return 0;
+ }
+ 
++#define ptrace_wants_step()	\
++	(current->ptrace & (PT_SINGLE_STEP | PT_SINGLE_BLOCK))
++
+ /**
+  * tracehook_report_syscall_exit - task has just finished a system call
+  * @regs:		user register state of current task
+@@ -143,7 +146,7 @@ static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
+ 	if (task_utrace_flags(current) & UTRACE_EVENT(SYSCALL_EXIT))
+ 		utrace_report_syscall_exit(regs);
+ 
+-	if (step) {
++	if (step && ptrace_wants_step()) {
+ 		siginfo_t info;
+ 		user_single_step_siginfo(current, regs, &info);
+ 		force_sig_info(SIGTRAP, &info, current);
+@@ -436,7 +439,7 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
+ {
+ 	if (task_utrace_flags(current))
+ 		utrace_signal_handler(current, stepping);
+-	if (stepping)
++	if (stepping && ptrace_wants_step())
+ 		ptrace_notify(SIGTRAP);
+ }
+ 
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 209ea2d..44908d0 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -575,13 +575,16 @@ static int ptrace_resume(struct task_struct *child, long request,
+ 		clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
+ #endif
+ 
++	child->ptrace &= ~(PT_SINGLE_STEP | PT_SINGLE_BLOCK);
+ 	if (is_singleblock(request)) {
+ 		if (unlikely(!arch_has_block_step()))
+ 			return -EIO;
++		child->ptrace |= PT_SINGLE_BLOCK;
+ 		user_enable_block_step(child);
+ 	} else if (is_singlestep(request) || is_sysemu_singlestep(request)) {
+ 		if (unlikely(!arch_has_single_step()))
+ 			return -EIO;
++		child->ptrace |= PT_SINGLE_STEP;
+ 		user_enable_single_step(child);
+ 	} else {
+ 		user_disable_single_step(child);
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:29 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:29 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com (LHLO
+ zmta02.collab.prod.int.phx2.redhat.com) (10.5.5.32) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:46 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 810E31322A2;
+	Sun,  7 Aug 2011 15:18:46 -0400 (EDT)
+Received: from zmta02.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta02.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id ptiIThWTq2a6; Sun,  7 Aug 2011 15:18:46 -0400 (EDT)
+Received: from int-mx09.intmail.prod.int.phx2.redhat.com (int-mx09.intmail.prod.int.phx2.redhat.com [10.5.11.22])
+	by zmta02.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 6B665128FDA;
+	Sun,  7 Aug 2011 15:18:46 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx09.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIiI8007757;
+	Sun, 7 Aug 2011 15:18:44 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:08 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:06 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 19/22] utrace: finish_resume_report: don't do
+	user_xxx_step() if ptrace_wants_step()
+Message-ID: <20110807191606.GA14453@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.22
+Status: RO
+Content-Length: 2740
+Lines: 83
+
+finish_resume_report() should not enable/disable the stepping if
+ptrace_wants_step() == T. If ptrace wants block_step while utrace
+wants single_step we could "promote" the stepping, but I do not
+think this really makes sense.
+
+Unless the tracee is killed this can't race with ptrace, this is
+called by the tracee itself. If it is killed we do not care.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/tracehook.h |    8 ++++----
+ kernel/utrace.c           |    9 ++++++---
+ 2 files changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
+index 06edb52..5612d2d 100644
+--- a/include/linux/tracehook.h
++++ b/include/linux/tracehook.h
+@@ -121,8 +121,8 @@ static inline __must_check int tracehook_report_syscall_entry(
+ 	return 0;
+ }
+ 
+-#define ptrace_wants_step()	\
+-	(current->ptrace & (PT_SINGLE_STEP | PT_SINGLE_BLOCK))
++#define ptrace_wants_step(task)	\
++	((task)->ptrace & (PT_SINGLE_STEP | PT_SINGLE_BLOCK))
+ 
+ /**
+  * tracehook_report_syscall_exit - task has just finished a system call
+@@ -146,7 +146,7 @@ static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
+ 	if (task_utrace_flags(current) & UTRACE_EVENT(SYSCALL_EXIT))
+ 		utrace_report_syscall_exit(regs);
+ 
+-	if (step && ptrace_wants_step()) {
++	if (step && ptrace_wants_step(current)) {
+ 		siginfo_t info;
+ 		user_single_step_siginfo(current, regs, &info);
+ 		force_sig_info(SIGTRAP, &info, current);
+@@ -439,7 +439,7 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
+ {
+ 	if (task_utrace_flags(current))
+ 		utrace_signal_handler(current, stepping);
+-	if (stepping && ptrace_wants_step())
++	if (stepping && ptrace_wants_step(current))
+ 		ptrace_notify(SIGTRAP);
+ }
+ 
+diff --git a/kernel/utrace.c b/kernel/utrace.c
+index 508c13c..fbabb81 100644
+--- a/kernel/utrace.c
++++ b/kernel/utrace.c
+@@ -1828,7 +1828,8 @@ static void finish_resume_report(struct task_struct *task,
+ 
+ 	case UTRACE_BLOCKSTEP:
+ 		if (likely(arch_has_block_step())) {
+-			user_enable_block_step(task);
++			if (!ptrace_wants_step(task))
++				user_enable_block_step(task);
+ 			break;
+ 		}
+ 
+@@ -1841,7 +1842,8 @@ static void finish_resume_report(struct task_struct *task,
+ 
+ 	case UTRACE_SINGLESTEP:
+ 		if (likely(arch_has_single_step())) {
+-			user_enable_single_step(task);
++			if (!ptrace_wants_step(task))
++				user_enable_single_step(task);
+ 		} else {
+ 			/*
+ 			 * This means some callback is to blame for failing
+@@ -1856,7 +1858,8 @@ static void finish_resume_report(struct task_struct *task,
+ 	case UTRACE_REPORT:
+ 	case UTRACE_RESUME:
+ 	default:
+-		user_disable_single_step(task);
++		if (!ptrace_wants_step(task))
++			user_disable_single_step(task);
+ 		break;
+ 	}
+ }
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:30 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:30 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com (LHLO
+ zmta01.collab.prod.int.phx2.redhat.com) (10.5.5.31) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:49 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 1C4A79C7DE;
+	Sun,  7 Aug 2011 15:18:49 -0400 (EDT)
+Received: from zmta01.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta01.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id GxHOzMqYQY8N; Sun,  7 Aug 2011 15:18:49 -0400 (EDT)
+Received: from int-mx02.intmail.prod.int.phx2.redhat.com (int-mx02.intmail.prod.int.phx2.redhat.com [10.5.11.12])
+	by zmta01.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 066D2909E4;
+	Sun,  7 Aug 2011 15:18:49 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx02.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIkkD030034;
+	Sun, 7 Aug 2011 15:18:47 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:10 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:08 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 20/22] ptrace: shift user_*_step() from ptrace_resume() to
+	ptrace_stop()
+Message-ID: <20110807191608.GA14460@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.12
+Status: RO
+Content-Length: 2384
+Lines: 70
+
+1. ptrace_resume() plays with the stopped task which can be also
+   task_is_utraced(). In this case user_enable_xxx_step() can race
+   with utrace_reset()->user_disable_single_step().
+
+   We could change utrace_reset() to check ptrace_wants_step() and
+   add the task_utrace_lock + unlock barrier after ptrace_resume()
+   sets PT_SINGLE_STEP.
+
+   But it is better to reassign enable/desable from the tracer to
+   the tracee, it can check its PT_SINGLE_ bits after wakeup. This
+   also makes sense because enable_step(task) can be faster if
+   task == current.
+
+2. ptrace can do user_disable_single_step() while utrace needs the
+   stepping.
+
+   Set TIF_NOTIFY_RESUME after user_disable_single_step() to ensure
+   the tracee can't return to the user-space without utrace_resume().
+   Any correct engine which wants the stepping should reassert it.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ kernel/ptrace.c |    4 ----
+ kernel/signal.c |   12 ++++++++++++
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 44908d0..d37b30d 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -580,14 +580,10 @@ static int ptrace_resume(struct task_struct *child, long request,
+ 		if (unlikely(!arch_has_block_step()))
+ 			return -EIO;
+ 		child->ptrace |= PT_SINGLE_BLOCK;
+-		user_enable_block_step(child);
+ 	} else if (is_singlestep(request) || is_sysemu_singlestep(request)) {
+ 		if (unlikely(!arch_has_single_step()))
+ 			return -EIO;
+ 		child->ptrace |= PT_SINGLE_STEP;
+-		user_enable_single_step(child);
+-	} else {
+-		user_disable_single_step(child);
+ 	}
+ 
+ 	child->exit_code = data;
+diff --git a/kernel/signal.c b/kernel/signal.c
+index d0e0c67..bc40bd7 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1840,6 +1840,18 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
+ 	}
+ 
+ 	tracehook_finish_stop();
++
++	if (current->ptrace & PT_SINGLE_BLOCK)
++		user_enable_block_step(current);
++	else if (current->ptrace & PT_SINGLE_STEP)
++		user_enable_single_step(current);
++	else {
++		user_disable_single_step(current);
++		/* if utrace needs the stepping it should reassert */
++		if (task_utrace_flags(current))
++			set_thread_flag(TIF_NOTIFY_RESUME);
++	}
++
+ 	/*
+ 	 * While in TASK_TRACED, we were considered "frozen enough".
+ 	 * Now that we woke up, it's crucial if we're supposed to be
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:31 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:31 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:51 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id AD8D0D89A9;
+	Sun,  7 Aug 2011 15:18:51 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id LHAT6DyOymTI; Sun,  7 Aug 2011 15:18:51 -0400 (EDT)
+Received: from int-mx02.intmail.prod.int.phx2.redhat.com (int-mx02.intmail.prod.int.phx2.redhat.com [10.5.11.12])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 99798D8988;
+	Sun,  7 Aug 2011 15:18:51 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx02.intmail.prod.int.phx2.redhat.com (8.13.8/8.13.8) with SMTP id p77JIn3U030041;
+	Sun, 7 Aug 2011 15:18:50 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:13 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:11 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 21/22] ptrace_disable: no need to disable stepping
+Message-ID: <20110807191611.GA14463@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.67 on 10.5.11.12
+Status: RO
+Content-Length: 944
+Lines: 28
+
+ptrace_disable() is called when the tracee is quiescent and we
+are going to untrace. This means we are going to clear ->ptrace
+and wake up the tracee. Now that ptrace_stop() checks PT_ bits
+and does user_disable_single_step() we can remove this code from
+ptrace_disable(), it is unneeded and not utrace-friendly.
+
+TODO: change !x86 code.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ arch/x86/kernel/ptrace.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/kernel/ptrace.c b/arch/x86/kernel/ptrace.c
+index 7ab475f..f1cdc7d 100644
+--- a/arch/x86/kernel/ptrace.c
++++ b/arch/x86/kernel/ptrace.c
+@@ -807,8 +807,6 @@ static int ioperm_get(struct task_struct *target,
+  */
+ void ptrace_disable(struct task_struct *child)
+ {
+-	child->ptrace &= ~(PT_SINGLE_STEP | PT_SINGLE_BLOCK);
+-	user_disable_single_step(child);
+ #ifdef TIF_SYSCALL_EMU
+ 	clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
+ #endif
+-- 
+1.5.5.1
+
+From davej  Sun Aug  7 15:19:32 2011
+Return-Path: oleg@redhat.com
+X-Spam-Checker-Version: SpamAssassin 3.3.2 (2011-06-06) on
+	gelk.kernelslacker.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.9 required=5.0 tests=BAYES_00,T_RP_MATCHES_RCVD,
+	UNPARSEABLE_RELAY autolearn=ham version=3.3.2
+Received: from mail.corp.redhat.com [10.5.5.51]
+	by gelk with IMAP (fetchmail-6.3.20)
+	for <davej@localhost> (single-drop); Sun, 07 Aug 2011 15:19:32 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com (LHLO
+ zmta03.collab.prod.int.phx2.redhat.com) (10.5.5.33) by
+ mail04.corp.redhat.com with LMTP; Sun, 7 Aug 2011 15:18:54 -0400 (EDT)
+Received: from localhost (localhost.localdomain [127.0.0.1])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 57405D89A9;
+	Sun,  7 Aug 2011 15:18:54 -0400 (EDT)
+Received: from zmta03.collab.prod.int.phx2.redhat.com ([127.0.0.1])
+	by localhost (zmta03.collab.prod.int.phx2.redhat.com [127.0.0.1]) (amavisd-new, port 10024)
+	with ESMTP id XgEdPuPz9LNX; Sun,  7 Aug 2011 15:18:54 -0400 (EDT)
+Received: from int-mx10.intmail.prod.int.phx2.redhat.com (int-mx10.intmail.prod.int.phx2.redhat.com [10.5.11.23])
+	by zmta03.collab.prod.int.phx2.redhat.com (Postfix) with ESMTP id 42E6BD8988;
+	Sun,  7 Aug 2011 15:18:54 -0400 (EDT)
+Received: from tranklukator.englab.brq.redhat.com (dhcp-1-232.brq.redhat.com [10.34.1.232])
+	by int-mx10.intmail.prod.int.phx2.redhat.com (8.14.4/8.14.4) with SMTP id p77JIqEO027919;
+	Sun, 7 Aug 2011 15:18:52 -0400
+Received: by tranklukator.englab.brq.redhat.com (nbSMTP-1.00) for uid 500
+	oleg@redhat.com; Sun,  7 Aug 2011 21:16:15 +0200 (CEST)
+Date: Sun, 7 Aug 2011 21:16:13 +0200
+From: Oleg Nesterov <oleg@redhat.com>
+To: "Frank Ch. Eigler" <fche@redhat.com>, Kyle McMartin <kmcmartin@redhat.com>,
+        Dave Jones <davej@redhat.com>, Josh Stone <jistone@redhat.com>,
+        Matthew Garrett <mjg@redhat.com>, David Smith <dsmith@redhat.com>
+Cc: kernel@lists.fedoraproject.org
+Subject: [PATCH 22/22] ptrace_report_syscall: check TIF_SYSCALL_EMU
+Message-ID: <20110807191613.GA14470@redhat.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20110807191434.GA13184@redhat.com>
+User-Agent: Mutt/1.5.18 (2008-05-17)
+X-Scanned-By: MIMEDefang 2.68 on 10.5.11.23
+Status: RO
+Content-Length: 862
+Lines: 27
+
+4d16a64 "introduce PT_SYSCALL_TRACE flag" breaks PTRACE_SYSEMU
+which doesn't set PT_SYSCALL_TRACE.
+
+Change ptrace_report_syscall() to check TIF_SYSCALL_EMU as well.
+This can't conflict with utrace, this flag can only be set by
+ptrace.
+
+Signed-off-by: Oleg Nesterov <oleg@redhat.com>
+---
+ include/linux/tracehook.h |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/include/linux/tracehook.h b/include/linux/tracehook.h
+index 5612d2d..ac833de 100644
+--- a/include/linux/tracehook.h
++++ b/include/linux/tracehook.h
+@@ -76,7 +76,7 @@ static inline void ptrace_report_syscall(struct pt_regs *regs)
+ {
+ 	int ptrace = task_ptrace(current);
+ 
+-	if (!(ptrace & PT_SYSCALL_TRACE))
++	if (!(ptrace & PT_SYSCALL_TRACE) && !test_thread_flag(TIF_SYSCALL_EMU))
+ 		return;
+ 
+ 	ptrace_notify(SIGTRAP | ((ptrace & PT_TRACESYSGOOD) ? 0x80 : 0));
+-- 
+1.5.5.1
+
