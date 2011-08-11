@@ -135,7 +135,10 @@ class KernelPackageRecipe(CPackageRecipe):
         r.macros.archive_version = r.version.replace('_', '-')
         r.macros.majorversion = ".".join(r.version.split('.')[0:2])
         r.macros.kseries = ".".join(r.version.split('.')[0:3])
+        r.macros.level = r.version.split('.')[0]
+        r.macros.patchlevel = r.version.split('.')[1]
         r.macros.sublevel = r.version.split('.')[2].split('_')[0]
+        r.macros.lastlevel = r.version.split('.')[3].split('_')[0]
 
         # Versions of Conary since 1.2.6 print the methods that are
         # called, but hasattr always returns a proxy function, so
@@ -156,7 +159,7 @@ class KernelPackageRecipe(CPackageRecipe):
 
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
-        r.macros.localversion = '-%(serial)s-fl%(cfgver)s'
+        r.macros.localversion = '-%(serial)s-foresight.%(cfgver)s'
         r.macros.kver = '%(archive_version)s%(localversion)s'
         r.macros.sourcever = '%(version)s-%(serial)s'
         r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
@@ -231,8 +234,14 @@ class KernelPackageRecipe(CPackageRecipe):
         pass
 
     def distCleanup(r):
+        # play safe
+        r.addAction('sed -i "s/^VERSION.*/VERSION = %(level)s/" Makefile')
+        r.addAction('sed -i "s/^PATCHLEVEL.*/PATCHLEVEL = %(patchlevel)s/" Makefile')
         # Override any "-pre" or premature increment of SUBLEVEL from patches
         r.addAction('sed -i "s/^SUBLEVEL.*/SUBLEVEL = %(sublevel)s/" Makefile')
+
+        r.addAction('sed -i "s/^EXTRAVERSION.*/EXTRAVERSION = .%(lastlevel)s/" Makefile')
+
         # Since we will get kernel-source:tree out of this tree, clean it up
         r.addAction('find . -name "*.orig" | xargs rm -f')
         r.addAction('find . -name "*~" | xargs rm -f')
