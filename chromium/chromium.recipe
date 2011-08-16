@@ -57,11 +57,14 @@ class Chromium(AutoPackageRecipe):
                      'ffmpeg:devel',
                      'pam:devel',
                      'libXinerama:devel',
+                     'speex:devel',
                     ]
 
     def setup(r):
         r.addArchive('http://build.chromium.org/official/%(name)s-'+ r.baseVersion +'.tar.bz2')
         for p in [ 'chromium-system-vpx-r4.patch',
+                   # fixes https://bugs.gentoo.org/show_bug.cgi?id=378777
+                   'chromium-system-libevent-r1.patch',
                    ]:
             r.addPatch(p)
         # http://code.google.com/p/chromium/issues/detail?id=61759
@@ -77,7 +80,7 @@ class Chromium(AutoPackageRecipe):
                    dir = 'v8/src')
 
         r.macros.gypDefines =  ('release_extra_cflags=\"%(cflags)s \" '
-                                # 'use_system_xdg_utils=1 '
+                                'use_system_xdg_utils=1 '
                                 'use_system_zlib=1 '
                                 ##  system's ffmpeg plus system's libvpx forces disabling of 
                                 ## remoting. upstream linking mess
@@ -98,7 +101,7 @@ class Chromium(AutoPackageRecipe):
                                 'use_system_libxslt=1 '
                                 'use_system_bzip2=1 '
                                 'use_system_flac=1 '
-                                'v8_use_snapshot=1 '
+                                'use_system_speex=1 '
                                 'use_system_libevent=1 '
                                 'use_system_libpng=1 ' 
                                 'linux_link_gnome_keyring=1 '
@@ -138,7 +141,7 @@ class Chromium(AutoPackageRecipe):
               )
 
         # Make.
-        r.Make('chrome chrome_sandbox BUILDTYPE=Release ')
+        r.Make('chrome chrome_sandbox BUILDTYPE=Release V=1 ')
 
         # Install.
         r.addSource('chromium-browser', macros=True )
@@ -146,20 +149,25 @@ class Chromium(AutoPackageRecipe):
 
 
         buildLoc = 'out/Release/'
-        artifacts = ['chrome.pak', 'locales', 'resources.pak', 'resources', 
-                     'xdg-settings', 'chrome', 'chrome_sandbox',
-                     'libppGoogleNaClPluginChrome.so',
-                     'nacl_irt_x86_*.nexe',
-                     # bellow needed while we use internal ffmpeg
-                     'libffmpegsumo.so'
-                     ]
+        artifacts = [ 'chrome.pak',
+                      'resources.pak',
+                      'locales',
+                      'resources', 
+                      'chrome',
+                      'chrome_sandbox',
+                      'libppGoogleNaClPluginChrome.so',
+                      'nacl_irt_x86_*.nexe',
+                      # bellow needed while we use internal ffmpeg
+                      'libffmpegsumo.so',
+                      'ffmpegsumo_nolink'
+                      ]
 
         r.MakeDirs('%(libdir)s/chromium-browser')
 
         for artifact in artifacts:
             r.Install(buildLoc + artifact, '%(libdir)s/chromium-browser/')
 
-        r.SetModes('%(libdir)s/chromium-browser/chrome_sandbox', 04555)
+        r.SetModes('%(libdir)s/chromium-browser/chrome_sandbox', 04755)
 
         r.addSource('chromium-browser.desktop')
         r.Desktopfile('chromium-browser.desktop')
@@ -177,7 +185,7 @@ class Chromium(AutoPackageRecipe):
                       '%(datadir)s/icons/hicolor/' + size + 'x' + size + '/apps/%(name)s-browser.png',
                       mode = 0644)
 
-        r.Install(buildLoc + 'product_logo_48.png', 
+        r.Symlink('%(datadir)s/icons/hicolor/48x48/apps/%(name)s-browser.png', 
                   '%(datadir)s/pixmaps/chromium-browser.png')
 
         # Chromium doesn't look in the mozilla plugins dir by default.
