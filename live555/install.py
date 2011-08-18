@@ -18,8 +18,10 @@ for root, dirs, files in os.walk('.'):
                     'genMakefiles', 'win32config', 'genWindowsMakefiles',
                     'configure', 'fix-makefile', 'DynamicRTSPServer.hh.new' ]:
             continue
-        elif fileext in ['a', 'hh', 'h']:
+        elif fileext in ['hh', 'h']:
             install(filepath, '%(DESTDIR)s/%(includedir)s/' % args + filepath)
+        elif fileext == 'a':
+            install(filepath, '%(DESTDIR)s/%(libdir)s/' % args + file)
         elif file in ['COPYING', 'README']:
             install(filepath, '%(DESTDIR)s/%(thisdocdir)s/' % args + file)
         elif fileext in ['sdp']:
