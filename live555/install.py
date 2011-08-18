@@ -19,7 +19,9 @@ for root, dirs, files in os.walk('.'):
                     'configure', 'fix-makefile', 'DynamicRTSPServer.hh.new' ]:
             continue
         elif fileext in ['hh', 'h']:
-            install(filepath, '%(DESTDIR)s/%(includedir)s/' % args + filepath)
+            if '/include/' in filepath:
+                install(filepath, '%(DESTDIR)s/%(includedir)s/' % args + filepath.replace('/include/', '/'))
+            else: continue
         elif fileext == 'a':
             install(filepath, '%(DESTDIR)s/%(libdir)s/' % args + file)
         elif file in ['COPYING', 'README']:
