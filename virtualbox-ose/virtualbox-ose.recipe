@@ -16,7 +16,7 @@ class VirtualboxOse(AutoPackageRecipe):
                      'libstdc++:devel', 
                      'zlib:devel',
 		     'file:runtime', 
-		     'curl:devel',
+ 		     'curl:devel',
 		     'libIDL:devel', 'libdrm:devel', 'libxcb:devel',
 		     'libxml2:devel', 'xorg-server:devel',
 		     'openssl:devel', 'boost:devel', 'xf86driproto:devel',
@@ -30,8 +30,12 @@ class VirtualboxOse(AutoPackageRecipe):
                      'libXfixes:devel', 'libXinerama:devel', 'libXmu:devel',
                      'libXrandr:devel', 'libXt:devel', 'dev86:runtime',
                      'pam:devel', 'qt4:devel', 'qt4-core:devellib',
-                     'qt4-gui:devellib', 'which:runtime', 'gsoap:devel']
- 
+                     'qt4-gui:devellib', 'which:runtime', 'gsoap:devel',
+                     'libvncserver:devel',]
+    
+    if Arch.x86_64:
+        buildRequires += ['glibc:devellib[is: x86(~i486,~i586,~i686)]']
+
     def setup(r):
 	r.macros.archive_version = 'OSE-%(version)s'
         r.macros.cflags += ' -L%(libdir)s/xorg.mesa.3d'
@@ -53,26 +57,29 @@ class VirtualboxOse(AutoPackageRecipe):
             r.addSource('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + f + '?root=free', 
                         dest = f)
 
-        for p in [ 'VirtualBox-OSE-3.2.0-noupdate.patch',
-                   'VirtualBox-OSE-4.0.2-strings.patch',
-                   # 'VirtualBox-OSE-4.0.2-libcxx.patch',
-                   ## 'VirtualBox-OSE-3.2.4-optflags.patch',
-                   'VirtualBox-OSE-4.0.0-32bit.patch',
-                   'VirtualBox-OSE-3.2.0-visibility.patch',
-                   'VirtualBox-OSE-3.2.10-noansi.patch',
-                   'VirtualBox-OSE-3.2.6-vboxkeyboard.patch',
-                   'VirtualBox-OSE-4.0.0-makeself.patch',
-                   'VirtualBox-OSE-4.0.0-beramono.patch',
-                   'VirtualBox-OSE-4.0.2-aiobug.patch',
+        for p in [ 'VirtualBox-OSE-3.2.6-vboxkeyboard.patch',
                    ]:
             r.addPatch('http://cvs.rpmfusion.org/viewvc/*checkout*/rpms/VirtualBox-OSE/devel/' + p + '?root=free')
 
-        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/18-system-xorg.patch')
-        # but with /usr/include/x11/ -> /usr/include/X11
-        # r.addPatch('fl-18-system-xorg.patch')
-        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/28-no-selinux-fedora.patch')
-        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/29-fix-ftbfs-as-needed.patch')
-        r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.0.8-dfsg-2/30-usb-warning-filters.patch')
+        for p in [ '06-xsession.patch',
+                   '07-vboxnetflt-reference.patch',
+                   '13-module-mismatch.patch',
+                   '16-no-update.patch',
+                   '18-system-xorg.patch',
+                   '23-remove-invalid-chars-check.patch',
+                   '27-hide-host-cache-warning.patch',
+                   '28-no-selinux-fedora.patch',
+                   '29-fix-ftbfs-as-needed.patch',
+                   '30-usb-warning-filters.patch',
+                   '32-disable-guest-version-check.patch',
+                   '33-link-static-libgsoap.patch',
+                   '34-fix-vboxpci-build.patch',
+                   '35-libvdeplug-soname.patch',
+                   '36-fix-kernel-panic-suspend.patch',]:
+            r.addPatch('http://patch-tracker.debian.org/patch/series/dl/virtualbox/4.1.0-dfsg-2/' + p)
+
+
+
 
         # Fix path to USBLib
         # kmk: *** No rule to make target `out/linux.x86/release/lib/USBLib.a',
@@ -87,23 +94,38 @@ class VirtualboxOse(AutoPackageRecipe):
         
 	r.macros.optflags += ' -L%(libdir)s/xorg.mesa.3d '
         # make sure we build against as much system libs as possible
-        r.Remove('src/libs/{libpng-*,libxml2-*,libxslt-*,zlib-*,boost-*}', recursive=True)
+        r.Remove('src/libs/{libpng-*,libxml2-*,libxslt-*,zlib-*,boost-*}',
+                 recursive=True)
 
         r.Run('KBUILDDIR=%(builddir)s/kBuild ./configure '
               ' --disable-kmods '
               ' --enable-webservice '
+              ' --enable-vnc'
               # ' --disable-java '
               ' --nofatal')
 
 	r.Run('. ./env.sh && kmk %(parallelmflags)s KBUILD_VERBOSE=2 TOOL_YASM_AS=yasm '
               ' VBOX_PATH_APP_PRIVATE=%(libdir)s/virtualbox '
-              # ' VBOX_WITH_VNC:=1 '
-              ' PATH_INS="$PWD/obj" VBOX_WITH_REGISTRATION_REQUEST= VBOX_WITH_DOCS= '
-              ' VBOX_WITH_TESTCASES= VBOX_WITH_TESTSUITE= VBOX_WITH_ORIGIN:='
-              ' VBOX_WITH_UPDATE_REQUEST= KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
-              ' VBOX_GCC_OPT="%(optflags)s" VBOX_GCC_GC_OPT="%(optflags)s" VBOX_GCC_WERR="" '
+              ' VBOX_WITH_VNC:=1 '
+              ' PATH_INS="$PWD/obj" '
+              ' VBOX_WITH_REGISTRATION_REQUEST= '
+              ' VBOX_WITH_DOCS= '
+              ' VBOX_WITH_TESTCASES= '
+              ' VBOX_WITH_TESTSUITE= '
+              ' VBOX_WITH_ORIGIN='
+              ' VBOX_WITH_UPDATE_REQUEST= '
+              ' VBOX_WITH_WARNINGS_AS_ERRORS= '
+              ' KBUILD_MSG_STYLE:=brief '
+              ' EXEC_X86_WIN32:=wine'
+              ' VBOX_WITHOUT_ADDITIONS:='
+              ' KMK_REVISION=3000 KBUILD_KMK_REVISION=3000 '
+              ' VBOX_GCC_OPT="%(optflags)s" '
+              ' VBOX_GCC_GC_OPT="%(optflags)s" '
+              ' VBOX_GCC_WERR="" '
+              ' VBOX_GCC_R0_OPT="%(optflags)s" '
+              ' TOOL_GCC3_CC="%(cc)s" TOOL_GCC3_CXX="%(cxx)s" '
               ' VBOX_JAVA_HOME=%(libdir)s/jvm/java-1.6.0-icedtea'
-              ' VBOX_GCC_R0_OPT="%(optflags)s" VBOX_XCURSOR_LIBS="Xcursor Xext X11 GL" ')
+              ' VBOX_XCURSOR_LIBS="Xcursor Xext X11 GL" ')
 
         # 
         # Binaries and Wrapper with Launchers
