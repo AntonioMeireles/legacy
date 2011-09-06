@@ -6,17 +6,13 @@
 loadInstalled('nspr')
 class NSS(CPackageRecipe):
     name = 'nss'
-    version = '3.12.10'
-
-    
+    version = '3.12.11'
     # rpmRelease = '4.fc14'
-
-
     buildRequires = [ 'nspr:devel', 'perl:runtime', 'sqlite:devel', 'zlib:devel']
 
     def setup(r):
         r.disableParallelMake()
-        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_12_10_RTM/src/')
+        r.addArchive('ftp://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_12_11_RTM/src/')
         r.addArchive('%(name)s-pem-20101125.tar.bz2', dir = '%(name)s-%(version)s/')
         r.addSource('mkpkgconfigfiles.sh', macros = True)
         r.addSource('nss.pc.in')
@@ -26,22 +22,27 @@ class NSS(CPackageRecipe):
         r.addSource('nss-softokn.pc.in')
         r.addSource('nss-softokn-config.in')
 
+        # Distrust DigiNotar root CA - backported from CVS (https://bugzilla.mozilla.org/show_bug.cgi?id=682927)
+        r.addPatch('distrust-diginotar.patch', dir='mozilla')
+        # Adds the SPI Inc. and CAcert.org CA certificates - patch from Debian
+        r.addPatch('add_spi+cacert_ca_certs.patch', dir='mozilla')
+
         # taken from nss pk from RH
         for p in [ 'renegotiate-transitional.patch',
                    'nss-enable-pem.patch',
                    'nsspem-642433.patch',
                    'nss-539183.patch',
                    '0001-Bug-695011-PEM-logging.patch',
-                   'nss-703658.patch',
                    ]:
             r.addPatch(p, dir='mozilla')
+
 
         if Arch.x86_64:
             r.Environment('USE_64', '1')
 
         r.Environment('BUILD_OPT', '1')
         r.Environment('FREEBL_NO_DEPEND', '1')
-        
+
         r.Environment('XCFLAGS', '%(optflags)s')
 
         r.Environment('PKG_CONFIG_ALLOW_SYSTEM_LIBS', '1')
@@ -72,6 +73,26 @@ class NSS(CPackageRecipe):
         r.Make(dir='mozilla/security/coreconf')
         r.Make(dir='mozilla/security/dbm')
         r.Make(dir='mozilla/security/nss')
+
+        r.Environment('NSS_ENABLE_ECC=1', '1')
+        r.Environment('NSS_ECC_MORE_THAN_SUITE_B', '1')
+
+        r.Replace('util\ freebl\ \$\(SQLITE_SRCDIR\)\ softoken',
+                  ' $(SQLITE_SRCDIR) ',
+                  'mozilla/security/nss/lib/manifest.mn')
+
+        r.Replace('bltest', 
+                  '',
+                  'mozilla/security/nss/cmd/manifest.mn')
+        r.Replace('fipstest', 
+                  '',
+                  'mozilla/security/nss/cmd/manifest.mn')
+
+
+
+#        r.Make(dir='mozilla/security/coreconf')
+#        r.Make(dir='mozilla/security/dbm')
+        r.Make('libs', dir='mozilla/security/nss')
 
         r.MakeDirs('%(libdir)s/pkgconfig')
         # Set up our package files
