@@ -7,7 +7,7 @@ loadSuperClass('jvmpackage')
 class IcedTea(JVMPackageRecipe, CPackageRecipe):
 
     name = 'icedtea'
-    version = '1.6.0.0_b22_1.10.1'
+    version = '1.6.0.0_b22_1.10.3'
 
     vendor = 'icedtea'
     release = '1.6.0'
@@ -18,7 +18,7 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         'dbus:devel', 'docbook-dtds:data', 'expat:devel', 'file:runtime',
         'findutils:runtime', 'fontconfig:devel', 'freetype:devel',
         'gcc-c++:runtime', 'gcc:runtime', 'gettext:runtime', 'giflib:devel',
-        'glib:devel', 'glib:runtime', 'glibc:devel', 'glitz:devel',
+        'glib:devel', 'glib:runtime', 'glibc:devel', 'pulseaudio:devel',
         'gnome-common:devel', 'gnome-common:runtime', 'gtk:devel', 'gtk:devel',
         'intltool:devel', 'intltool:runtime', 'libdmx:devel', 'libgcc:devellib',
         'libICE:devel', 'libjpeg:devel', 'libpng:devel', 'libSM:devel',
@@ -102,11 +102,17 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
 
         conf = (
             '--without-rhino '
+            '--enable-pulse-java '
             '--with-ant-home=%(builddir)s/'+ant+' '
             '--with-xalan2-jar=%(builddir)s/'+xalan+'/xalan.jar '
             '--with-xalan2-serializer-jar=%(builddir)s/'+xalan+'/serializer.jar '
             '--with-xerces2-jar=%(builddir)s/'+xalan+'/xercesImpl.jar '
             '--with-jdk-home='+openjdk_home+' '
+            # '--with-hotspot-build=hs20 '
+            # '--with-hotspot-src-zip=http://hg.openjdk.java.net/hsx/hsx20/master/archive/hotspot.tar.gz '
+            # '--with-jaf-drop-zip=https://jax-ws.dev.java.net/files/documents/4202/150725/jdk6-jaf-b20.zip '
+            # '--with-jaxp-drop-zip=https://jaxp.dev.java.net/files/documents/913/150648/jaxp144_01.zip '
+            # '--with-jaxws-drop-zip=https://jax-ws.dev.java.net/files/documents/4202/150724/jdk6-jaxws-b20.zip '
             '--with-ecj-jar=%(builddir)s/ecj.jar '
         )
 
@@ -124,7 +130,7 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         r.Environment('SHELL', '/bin/sh')
 
         r.Configure(conf, preConfigure=bootstrap_path)
-
+        r.Make('patch')
         r.Make(preMake=bootstrap_path)
 
         r.Install('openjdk.build/j2sdk-image/*', '%(jdkhome)s/')
@@ -144,6 +150,12 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         r.DanglingSymlinks(exceptions='%(libdir)s/mozilla/plugins/libjavaplugin.so')
 
         # Tweaks for ca-certificates
-        r.Replace('nssLibraryDirector \=', 'nssLibraryDirectory = %(libdir)s', '%(jrelibdir)s/security/nss.conf')
-        r.Replace('# security\.provider\.9', 'security.provider.9', '%(jrelibdir)s/security/java.security')
+        # XXX this shouldn't be needed at all
+        r.Replace('#security\.provider\.9', 'security.provider.9', '%(jrelibdir)s/../security/java.security')
 
+        # expects ca-certificates
+        # XXX we're not putting a Runtime deps on ca-certificates here for now as it would create a build loop
+        # as ca-certificates needs jre to build. 
+        r.Remove('%(jrelibdir)s/security/cacerts', recursive = True)
+        r.Symlink('%(sysconfdir)s/pki/java/cacerts', '%(jrelibdir)s/security/cacerts')
+        r.DanglingSymlinks(exceptions='%(jrelibdir)s/security/cacerts')
