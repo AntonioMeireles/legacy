@@ -1,7 +1,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '13.0.782.237' 
+    baseVersion = '14.0.835.162' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
@@ -70,28 +70,28 @@ class Chromium(AutoPackageRecipe):
         # http://code.google.com/p/chromium/issues/detail?id=61759
         # http://codereview.chromium.org/5193003/
         # not enough for system's ffmpeg plus system's libvpx to behave under chromoting
-        r.addPatch('http://codereview.chromium.org/download/issue5193003_1_2.diff', dir = 'third_party/ffmpeg/')
-
-        # Fix upstream issue #77625: Chromium Generates HUGE numbers of CPU wakeups
-        # and uses massive amounts of power
-        # http://code.google.com/p/chromium/issues/detail?id=77625
-        # Patch from: http://code.google.com/p/v8/source/detail?r=8472
-        r.addPatch('http://codereview.chromium.org/download/issue7274024_1.diff',
-                   dir = 'v8/src')
+        r.addPatch('http://codereview.chromium.org/download/issue5193003_1_2.diff',
+                   dir = 'third_party/ffmpeg/')
 
         r.macros.gypDefines =  ('release_extra_cflags=\"%(cflags)s \" '
                                 'use_system_xdg_utils=1 '
                                 'use_system_zlib=1 '
+
                                 ##  system's ffmpeg plus system's libvpx forces disabling of 
                                 ## remoting. upstream linking mess
-                                'use_system_libvpx=1 '
-                                'ffmpeg_branding=Chrome '
-                                'proprietary_codecs=1 '
-                                ##  http://code.google.com/p/chromium/issues/detail?id=62632
-                                #'remoting=0 '
-                                'use_system_libvpx=1 '
+                                'use_system_libvpx=0 '
                                 # system's one works but flacky ...
                                 'use_system_ffmpeg=0 '
+                                # until http://crbug.com/22208
+                                'use_system_sqlite=0 '
+                                # until https://bugzilla.mozilla.org/show_bug.cgi?id=547312
+                                # http://crbug.com/58087
+                                'use_system_ssl=0 '
+                                # busted in upstream tarballs atm
+                                'disable_nacl=1 '
+
+                                'ffmpeg_branding=Chrome '
+                                'proprietary_codecs=1 '
 
                                 # we are at icu-4.4.x. builtin at 4.6
                                 'use_system_icu=0 '
@@ -110,11 +110,6 @@ class Chromium(AutoPackageRecipe):
                                 'werror= '
                                 'gcc_version=44 '
                                 'use_system_yasm=1 '
-                                # until http://crbug.com/22208
-                                'use_system_sqlite=0 '
-                                # until https://bugzilla.mozilla.org/show_bug.cgi?id=547312
-                                # http://crbug.com/58087
-                                'use_system_ssl=0 '
                                 # 
                                 'linux_strip_binary=1 '
                                 'remove_webcore_debug_symbols=1 '
@@ -136,16 +131,19 @@ class Chromium(AutoPackageRecipe):
                   'third_party/zlib/zconf.h')
 
         r.Run("GYP_DEFINES=\'%(gypDefines)s\'  GYP_GENERATORS=make "
-               "build/gyp_chromium "
-               " build/all.gyp --depth=. ",
+              "build/gyp_chromium "
+              " build/all.gyp --depth=. ",
               )
 
         # Make.
         r.Make('chrome chrome_sandbox BUILDTYPE=Release V=1 ')
 
         # Install.
-        r.addSource('chromium-browser', macros=True )
-        r.Install('chromium-browser', '%(bindir)s/chromium-browser', mode = 0755)
+        r.addSource('chromium-browser',
+                    macros=True )
+        r.Install('chromium-browser',
+                  '%(bindir)s/chromium-browser',
+                  mode = 0755)
         r.Symlink('%(bindir)s/chromium-browser',
                   '%(bindir)s/chromium')
 
@@ -156,8 +154,8 @@ class Chromium(AutoPackageRecipe):
                       'resources', 
                       'chrome',
                       'chrome_sandbox',
-                      'libppGoogleNaClPluginChrome.so',
-                      'nacl_irt_x86_*.nexe',
+                      #'libppGoogleNaClPluginChrome.so',
+                      #'nacl_irt_x86_*.nexe',
                       # bellow needed while we use internal ffmpeg
                       'libffmpegsumo.so',
                       'ffmpegsumo_nolink'
@@ -166,7 +164,8 @@ class Chromium(AutoPackageRecipe):
         r.MakeDirs('%(libdir)s/chromium-browser')
 
         for artifact in artifacts:
-            r.Install(buildLoc + artifact, '%(libdir)s/chromium-browser/')
+            r.Install(buildLoc + artifact,
+                      '%(libdir)s/chromium-browser/')
 
         r.SetModes('%(libdir)s/chromium-browser/chrome_sandbox', 04755)
 
@@ -178,7 +177,8 @@ class Chromium(AutoPackageRecipe):
                     mode = 0644)
 
         r.Install(buildLoc + 'chrome.1',
-                  '%(mandir)s/man1/%(name)s.1', mode = 0644)
+                  '%(mandir)s/man1/%(name)s.1',
+                  mode = 0644)
 
         for size in ['16', '22', '24', '32',
                      '48', '64', '128', '256',]:
