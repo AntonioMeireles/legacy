@@ -67,11 +67,15 @@ stdloglvl=3
 """,
                  mode = 0644)
 
-        for req in ('%(essentialbindir)s/awk', '%(essentialsbindir)s/dmsetup',
-                    '%(essentialsbindir)s/ip', '%(essentialsbindir)s/modprobe',
+        for req in ('%(essentialbindir)s/awk',
+                    '%(essentialsbindir)s/dmsetup',
+                    '%(essentialsbindir)s/ip',
+                    '%(essentialsbindir)s/modprobe',
                     '%(essentialsbindir)s/lvm',
-                    '%(essentialsbindir)s/ldconfig', '/dev/null',
-                    '%(bindir)s/head', '%(bindir)s/tail',
+                    '%(essentialsbindir)s/ldconfig',
+                    '/dev/null',
+                    '%(bindir)s/head',
+                    '%(bindir)s/tail',
                     '%(essentialbindir)s/cat',
                     '%(essentialbindir)s/chmod',
                     '%(bindir)s/cmp',
@@ -112,18 +116,17 @@ stdloglvl=3
                     'initscripts:runtime',
                     'plymouth:runtime'
                     ):
-
             r.Requires(req, '%(essentialsbindir)s/dracut')
 
         for req in ('%(essentialsbindir)s/bootman',
                     '%(essentialsbindir)s/bommy',
                     '%(bindir)s/grubtobootman',
                     '%(bindir)s/wc',
-                    '%(essentialsbindir)s/dracut',
                     '%(essentialsbindir)s/ext3flush',
                     '%(essentialbindir)s/awk',
                     'bootman:runtime(bommy-get)',):
             r.Requires(req, '%(taghandlerdir)s/kernel')
+
         # rm modules specific to foreign distros. 
         for rm in [ # RH and / or rpm specific 
                     '98selinux',
@@ -133,22 +136,50 @@ stdloglvl=3
                     ]:
             r.Remove('%(datadir)s/dracut/modules.d/' + rm, recursive=True)
 
+        # dracut-fips
         r.Install('dracut.conf.d/fips.conf.example', '%(sysconfdir)s/dracut.conf.d/40-fips.conf',
                   mode = 0644)
         r.PackageSpec('dracut-fips', '%(datadir)s/dracut/modules.d/01fips/.*',
                       '%(sysconfdir)s/dracut.conf.d/40-fips.conf')
 
+        # XXX smooth upgrade path from mkinitrd 
+        # XXX to be dropped in f3
+        r.PackageSpec('mkinitrd',
+                      '%(essentialsbindir)s/lsinitrd',
+                      '%(essentialsbindir)s/mkinitrd')
+        r.Requires('mkinitrd:runtime', 'dracut:runtime')
+        r.Requires('dracut:runtime', 'mkinitrd:runtime')
+
+        # dracut-network
         for module in [ '40network', '95fcoe', '95iscsi', 
                         '95nbd', '45ifcfg', '95znet' ]:
-            r.PackageSpec('dracut-network', '%(datadir)s/dracut/modules.d/' + module + '/.*' )
+            r.PackageSpec('dracut-network',
+                          '%(datadir)s/dracut/modules.d/' + module + '/.*' )
 
-        r.PackageSpec('dracut-tools', '%(mandir)s/man8/dracut-gencmdline.8.*',
-                      '%(mandir)s/man8/dracut-catimages.8.*',
-                      '%(essentialsbindir)s/dracut-gencmdline'
-                      '%(essentialsbindir)s/dracut-catimages')
+        # dracut-tools
         r.MakeDirs('%(localstatedir)s/lib/dracut/overlay')
         r.ExcludeDirectories(exceptions='%(localstatedir)s/lib/dracut/overlay')
-        r.PackageSpec('dracut-tools', '%(localstatedir)s/lib/dracut/overlay')
         r.MakeDirs('/boot/dracut')
         r.ExcludeDirectories(exceptions='/boot/dracut')
-        r.PackageSpec('dracut-tools', '/boot/dracut') 
+        r.PackageSpec('dracut-tools',
+                      '%(mandir)s/man8/dracut-gencmdline.8.*',
+                      '%(mandir)s/man8/dracut-catimages.8.*',
+                      '%(essentialsbindir)s/dracut-gencmdline',
+                      '%(essentialsbindir)s/dracut-catimages',
+                      '%(localstatedir)s/lib/dracut/overlay',
+                      '/boot/dracut', 
+                      )
+        # 
+        r.Requires('dracut-fips:config',
+                   'dracut-fips:data')
+        r.Requires('dracut-fips:data',
+                   'dracut-fips:config')
+
+        r.Requires('dracut:runtime',
+                   '%(datadir)s/dracut/modules.d/01fips/')
+        r.Requires('dracut:runtime',
+                   '%(localstatedir)s/lib/dracut/overlay')
+        r.Requires('dracut:runtime',
+                   '%(datadir)s/dracut/modules.d/')
+        
+
