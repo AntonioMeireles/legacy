@@ -21,7 +21,7 @@ class NSS(CPackageRecipe):
         r.addSource('nss-util-config.in')
         r.addSource('nss-softokn.pc.in')
         r.addSource('nss-softokn-config.in')
-
+        vmajor, vminor, vpatch = r.version.split('.')
         # Distrust DigiNotar root CA - backported from CVS (https://bugzilla.mozilla.org/show_bug.cgi?id=682927)
         r.addPatch('distrust-diginotar.patch', dir='mozilla')
         # Adds the SPI Inc. and CAcert.org CA certificates - patch from Debian
@@ -39,6 +39,22 @@ class NSS(CPackageRecipe):
                    '0001-Bug-695011-PEM-logging.patch',
                    ]:
             r.addPatch(p, dir='mozilla')
+
+        # tweak softtokn .in
+        r.Replace(('@MOD_MAJOR_VERSION@', vmajor),
+                  ('@MOD_MINOR_VERSION@', vminor),
+                  ('@MOD_PATCH_VERSION@', vpatch),
+                  ('@prefix@','%(prefix)s'),
+                  'nss-softokn-config.in')
+
+        r.Replace(('@libdir@','%(libdir)s'),
+                  ('@prefix@','%(prefix)s'),
+                  ('@exec_prefix@','%(exec_prefix)s'),
+                  ('@includedir@','%(includedir)s'),
+                  ('@SOFTOKEN_VERSION@', '%(version)s'),
+                  ('@NSSUTIL_VERSION@', '%(version)s'),
+                  ('@NSPR_VERSION@', Nspr.version),
+                  'nss-softokn.pc.in')
 
         if Arch.x86_64:
             r.Environment('USE_64', '1')
@@ -91,7 +107,9 @@ class NSS(CPackageRecipe):
 
         r.Install('mozilla/dist/pkgconfig/*.pc', '%(libdir)s/pkgconfig/', mode=0644)
         r.Install('mozilla/dist/pkgconfig/*config', '%(bindir)s/', mode=0755)
-        
+        # override nss-softokn* zero bit default ones
+        r.Install('nss-softokn-config.in', '%(bindir)s/nss-softokn-config', mode=0755)
+        r.Install('nss-softokn.pc.in', '%(libdir)s/pkgconfig/nss-softokn.pc')
 
         r.macros.unsupported_tools_directory='%(libdir)s/nss/unsupported-tools'
 
