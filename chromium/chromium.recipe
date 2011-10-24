@@ -1,7 +1,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '14.0.835.204' 
+    baseVersion = '15.0.874.104' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
@@ -63,16 +63,16 @@ class Chromium(AutoPackageRecipe):
 
     def setup(r):
         r.addArchive('http://build.chromium.org/official/%(name)s-'+ r.baseVersion +'.tar.bz2')
-        for p in [ 'chromium-system-vpx-r4.patch',
-                   # fixes https://bugs.gentoo.org/show_bug.cgi?id=378777
-                   'chromium-system-libevent-r1.patch',
-                   ]:
+        for p in [
+            # Issue 94518:Chromium built issue updating projects from gyp files
+            'http://chromium.googlecode.com/issues/attachment?aid=945180020000&name=nacl.gypi-mod.patch&token=d398cd47dd30fe7da45816c69502683b'
+            ]:
             r.addPatch(p)
         # http://code.google.com/p/chromium/issues/detail?id=61759
         # http://codereview.chromium.org/5193003/
         # not enough for system's ffmpeg plus system's libvpx to behave under chromoting
-        r.addPatch('http://codereview.chromium.org/download/issue5193003_1_2.diff',
-                   dir = 'third_party/ffmpeg/')
+        # r.addPatch('http://codereview.chromium.org/download/issue5193003_1_2.diff',
+        #            dir = 'third_party/ffmpeg/')
 
         r.macros.gypDefines =  ('release_extra_cflags=\"%(cflags)s \" '
                                 'no_strict_aliasing=1 '
@@ -138,7 +138,10 @@ class Chromium(AutoPackageRecipe):
               )
 
         # Make.
-        r.Make('chrome chrome_sandbox BUILDTYPE=Release V=1 ')
+        for t in [ 'chrome',
+                   'chrome_sandbox',
+                   'chromedriver',]:
+            r.Make(t + ' BUILDTYPE=Release V=1 ')
 
         # Install.
         r.addSource('chromium-browser',
@@ -156,11 +159,12 @@ class Chromium(AutoPackageRecipe):
                       'resources', 
                       'chrome',
                       'chrome_sandbox',
+                      'chromedriver',
                       #'libppGoogleNaClPluginChrome.so',
                       #'nacl_irt_x86_*.nexe',
                       # bellow needed while we use internal ffmpeg
                       'libffmpegsumo.so',
-                      'ffmpegsumo_nolink'
+                      # 'ffmpegsumo_nolink'
                       ]
 
         r.MakeDirs('%(libdir)s/chromium-browser')
