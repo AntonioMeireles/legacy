@@ -1,30 +1,40 @@
 #
-# Copyright (c) 2006-2010 rPath, Inc.
+# Copyright (c) 2006-2009 rPath, Inc.
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadInstalled('python')
-class RmakeRecipe(CPackageRecipe, Python.VersionMixIn):
+class RmakeRecipe(CPackageRecipe):
     name = 'rmake'
     version = '2.0.9'
+    tag = '18e1bceab280'
+    if tag:
+        version += '+hg_' + tag
 
-    buildRequires = [ 'conary:python', 'chkconfig:runtime', 'm2crypto:python',
-                      'info-rmake:user',  'libcap:devel',
-                      'pygtk:python', 'info-rmake-chroot:user',
-                      'conary-repository:python', 'desktop-file-utils:runtime',
-                      'python:devel', 'python:bin', 'python:runtime',
-                    ]
-
+    buildRequires = [
+        'chkconfig:runtime',
+        'conary:python',
+        'conary-repository:python',
+        'desktop-file-utils:runtime',
+        'info-rmake-chroot:user',
+        'info-rmake:user',
+        'libcap:devel',
+        'm2crypto:python',
+        'pygtk:python',
+        'python:devel',
+    ]
 
     def setup(r):
-        r.setDefaultPython()
-        r.addArchive('ftp://download.rpath.com/rmake/')
+        if r.tag:
+            r.addMercurialSnapshot('http://hg.rpath.com/rmake-2.0', tag=r.tag)
+        else:
+            r.addArchive('ftp://download.rpath.com/rmake/')
 
         r.addSource('server.conf', dest='%(sysconfdir)s/rmake/serverrc',
                     macros=True)
         r.addSource('client.conf', dest='%(sysconfdir)s/rmake/rmakerc',
                     macros=True)
+
 
         r.InitialContents('%(sysconfdir)s/rmake/(serverrc|rmakerc)')
 
@@ -63,7 +73,7 @@ class RmakeRecipe(CPackageRecipe, Python.VersionMixIn):
         r.Requires('rmake:libexec', 'rootfactory.py')
         r.Requires('busybox:runtime',
                    '%(libexecdir)s/rmake/chroothelper')
-        r.Requires('/sbin/ip', '.*/site-packages/rmake/lib/procutil.*')
+        r.Requires('iproute:runtime', '.*/site-packages/rmake/lib/procutil.*')
         r.Requires(exceptDeps='python: (epdb|rmake.cmdline.password)')
         r.ComponentSpec('gtk', 'password.py(|c|o)')
         # make gtk require rmake:runtime
@@ -73,6 +83,7 @@ class RmakeRecipe(CPackageRecipe, Python.VersionMixIn):
         r.UtilizeGroup('rmake-chroot', '%(libexecdir)s/rmake/chroothelper')
         r.Doc('extra/plugins/*.py')
         r.Doc('CPL')
+
 
         ## package rmake-proxy
         r.macros.proxydir = '%(servicedir)s/rmake-proxy'
@@ -158,3 +169,5 @@ serverName localhost
                       '.*/rmake/plugins/multinode/.*',
                       '%(sysconfdir)s/rmake/client.d/00_rmake_multinode')
         r.Requires('rmake:python(%(version)s)', 'rmake_node/__init__.py')
+        # Avoid rpl-2-py26 <-> fl:2 compatibility issues
+        r.Requires(exceptDeps='file: /etc/init.d/functions')
