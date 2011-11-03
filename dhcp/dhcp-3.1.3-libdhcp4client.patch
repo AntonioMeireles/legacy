@@ -1,0 +1,2426 @@
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c dhcp-3.1-ESV-R3/client/dhclient.c
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c	2011-10-10 10:21:40.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/dhclient.c	2011-10-10 09:59:56.000000000 -0400
+@@ -77,6 +77,10 @@ int onetry=0;
+ int quiet=0;
+ int nowait=0;
+ 
++#ifdef LIBDHCP
++FILE *leaseFile = NULL;
++#endif
++
+ static void usage PROTO ((void));
+ 
+ static int check_domain_name(const char *ptr, size_t len, int dots);
+@@ -84,10 +88,41 @@ static int check_domain_name_list(const 
+ static int check_option_values(struct universe *universe, unsigned int opt,
+ 			       const char *ptr, size_t len);
+ 
++#ifdef LIBDHCP
++#include "isc-dhcp/libdhcp_control.h"
++LIBDHCP_Control *libdhcp_control;
++static void libdhcp_dispatch(void)
++  {
++         struct timeval tv = { 0, 0 }, *tvp;
++         isc_result_t status;
++
++         /* Wait for a packet, or a timeout, or libdhcp being finished */
++         do {
++                 tvp = process_outstanding_timeouts(&tv);
++                 status = omapi_one_dispatch(0, tvp);
++
++        if (libdhcp_control && ((status == ISC_R_TIMEDOUT) || (libdhcp_control->timeout && (time(NULL) >= (libdhcp_control->timeout + libdhcp_control->now))))) {
++             if (libdhcp_control->callback)
++                     libdhcp_control->callback(libdhcp_control, DHC_TIMEDOUT, NULL);
++             break;
++        }
++    } while ((status != ISC_R_TIMEDOUT) && ((!libdhcp_control) || (!(libdhcp_control->finished))));
++  }
++
++extern void omapi_free_all_pointers(void);
++
++__attribute__ ((visibility ("default")))
++int dhcpv4_client (libdhcp_ctl, argc, argv, envp)
++       LIBDHCP_Control *libdhcp_ctl;
++#else
+ int main (argc, argv, envp)
++#endif
+ 	int argc;
+ 	char **argv, **envp;
+ {
++#ifdef LIBDHCP
++  libdhcp_control = libdhcp_ctl;
++#endif
+ 	int fd;
+ 	int i;
+ 	struct servent *ent;
+@@ -109,6 +144,7 @@ int main (argc, argv, envp)
+ 	int no_dhclient_script = 0;
+ 	char *s;
+ 
++#ifndef LIBDHCP
+         /* Make sure that file descriptors 0 (stdin), 1, (stdout), and
+            2 (stderr) are open. To do this, we assume that when we
+            open a file the lowest available file decriptor is used. */
+@@ -132,6 +168,7 @@ int main (argc, argv, envp)
+ #if !(defined (DEBUG) || defined (SYSLOG_4_2) || defined (__CYGWIN32__))
+ 	setlogmask (LOG_UPTO (LOG_INFO));
+ #endif	
++#endif
+ 
+ 	/* Set up the OMAPI. */
+ 	status = omapi_init ();
+@@ -346,6 +383,7 @@ int main (argc, argv, envp)
+ 
+ 	write_client_pid_file();
+ 
++#ifndef LIBDHCP
+ 	if (!quiet) {
+ 		log_info ("%s %s", message, DHCP_VERSION);
+ 		log_info (copyright);
+@@ -354,6 +392,7 @@ int main (argc, argv, envp)
+ 		log_info ("%s", "");
+ 	} else
+ 		log_perror = 0;
++#endif
+ 
+ 	/* If we're given a relay agent address to insert, for testing
+ 	   purposes, figure out what it is. */
+@@ -424,11 +463,17 @@ int main (argc, argv, envp)
+ 	/* Parse the dhclient.conf file. */
+ 	read_client_conf ();
+ 
++#ifdef LIBDHCP
++	if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_LEASE_DATABASE)) {
++#endif
+ 	/* Parse the lease database. */
+ 	read_client_leases ();
+ 
+ 	/* Rewrite the lease database... */
+ 	rewrite_client_leases ();
++#ifdef LIBDHCP
++	}
++#endif
+ 
+ 	/* XXX */
+ /* 	config_counter(&snd_counter, &rcv_counter); */
+@@ -447,7 +492,7 @@ int main (argc, argv, envp)
+ 		if (!persist) {
+ 			/* Nothing more to do. */
+ 			log_info ("No broadcast interfaces found - exiting.");
+-			exit (0);
++			return (0);
+ 		}
+ 	} else if (!release_mode && !exit_mode) {
+ 		/* Call the script with the list of interfaces. */
+@@ -543,6 +588,7 @@ int main (argc, argv, envp)
+ 	dmalloc_outstanding = 0;
+ #endif
+ 
++#ifndef LIBDHCP
+ 	/* If we're not supposed to wait before getting the address,
+ 	   don't. */
+ 	if (nowait)
+@@ -555,6 +601,126 @@ int main (argc, argv, envp)
+ 
+ 	/* Start dispatching packets and timeouts... */
+ 	dispatch ();
++#else
++	if (libdhcp_control) {
++		if (libdhcp_control->timeout)
++			libdhcp_control->now = time(NULL);
++		else
++			libdhcp_control->now = 0;
++	}
++
++	libdhcp_dispatch();
++
++	/* libdhcp is finished with us. */
++
++	/* close all file descriptors:  */
++	for (ip = interfaces; ip; ip = ip->next) {
++		shutdown(ip->wfdesc, SHUT_RDWR);
++		close(ip->wfdesc);
++
++		if (ip->rfdesc != ip->wfdesc)
++			close(ip->rfdesc);
++	}
++
++	if (fallback_interface != 0) {
++		ip = fallback_interface;
++		shutdown(ip->wfdesc, SHUT_RDWR);
++		close(ip->wfdesc);
++
++		if (ip->rfdesc != ip->wfdesc)
++			close(ip->rfdesc);
++	}
++
++	if (leaseFile)
++		fclose (leaseFile);
++
++	closelog();
++
++	char *current_pid_file = _PATH_DHCLIENT_PID;
++
++	/* Free ALL allocated memory: */
++	omapi_free_all_pointers();
++
++	/* Re-Initialize globals: */
++	client_env = 0;
++	client_env_count = 0;
++	default_lease_time = 43200;
++
++	dhcp_max_agent_option_packet_length = 0;
++	iaddr_any.len = 4;
++	memset(&(iaddr_any.iabuf[0]), '\0', 4);
++	iaddr_broadcast.len = 4;
++	memset(&(iaddr_broadcast.iabuf[0]), 0xff, 4);
++	interfaces_requested = 0;
++	leaseFile = 0;
++
++	libdhcp_control = 0;
++
++	local_port = 0;
++	no_daemon = 0;
++	nowait = 0;
++	onetry = 0;
++	quiet = 0;
++	max_lease_time = 86400;
++	path_dhclient_conf = _PATH_DHCLIENT_CONF;
++	path_dhclient_db = _PATH_DHCLIENT_DB;
++	path_dhclient_pid = _PATH_DHCLIENT_PID;
++	strcpy(&(path_dhclient_script_array[0]), _PATH_DHCLIENT_SCRIPT);
++	path_dhclient_script = path_dhclient_script_array;
++	remote_port = 0;
++	resolver_inited = 0;
++	log_perror = 1;
++	global_scope = NULL;
++	root_group = NULL;
++	group_name_hash = NULL;
++	interfaces = NULL;
++	dummy_interfaces = NULL;
++	fallback_interface = NULL;
++	extern int have_setup_fallback;
++	have_setup_fallback = 0;
++	quiet_interface_discovery = 1;
++#ifndef LIBDHCP
++	timeouts = NULL;
++#endif
++	dhcp_type_interface = NULL;
++	interface_vector = NULL;
++	interface_count = 0;
++	interface_max = 0;
++	name_servers = 0;
++	domains = 0;
++	dhcp_type_interface = NULL;
++	dhcp_type_group = NULL;
++	dhcp_type_shared_network = NULL;
++	dhcp_type_control = NULL;
++	memset(&dhcp_universe, '\0', sizeof(struct universe));
++	memset(&nwip_universe, '\0', sizeof(struct universe));
++	memset(&fqdn_universe, '\0', sizeof(struct universe));
++	universe_hash = 0;
++	universes = 0;
++	universe_count = 0;
++	universe_max = 0;
++	config_universe = 0; 
++	extern struct hash_bucket *free_hash_buckets;
++	free_hash_buckets = NULL;
++	extern struct dhcp_packet *dhcp_free_list;
++	dhcp_free_list = NULL;
++	extern struct packet *packet_free_list;
++	packet_free_list = NULL;
++	extern struct binding_value *free_binding_values;
++	free_binding_values = NULL;
++	extern struct expression *free_expressions;
++	free_expressions = NULL;
++	extern struct option_cache *free_option_caches;
++	free_option_caches = NULL;
++	extern  struct packet *free_packets;
++	free_packets = NULL;
++	extern  pair free_pairs;
++	free_pairs = NULL;
++	extern omapi_io_object_t omapi_io_states;
++	memset(&omapi_io_states, '\0', sizeof(omapi_io_states));
++	dhcp_control_object = NULL;
++	unlink(current_pid_file);
++#endif
+ 
+ 	/*NOTREACHED*/
+ 	return 0;
+@@ -947,7 +1113,20 @@ void dhcpack (packet)
+ 	if (client -> new -> rebind < cur_time)
+ 		client -> new -> rebind = TIME_MAX;
+ 
++#ifdef LIBDHCP
++	/* We need the server's siaddr for the 'bootServer'
++	 * pump option
++	 */
++	u_int32_t set_siaddr = 0;
++	set_siaddr = client->packet.siaddr.s_addr;
++	client->packet.siaddr.s_addr = packet->raw->siaddr.s_addr;
++#endif
++
+ 	bind_lease (client);
++
++#ifdef LIBDHCP
++	client->packet.siaddr.s_addr = set_siaddr;
++#endif
+ }
+ 
+ void bind_lease (client)
+@@ -985,6 +1164,9 @@ void bind_lease (client)
+ 		return;
+ 	}
+ 
++#ifdef LIBDHCP
++	if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_LEASE_DATABASE))
++#endif
+ 	/* Write out the new lease. */
+ 	write_client_lease (client, client -> new, 0, 0);
+ 
+@@ -1087,11 +1269,13 @@ int commit_leases ()
+ 	return 0;
+ }
+ 
++#ifndef LIBDHCP
+ int write_lease (lease)
+ 	struct lease *lease;
+ {
+ 	return 0;
+ }
++#endif
+ 
+ int write_host (host)
+ 	struct host_decl *host;
+@@ -1701,6 +1885,10 @@ void state_panic (cpp)
+ 	   tell the shell script that we failed to allocate an address,
+ 	   and try again later. */
+ 	if (onetry) {
++#ifdef LIBDHCP
++		script_init (client, "FAIL", (struct string_list *)0);
++		return;
++#endif
+ 		if (!quiet)
+ 			log_info ("Unable to obtain a lease on first try.%s",
+ 				  "  Exiting.");
+@@ -2322,7 +2510,9 @@ void destroy_client_lease (lease)
+ 	free_client_lease (lease, MDL);
+ }
+ 
+-FILE *leaseFile;
++#ifndef LIBDHCP
++ FILE *leaseFile;
++#endif
+ 
+ void rewrite_client_leases ()
+ {
+@@ -2744,6 +2934,54 @@ void script_write_params (client, prefix
+ int script_go (client)
+ 	struct client_state *client;
+ {
++#ifdef LIBDHCP
++	struct string_list *sp;
++
++	if (libdhcp_control && libdhcp_control->callback) {
++		int dhcmsg;
++		char *reason="";
++
++		for (sp = client->env; sp; sp = sp->next)
++			if (strncmp(sp->string, "reason=", 7) == 0) {
++				reason = sp->string + 7;
++				break;
++			}
++
++		if (strcmp(reason,"NBI") == 0)
++			dhcmsg = DHC4_NBI;
++		else if (strcmp(reason,"PREINIT") == 0)
++			dhcmsg = DHC4_PREINIT;
++		else if (strcmp(reason,"BOUND") == 0)
++			dhcmsg = DHC4_BOUND;
++		else if (strcmp(reason,"RENEW") == 0)
++			dhcmsg = DHC4_RENEW;
++		else if (strcmp(reason,"REBOOT") == 0)
++			dhcmsg = DHC4_REBOOT;
++		else if (strcmp(reason,"REBIND") == 0)
++			dhcmsg = DHC4_REBIND;
++		else if (strcmp(reason,"STOP") == 0)
++			dhcmsg = DHC4_STOP;
++		else if (strcmp(reason,"MEDIUM") == 0)
++			dhcmsg = DHC4_MEDIUM;
++		else if (strcmp(reason,"TIMEOUT") == 0)
++			dhcmsg = DHC4_TIMEOUT;
++		else if (strcmp(reason,"FAIL") == 0)
++			dhcmsg = DHC4_FAIL;
++		else if (strcmp(reason,"EXPIRE") == 0)
++			dhcmsg = DHC4_EXPIRE;
++		else if (strcmp(reason,"RELEASE") == 0)
++			dhcmsg = DHC4_RELEASE;
++		else
++			dhcmsg = DHC4_NBI;
++
++		(*libdhcp_control->callback) (libdhcp_control, dhcmsg, client);
++
++		if (libdhcp_control->decline)
++			return 1;
++	}
++
++	return 0;
++#else
+ 	int rval;
+ 	char *scriptName;
+ 	char *argv [2];
+@@ -2822,6 +3060,7 @@ int script_go (client)
+ 	GET_TIME (&cur_time);
+ 	return (WIFEXITED (wstatus) ?
+ 		WEXITSTATUS (wstatus) : -WTERMSIG (wstatus));
++#endif
+ }
+ 
+ void client_envadd (struct client_state *client,
+@@ -2904,6 +3143,9 @@ void go_daemon ()
+ 
+ 	/* Don't become a daemon if the user requested otherwise. */
+ 	if (no_daemon) {
++#ifdef LIBDHCP
++		if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_PID_FILE ))
++#endif
+ 		write_client_pid_file ();
+ 		return;
+ 	}
+@@ -2913,6 +3155,10 @@ void go_daemon ()
+ 		return;
+ 	state = 1;
+ 
++#ifdef LIBDHCP
++	return;
++#endif
++
+ 	/* Stop logging to stderr... */
+ 	log_perror = 0;
+ 
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c.orig dhcp-3.1-ESV-R3/client/dhclient.c.orig
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c.orig	2011-10-10 10:21:40.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/dhclient.c.orig	2011-10-10 09:41:09.000000000 -0400
+@@ -562,16 +562,25 @@ int main (argc, argv, envp)
+ 
+ static void usage ()
+ {
+-	log_info ("%s %s", message, DHCP_VERSION);
+-	log_info (copyright);
+-	log_info (arr);
+-	log_info (url);
+-
+-	log_error ("Usage: dhclient [-1dqrx] [-nw] [-p <port>] %s",
+-		   "[-s server]");
+-	log_error ("                [-cf config-file] [-lf lease-file]%s",
+-		   "[-pf pid-file] [-e VAR=val]");
+-	log_fatal ("                [-sf script-file] [interface]");
++	printf ("%s %s\n", message, DHCP_VERSION);
++	printf (copyright);
++	printf ("\n");
++	printf (arr);
++	printf ("\n");
++	printf (url);
++	printf ("\n");
++
++	printf ("Usage: dhclient [-1dqr] [-nw] [-p <port>] %s",
++	   "[-s server]");
++	printf ("                [-cf config-file] [-lf lease-file]%s",
++	   "[-pf pid-file] [-e VAR=val]");
++	printf ("                [ -I <dhcp-client-identifier> ] [-B]\n");
++	printf ("                [ -H <host-name> | -F <fqdn.fqdn> ] [ -T <timeout> ]\n");
++	printf ("                [ -V <vendor-class-identifier> ]\n");
++	printf ("                [ -R <request option list> ]\n");
++	printf ("                [-sf script-file] [interface]\n");
++
++	exit (EXIT_FAILURE);
+ }
+ 
+ isc_result_t find_class (struct class **c,
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c.rej dhcp-3.1-ESV-R3/client/dhclient.c.rej
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c.rej	1969-12-31 19:00:00.000000000 -0500
++++ dhcp-3.1-ESV-R3/client/dhclient.c.rej	2011-10-10 09:41:10.000000000 -0400
+@@ -0,0 +1,63 @@
++***************
++*** 77,88 ****
++  int quiet=0;
++  int nowait=0;
++  
++  static void usage PROTO ((void));
++  
++  int main (argc, argv, envp)
++  	int argc;
++  	char **argv, **envp;
++  {
++  	int fd;
++  	int i;
++  	struct servent *ent;
++--- 77,124 ----
++  int quiet=0;
++  int nowait=0;
++  
+++ #ifdef LIBDHCP
+++ FILE *leaseFile = NULL;
+++ #endif
+++ 
++  static void usage PROTO ((void));
++  
+++ #ifdef LIBDHCP
+++ #include "isc-dhcp/libdhcp_control.h"
+++ LIBDHCP_Control *libdhcp_control;
+++ static void libdhcp_dispatch(void)
+++   {
+++          struct timeval tv = { 0, 0 }, *tvp;
+++          isc_result_t status;
+++ 
+++          /* Wait for a packet, or a timeout, or libdhcp being finished */
+++          do {
+++                  tvp = process_outstanding_timeouts(&tv);
+++                  status = omapi_one_dispatch(0, tvp);
+++ 		 
+++ 		 if (libdhcp_control && ((status == ISC_R_TIMEDOUT) || (libdhcp_control->timeout && (time(NULL) >= (libdhcp_control->timeout + libdhcp_control->now))))) {
+++ 		         if (libdhcp_control->callback)
+++ 		                 libdhcp_control->callback(libdhcp_control, DHC_TIMEDOUT, NULL);
+++ 			 
+++ 			 break;
+++ 		 }
+++ 	 } while ((status != ISC_R_TIMEDOUT) && ((!libdhcp_control) || (!(libdhcp_control->finished))));
+++   }
+++ 
+++ extern void omapi_free_all_pointers(void);
+++ 
+++ __attribute__ ((visibility ("default")))
+++ int dhcpv4_client (libdhcp_ctl, argc, argv, envp)
+++        LIBDHCP_Control *libdhcp_ctl;
+++ #else
++  int main (argc, argv, envp)
+++ #endif
++  	int argc;
++  	char **argv, **envp;
++  {
+++ #ifdef LIBDHCP
+++   libdhcp_control = libdhcp_ctl;
+++ #endif
++  	int fd;
++  	int i;
++  	struct servent *ent;
+diff -rupN dhcp-3.1-ESV-R3_orig/common/alloc.c dhcp-3.1-ESV-R3/common/alloc.c
+--- dhcp-3.1-ESV-R3_orig/common/alloc.c	2009-07-23 17:43:33.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/alloc.c	2011-10-10 09:41:10.000000000 -0400
+@@ -1013,7 +1013,11 @@ int executable_statement_reference (ptr,
+ 	return 1;
+ }
+ 
++#ifdef LIBDHCP
++struct packet *free_packets;
++#else
+ static struct packet *free_packets;
++#endif
+ 
+ #if defined (DEBUG_MEMORY_LEAKAGE) || \
+ 		defined (DEBUG_MEMORY_LEAKAGE_ON_EXIT)
+diff -rupN dhcp-3.1-ESV-R3_orig/common/discover.c dhcp-3.1-ESV-R3/common/discover.c
+--- dhcp-3.1-ESV-R3_orig/common/discover.c	2011-07-07 15:18:47.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/discover.c	2011-10-10 10:01:10.000000000 -0400
+@@ -122,6 +122,10 @@ isc_result_t interface_initialize (omapi
+    register that interface with the network I/O software, figure out what
+    subnet it's on, and add it to the list of interfaces. */
+ 
++#ifdef LIBDHCP
++int have_setup_fallback = 0;
++#endif
++
+ void discover_interfaces (state)
+ 	int state;
+ {
+@@ -142,7 +146,9 @@ void discover_interfaces (state)
+ 	char *s;
+ #endif
+ 	isc_result_t status;
++#ifndef LIBDHCP
+ 	static int setup_fallback = 0;
++#endif
+ 	int wifcount = 0;
+ 
+ 	/* Create an unbound datagram socket to do the SIOCGIFADDR ioctl on. */
+@@ -696,10 +702,17 @@ void discover_interfaces (state)
+ 		log_fatal ("Not configured to listen on any interfaces!");
+ 	}
+ 
++#ifdef LIBDHCP
++	if (!have_setup_fallback) {
++		have_setup_fallback = 1;
++		maybe_setup_fallback ();
++	}
++#else
+ 	if (!setup_fallback) {
+ 		setup_fallback = 1;
+ 		maybe_setup_fallback ();
+ 	}
++#endif
+ 
+ #if defined (HAVE_SETFD)
+ 	if (fallback_interface) {
+diff -rupN dhcp-3.1-ESV-R3_orig/common/discover.c.orig dhcp-3.1-ESV-R3/common/discover.c.orig
+--- dhcp-3.1-ESV-R3_orig/common/discover.c.orig	1969-12-31 19:00:00.000000000 -0500
++++ dhcp-3.1-ESV-R3/common/discover.c.orig	2011-07-07 15:18:47.000000000 -0400
+@@ -0,0 +1,1167 @@
++/* dispatch.c
++
++   Network input dispatcher... */
++
++/*
++ * Copyright (c) 2009 by Internet Systems Consortium, Inc. ("ISC")
++ * Copyright (c) 2004-2006 by Internet Systems Consortium, Inc. ("ISC")
++ * Copyright (c) 1995-2003 by Internet Software Consortium
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
++ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ *
++ *   Internet Systems Consortium, Inc.
++ *   950 Charter Street
++ *   Redwood City, CA 94063
++ *   <info@isc.org>
++ *   https://www.isc.org/
++ *
++ * This software has been written for Internet Systems Consortium
++ * by Ted Lemon in cooperation with Vixie Enterprises and Nominum, Inc.
++ * To learn more about Internet Systems Consortium, see
++ * ``https://www.isc.org/''.  To learn more about Vixie Enterprises,
++ * see ``http://www.vix.com''.   To learn more about Nominum, Inc., see
++ * ``http://www.nominum.com''.
++ */
++
++#ifndef lint
++static char copyright[] =
++"$Id: discover.c,v 1.51.2.5 2011-07-07 19:18:47 sar Exp $ Copyright (c) 2004-2006 Internet Systems Consortium.  All rights reserved.\n";
++#endif /* not lint */
++
++#include "dhcpd.h"
++#include <sys/ioctl.h>
++
++struct interface_info *interfaces, *dummy_interfaces, *fallback_interface;
++int interfaces_invalidated;
++int quiet_interface_discovery;
++u_int16_t local_port;
++u_int16_t remote_port;
++int (*dhcp_interface_setup_hook) (struct interface_info *, struct iaddr *);
++int (*dhcp_interface_discovery_hook) (struct interface_info *);
++isc_result_t (*dhcp_interface_startup_hook) (struct interface_info *);
++int (*dhcp_interface_shutdown_hook) (struct interface_info *);
++
++struct in_addr limited_broadcast;
++struct in_addr local_address;
++
++void (*bootp_packet_handler) PROTO ((struct interface_info *,
++				     struct dhcp_packet *, unsigned,
++				     unsigned int,
++				     struct iaddr, struct hardware *));
++
++omapi_object_type_t *dhcp_type_interface;
++#if defined (TRACING)
++trace_type_t *interface_trace;
++trace_type_t *inpacket_trace;
++trace_type_t *outpacket_trace;
++#endif
++struct interface_info **interface_vector;
++int interface_count;
++int interface_max;
++
++OMAPI_OBJECT_ALLOC (interface, struct interface_info, dhcp_type_interface)
++
++isc_result_t interface_setup ()
++{
++	isc_result_t status;
++	status = omapi_object_type_register (&dhcp_type_interface,
++					     "interface",
++					     dhcp_interface_set_value,
++					     dhcp_interface_get_value,
++					     dhcp_interface_destroy,
++					     dhcp_interface_signal_handler,
++					     dhcp_interface_stuff_values,
++					     dhcp_interface_lookup, 
++					     dhcp_interface_create,
++					     dhcp_interface_remove,
++					     0, 0, 0,
++					     sizeof (struct interface_info),
++					     interface_initialize, RC_MISC);
++	if (status != ISC_R_SUCCESS)
++		log_fatal ("Can't register interface object type: %s",
++			   isc_result_totext (status));
++
++	return status;
++}
++
++#if defined (TRACING)
++void interface_trace_setup ()
++{
++	interface_trace = trace_type_register ("interface", (void *)0,
++					       trace_interface_input,
++					       trace_interface_stop, MDL);
++	inpacket_trace = trace_type_register ("inpacket", (void *)0,
++					       trace_inpacket_input,
++					       trace_inpacket_stop, MDL);
++	outpacket_trace = trace_type_register ("outpacket", (void *)0,
++					       trace_outpacket_input,
++					       trace_outpacket_stop, MDL);
++}
++#endif
++
++isc_result_t interface_initialize (omapi_object_t *ipo,
++				   const char *file, int line)
++{
++	struct interface_info *ip = (struct interface_info *)ipo;
++	ip -> rfdesc = ip -> wfdesc = -1;
++	return ISC_R_SUCCESS;
++}
++
++/* Use the SIOCGIFCONF ioctl to get a list of all the attached interfaces.
++   For each interface that's of type INET and not the loopback interface,
++   register that interface with the network I/O software, figure out what
++   subnet it's on, and add it to the list of interfaces. */
++
++void discover_interfaces (state)
++	int state;
++{
++	struct interface_info *tmp, *ip;
++	struct interface_info *last, *next;
++	char buf [2048];
++	struct ifconf ic;
++	struct ifreq ifr;
++	int i;
++	int sock;
++	int address_count = 0;
++	struct subnet *subnet;
++	struct shared_network *share;
++	struct sockaddr_in foo;
++	int ir;
++	struct ifreq *tif;
++#ifdef ALIAS_NAMES_PERMUTED
++	char *s;
++#endif
++	isc_result_t status;
++	static int setup_fallback = 0;
++	int wifcount = 0;
++
++	/* Create an unbound datagram socket to do the SIOCGIFADDR ioctl on. */
++	if ((sock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
++		log_fatal ("Can't create addrlist socket");
++
++	/* Get the interface configuration information... */
++
++#ifdef SIOCGIFCONF_ZERO_PROBE
++	/* linux will only tell us how long a buffer it wants if we give it
++	 * a null buffer first. So, do a dry run to figure out the length.
++	 * 
++	 * XXX this code is duplicated from below because trying to fold
++	 * the logic into the if statement and goto resulted in excesssive
++	 * obfuscation. The intent is that unless you run Linux you shouldn't
++	 * have to deal with this. */
++
++	ic.ifc_len = 0;
++	ic.ifc_ifcu.ifcu_buf = (caddr_t)NULL;
++#else
++	/* otherwise, we just feed it a starting size, and it'll tell us if
++	 * it needs more */
++
++	ic.ifc_len = sizeof buf;
++	ic.ifc_ifcu.ifcu_buf = (caddr_t)buf;
++#endif
++
++      gifconf_again:
++	i = ioctl(sock, SIOCGIFCONF, &ic);
++
++	if (i < 0)
++		log_fatal ("ioctl: SIOCGIFCONF: %m");
++
++#ifdef SIOCGIFCONF_ZERO_PROBE
++	/* Workaround for SIOCGIFCONF bug on some Linux versions. */
++	if (ic.ifc_ifcu.ifcu_buf == 0 && ic.ifc_len == 0) {
++		ic.ifc_len = sizeof buf;
++		ic.ifc_ifcu.ifcu_buf = (caddr_t)buf;
++		goto gifconf_again;
++	}
++#endif
++
++	/* If the SIOCGIFCONF resulted in more data than would fit in
++	   a buffer, allocate a bigger buffer. */
++	if ((ic.ifc_ifcu.ifcu_buf == buf 
++#ifdef SIOCGIFCONF_ZERO_PROBE
++	     || ic.ifc_ifcu.ifcu_buf == 0
++#endif
++		) && ic.ifc_len > sizeof buf) {
++		ic.ifc_ifcu.ifcu_buf = dmalloc ((size_t)ic.ifc_len, MDL);
++		if (!ic.ifc_ifcu.ifcu_buf)
++			log_fatal ("Can't allocate SIOCGIFCONF buffer.");
++		goto gifconf_again;
++#ifdef SIOCGIFCONF_ZERO_PROBE
++	} else if (ic.ifc_ifcu.ifcu_buf == 0) {
++		ic.ifc_ifcu.ifcu_buf = (caddr_t)buf;
++		ic.ifc_len = sizeof buf;
++		goto gifconf_again;
++#endif
++	}
++
++		
++	/* If we already have a list of interfaces, and we're running as
++	   a DHCP server, the interfaces were requested. */
++	if (interfaces && (state == DISCOVER_SERVER ||
++			   state == DISCOVER_RELAY ||
++			   state == DISCOVER_REQUESTED))
++		ir = 0;
++	else if (state == DISCOVER_UNCONFIGURED)
++		ir = INTERFACE_REQUESTED | INTERFACE_AUTOMATIC;
++	else
++		ir = INTERFACE_REQUESTED;
++
++	/* Cycle through the list of interfaces looking for IP addresses. */
++	for (i = 0; i < ic.ifc_len;) {
++		struct ifreq *ifp = (struct ifreq *)((caddr_t)ic.ifc_req + i);
++#ifdef HAVE_SA_LEN
++		if (ifp -> ifr_addr.sa_len > sizeof (struct sockaddr))
++			i += (sizeof ifp -> ifr_name) + ifp -> ifr_addr.sa_len;
++		else
++#endif
++			i += sizeof *ifp;
++
++#ifdef ALIAS_NAMES_PERMUTED
++		if ((s = strrchr (ifp -> ifr_name, ':'))) {
++			*s = 0;
++		}
++#endif
++
++#ifdef SKIP_DUMMY_INTERFACES
++		if (!strncmp (ifp -> ifr_name, "dummy", 5))
++			continue;
++#endif
++
++
++		/* See if this is the sort of interface we want to
++		   deal with. */
++		strcpy (ifr.ifr_name, ifp -> ifr_name);
++		if (ioctl (sock, SIOCGIFFLAGS, &ifr) < 0)
++			log_fatal ("Can't get interface flags for %s: %m",
++			       ifr.ifr_name);
++
++		/* See if we've seen an interface that matches this one. */
++		for (tmp = interfaces; tmp; tmp = tmp -> next)
++			if (!strcmp (tmp -> name, ifp -> ifr_name))
++				break;
++
++		/* Skip non broadcast interfaces (plus loopback and
++		   point-to-point in case an OS incorrectly marks them
++		   as broadcast). Also skip down interfaces unless we're
++		   trying to get a list of configurable interfaces. */
++		if (((!(ifr.ifr_flags & IFF_BROADCAST) ||
++		      ifr.ifr_flags & IFF_LOOPBACK ||
++		      ifr.ifr_flags & IFF_POINTOPOINT) && !tmp) ||
++		    (!(ifr.ifr_flags & IFF_UP) &&
++		     state != DISCOVER_UNCONFIGURED))
++			continue;
++		
++		/* If there isn't already an interface by this name,
++		   allocate one. */
++		if (!tmp) {
++			tmp = (struct interface_info *)0;
++			status = interface_allocate (&tmp, MDL);
++			if (status != ISC_R_SUCCESS)
++				log_fatal ("Error allocating interface %s: %s",
++					   ifp -> ifr_name,
++					   isc_result_totext (status));
++			strcpy (tmp -> name, ifp -> ifr_name);
++			interface_snorf (tmp, ir);
++			interface_dereference (&tmp, MDL);
++			tmp = interfaces; /* XXX */
++		}
++
++		if (dhcp_interface_discovery_hook)
++			(*dhcp_interface_discovery_hook) (tmp);
++
++		/* If we have the capability, extract link information
++		   and record it in a linked list. */
++#ifdef HAVE_AF_LINK
++		if (ifp -> ifr_addr.sa_family == AF_LINK) {
++			struct sockaddr_dl *foo = ((struct sockaddr_dl *)
++						   (&ifp -> ifr_addr));
++#if defined (HAVE_SIN_LEN)
++			tmp -> hw_address.hlen = foo -> sdl_alen;
++#else
++			tmp -> hw_address.hlen = 6; /* XXX!!! */
++#endif
++			tmp -> hw_address.hbuf [0] = HTYPE_ETHER; /* XXX */
++			memcpy (&tmp -> hw_address.hbuf [1],
++				LLADDR (foo), tmp -> hw_address.hlen);
++			tmp -> hw_address.hlen++;	/* for type. */
++		} else
++#endif /* AF_LINK */
++
++		if (ifp -> ifr_addr.sa_family == AF_INET) {
++			struct iaddr addr;
++
++			/* Get a pointer to the address... */
++			memcpy (&foo, &ifp -> ifr_addr,
++				sizeof ifp -> ifr_addr);
++
++			/* We don't want the loopback interface. */
++			if (foo.sin_addr.s_addr == htonl (INADDR_LOOPBACK) &&
++			    ((tmp -> flags & INTERFACE_AUTOMATIC) &&
++			     state == DISCOVER_SERVER))
++			    continue;
++
++
++			/* If this is the first real IP address we've
++			   found, keep a pointer to ifreq structure in
++			   which we found it. */
++			if (!tmp -> ifp) {
++#ifdef HAVE_SA_LEN
++				unsigned len = ((sizeof ifp -> ifr_name) +
++						ifp -> ifr_addr.sa_len);
++#else
++				unsigned len = sizeof *ifp;
++#endif
++				tif = (struct ifreq *)dmalloc (len, MDL);
++				if (!tif)
++					log_fatal ("no space for ifp.");
++				memcpy (tif, ifp, len);
++				tmp -> ifp = tif;
++				tmp -> primary_address = foo.sin_addr;
++			}
++
++			/* Grab the address... */
++			addr.len = 4;
++			memcpy (addr.iabuf, &foo.sin_addr.s_addr,
++				addr.len);
++			if (dhcp_interface_setup_hook)
++				(*dhcp_interface_setup_hook) (tmp, &addr);
++		}
++	}
++
++	/* If we allocated a buffer, free it. */
++	if (ic.ifc_ifcu.ifcu_buf != buf)
++		dfree (ic.ifc_ifcu.ifcu_buf, MDL);
++
++#if defined (LINUX_SLASHPROC_DISCOVERY)
++	/* On Linux, interfaces that don't have IP addresses don't
++	   show up in the SIOCGIFCONF syscall.  This only matters for
++	   the DHCP client, of course - the relay agent and server
++	   should only care about interfaces that are configured with
++	   IP addresses anyway.
++
++	   The PROCDEV_DEVICE (/proc/net/dev) is a kernel-supplied file
++	   that, when read, prints a human readable network status.   We
++	   extract the names of the network devices by skipping the first
++	   two lines (which are header) and then parsing off everything
++	   up to the colon in each subsequent line - these lines start
++	   with the interface name, then a colon, then a bunch of
++	   statistics. */
++
++	if (state == DISCOVER_UNCONFIGURED) {
++		FILE *proc_dev;
++		char buffer [256];
++		int skip = 2;
++
++		proc_dev = fopen (PROCDEV_DEVICE, "r");
++		if (!proc_dev)
++			log_fatal ("%s: %m", PROCDEV_DEVICE);
++
++		while (fgets (buffer, sizeof buffer, proc_dev)) {
++			char *name = buffer;
++			char *sep;
++
++			/* Skip the first two blocks, which are header
++			   lines. */
++			if (skip) {
++				--skip;
++				continue;
++			}
++
++			sep = strrchr (buffer, ':');
++			if (sep)
++				*sep = '\0';
++			while (*name == ' ')
++				name++;
++
++			/* See if we've seen an interface that matches
++			   this one. */
++			for (tmp = interfaces; tmp; tmp = tmp -> next)
++				if (!strcmp (tmp -> name, name))
++					break;
++
++			/* If we found one, nothing more to do.. */
++			if (tmp)
++				continue;
++
++			strncpy (ifr.ifr_name, name, IFNAMSIZ);
++
++			/* Skip non broadcast interfaces (plus loopback and
++			 * point-to-point in case an OS incorrectly marks them
++			 * as broadcast).
++			 */
++			if ((ioctl (sock, SIOCGIFFLAGS, &ifr) < 0) ||
++			    (!(ifr.ifr_flags & IFF_BROADCAST)) ||
++			    (ifr.ifr_flags & IFF_LOOPBACK ) ||
++			    (ifr.ifr_flags & IFF_POINTOPOINT))
++				continue;
++
++			/* Otherwise, allocate one. */
++			tmp = (struct interface_info *)0;
++			status = interface_allocate (&tmp, MDL);
++			if (status != ISC_R_SUCCESS)
++				log_fatal ("Can't allocate interface %s: %s",
++					   name, isc_result_totext (status));
++			tmp -> flags = ir;
++			strncpy (tmp -> name, name, IFNAMSIZ);
++			if (interfaces) {
++				interface_reference (&tmp -> next,
++						     interfaces, MDL);
++				interface_dereference (&interfaces, MDL);
++			}
++			interface_reference (&interfaces, tmp, MDL);
++			interface_dereference (&tmp, MDL);
++			tmp = interfaces;
++
++			if (dhcp_interface_discovery_hook)
++				(*dhcp_interface_discovery_hook) (tmp);
++
++		}
++		fclose (proc_dev);
++	}
++#endif
++
++	/* Now cycle through all the interfaces we found, looking for
++	   hardware addresses. */
++#if defined (HAVE_SIOCGIFHWADDR) && !defined (HAVE_AF_LINK)
++	for (tmp = interfaces; tmp; tmp = tmp -> next) {
++		struct ifreq ifr;
++		struct sockaddr sa;
++		int b, sk;
++		
++		if (!tmp -> ifp) {
++			/* Make up an ifreq structure. */
++			tif = (struct ifreq *)dmalloc (sizeof (struct ifreq),
++						       MDL);
++			if (!tif)
++				log_fatal ("no space to remember ifp.");
++			memset (tif, 0, sizeof (struct ifreq));
++			strcpy (tif -> ifr_name, tmp -> name);
++			tmp -> ifp = tif;
++		}
++
++		/* Read the hardware address from this interface. */
++		ifr = *tmp -> ifp;
++		if (ioctl (sock, SIOCGIFHWADDR, &ifr) < 0)
++			continue;
++		
++		sa = *(struct sockaddr *)&ifr.ifr_hwaddr;
++		
++		switch (sa.sa_family) {
++#ifdef HAVE_ARPHRD_TUNNEL
++		      case ARPHRD_TUNNEL:
++			/* ignore tunnel interfaces. */
++#endif
++#ifdef HAVE_ARPHRD_ROSE
++		      case ARPHRD_ROSE:
++#endif
++#ifdef HAVE_ARPHRD_IRDA
++		     case ARPHRD_IRDA:
++			/* ignore infrared interfaces. */
++#endif
++#ifdef HAVE_ARPHRD_SIT
++		     case ARPHRD_SIT:
++			/* ignore IPv6-in-IPv4 interfaces. */
++#endif
++#ifdef HAVE_ARPHRD_IEEE1394
++		     case ARPHRD_IEEE1394:
++			/* ignore IEEE1394 interfaces. */
++#endif
++#ifdef HAVE_ARPHRD_LOOPBACK
++		      case ARPHRD_LOOPBACK:
++			/* ignore loopback interface */
++			break;
++#endif
++
++		      case ARPHRD_ETHER:
++			tmp -> hw_address.hlen = 7;
++			tmp -> hw_address.hbuf [0] = ARPHRD_ETHER;
++			memcpy (&tmp -> hw_address.hbuf [1], sa.sa_data, 6);
++			break;
++
++#ifndef HAVE_ARPHRD_IEEE802
++# define ARPHRD_IEEE802 HTYPE_IEEE802
++#endif
++#if defined (HAVE_ARPHRD_IEEE802_TR)
++		      case ARPHRD_IEEE802_TR:
++#endif
++		      case ARPHRD_IEEE802:
++			tmp -> hw_address.hlen = 7;
++			tmp -> hw_address.hbuf [0] = ARPHRD_IEEE802;
++			memcpy (&tmp -> hw_address.hbuf [1], sa.sa_data, 6);
++			break;
++
++#ifndef HAVE_ARPHRD_FDDI
++# define ARPHRD_FDDI HTYPE_FDDI
++#endif
++		      case ARPHRD_FDDI:
++			tmp -> hw_address.hlen = 17;
++			tmp -> hw_address.hbuf [0] = HTYPE_FDDI; /* XXX */
++			memcpy (&tmp -> hw_address.hbuf [1], sa.sa_data, 16);
++			break;
++
++#ifdef HAVE_ARPHRD_METRICOM
++		      case ARPHRD_METRICOM:
++			tmp -> hw_address.hlen = 7;
++			tmp -> hw_address.hbuf [0] = ARPHRD_METRICOM;
++			memcpy (&tmp -> hw_address.hbuf [0], sa.sa_data, 6);
++			break;
++#endif
++
++#ifdef HAVE_ARPHRD_AX25
++		      case ARPHRD_AX25:
++			tmp -> hw_address.hlen = 7;
++			tmp -> hw_address.hbuf [0] = ARPHRD_AX25;
++			memcpy (&tmp -> hw_address.hbuf [1], sa.sa_data, 6);
++			break;
++#endif
++
++#ifdef HAVE_ARPHRD_NETROM
++		      case ARPHRD_NETROM:
++			tmp -> hw_address.hlen = 7;
++			tmp -> hw_address.hbuf [0] = ARPHRD_NETROM;
++			memcpy (&tmp -> hw_address.hbuf [1], sa.sa_data, 6);
++			break;
++#endif
++
++		      default:
++			log_error ("%s: unknown hardware address type %d",
++				   ifr.ifr_name, sa.sa_family);
++			break;
++		}
++	}
++#endif /* defined (HAVE_SIOCGIFHWADDR) && !defined (HAVE_AF_LINK) */
++
++	/* If we're just trying to get a list of interfaces that we might
++	   be able to configure, we can quit now. */
++	if (state == DISCOVER_UNCONFIGURED) {
++		close (sock);
++		return;
++	}
++
++	/* Weed out the interfaces that did not have IP addresses. */
++	tmp = last = next = (struct interface_info *)0;
++	if (interfaces)
++		interface_reference (&tmp, interfaces, MDL);
++	while (tmp) {
++		if (next)
++			interface_dereference (&next, MDL);
++		if (tmp -> next)
++			interface_reference (&next, tmp -> next, MDL);
++		/* skip interfaces that are running already */
++		if (tmp -> flags & INTERFACE_RUNNING) {
++			interface_dereference(&tmp, MDL);
++			if(next)
++				interface_reference(&tmp, next, MDL);
++			continue;
++		}
++		if ((tmp -> flags & INTERFACE_AUTOMATIC) &&
++		    state == DISCOVER_REQUESTED)
++			tmp -> flags &= ~(INTERFACE_AUTOMATIC |
++					  INTERFACE_REQUESTED);
++		if (!tmp -> ifp || !(tmp -> flags & INTERFACE_REQUESTED)) {
++			if ((tmp -> flags & INTERFACE_REQUESTED) != ir)
++				log_fatal ("%s: not found", tmp -> name);
++			if (!last) {
++				if (interfaces)
++					interface_dereference (&interfaces,
++							       MDL);
++				if (next)
++				interface_reference (&interfaces, next, MDL);
++			} else {
++				interface_dereference (&last -> next, MDL);
++				if (next)
++					interface_reference (&last -> next,
++							     next, MDL);
++			}
++			if (tmp -> next)
++				interface_dereference (&tmp -> next, MDL);
++
++			/* Remember the interface in case we need to know
++			   about it later. */
++			if (dummy_interfaces) {
++				interface_reference (&tmp -> next,
++						     dummy_interfaces, MDL);
++				interface_dereference (&dummy_interfaces, MDL);
++			}
++			interface_reference (&dummy_interfaces, tmp, MDL);
++			interface_dereference (&tmp, MDL);
++			if (next)
++				interface_reference (&tmp, next, MDL);
++			continue;
++		}
++		last = tmp;
++
++		memcpy (&foo, &tmp -> ifp -> ifr_addr,
++			sizeof tmp -> ifp -> ifr_addr);
++
++		/* We must have a subnet declaration for each interface. */
++		if (!tmp -> shared_network && (state == DISCOVER_SERVER)) {
++			log_error ("%s", "");
++			log_error ("No subnet declaration for %s (%s).",
++				   tmp -> name, inet_ntoa (foo.sin_addr));
++			if (supports_multiple_interfaces (tmp)) {
++				log_error ("** Ignoring requests on %s.  %s",
++					   tmp -> name, "If this is not what");
++				log_error ("   you want, please write %s",
++					   "a subnet declaration");
++				log_error ("   in your dhcpd.conf file %s",
++					   "for the network segment");
++				log_error ("   to %s %s %s",
++					   "which interface",
++					   tmp -> name, "is attached. **");
++				log_error ("%s", "");
++				goto next;
++			} else {
++				log_error ("You must write a subnet %s",
++					   " declaration for this");
++				log_error ("subnet.   You cannot prevent %s",
++					   "the DHCP server");
++				log_error ("from listening on this subnet %s",
++					   "because your");
++				log_fatal ("operating system does not %s.",
++					   "support this capability");
++			}
++		}
++
++		/* Find subnets that don't have valid interface
++		   addresses... */
++		for (subnet = (tmp -> shared_network
++			       ? tmp -> shared_network -> subnets
++			       : (struct subnet *)0);
++		     subnet; subnet = subnet -> next_sibling) {
++			if (!subnet -> interface_address.len) {
++				/* Set the interface address for this subnet
++				   to the first address we found. */
++				subnet -> interface_address.len = 4;
++				memcpy (subnet -> interface_address.iabuf,
++					&foo.sin_addr.s_addr, 4);
++			}
++		}
++
++		/* Flag the index as not having been set, so that the
++		   interface registerer can set it or not as it chooses. */
++		tmp -> index = -1;
++
++		/* Register the interface... */
++		if_register_receive (tmp);
++		if_register_send (tmp);
++
++		interface_stash (tmp);
++		wifcount++;
++#if defined (HAVE_SETFD)
++		if (fcntl (tmp -> rfdesc, F_SETFD, 1) < 0)
++			log_error ("Can't set close-on-exec on %s: %m",
++				   tmp -> name);
++		if (tmp -> rfdesc != tmp -> wfdesc) {
++			if (fcntl (tmp -> wfdesc, F_SETFD, 1) < 0)
++				log_error ("Can't set close-on-exec on %s: %m",
++					   tmp -> name);
++		}
++#endif
++	      next:
++		interface_dereference (&tmp, MDL);
++		if (next)
++			interface_reference (&tmp, next, MDL);
++	}
++
++	/* Now register all the remaining interfaces as protocols. */
++	for (tmp = interfaces; tmp; tmp = tmp -> next) {
++		/* not if it's been registered before */
++		if (tmp -> flags & INTERFACE_RUNNING)
++			continue;
++		if (tmp -> rfdesc == -1)
++			continue;
++		status = omapi_register_io_object ((omapi_object_t *)tmp,
++						   if_readsocket, 0,
++						   got_one, 0, 0);
++		if (status != ISC_R_SUCCESS)
++			log_fatal ("Can't register I/O handle for %s: %s",
++				   tmp -> name, isc_result_totext (status));
++	}
++
++	close (sock);
++
++	if (state == DISCOVER_SERVER && wifcount == 0) {
++		log_info ("%s", "");
++		log_fatal ("Not configured to listen on any interfaces!");
++	}
++
++	if (!setup_fallback) {
++		setup_fallback = 1;
++		maybe_setup_fallback ();
++	}
++
++#if defined (HAVE_SETFD)
++	if (fallback_interface) {
++	    if (fcntl (fallback_interface -> rfdesc, F_SETFD, 1) < 0)
++		log_error ("Can't set close-on-exec on fallback: %m");
++	    if (fallback_interface -> rfdesc != fallback_interface -> wfdesc) {
++		if (fcntl (fallback_interface -> wfdesc, F_SETFD, 1) < 0)
++		    log_error ("Can't set close-on-exec on fallback: %m");
++	    }
++	}
++#endif
++}
++
++int if_readsocket (h)
++	omapi_object_t *h;
++{
++	struct interface_info *ip;
++
++	if (h -> type != dhcp_type_interface)
++		return -1;
++	ip = (struct interface_info *)h;
++	return ip -> rfdesc;
++}
++
++int setup_fallback (struct interface_info **fp, const char *file, int line)
++{
++	isc_result_t status;
++
++	status = interface_allocate (&fallback_interface, file, line);
++	if (status != ISC_R_SUCCESS)
++		log_fatal ("Error allocating fallback interface: %s",
++			   isc_result_totext (status));
++	strcpy (fallback_interface -> name, "fallback");
++	if (dhcp_interface_setup_hook)
++		(*dhcp_interface_setup_hook) (fallback_interface,
++					      (struct iaddr *)0);
++	status = interface_reference (fp, fallback_interface, file, line);
++
++	fallback_interface -> index = -1;
++	interface_stash (fallback_interface);
++	return status == ISC_R_SUCCESS;
++}
++
++void reinitialize_interfaces ()
++{
++	struct interface_info *ip;
++
++	for (ip = interfaces; ip; ip = ip -> next) {
++		if_reinitialize_receive (ip);
++		if_reinitialize_send (ip);
++	}
++
++	if (fallback_interface)
++		if_reinitialize_send (fallback_interface);
++
++	interfaces_invalidated = 1;
++}
++
++isc_result_t got_one (h)
++	omapi_object_t *h;
++{
++	struct sockaddr_in from;
++	struct hardware hfrom;
++	struct iaddr ifrom;
++	int result;
++	union {
++		unsigned char packbuf [4095]; /* Packet input buffer.
++					 	 Must be as large as largest
++						 possible MTU. */
++		struct dhcp_packet packet;
++	} u;
++	struct interface_info *ip;
++
++	if (h -> type != dhcp_type_interface)
++		return ISC_R_INVALIDARG;
++	ip = (struct interface_info *)h;
++
++      again:
++	if ((result =
++	     receive_packet (ip, u.packbuf, sizeof u, &from, &hfrom)) < 0) {
++		log_error ("receive_packet failed on %s: %m", ip -> name);
++		return ISC_R_UNEXPECTED;
++	}
++	if (result == 0)
++		return ISC_R_UNEXPECTED;
++
++	/*
++	 * If we didn't at least get the fixed portion of the BOOTP
++	 * packet, drop the packet.
++	 * Previously we allowed packets with no sname or filename
++	 * as we were aware of at least one client that did.  But
++	 * a bug caused short packets to not work and nobody has
++	 * complained, it seems rational to tighten up that
++	 * restriction.
++	 */
++	if (result < DHCP_FIXED_NON_UDP)
++		return ISC_R_UNEXPECTED;
++
++	if (bootp_packet_handler) {
++		ifrom.len = 4;
++		memcpy (ifrom.iabuf, &from.sin_addr, ifrom.len);
++
++		(*bootp_packet_handler) (ip, &u.packet, (unsigned)result,
++					 from.sin_port, ifrom, &hfrom);
++	}
++
++	/* If there is buffered data, read again.    This is for, e.g.,
++	   bpf, which may return two packets at once. */
++	if (ip -> rbuf_offset != ip -> rbuf_len)
++		goto again;
++	return ISC_R_SUCCESS;
++}
++
++isc_result_t dhcp_interface_set_value  (omapi_object_t *h,
++					omapi_object_t *id,
++					omapi_data_string_t *name,
++					omapi_typed_data_t *value)
++{
++	struct interface_info *interface;
++	isc_result_t status;
++	int foo;
++
++	if (h -> type != dhcp_type_interface)
++		return ISC_R_INVALIDARG;
++	interface = (struct interface_info *)h;
++
++	if (!omapi_ds_strcmp (name, "name")) {
++		if ((value -> type == omapi_datatype_data ||
++		     value -> type == omapi_datatype_string) &&
++		    value -> u.buffer.len < sizeof interface -> name) {
++			memcpy (interface -> name,
++				value -> u.buffer.value,
++				value -> u.buffer.len);
++			interface -> name [value -> u.buffer.len] = 0;
++		} else
++			return ISC_R_INVALIDARG;
++		return ISC_R_SUCCESS;
++	}
++
++	/* Try to find some inner object that can take the value. */
++	if (h -> inner && h -> inner -> type -> set_value) {
++		status = ((*(h -> inner -> type -> set_value))
++			  (h -> inner, id, name, value));
++		if (status == ISC_R_SUCCESS || status == ISC_R_UNCHANGED)
++			return status;
++	}
++			  
++	return ISC_R_NOTFOUND;
++}
++
++
++isc_result_t dhcp_interface_get_value (omapi_object_t *h,
++				       omapi_object_t *id,
++				       omapi_data_string_t *name,
++				       omapi_value_t **value)
++{
++	return ISC_R_NOTIMPLEMENTED;
++}
++
++isc_result_t dhcp_interface_destroy (omapi_object_t *h,
++					 const char *file, int line)
++{
++	struct interface_info *interface;
++	isc_result_t status;
++
++	if (h -> type != dhcp_type_interface)
++		return ISC_R_INVALIDARG;
++	interface = (struct interface_info *)h;
++
++	if (interface -> ifp) {
++		dfree (interface -> ifp, file, line);
++		interface -> ifp = 0;
++	}
++	if (interface -> next)
++		interface_dereference (&interface -> next, file, line);
++	if (interface -> rbuf) {
++		dfree (interface -> rbuf, file, line);
++		interface -> rbuf = (unsigned char *)0;
++	}
++	if (interface -> client)
++		interface -> client = (struct client_state *)0;
++
++	if (interface -> shared_network)
++		omapi_object_dereference ((omapi_object_t **)
++					  &interface -> shared_network, MDL);
++
++	return ISC_R_SUCCESS;
++}
++
++isc_result_t dhcp_interface_signal_handler (omapi_object_t *h,
++					    const char *name, va_list ap)
++{
++	struct interface_info *ip, *interface;
++	struct client_config *config;
++	struct client_state *client;
++	isc_result_t status;
++
++	if (h -> type != dhcp_type_interface)
++		return ISC_R_INVALIDARG;
++	interface = (struct interface_info *)h;
++
++	/* If it's an update signal, see if the interface is dead right
++	   now, or isn't known at all, and if that's the case, revive it. */
++	if (!strcmp (name, "update")) {
++		for (ip = dummy_interfaces; ip; ip = ip -> next)
++			if (ip == interface)
++				break;
++		if (ip && dhcp_interface_startup_hook)
++			return (*dhcp_interface_startup_hook) (ip);
++
++		for (ip = interfaces; ip; ip = ip -> next)
++			if (ip == interface)
++				break;
++		if (!ip && dhcp_interface_startup_hook)
++			return (*dhcp_interface_startup_hook) (ip);
++	}
++
++	/* Try to find some inner object that can take the value. */
++	if (h -> inner && h -> inner -> type -> signal_handler) {
++		status = ((*(h -> inner -> type -> signal_handler))
++			  (h -> inner, name, ap));
++		if (status == ISC_R_SUCCESS)
++			return status;
++	}
++	return ISC_R_NOTFOUND;
++}
++
++isc_result_t dhcp_interface_stuff_values (omapi_object_t *c,
++					  omapi_object_t *id,
++					  omapi_object_t *h)
++{
++	struct interface_info *interface;
++	isc_result_t status;
++
++	if (h -> type != dhcp_type_interface)
++		return ISC_R_INVALIDARG;
++	interface = (struct interface_info *)h;
++
++	/* Write out all the values. */
++
++	status = omapi_connection_put_name (c, "state");
++	if (status != ISC_R_SUCCESS)
++		return status;
++	if ((interface->flags & INTERFACE_REQUESTED) != 0)
++	    status = omapi_connection_put_string (c, "up");
++	else
++	    status = omapi_connection_put_string (c, "down");
++	if (status != ISC_R_SUCCESS)
++		return status;
++
++	/* Write out the inner object, if any. */
++	if (h -> inner && h -> inner -> type -> stuff_values) {
++		status = ((*(h -> inner -> type -> stuff_values))
++			  (c, id, h -> inner));
++		if (status == ISC_R_SUCCESS)
++			return status;
++	}
++
++	return ISC_R_SUCCESS;
++}
++
++isc_result_t dhcp_interface_lookup (omapi_object_t **ip,
++				    omapi_object_t *id,
++				    omapi_object_t *ref)
++{
++	omapi_value_t *tv = (omapi_value_t *)0;
++	isc_result_t status;
++	struct interface_info *interface;
++
++	if (!ref)
++		return ISC_R_NOKEYS;
++
++	/* First see if we were sent a handle. */
++	status = omapi_get_value_str (ref, id, "handle", &tv);
++	if (status == ISC_R_SUCCESS) {
++		status = omapi_handle_td_lookup (ip, tv -> value);
++
++		omapi_value_dereference (&tv, MDL);
++		if (status != ISC_R_SUCCESS)
++			return status;
++
++		/* Don't return the object if the type is wrong. */
++		if ((*ip) -> type != dhcp_type_interface) {
++			omapi_object_dereference (ip, MDL);
++			return ISC_R_INVALIDARG;
++		}
++	}
++
++	/* Now look for an interface name. */
++	status = omapi_get_value_str (ref, id, "name", &tv);
++	if (status == ISC_R_SUCCESS) {
++		char *s;
++		unsigned len;
++		for (interface = interfaces; interface;
++		     interface = interface -> next) {
++		    s = memchr (interface -> name, 0, IFNAMSIZ);
++		    if (s)
++			    len = s - &interface -> name [0];
++		    else
++			    len = IFNAMSIZ;
++		    if ((tv -> value -> u.buffer.len == len &&
++			 !memcmp (interface -> name,
++				  (char *)tv -> value -> u.buffer.value,
++				  len)))
++			    break;
++		}
++		if (!interface) {
++		    for (interface = dummy_interfaces;
++			 interface; interface = interface -> next) {
++			    s = memchr (interface -> name, 0, IFNAMSIZ);
++			    if (s)
++				    len = s - &interface -> name [0];
++			    else
++				    len = IFNAMSIZ;
++			    if ((tv -> value -> u.buffer.len == len &&
++				 !memcmp (interface -> name,
++					  (char *)
++					  tv -> value -> u.buffer.value,
++					  len)))
++				    break;
++		    }
++		}
++
++		omapi_value_dereference (&tv, MDL);
++		if (*ip && *ip != (omapi_object_t *)interface) {
++			omapi_object_dereference (ip, MDL);
++			return ISC_R_KEYCONFLICT;
++		} else if (!interface) {
++			if (*ip)
++				omapi_object_dereference (ip, MDL);
++			return ISC_R_NOTFOUND;
++		} else if (!*ip)
++			omapi_object_reference (ip,
++						(omapi_object_t *)interface,
++						MDL);
++	}
++
++	/* If we get to here without finding an interface, no valid key was
++	   specified. */
++	if (!*ip)
++		return ISC_R_NOKEYS;
++	return ISC_R_SUCCESS;
++}
++
++/* actually just go discover the interface */
++isc_result_t dhcp_interface_create (omapi_object_t **lp,
++				    omapi_object_t *id)
++{
++ 	struct interface_info *hp;
++	isc_result_t status;
++	
++	hp = (struct interface_info *)0;
++	status = interface_allocate (&hp, MDL);
++ 	if (status != ISC_R_SUCCESS)
++		return status;
++ 	hp -> flags = INTERFACE_REQUESTED;
++	status = interface_reference ((struct interface_info **)lp, hp, MDL);
++	interface_dereference (&hp, MDL);
++	return status;
++}
++
++isc_result_t dhcp_interface_remove (omapi_object_t *lp,
++				    omapi_object_t *id)
++{
++ 	struct interface_info *interface, *ip, *last;
++
++	interface = (struct interface_info *)lp;
++
++	/* remove from interfaces */
++	last = 0;
++	for (ip = interfaces; ip; ip = ip -> next) {
++		if (ip == interface) {
++			if (last) {
++				interface_dereference (&last -> next, MDL);
++				if (ip -> next)
++					interface_reference (&last -> next,
++							     ip -> next, MDL);
++			} else {
++				interface_dereference (&interfaces, MDL);
++				if (ip -> next)
++					interface_reference (&interfaces,
++							     ip -> next, MDL);
++			}
++			if (ip -> next)
++				interface_dereference (&ip -> next, MDL);
++			break;
++		}
++		last = ip;
++	}
++	if (!ip)
++		return ISC_R_NOTFOUND;
++
++	/* add the interface to the dummy_interface list */
++	if (dummy_interfaces) {
++		interface_reference (&interface -> next,
++				     dummy_interfaces, MDL);
++		interface_dereference (&dummy_interfaces, MDL);
++	}
++	interface_reference (&dummy_interfaces, interface, MDL);
++
++	/* do a DHCPRELEASE */
++	if (dhcp_interface_shutdown_hook)
++		(*dhcp_interface_shutdown_hook) (interface);
++
++	/* remove the io object */
++	omapi_unregister_io_object ((omapi_object_t *)interface);
++
++	if_deregister_send (interface);
++	if_deregister_receive (interface);
++
++	return ISC_R_SUCCESS;
++}
++
++void interface_stash (struct interface_info *tptr)
++{
++	struct interface_info **vec;
++	int delta;
++
++	/* If the registerer didn't assign an index, assign one now. */
++	if (tptr -> index == -1) {
++		tptr -> index = interface_count++;
++		while (tptr -> index < interface_max &&
++		       interface_vector [tptr -> index])
++			tptr -> index = interface_count++;
++	}
++
++	if (interface_max <= tptr -> index) {
++		delta = tptr -> index - interface_max + 10;
++		vec = dmalloc ((interface_max + delta) *
++			       sizeof (struct interface_info *), MDL);
++		if (!vec)
++			return;
++		memset (&vec [interface_max], 0,
++			(sizeof (struct interface_info *)) * delta);
++		interface_max += delta;
++		if (interface_vector) {
++		    memcpy (vec, interface_vector,
++			    (interface_count *
++			     sizeof (struct interface_info *)));
++		    dfree (interface_vector, MDL);
++		}
++		interface_vector = vec;
++	}
++	interface_reference (&interface_vector [tptr -> index], tptr, MDL);
++	if (tptr -> index >= interface_count)
++		interface_count = tptr -> index + 1;
++#if defined (TRACING)
++	trace_interface_register (interface_trace, tptr);
++#endif
++}
++
++void interface_snorf (struct interface_info *tmp, int ir)
++{
++	tmp -> circuit_id = (u_int8_t *)tmp -> name;
++	tmp -> circuit_id_len = strlen (tmp -> name);
++	tmp -> remote_id = 0;
++	tmp -> remote_id_len = 0;
++	tmp -> flags = ir;
++	if (interfaces) {
++		interface_reference (&tmp -> next,
++				     interfaces, MDL);
++		interface_dereference (&interfaces, MDL);
++	}
++	interface_reference (&interfaces, tmp, MDL);
++}
+diff -rupN dhcp-3.1-ESV-R3_orig/common/dispatch.c dhcp-3.1-ESV-R3/common/dispatch.c
+--- dhcp-3.1-ESV-R3_orig/common/dispatch.c	2011-10-10 10:21:40.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/dispatch.c	2011-10-10 10:04:04.000000000 -0400
+@@ -39,8 +39,24 @@ static char copyright[] =
+ 
+ #include "dhcpd.h"
+ 
+-struct timeout *timeouts;
+-static struct timeout *free_timeouts;
++struct timeout {
++#ifndef LIBDHCP
++	struct timeout *next;
++#endif
++	TIME when;
++	void (*func) PROTO ((void *));
++	void *what;
++	tvref_t ref;
++	tvunref_t unref;
++};
++
++#ifdef LIBDHCP
++static struct timeout *timeouts = NULL;
++static int ntimeouts = 0;
++#else
++static struct timeout *timeouts = NULL;
++static struct timeout *free_timeouts = NULL;
++#endif
+ 
+ void set_time(TIME t)
+ {
+@@ -53,9 +69,41 @@ void set_time(TIME t)
+ 
+ struct timeval *process_outstanding_timeouts (struct timeval *tvp)
+ {
++#ifdef LIBDHCP
++	int i;
++	struct timeout t = { 0 };
++#endif
+ 	/* Call any expired timeouts, and then if there's
+ 	   still a timeout registered, time out the select
+ 	   call then. */
++#ifdef LIBDHCP
++	if (!ntimeouts)
++		return NULL;
++
++	for (i = 0; i < ntimeouts && timeouts[i].when <= cur_time;) {
++		struct timeout *new_timeouts;
++		size_t n;
++
++		memmove(&t, &timeouts[i], sizeof (t));
++
++		n = (ntimeouts - i - 1) * sizeof (t);
++		memmove(&timeouts[i+1], &timeouts[i], n);
++
++		n = --ntimeouts * sizeof (t);
++		new_timeouts = realloc(timeouts, n);
++		/* XXX broken API, no way to return error here */
++		if (new_timeouts || !n)
++			timeouts = new_timeouts;
++
++		if (t.func)
++			t.func(t.what);
++		if (t.unref)
++			t.unref(t.what, MDL);
++	}
++	if (tvp && ntimeouts) {
++		tvp->tv_sec = timeouts[0].when;
++		tvp->tv_usec = 0;
++#else
+       another:
+ 	if (timeouts) {
+ 		struct timeout *t;
+@@ -73,9 +121,15 @@ struct timeval *process_outstanding_time
+ 			tvp -> tv_sec = timeouts -> when;
+ 			tvp -> tv_usec = 0;
+ 		}
++#endif
+ 		return tvp;
++#ifdef LIBDHCP
++	}
++	return NULL;
++#else
+ 	} else
+ 		return (struct timeval *)0;
++#endif
+ }
+ 
+ /* Wait for packets to come in using select().   When one does, call
+@@ -104,13 +158,28 @@ void add_timeout (when, where, what, ref
+ 	tvref_t ref;
+ 	tvunref_t unref;
+ {
++#ifdef LIBDHCP
++	struct timeout t = {
++		.when = when,
++		.func = where,
++		.what = what,
++		.ref = ref,
++		.unref = unref
++	};
++	struct timeout *new_timeouts;
++	int i, pos = 0;
++#else
+ 	struct timeout *t, *q;
++#endif
+ 
+ 	/* See if this timeout supersedes an existing timeout. */
++#ifdef LIBDHCP
++	for (i = 0; i < ntimeouts; i++) {
++		struct timeout *q = &timeouts[i];
++#else
+ 	t = (struct timeout *)0;
+ 	for (q = timeouts; q; q = q -> next) {
+-		if ((where == NULL || q -> func == where) &&
+-		    q -> what == what) {
++		if ((where == NULL || q -> func == where) && q -> what == what) {
+ 			if (t)
+ 				t -> next = q -> next;
+ 			else
+@@ -119,7 +188,29 @@ void add_timeout (when, where, what, ref
+ 		}
+ 		t = q;
+ 	}
++#endif
+ 
++#ifdef LIBDHCP
++		/* If this one is already in the list with a different time,
++		 * remove it and re-add */
++		if ((where == NULL || q->func == where) &&
++				q->what == what) {
++			size_t n = (--ntimeouts - i) * sizeof (*q);
++			memmove(&t, q, sizeof (t));
++
++			if (n)
++				memmove(&timeouts[i], &timeouts[i+1], n);
++
++			if (ntimeouts) {
++				new_timeouts = realloc(timeouts, ntimeouts * sizeof (*q));
++				/* XXX broken API, no way to return error here */
++				if (new_timeouts)
++					timeouts = new_timeouts;
++			} else {
++				timeouts = NULL;
++			}
++			add_timeout(when, where, what, ref, unref);
++#else
+ 	/* If we didn't supersede a timeout, allocate a timeout
+ 	   structure now. */
+ 	if (!q) {
+@@ -128,7 +219,7 @@ void add_timeout (when, where, what, ref
+ 			free_timeouts = q -> next;
+ 		} else {
+ 			q = ((struct timeout *)
+-			     dmalloc (sizeof (struct timeout), MDL));
++				dmalloc (sizeof (struct timeout), MDL));
+ 			if (!q)
+ 				log_fatal ("add_timeout: no memory!");
+ 		}
+@@ -158,22 +249,76 @@ void add_timeout (when, where, what, ref
+ 		if (t -> next -> when > q -> when) {
+ 			q -> next = t -> next;
+ 			t -> next = q;
++#endif
+ 			return;
++#ifdef LIBDHCP
++		} else if (timeouts[i].when > when) {
++			pos = i;
++#endif
+ 		}
+ 	}
+ 
++#ifdef LIBDHCP
++	/* If we didn't supersede an existing timeout, then pos is set
++	 * to the timeout which will post after this one.  Insert this
++	 * one before it. */
++
++	new_timeouts = realloc(timeouts, sizeof (t) * (ntimeouts+1));
++	/* XXX broken API, no way to return error here */
++	if (new_timeouts) {
++		/* ntimeouts = 10
++		 * pos = 3;
++		 * n = 10-3 * sizeof (t) = 7 * sizeof (t) 
++		 */
++		size_t n = (ntimeouts - pos) * sizeof (t);
++
++		timeouts = new_timeouts;
++		memmove(&timeouts[pos+1], &timeouts[pos], n);
++		memmove(&timeouts[pos], &t, sizeof (t));
++		ntimeouts++;
++	}
++#else
+ 	/* End of list. */
+ 	t -> next = q;
+ 	q -> next = (struct timeout *)0;
++#endif
+ }
+ 
+ void cancel_timeout (where, what)
+ 	void (*where) PROTO ((void *));
+ 	void *what;
+ {
++#ifdef LIBDHCP
++	struct timeout t;
++	int i = 0;
++#else
+ 	struct timeout *t, *q;
++#endif
+ 
+ 	/* Look for this timeout on the list, and unlink it if we find it. */
++#ifdef LIBDHCP
++	for (i = 0; i < ntimeouts; i++) {
++		struct timeout *new_timeouts, *q = &timeouts[i];
++
++		if (q->func == where && q->what == what) {
++			size_t n;
++
++			memmove(&t, q, sizeof (t));
++
++			n = (ntimeouts - i - 1) * sizeof (t);
++			memmove(&timeouts[i+1], &timeouts[i], n);
++
++			n = --ntimeouts * sizeof (t);
++			new_timeouts = realloc(timeouts, n);
++			/* XXX broken API, no way to return error here */
++			if (new_timeouts || !n)
++				timeouts = new_timeouts;
++
++			if (t.unref)
++				t.unref(t.what, MDL);
++		}
++	}
++#else
+ 	t = (struct timeout *)0;
+ 	for (q = timeouts; q; q = q -> next) {
+ 		if (q -> func == where && q -> what == what) {
+@@ -205,13 +350,20 @@ void cancel_all_timeouts ()
+ 		t -> next = free_timeouts;
+ 		free_timeouts = t;
+ 	}
++#endif
+ }
+ 
++__attribute__ ((visibility ("default")))
+ void relinquish_timeouts ()
+ {
++#ifdef LIBDHCP
++	while (ntimeouts)
++		cancel_timeout(timeouts[0].func, timeouts[0].what);
++#else
+ 	struct timeout *t, *n;
+ 	for (t = free_timeouts; t; t = n) {
+ 		n = t -> next;
+ 		dfree (t, MDL);
+ 	}
++#endif
+ }
+diff -rupN dhcp-3.1-ESV-R3_orig/common/dispatch.c.rej dhcp-3.1-ESV-R3/common/dispatch.c.rej
+--- dhcp-3.1-ESV-R3_orig/common/dispatch.c.rej	1969-12-31 19:00:00.000000000 -0500
++++ dhcp-3.1-ESV-R3/common/dispatch.c.rej	2011-10-10 09:41:10.000000000 -0400
+@@ -0,0 +1,30 @@
++***************
++*** 193,203 ****
++  		q -> next = free_timeouts;
++  		free_timeouts = q;
++  	}
++  }
++  
++  #if defined (DEBUG_MEMORY_LEAKAGE_ON_EXIT)
++  void cancel_all_timeouts ()
++  {
++  	struct timeout *t, *n;
++  	for (t = timeouts; t; t = n) {
++  		n = t -> next;
++--- 338,353 ----
++  		q -> next = free_timeouts;
++  		free_timeouts = q;
++  	}
+++ #endif
++  }
++  
++  #if defined (DEBUG_MEMORY_LEAKAGE_ON_EXIT)
++  void cancel_all_timeouts ()
++  {
+++ #ifdef LIBDHCP
+++ 	cur_time = TIME_MAX;
+++ 	process_outstanding_timeouts(NULL);
+++ #else
++  	struct timeout *t, *n;
++  	for (t = timeouts; t; t = n) {
++  		n = t -> next;
+diff -rupN dhcp-3.1-ESV-R3_orig/common/options.c dhcp-3.1-ESV-R3/common/options.c
+--- dhcp-3.1-ESV-R3_orig/common/options.c	2011-07-07 15:18:47.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/options.c	2011-10-10 10:07:02.000000000 -0400
+@@ -2576,6 +2576,7 @@ int fqdn_option_space_encapsulate (resul
+ 	return 1;
+ }
+ 
++__attribute__ ((visibility ("default")))
+ void option_space_foreach (struct packet *packet, struct lease *lease,
+ 			   struct client_state *client_state,
+ 			   struct option_state *in_options,
+diff -rupN dhcp-3.1-ESV-R3_orig/common/tree.c dhcp-3.1-ESV-R3/common/tree.c
+--- dhcp-3.1-ESV-R3_orig/common/tree.c	2009-07-23 17:43:34.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/tree.c	2011-10-10 09:41:10.000000000 -0400
+@@ -41,7 +41,7 @@ static char copyright[] =
+ #include <omapip/omapip_p.h>
+ #include <ctype.h>
+ 
+-struct binding_scope *global_scope;
++struct binding_scope __attribute__ ((visibility ("default"))) *global_scope;
+ 
+ static int do_host_lookup PROTO ((struct data_string *,
+ 				  struct dns_host_entry *));
+@@ -2761,6 +2761,7 @@ int evaluate_numeric_expression (result,
+    result of that evaluation.   There should never be both an expression
+    and a valid data_string. */
+ 
++__attribute__ ((visibility ("default")))
+ int evaluate_option_cache (result, packet, lease, client_state,
+ 			   in_options, cfg_options, scope, oc, file, line)
+ 	struct data_string *result;
+diff -rupN dhcp-3.1-ESV-R3_orig/configure dhcp-3.1-ESV-R3/configure
+--- dhcp-3.1-ESV-R3_orig/configure	2005-03-17 15:14:55.000000000 -0500
++++ dhcp-3.1-ESV-R3/configure	2011-10-10 09:41:10.000000000 -0400
+@@ -246,7 +246,7 @@ if [ ! -d $workname ]; then
+ fi
+ 
+ if [ x"$dirs" = x ]; then
+-  dirs=". client server relay common omapip dhcpctl minires dst"
++  dirs=". client server relay common omapip dhcpctl minires dst libdhcp4client"
+ fi
+ 
+ for foo in $dirs; do
+diff -rupN dhcp-3.1-ESV-R3_orig/dst/hmac_link.c dhcp-3.1-ESV-R3/dst/hmac_link.c
+--- dhcp-3.1-ESV-R3_orig/dst/hmac_link.c	2001-02-22 02:22:08.000000000 -0500
++++ dhcp-3.1-ESV-R3/dst/hmac_link.c	2011-10-10 09:41:10.000000000 -0400
+@@ -38,6 +38,10 @@ static const char rcsid[] = "$Header: /p
+ 
+ #include "dst_internal.h"
+ 
++#ifdef LIBDHCP
++extern void* dmalloc(size_t,char *,int);
++#endif
++
+ #ifdef USE_MD5
+ # include "md5.h"
+ # ifndef _MD5_H_
+@@ -86,7 +90,11 @@ dst_hmac_md5_sign(const int mode, DST_KE
+ 	MD5_CTX *ctx = NULL;
+ 
+ 	if (mode & SIG_MODE_INIT) 
++#ifdef LIBDHCP
++		ctx = (MD5_CTX *) dmalloc(sizeof(*ctx),__FILE__,__LINE__);
++#else
+ 		ctx = (MD5_CTX *) malloc(sizeof(*ctx));
++#endif
+ 	else if (context)
+ 		ctx = (MD5_CTX *) *context;
+ 	if (ctx == NULL) 
+@@ -153,7 +161,11 @@ dst_hmac_md5_verify(const int mode, DST_
+ 	MD5_CTX *ctx = NULL;
+ 
+ 	if (mode & SIG_MODE_INIT) 
++#ifdef LIBDHCP
++		ctx = (MD5_CTX *) dmalloc(sizeof(*ctx),__FILE__,__LINE__);
++#else
+ 		ctx = (MD5_CTX *) malloc(sizeof(*ctx));
++#endif
+ 	else if (context)
+ 		ctx = (MD5_CTX *) *context;
+ 	if (ctx == NULL) 
+@@ -217,8 +229,11 @@ dst_buffer_to_hmac_md5(DST_KEY *dkey, co
+ 
+ 	if (dkey == NULL || key == NULL || keylen < 0)
+ 		return (-1);
+-
++#ifdef  LIBDHCP
++	if ((hkey = (HMAC_Key *) dmalloc(sizeof(HMAC_Key),__FILE__,__LINE__)) == NULL)
++#else
+ 	if ((hkey = (HMAC_Key *) malloc(sizeof(HMAC_Key))) == NULL)
++#endif
+ 		  return (-2);
+ 
+ 	memset(hkey->hk_ipad, 0, sizeof(hkey->hk_ipad));
+@@ -347,7 +362,11 @@ dst_hmac_md5_key_from_file_format(DST_KE
+ 	if (eol == NULL)
+ 		return (-4);
+ 	len = eol - p;
++#ifdef LIBDHCP
++	tmp = dmalloc(len + 2,__FILE__,__LINE__);
++#else
+ 	tmp = malloc(len + 2);
++#endif
+ 	memcpy(tmp, p, len);
+ 	*(tmp + len) = 0x0;
+ 	key_len = b64_pton((char *)tmp, key, HMAC_LEN+1);	/* see above */
+@@ -439,8 +458,11 @@ dst_hmac_md5_generate_key(DST_KEY *key, 
+ 		return(0);
+ 	
+ 	len = size > 64 ? 64 : size;
++#ifdef LIBDHCP
++	buff = dmalloc(len+8,__FILE__,__LINE__);
++#else
+ 	buff = malloc(len+8);
+-
++#endif
+ 	n = dst_random(DST_RAND_SEMI, len, buff);
+ 	n += dst_random(DST_RAND_KEY, len, buff);
+ 	if (n <= len) {	/* failed getting anything */
+@@ -463,7 +485,11 @@ dst_hmac_md5_init()
+ {
+ 	if (dst_t_func[KEY_HMAC_MD5] != NULL)
+ 		return (1);
++#ifdef LIBDHCP
++	dst_t_func[KEY_HMAC_MD5] = dmalloc(sizeof(struct dst_func),__FILE__,__LINE__);
++#else
+ 	dst_t_func[KEY_HMAC_MD5] = malloc(sizeof(struct dst_func));
++#endif
+ 	if (dst_t_func[KEY_HMAC_MD5] == NULL)
+ 		return (0);
+ 	memset(dst_t_func[KEY_HMAC_MD5], 0, sizeof(struct dst_func));
+diff -rupN dhcp-3.1-ESV-R3_orig/includes/dhcpd.h dhcp-3.1-ESV-R3/includes/dhcpd.h
+--- dhcp-3.1-ESV-R3_orig/includes/dhcpd.h	2011-10-10 10:21:41.000000000 -0400
++++ dhcp-3.1-ESV-R3/includes/dhcpd.h	2011-10-10 09:41:10.000000000 -0400
+@@ -1018,14 +1018,6 @@ struct hardware_link {
+ 
+ typedef void (*tvref_t)(void *, void *, const char *, int);
+ typedef void (*tvunref_t)(void *, const char *, int);
+-struct timeout {
+-	struct timeout *next;
+-	TIME when;
+-	void (*func) PROTO ((void *));
+-	void *what;
+-	tvref_t ref;
+-	tvunref_t unref;
+-};
+ 
+ struct protocol {
+ 	struct protocol *next;
+@@ -1986,7 +1978,6 @@ extern void (*bootp_packet_handler) PROT
+ 					    struct dhcp_packet *, unsigned,
+ 					    unsigned int,
+ 					    struct iaddr, struct hardware *));
+-extern struct timeout *timeouts;
+ extern omapi_object_type_t *dhcp_type_interface;
+ #if defined (TRACING)
+ trace_type_t *interface_trace;
+diff -rupN dhcp-3.1-ESV-R3_orig/includes/dhcpd.h.orig dhcp-3.1-ESV-R3/includes/dhcpd.h.orig
+--- dhcp-3.1-ESV-R3_orig/includes/dhcpd.h.orig	2011-10-10 10:21:40.000000000 -0400
++++ dhcp-3.1-ESV-R3/includes/dhcpd.h.orig	2011-10-10 09:41:09.000000000 -0400
+@@ -2176,7 +2176,7 @@ ssize_t decode_hw_header PROTO ((struct 
+ 				 unsigned, struct hardware *));
+ ssize_t decode_udp_ip_header PROTO ((struct interface_info *, unsigned char *,
+ 				     unsigned, struct sockaddr_in *,
+-				     unsigned, unsigned *));
++				     unsigned, unsigned *, int));
+ 
+ /* ethernet.c */
+ void assemble_ethernet_header PROTO ((struct interface_info *, unsigned char *,
+diff -rupN dhcp-3.1-ESV-R3_orig/Makefile.dist dhcp-3.1-ESV-R3/Makefile.dist
+--- dhcp-3.1-ESV-R3_orig/Makefile.dist	2009-07-23 17:43:33.000000000 -0400
++++ dhcp-3.1-ESV-R3/Makefile.dist	2011-10-10 09:41:10.000000000 -0400
+@@ -22,7 +22,7 @@
+ #   https://www.isc.org/
+ 
+ 
+-SUBDIRS=	common $(MINIRES) dst omapip server client relay dhcpctl
++SUBDIRS=	common $(MINIRES) dst omapip server client relay dhcpctl libdhcp4client
+ 
+ all:
+ 	@for dir in ${SUBDIRS}; do \
+diff -rupN dhcp-3.1-ESV-R3_orig/omapip/alloc.c dhcp-3.1-ESV-R3/omapip/alloc.c
+--- dhcp-3.1-ESV-R3_orig/omapip/alloc.c	2009-09-01 16:32:28.000000000 -0400
++++ dhcp-3.1-ESV-R3/omapip/alloc.c	2011-10-10 09:41:10.000000000 -0400
+@@ -40,6 +40,33 @@ static char copyright[] =
+ 
+ #include <omapip/omapip_p.h>
+ 
++#ifdef LIBDHCP
++/* OK, we need a quick and dirty way of freeing all memory used by libdhcp. 
++   All pointers will be stored in a glibc tree on alloc, and removed on free.
++   This is not too expensive for light single-call library use.
++*/
++#include <search.h>  
++extern void tdestroy (void *root, void (*free_node)(void *nodep));
++static void *all_pointers=0L;
++static int ptr_comparator(const void *p1, const void *p2) {
++    return ((p1 == p2) ? 0 : ((p1 > p2) ? 1 : -1));
++}
++
++static void record_pointer(void *ptr) {
++    tsearch(ptr, &(all_pointers), ptr_comparator);
++}
++
++static void forget_pointer(void *ptr) {
++    tdelete(ptr, &(all_pointers), ptr_comparator);
++}
++
++void omapi_free_all_pointers(void) {
++    if (all_pointers != NULL)
++		tdestroy(all_pointers, free);
++    all_pointers = NULL;
++}
++#endif
++
+ #if defined (DEBUG_MEMORY_LEAKAGE) || defined (DEBUG_MALLOC_POOL) || \
+ 		defined (DEBUG_MEMORY_LEAKAGE_ON_EXIT)
+ struct dmalloc_preamble *dmalloc_list;
+@@ -78,7 +105,9 @@ VOIDPTR dmalloc (size, file, line)
+ 		return (VOIDPTR)0;
+ 
+ 	foo = malloc(len);
+-
++#ifdef LIBDHCP
++	record_pointer(foo);
++#endif
+ 	if (!foo)
+ 		return (VOIDPTR)0;
+ 	bar = (VOIDPTR)(foo + DMDOFFSET);
+@@ -200,6 +229,9 @@ void dfree (ptr, file, line)
+ 		     0, (unsigned char *)ptr + DMDOFFSET, 0, 1, RC_MALLOC);
+ #endif
+ 	free (ptr);
++#ifdef LIBDHCP
++	forget_pointer(ptr);
++#endif
+ }
+ 
+ #if defined (DEBUG_MEMORY_LEAKAGE) || defined (DEBUG_MALLOC_POOL) || \
+diff -rupN dhcp-3.1-ESV-R3_orig/omapip/dispatch.c dhcp-3.1-ESV-R3/omapip/dispatch.c
+--- dhcp-3.1-ESV-R3_orig/omapip/dispatch.c	2010-03-17 19:20:59.000000000 -0400
++++ dhcp-3.1-ESV-R3/omapip/dispatch.c	2011-10-10 09:41:10.000000000 -0400
+@@ -34,7 +34,7 @@
+ 
+ #include <omapip/omapip_p.h>
+ 
+-static omapi_io_object_t omapi_io_states;
++omapi_io_object_t omapi_io_states;
+ TIME cur_time;
+ 
+ OMAPI_OBJECT_ALLOC (omapi_io,
+diff -rupN dhcp-3.1-ESV-R3_orig/omapip/errwarn.c dhcp-3.1-ESV-R3/omapip/errwarn.c
+--- dhcp-3.1-ESV-R3_orig/omapip/errwarn.c	2011-10-10 10:21:41.000000000 -0400
++++ dhcp-3.1-ESV-R3/omapip/errwarn.c	2011-10-10 10:15:37.000000000 -0400
+@@ -40,6 +40,11 @@ static char copyright[] =
+ #include <omapip/omapip_p.h>
+ #include <errno.h>
+ 
++#ifdef LIBDHCP
++#include <isc-dhcp/libdhcp_control.h>
++extern LIBDHCP_Control *libdhcp_control;
++#endif
++
+ #ifdef DEBUG
+ int log_perror = -1;
+ #else
+@@ -49,7 +54,9 @@ int log_priority;
+ void (*log_cleanup) (void);
+ 
+ #define CVT_BUF_MAX 1023
++#ifndef LIBDHCP
+ static char mbuf [CVT_BUF_MAX + 1];
++#endif
+ static char fbuf [CVT_BUF_MAX + 1];
+ 
+ /* Log an error message, then exit... */
+@@ -59,6 +66,16 @@ void log_fatal (const char * fmt, ... )
+   va_list list;
+ 
+   do_percentm (fbuf, fmt);
++  
++#ifdef LIBDHCP
++  if (libdhcp_control && (libdhcp_control->eh)) {
++      va_start (list, fmt);
++      libdhcp_control->eh(libdhcp_control, LOG_FATAL, fbuf, list);
++      va_end(list);
++      libdhcp_control->finished = 1;
++      return;
++  }
++#else
+ 
+   /* %Audit% This is log output. %2004.06.17,Safe%
+    * If we truncate we hope the user can get a hint from the log.
+@@ -92,6 +109,7 @@ void log_fatal (const char * fmt, ... )
+   if (log_cleanup)
+ 	  (*log_cleanup) ();
+   exit (1);
++#endif
+ }
+ 
+ /* Log an error message... */
+@@ -102,6 +120,13 @@ int log_error (const char * fmt, ...)
+ 
+   do_percentm (fbuf, fmt);
+ 
++#ifdef LIBDHCP
++  if (libdhcp_control && libdhcp_control->eh) {
++      va_start (list, fmt);
++      libdhcp_control->eh(libdhcp_control, LOG_ERR, fbuf, list);
++      va_end(list);
++  }
++#else
+   /* %Audit% This is log output. %2004.06.17,Safe%
+    * If we truncate we hope the user can get a hint from the log.
+    */
+@@ -117,7 +142,7 @@ int log_error (const char * fmt, ...)
+ 	  IGNORE_RET(write(STDERR_FILENO, mbuf, strlen (mbuf)));
+ 	  IGNORE_RET(write(STDERR_FILENO, "\n", 1));
+   }
+-
++#endif
+   return 0;
+ }
+ 
+@@ -129,6 +154,13 @@ int log_info (const char *fmt, ...)
+ 
+   do_percentm (fbuf, fmt);
+ 
++#ifdef LIBDHCP
++  if (libdhcp_control && libdhcp_control->eh) {
++      va_start (list, fmt);
++      libdhcp_control->eh(libdhcp_control, LOG_INFO, fbuf, list);
++      va_end(list);
++  }
++#else
+   /* %Audit% This is log output. %2004.06.17,Safe%
+    * If we truncate we hope the user can get a hint from the log.
+    */
+@@ -144,7 +176,7 @@ int log_info (const char *fmt, ...)
+ 	  IGNORE_RET(write(STDERR_FILENO, mbuf, strlen (mbuf)));
+ 	  IGNORE_RET(write(STDERR_FILENO, "\n", 1));
+   }
+-
++#endif
+   return 0;
+ }
+ 
+@@ -155,7 +187,13 @@ int log_debug (const char *fmt, ...)
+   va_list list;
+ 
+   do_percentm (fbuf, fmt);
+-
++#ifdef LIBDHCP
++  if (libdhcp_control && libdhcp_control->eh) {
++      va_start (list, fmt);
++      libdhcp_control->eh(libdhcp_control, LOG_DEBUG, fbuf, list);
++      va_end(list);
++  }
++#else
+   /* %Audit% This is log output. %2004.06.17,Safe%
+    * If we truncate we hope the user can get a hint from the log.
+    */
+@@ -171,7 +209,7 @@ int log_debug (const char *fmt, ...)
+ 	  IGNORE_RET(write(STDERR_FILENO, mbuf, strlen (mbuf)));
+ 	  IGNORE_RET(write(STDERR_FILENO, "\n", 1));
+   }
+-
++#endif
+   return 0;
+ }
+ 
+diff -rupN dhcp-3.1-ESV-R3_orig/omapip/errwarn.c.orig dhcp-3.1-ESV-R3/omapip/errwarn.c.orig
+--- dhcp-3.1-ESV-R3_orig/omapip/errwarn.c.orig	2010-03-17 15:32:13.000000000 -0400
++++ dhcp-3.1-ESV-R3/omapip/errwarn.c.orig	2011-10-10 09:41:10.000000000 -0400
+@@ -79,20 +79,13 @@ void log_fatal (const char * fmt, ... )
+ 
+ #if !defined (NOMINUM)
+   log_error ("%s", "");
+-  log_error ("If you did not get this software from ftp.isc.org, please");
+-  log_error ("get the latest from ftp.isc.org and install that before");
+-  log_error ("requesting help.");
++  log_error ("This version of ISC DHCP is based on the release available");
++  log_error ("on ftp.isc.org.  Features have been added and other changes");
++  log_error ("have been made to the base software release in order to make");
++  log_error ("it work better with this distribution.");
+   log_error ("%s", "");
+-  log_error ("If you did get this software from ftp.isc.org and have not");
+-  log_error ("yet read the README, please read it before requesting help.");
+-  log_error ("If you intend to request help from the dhcp-server@isc.org");
+-  log_error ("mailing list, please read the section on the README about");
+-  log_error ("submitting bug reports and requests for help.");
+-  log_error ("%s", "");
+-  log_error ("Please do not under any circumstances send requests for");
+-  log_error ("help directly to the authors of this software - please");
+-  log_error ("send them to the appropriate mailing list as described in");
+-  log_error ("the README file.");
++  log_error ("Please report for this software via the rITS site:");
++  log_error ("    http://issues.rpath.com");
+   log_error ("%s", "");
+   log_error ("exiting.");
+ #endif

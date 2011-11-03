@@ -1,0 +1,1151 @@
+diff -rupN dhcp-3.1-ESV-R3_orig/client/clparse.c dhcp-3.1-ESV-R3/client/clparse.c
+--- dhcp-3.1-ESV-R3_orig/client/clparse.c	2011-10-10 10:43:31.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/clparse.c	2011-10-10 10:46:14.000000000 -0400
+@@ -87,6 +87,7 @@ isc_result_t read_client_conf ()
+ 	top_level_config.requested_options = default_requested_options;
+ 	top_level_config.omapi_port = -1;
+ 	top_level_config.do_forward_update = 1;
++	top_level_config.bootp_broadcast_always = 0;
+ 
+ 	group_allocate (&top_level_config.on_receipt, MDL);
+ 	if (!top_level_config.on_receipt)
+@@ -233,7 +234,8 @@ void read_client_leases ()
+ 	interface-declaration |
+ 	LEASE client-lease-statement |
+ 	ALIAS client-lease-statement |
+-	KEY key-definition */
++	KEY key-definition |
++	BOOTP_BROADCAST_ALWAYS */
+ 
+ void parse_client_statement (cfile, ip, config)
+ 	struct parse *cfile;
+@@ -570,6 +572,12 @@ void parse_client_statement (cfile, ip, 
+ 		parse_reject_statement (cfile, config);
+ 		return;
+ 
++	      case BOOTP_BROADCAST_ALWAYS:
++		token = next_token(&val, (unsigned*)0, cfile);
++		config -> bootp_broadcast_always = 1;
++		parse_semi (cfile);
++		return;
++
+ 	      default:
+ 		lose = 0;
+ 		stmt = (struct executable_statement *)0;
+diff -rupN dhcp-3.1-ESV-R3_orig/client/clparse.c.orig dhcp-3.1-ESV-R3/client/clparse.c.orig
+--- dhcp-3.1-ESV-R3_orig/client/clparse.c.orig	2009-09-01 16:32:27.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/clparse.c.orig	2011-10-10 10:46:13.000000000 -0400
+@@ -51,6 +51,9 @@ u_int32_t default_requested_options [] =
+ 	DHO_DOMAIN_NAME,
+ 	DHO_DOMAIN_NAME_SERVERS,
+ 	DHO_HOST_NAME,
++	DHO_NIS_DOMAIN,
++	DHO_NIS_SERVERS,
++	DHO_NTP_SERVERS,
+ 	0
+ };
+ 
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c dhcp-3.1-ESV-R3/client/dhclient.c
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c	2011-10-10 10:43:32.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/dhclient.c	2011-10-10 11:23:37.000000000 -0400
+@@ -38,6 +38,12 @@ static char ocopyright[] =
+ #include "dhcpd.h"
+ #include "version.h"
+ 
++/*
++ * Defined in stdio.h when _GNU_SOURCE is set, but we don't want to define
++ * that when building ISC code.
++ */
++extern int asprintf(char **strp, const char *fmt, ...);
++
+ TIME default_lease_time = 43200; /* 12 hours... */
+ TIME max_lease_time = 86400; /* 24 hours... */
+ 
+@@ -76,6 +82,9 @@ int client_env_count=0;
+ int onetry=0;
+ int quiet=0;
+ int nowait=0;
++int bootp_broadcast_always = 0;
++
++extern u_int32_t default_requested_options[];
+ 
+ #ifdef LIBDHCP
+ FILE *leaseFile = NULL;
+@@ -143,6 +152,15 @@ int main (argc, argv, envp)
+ 	int no_dhclient_pid = 0;
+ 	int no_dhclient_script = 0;
+ 	char *s;
++	char *dhcp_client_identifier_arg = NULL;
++	char *dhcp_host_name_arg = NULL;
++	char *dhcp_fqdn_arg = NULL;
++	char *dhcp_vendor_class_identifier_arg = NULL;
++	char *dhclient_request_options = NULL;
++
++	int timeout_arg = 0;
++	char *arg_conf = NULL;
++	int arg_conf_len = 0;
+ 
+ #ifndef LIBDHCP
+         /* Make sure that file descriptors 0 (stdin), 1, (stdout), and
+@@ -255,6 +273,88 @@ int main (argc, argv, envp)
+ 		} else if (!strcmp (argv [i], "--version")) {
+ 			log_info ("isc-dhclient-%s", DHCP_VERSION);
+ 			exit (0);
++		} else if (!strcmp (argv [i], "-I")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			if (strlen(argv[i]) >= DHCP_MAX_OPTION_LEN) {
++				log_error("-I option dhcp-client-identifier string \"%s\" is too long - maximum length is: %d",  argv[i], DHCP_MAX_OPTION_LEN-1);
++				exit(1);
++			}
++
++			dhcp_client_identifier_arg = argv[i];
++		} else if (!strcmp (argv [i], "-B")) {
++			bootp_broadcast_always = 1;
++		} else if (!strcmp (argv [i], "-H")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			if (strlen(argv[i]) >= DHCP_MAX_OPTION_LEN) {
++				log_error("-H option host-name string \"%s\" is too long - maximum length is: %d",  argv[i], DHCP_MAX_OPTION_LEN-1);
++				exit(1);
++			}
++
++			if (dhcp_host_name_arg != NULL) {
++				log_error("The -H <host-name> and -F <fqdn> arguments are mutually exclusive");
++				exit(1);
++			}
++
++			dhcp_host_name_arg = argv[i];
++		} else if (!strcmp (argv [i], "-F")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			if (strlen(argv[i]) >= DHCP_MAX_OPTION_LEN) {
++				log_error("-F option fqdn.fqdn string \"%s\" is too long - maximum length is: %d",  argv[i], DHCP_MAX_OPTION_LEN-1);
++				exit(1);
++			}
++
++			if (dhcp_fqdn_arg != NULL) {
++				log_error("Only one -F <fqdn> argument can be specified");
++				exit(1);
++			}
++
++			if (dhcp_host_name_arg != NULL) {
++				log_error("The -F <fqdn> and -H <host-name> arguments are mutually exclusive");
++				exit(1);
++			}
++
++			dhcp_fqdn_arg = argv[i];
++		} else if (!strcmp (argv [i], "-T")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			if ((timeout_arg = atoi(argv[i])) <= 0) {
++				log_error("-T timeout option must be > 0 - bad value: %s",argv[i]);
++				exit(1);
++			}
++		} else if (!strcmp (argv [i], "-V")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			if (strlen(argv[i]) >= DHCP_MAX_OPTION_LEN) {
++				log_error("-V option vendor-class-identifier string \"%s\" is too long - maximum length is: %d",  argv[i], DHCP_MAX_OPTION_LEN-1);
++				exit(1);
++			}
++
++			dhcp_vendor_class_identifier_arg = argv[i];
++		} else if (!strcmp (argv [i], "-R")) {
++			if ((++i == argc) || (argv[i] == NULL) || (*(argv[i])=='\0')) {
++				usage ();
++				return EXIT_FAILURE;
++			}
++
++			dhclient_request_options=argv[i];
+  		} else if (argv [i][0] == '-') {
+  		    usage ();
+ 		} else {
+@@ -463,6 +563,168 @@ int main (argc, argv, envp)
+ 	/* Parse the dhclient.conf file. */
+ 	read_client_conf ();
+ 
++
++    /* Parse any extra command line configuration arguments: */
++    if ((dhcp_client_identifier_arg != NULL) && (*dhcp_client_identifier_arg != '\0')) {
++        arg_conf_len = asprintf(&arg_conf, "send dhcp-client-identifier \"%s\";", dhcp_client_identifier_arg);
++
++        if ((arg_conf == 0) || (arg_conf_len <= 0))
++            log_fatal("Unable to send -I option dhcp-client-identifier");
++    }
++
++    if ((dhcp_host_name_arg != NULL) && (*dhcp_host_name_arg != '\0')) {
++        if (arg_conf == 0) {
++            arg_conf_len = asprintf(&arg_conf, "send host-name \"%s\";", dhcp_host_name_arg);
++
++                if ((arg_conf == 0) || (arg_conf_len <= 0))
++            log_fatal("Unable to send -H option host-name");
++        } else {
++        char *last_arg_conf = arg_conf;
++            arg_conf = NULL;
++            arg_conf_len = asprintf( &arg_conf, "%s\nsend host-name \"%s\";", last_arg_conf, dhcp_host_name_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to send -H option host-name");
++
++            free(last_arg_conf);
++        }
++    }
++
++    if ((dhcp_fqdn_arg != NULL) && (*dhcp_fqdn_arg != '\0')) {
++        if (arg_conf == 0) {
++            arg_conf_len = asprintf(&arg_conf,  "send fqdn.fqdn \"%s\";", dhcp_fqdn_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to send -F option fqdn.fqdn");
++        } else {
++            char *last_arg_conf = arg_conf;
++            arg_conf = NULL;
++            arg_conf_len = asprintf( &arg_conf, "%s\nsend fqdn.fqdn \"%s\";", last_arg_conf, dhcp_fqdn_arg);
++
++            if ((arg_conf == 0)  || (arg_conf_len <= 0))
++                log_fatal("Unable to send -F option fqdn.fqdn");
++
++            free(last_arg_conf);
++        }
++    }
++
++    if (timeout_arg) {
++        if (arg_conf == 0) {
++            arg_conf_len = asprintf(&arg_conf,  "timeout %d;", timeout_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to process -T timeout argument");
++        } else {
++            char *last_arg_conf = arg_conf;
++            arg_conf = NULL;
++            arg_conf_len = asprintf( &arg_conf, "%s\ntimeout %d;", last_arg_conf, timeout_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len == 0))
++                log_fatal("Unable to process -T timeout argument");
++
++            free(last_arg_conf);
++        }
++    }
++
++    if ((dhcp_vendor_class_identifier_arg != NULL) && (*dhcp_vendor_class_identifier_arg != '\0')) {
++        if (arg_conf == 0) {
++            arg_conf_len = asprintf(&arg_conf,  "send vendor-class-identifier \"%s\";", dhcp_vendor_class_identifier_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to send -V option vendor-class-identifier");
++        } else {
++            char *last_arg_conf = arg_conf;
++            arg_conf = NULL;
++            arg_conf_len = asprintf(&arg_conf, "%s\nsend vendor-class-identifier \"%s\";", last_arg_conf, dhcp_vendor_class_identifier_arg);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to send -V option vendor-class-identifier");
++
++            free(last_arg_conf);
++        }
++    }
++
++    if (dhclient_request_options != NULL) {
++        if (arg_conf == 0) {
++            arg_conf_len = asprintf(&arg_conf,  "request %s;", dhclient_request_options);
++
++            if ((arg_conf == 0) || (arg_conf_len <= 0))
++                log_fatal("Unable to parse -R <request options list> argument");
++        } else {
++            char *last_arg_conf = arg_conf;
++            arg_conf = NULL;
++            arg_conf_len = asprintf(&arg_conf, "%s\nrequest %s;", last_arg_conf, dhclient_request_options);
++
++            if ((arg_conf == 0)  || (arg_conf_len <= 0))
++                log_fatal("Unable to parse -R <request options list> argument");
++
++            free(last_arg_conf);
++        }
++    }
++
++    if (arg_conf) {
++        if (arg_conf_len == 0)
++            if ((arg_conf_len = strlen(arg_conf)) == 0)
++                /* huh ? cannot happen ! */
++                log_fatal("Unable to process -I/-H/-F/-T/-V/-R configuration arguments");
++
++        /* parse the extra dhclient.conf configuration arguments
++        * into top level config: */
++        struct parse *cfile = (struct parse *)0;
++        const char *val = NULL;
++        int token;
++
++        status = new_parse (&cfile, -1, arg_conf, arg_conf_len, "extra dhclient -I/-H/-F/-T/-V/-R configuration arguments", 0);
++
++        if ((status != ISC_R_SUCCESS) || (cfile -> warnings_occurred))
++            log_fatal("Cannot parse -I/-H/-F/-T/-V/-R configuration arguments !");
++        /* more detailed parse failures will be logged */
++
++        do {
++            token = peek_token (&val, (unsigned *)0, cfile);
++            if (token == END_OF_FILE)
++                break;
++
++            parse_client_statement (cfile, (struct interface_info *)0, &top_level_config);
++        } while (1);
++
++        if (cfile -> warnings_occurred)
++            log_fatal ("Cannot parse -I/-H/-F/-T/-V/-R configuration arguments !");
++        end_parse (&cfile);
++
++        if (timeout_arg) {
++            /* we just set the toplevel timeout, but per-client
++             * timeouts may still be at defaults. Also, it makes no
++             * sense having the reboot_timeout or backoff_cutoff
++             * greater than the timeout:
++             */
++            if ((top_level_config.backoff_cutoff == 15) && (top_level_config.backoff_cutoff > (timeout_arg / 2)))
++                top_level_config.backoff_cutoff = (((unsigned long)(timeout_arg / 2)) == 0) ? timeout_arg : (unsigned long)(timeout_arg / 2);
++
++            for (ip = interfaces; ip; ip = ip -> next) {
++                if (ip->client->config->timeout == 60)
++                    ip->client->config->timeout = timeout_arg;
++
++                if ((ip->client->config->reboot_timeout == 10) && (ip->client->config->reboot_timeout > ip->client->config->timeout))
++                    ip->client->config->reboot_timeout = ip->client->config->timeout;
++
++                if ((ip->client->config->backoff_cutoff == 15) && (ip->client->config->backoff_cutoff > top_level_config.backoff_cutoff))
++                    ip->client->config->backoff_cutoff = top_level_config.backoff_cutoff;
++            }
++        }
++
++        if ((dhclient_request_options != 0) && (top_level_config.requested_options != default_requested_options)) {
++            for (ip = interfaces; ip; ip = ip -> next) {
++                if (ip->client->config->requested_options == default_requested_options)
++                    ip->client->config->requested_options = top_level_config.requested_options;
++            }
++        }
++
++        free(arg_conf);
++        arg_conf = NULL;
++        arg_conf_len = 0;
++    }
++
+ #ifdef LIBDHCP
+ 	if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_LEASE_DATABASE)) {
+ #endif
+@@ -2266,7 +2528,8 @@ void make_discover (client, lease)
+ 	client -> packet.xid = random ();
+ 	client -> packet.secs = 0; /* filled in by send_discover. */
+ 
+-	if (can_receive_unicast_unconfigured (client -> interface))
++	if ((!(bootp_broadcast_always || client->config->bootp_broadcast_always))
++	    && can_receive_unicast_unconfigured(client->interface))
+ 		client -> packet.flags = 0;
+ 	else
+ 		client -> packet.flags = htons (BOOTP_BROADCAST);
+@@ -2353,7 +2616,9 @@ void make_request (client, lease)
+ 	} else {
+ 		memset (&client -> packet.ciaddr, 0,
+ 			sizeof client -> packet.ciaddr);
+-		if (can_receive_unicast_unconfigured (client -> interface))
++		if ((!(bootp_broadcast_always ||
++		    client ->config->bootp_broadcast_always)) &&
++		    can_receive_unicast_unconfigured (client -> interface))
+ 			client -> packet.flags = 0;
+ 		else
+ 			client -> packet.flags = htons (BOOTP_BROADCAST);
+@@ -2416,7 +2681,8 @@ void make_decline (client, lease)
+ 	client -> packet.hops = 0;
+ 	client -> packet.xid = client -> xid;
+ 	client -> packet.secs = 0; /* Filled in by send_request. */
+-	if (can_receive_unicast_unconfigured (client -> interface))
++	if ((!(bootp_broadcast_always || client->config-> bootp_broadcast_always))
++	    && can_receive_unicast_unconfigured (client->interface))
+ 		client -> packet.flags = 0;
+ 	else
+ 		client -> packet.flags = htons (BOOTP_BROADCAST);
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c.orig dhcp-3.1-ESV-R3/client/dhclient.c.orig
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c.orig	2011-10-10 10:43:32.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/dhclient.c.orig	2011-10-10 10:46:14.000000000 -0400
+@@ -77,6 +77,10 @@ int onetry=0;
+ int quiet=0;
+ int nowait=0;
+ 
++#ifdef LIBDHCP
++FILE *leaseFile = NULL;
++#endif
++
+ static void usage PROTO ((void));
+ 
+ static int check_domain_name(const char *ptr, size_t len, int dots);
+@@ -84,10 +88,41 @@ static int check_domain_name_list(const 
+ static int check_option_values(struct universe *universe, unsigned int opt,
+ 			       const char *ptr, size_t len);
+ 
++#ifdef LIBDHCP
++#include "isc-dhcp/libdhcp_control.h"
++LIBDHCP_Control *libdhcp_control;
++static void libdhcp_dispatch(void)
++  {
++         struct timeval tv = { 0, 0 }, *tvp;
++         isc_result_t status;
++
++         /* Wait for a packet, or a timeout, or libdhcp being finished */
++         do {
++                 tvp = process_outstanding_timeouts(&tv);
++                 status = omapi_one_dispatch(0, tvp);
++
++        if (libdhcp_control && ((status == ISC_R_TIMEDOUT) || (libdhcp_control->timeout && (time(NULL) >= (libdhcp_control->timeout + libdhcp_control->now))))) {
++             if (libdhcp_control->callback)
++                     libdhcp_control->callback(libdhcp_control, DHC_TIMEDOUT, NULL);
++             break;
++        }
++    } while ((status != ISC_R_TIMEDOUT) && ((!libdhcp_control) || (!(libdhcp_control->finished))));
++  }
++
++extern void omapi_free_all_pointers(void);
++
++__attribute__ ((visibility ("default")))
++int dhcpv4_client (libdhcp_ctl, argc, argv, envp)
++       LIBDHCP_Control *libdhcp_ctl;
++#else
+ int main (argc, argv, envp)
++#endif
+ 	int argc;
+ 	char **argv, **envp;
+ {
++#ifdef LIBDHCP
++  libdhcp_control = libdhcp_ctl;
++#endif
+ 	int fd;
+ 	int i;
+ 	struct servent *ent;
+@@ -109,6 +144,7 @@ int main (argc, argv, envp)
+ 	int no_dhclient_script = 0;
+ 	char *s;
+ 
++#ifndef LIBDHCP
+         /* Make sure that file descriptors 0 (stdin), 1, (stdout), and
+            2 (stderr) are open. To do this, we assume that when we
+            open a file the lowest available file decriptor is used. */
+@@ -132,6 +168,7 @@ int main (argc, argv, envp)
+ #if !(defined (DEBUG) || defined (SYSLOG_4_2) || defined (__CYGWIN32__))
+ 	setlogmask (LOG_UPTO (LOG_INFO));
+ #endif	
++#endif
+ 
+ 	/* Set up the OMAPI. */
+ 	status = omapi_init ();
+@@ -346,6 +383,7 @@ int main (argc, argv, envp)
+ 
+ 	write_client_pid_file();
+ 
++#ifndef LIBDHCP
+ 	if (!quiet) {
+ 		log_info ("%s %s", message, DHCP_VERSION);
+ 		log_info (copyright);
+@@ -354,6 +392,7 @@ int main (argc, argv, envp)
+ 		log_info ("%s", "");
+ 	} else
+ 		log_perror = 0;
++#endif
+ 
+ 	/* If we're given a relay agent address to insert, for testing
+ 	   purposes, figure out what it is. */
+@@ -424,11 +463,17 @@ int main (argc, argv, envp)
+ 	/* Parse the dhclient.conf file. */
+ 	read_client_conf ();
+ 
++#ifdef LIBDHCP
++	if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_LEASE_DATABASE)) {
++#endif
+ 	/* Parse the lease database. */
+ 	read_client_leases ();
+ 
+ 	/* Rewrite the lease database... */
+ 	rewrite_client_leases ();
++#ifdef LIBDHCP
++	}
++#endif
+ 
+ 	/* XXX */
+ /* 	config_counter(&snd_counter, &rcv_counter); */
+@@ -447,7 +492,7 @@ int main (argc, argv, envp)
+ 		if (!persist) {
+ 			/* Nothing more to do. */
+ 			log_info ("No broadcast interfaces found - exiting.");
+-			exit (0);
++			return (0);
+ 		}
+ 	} else if (!release_mode && !exit_mode) {
+ 		/* Call the script with the list of interfaces. */
+@@ -543,6 +588,7 @@ int main (argc, argv, envp)
+ 	dmalloc_outstanding = 0;
+ #endif
+ 
++#ifndef LIBDHCP
+ 	/* If we're not supposed to wait before getting the address,
+ 	   don't. */
+ 	if (nowait)
+@@ -555,6 +601,126 @@ int main (argc, argv, envp)
+ 
+ 	/* Start dispatching packets and timeouts... */
+ 	dispatch ();
++#else
++	if (libdhcp_control) {
++		if (libdhcp_control->timeout)
++			libdhcp_control->now = time(NULL);
++		else
++			libdhcp_control->now = 0;
++	}
++
++	libdhcp_dispatch();
++
++	/* libdhcp is finished with us. */
++
++	/* close all file descriptors:  */
++	for (ip = interfaces; ip; ip = ip->next) {
++		shutdown(ip->wfdesc, SHUT_RDWR);
++		close(ip->wfdesc);
++
++		if (ip->rfdesc != ip->wfdesc)
++			close(ip->rfdesc);
++	}
++
++	if (fallback_interface != 0) {
++		ip = fallback_interface;
++		shutdown(ip->wfdesc, SHUT_RDWR);
++		close(ip->wfdesc);
++
++		if (ip->rfdesc != ip->wfdesc)
++			close(ip->rfdesc);
++	}
++
++	if (leaseFile)
++		fclose (leaseFile);
++
++	closelog();
++
++	char *current_pid_file = _PATH_DHCLIENT_PID;
++
++	/* Free ALL allocated memory: */
++	omapi_free_all_pointers();
++
++	/* Re-Initialize globals: */
++	client_env = 0;
++	client_env_count = 0;
++	default_lease_time = 43200;
++
++	dhcp_max_agent_option_packet_length = 0;
++	iaddr_any.len = 4;
++	memset(&(iaddr_any.iabuf[0]), '\0', 4);
++	iaddr_broadcast.len = 4;
++	memset(&(iaddr_broadcast.iabuf[0]), 0xff, 4);
++	interfaces_requested = 0;
++	leaseFile = 0;
++
++	libdhcp_control = 0;
++
++	local_port = 0;
++	no_daemon = 0;
++	nowait = 0;
++	onetry = 0;
++	quiet = 0;
++	max_lease_time = 86400;
++	path_dhclient_conf = _PATH_DHCLIENT_CONF;
++	path_dhclient_db = _PATH_DHCLIENT_DB;
++	path_dhclient_pid = _PATH_DHCLIENT_PID;
++	strcpy(&(path_dhclient_script_array[0]), _PATH_DHCLIENT_SCRIPT);
++	path_dhclient_script = path_dhclient_script_array;
++	remote_port = 0;
++	resolver_inited = 0;
++	log_perror = 1;
++	global_scope = NULL;
++	root_group = NULL;
++	group_name_hash = NULL;
++	interfaces = NULL;
++	dummy_interfaces = NULL;
++	fallback_interface = NULL;
++	extern int have_setup_fallback;
++	have_setup_fallback = 0;
++	quiet_interface_discovery = 1;
++#ifndef LIBDHCP
++	timeouts = NULL;
++#endif
++	dhcp_type_interface = NULL;
++	interface_vector = NULL;
++	interface_count = 0;
++	interface_max = 0;
++	name_servers = 0;
++	domains = 0;
++	dhcp_type_interface = NULL;
++	dhcp_type_group = NULL;
++	dhcp_type_shared_network = NULL;
++	dhcp_type_control = NULL;
++	memset(&dhcp_universe, '\0', sizeof(struct universe));
++	memset(&nwip_universe, '\0', sizeof(struct universe));
++	memset(&fqdn_universe, '\0', sizeof(struct universe));
++	universe_hash = 0;
++	universes = 0;
++	universe_count = 0;
++	universe_max = 0;
++	config_universe = 0; 
++	extern struct hash_bucket *free_hash_buckets;
++	free_hash_buckets = NULL;
++	extern struct dhcp_packet *dhcp_free_list;
++	dhcp_free_list = NULL;
++	extern struct packet *packet_free_list;
++	packet_free_list = NULL;
++	extern struct binding_value *free_binding_values;
++	free_binding_values = NULL;
++	extern struct expression *free_expressions;
++	free_expressions = NULL;
++	extern struct option_cache *free_option_caches;
++	free_option_caches = NULL;
++	extern  struct packet *free_packets;
++	free_packets = NULL;
++	extern  pair free_pairs;
++	free_pairs = NULL;
++	extern omapi_io_object_t omapi_io_states;
++	memset(&omapi_io_states, '\0', sizeof(omapi_io_states));
++	dhcp_control_object = NULL;
++	unlink(current_pid_file);
++#endif
+ 
+ 	/*NOTREACHED*/
+ 	return 0;
+@@ -947,7 +1113,20 @@ void dhcpack (packet)
+ 	if (client -> new -> rebind < cur_time)
+ 		client -> new -> rebind = TIME_MAX;
+ 
++#ifdef LIBDHCP
++	/* We need the server's siaddr for the 'bootServer'
++	 * pump option
++	 */
++	u_int32_t set_siaddr = 0;
++	set_siaddr = client->packet.siaddr.s_addr;
++	client->packet.siaddr.s_addr = packet->raw->siaddr.s_addr;
++#endif
++
+ 	bind_lease (client);
++
++#ifdef LIBDHCP
++	client->packet.siaddr.s_addr = set_siaddr;
++#endif
+ }
+ 
+ void bind_lease (client)
+@@ -985,6 +1164,9 @@ void bind_lease (client)
+ 		return;
+ 	}
+ 
++#ifdef LIBDHCP
++	if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_LEASE_DATABASE))
++#endif
+ 	/* Write out the new lease. */
+ 	write_client_lease (client, client -> new, 0, 0);
+ 
+@@ -1087,11 +1269,13 @@ int commit_leases ()
+ 	return 0;
+ }
+ 
++#ifndef LIBDHCP
+ int write_lease (lease)
+ 	struct lease *lease;
+ {
+ 	return 0;
+ }
++#endif
+ 
+ int write_host (host)
+ 	struct host_decl *host;
+@@ -1701,6 +1885,10 @@ void state_panic (cpp)
+ 	   tell the shell script that we failed to allocate an address,
+ 	   and try again later. */
+ 	if (onetry) {
++#ifdef LIBDHCP
++		script_init (client, "FAIL", (struct string_list *)0);
++		return;
++#endif
+ 		if (!quiet)
+ 			log_info ("Unable to obtain a lease on first try.%s",
+ 				  "  Exiting.");
+@@ -2322,7 +2510,9 @@ void destroy_client_lease (lease)
+ 	free_client_lease (lease, MDL);
+ }
+ 
+-FILE *leaseFile;
++#ifndef LIBDHCP
++ FILE *leaseFile;
++#endif
+ 
+ void rewrite_client_leases ()
+ {
+@@ -2744,6 +2934,54 @@ void script_write_params (client, prefix
+ int script_go (client)
+ 	struct client_state *client;
+ {
++#ifdef LIBDHCP
++	struct string_list *sp;
++
++	if (libdhcp_control && libdhcp_control->callback) {
++		int dhcmsg;
++		char *reason="";
++
++		for (sp = client->env; sp; sp = sp->next)
++			if (strncmp(sp->string, "reason=", 7) == 0) {
++				reason = sp->string + 7;
++				break;
++			}
++
++		if (strcmp(reason,"NBI") == 0)
++			dhcmsg = DHC4_NBI;
++		else if (strcmp(reason,"PREINIT") == 0)
++			dhcmsg = DHC4_PREINIT;
++		else if (strcmp(reason,"BOUND") == 0)
++			dhcmsg = DHC4_BOUND;
++		else if (strcmp(reason,"RENEW") == 0)
++			dhcmsg = DHC4_RENEW;
++		else if (strcmp(reason,"REBOOT") == 0)
++			dhcmsg = DHC4_REBOOT;
++		else if (strcmp(reason,"REBIND") == 0)
++			dhcmsg = DHC4_REBIND;
++		else if (strcmp(reason,"STOP") == 0)
++			dhcmsg = DHC4_STOP;
++		else if (strcmp(reason,"MEDIUM") == 0)
++			dhcmsg = DHC4_MEDIUM;
++		else if (strcmp(reason,"TIMEOUT") == 0)
++			dhcmsg = DHC4_TIMEOUT;
++		else if (strcmp(reason,"FAIL") == 0)
++			dhcmsg = DHC4_FAIL;
++		else if (strcmp(reason,"EXPIRE") == 0)
++			dhcmsg = DHC4_EXPIRE;
++		else if (strcmp(reason,"RELEASE") == 0)
++			dhcmsg = DHC4_RELEASE;
++		else
++			dhcmsg = DHC4_NBI;
++
++		(*libdhcp_control->callback) (libdhcp_control, dhcmsg, client);
++
++		if (libdhcp_control->decline)
++			return 1;
++	}
++
++	return 0;
++#else
+ 	int rval;
+ 	char *scriptName;
+ 	char *argv [2];
+@@ -2822,6 +3060,7 @@ int script_go (client)
+ 	GET_TIME (&cur_time);
+ 	return (WIFEXITED (wstatus) ?
+ 		WEXITSTATUS (wstatus) : -WTERMSIG (wstatus));
++#endif
+ }
+ 
+ void client_envadd (struct client_state *client,
+@@ -2904,6 +3143,9 @@ void go_daemon ()
+ 
+ 	/* Don't become a daemon if the user requested otherwise. */
+ 	if (no_daemon) {
++#ifdef LIBDHCP
++		if (libdhcp_control && (libdhcp_control->capability & DHCP_USE_PID_FILE ))
++#endif
+ 		write_client_pid_file ();
+ 		return;
+ 	}
+@@ -2913,6 +3155,10 @@ void go_daemon ()
+ 		return;
+ 	state = 1;
+ 
++#ifdef LIBDHCP
++	return;
++#endif
++
+ 	/* Stop logging to stderr... */
+ 	log_perror = 0;
+ 
+diff -rupN dhcp-3.1-ESV-R3_orig/client/dhclient.c.rej dhcp-3.1-ESV-R3/client/dhclient.c.rej
+--- dhcp-3.1-ESV-R3_orig/client/dhclient.c.rej	2011-10-10 10:43:32.000000000 -0400
++++ dhcp-3.1-ESV-R3/client/dhclient.c.rej	2011-10-10 10:46:14.000000000 -0400
+@@ -1,63 +1,176 @@
+ ***************
+-*** 77,88 ****
+-  int quiet=0;
+-  int nowait=0;
++*** 389,394 ****
++  	/* Parse the dhclient.conf file. */
++  	read_client_conf ();
+   
+-  static void usage PROTO ((void));
++  	/* Parse the lease database. */
++  	read_client_leases ();
+   
+-  int main (argc, argv, envp)
+-  	int argc;
+-  	char **argv, **envp;
+-  {
+-  	int fd;
+-  	int i;
+-  	struct servent *ent;
+---- 77,124 ----
+-  int quiet=0;
+-  int nowait=0;
++--- 489,655 ----
++  	/* Parse the dhclient.conf file. */
++  	read_client_conf ();
+   
+-+ #ifdef LIBDHCP
+-+ FILE *leaseFile = NULL;
+-+ #endif
+++ 	/* Parse any extra command line configuration arguments: */
+++ 	if ((dhcp_client_identifier_arg != NULL) && (*dhcp_client_identifier_arg != '\0')) {
+++ 		arg_conf_len = asprintf(&arg_conf, "send dhcp-client-identifier \"%s\";", dhcp_client_identifier_arg);
+ + 
+-  static void usage PROTO ((void));
+++ 		if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 			log_fatal("Unable to send -I option dhcp-client-identifier");
+++ 	}
+++ 
+++ 	if ((dhcp_host_name_arg != NULL) && (*dhcp_host_name_arg != '\0')) {
+++ 		if (arg_conf == 0) {
+++ 			arg_conf_len = asprintf(&arg_conf, "send host-name \"%s\";", dhcp_host_name_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -H option host-name");
+++ 		} else {
+++ 			char *last_arg_conf = arg_conf;
+++ 			arg_conf = NULL;
+++ 			arg_conf_len = asprintf( &arg_conf, "%s\nsend host-name \"%s\";", last_arg_conf, dhcp_host_name_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -H option host-name");
+++ 
+++ 			free(last_arg_conf);
+++ 		}
+++ 	}
+++ 
+++ 	if ((dhcp_fqdn_arg != NULL) && (*dhcp_fqdn_arg != '\0')) {
+++ 		if (arg_conf == 0) {
+++ 			arg_conf_len = asprintf(&arg_conf,  "send fqdn.fqdn \"%s\";", dhcp_fqdn_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -F option fqdn.fqdn");
+++ 		} else {
+++ 			char *last_arg_conf = arg_conf;
+++ 			arg_conf = NULL;
+++ 			arg_conf_len = asprintf( &arg_conf, "%s\nsend fqdn.fqdn \"%s\";", last_arg_conf, dhcp_fqdn_arg);
+++ 
+++ 			if ((arg_conf == 0)  || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -F option fqdn.fqdn");
+++ 
+++ 			free(last_arg_conf);
+++ 		}
+++ 	}
+++ 
+++ 	if (timeout_arg) {
+++ 		if (arg_conf == 0) {
+++ 			arg_conf_len = asprintf(&arg_conf,  "timeout %d;", timeout_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to process -T timeout argument");
+++ 		} else {
+++ 			char *last_arg_conf = arg_conf;
+++ 			arg_conf = NULL;
+++ 			arg_conf_len = asprintf( &arg_conf, "%s\ntimeout %d;", last_arg_conf, timeout_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len == 0))
+++ 				log_fatal("Unable to process -T timeout argument");
+++ 
+++ 			free(last_arg_conf);
+++ 		}
+++ 	}
+++ 
+++ 	if ((dhcp_vendor_class_identifier_arg != NULL) && (*dhcp_vendor_class_identifier_arg != '\0')) {
+++ 		if (arg_conf == 0) {
+++ 			arg_conf_len = asprintf(&arg_conf,  "send vendor-class-identifier \"%s\";", dhcp_vendor_class_identifier_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -V option vendor-class-identifier");
+++ 		} else {
+++ 			char *last_arg_conf = arg_conf;
+++ 			arg_conf = NULL;
+++ 			arg_conf_len = asprintf(&arg_conf, "%s\nsend vendor-class-identifier \"%s\";", last_arg_conf, dhcp_vendor_class_identifier_arg);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to send -V option vendor-class-identifier");
+++ 
+++ 			free(last_arg_conf);
+++ 		}
+++ 	}
+++ 
+++ 	if (dhclient_request_options != NULL) {
+++ 		if (arg_conf == 0) {
+++ 			arg_conf_len = asprintf(&arg_conf,  "request %s;", dhclient_request_options);
+++ 
+++ 			if ((arg_conf == 0) || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to parse -R <request options list> argument");
+++ 		} else {
+++ 			char *last_arg_conf = arg_conf;
+++ 			arg_conf = NULL;
+++ 			arg_conf_len = asprintf(&arg_conf, "%s\nrequest %s;", last_arg_conf, dhclient_request_options);
+++ 
+++ 			if ((arg_conf == 0)  || (arg_conf_len <= 0))
+++ 				log_fatal("Unable to parse -R <request options list> argument");
+++ 
+++ 			free(last_arg_conf);
+++ 		}
+++ 	}
+++ 
+++ 	if (arg_conf) {
+++ 		if (arg_conf_len == 0)
+++ 			if ((arg_conf_len = strlen(arg_conf)) == 0)
+++ 				/* huh ? cannot happen ! */
+++ 				log_fatal("Unable to process -I/-H/-F/-T/-V/-R configuration arguments");
+++ 
+++ 		/* parse the extra dhclient.conf configuration arguments
+++ 		 * into top level config: */
+++ 		struct parse *cfile = (struct parse *)0;
+++ 		const char *val = NULL;
+++ 		int token;
+++ 
+++ 		status = new_parse (&cfile, -1, arg_conf, arg_conf_len, "extra dhclient -I/-H/-F/-T/-V/-R configuration arguments", 0);
+++ 
+++ 		if ((status != ISC_R_SUCCESS) || (cfile -> warnings_occurred))
+++ 			log_fatal("Cannot parse -I/-H/-F/-T/-V/-R configuration arguments !");
+++ 		/* more detailed parse failures will be logged */
+++ 
+++ 		do {
+++ 			token = peek_token (&val, (unsigned *)0, cfile);
+++ 			if (token == END_OF_FILE)
+++ 				break;
+++ 
+++ 			parse_client_statement (cfile, (struct interface_info *)0, &top_level_config);
+++ 		} while (1);
+++ 
+++ 		if (cfile -> warnings_occurred)
+++ 			log_fatal ("Cannot parse -I/-H/-F/-T/-V/-R configuration arguments !");
+++ 		end_parse (&cfile);
+++ 
+++ 		if (timeout_arg) {
+++ 			/* we just set the toplevel timeout, but per-client
+++ 			 * timeouts may still be at defaults. Also, it makes no
+++ 			 * sense having the reboot_timeout or backoff_cutoff
+++ 			 * greater than the timeout:
+++ 			 */
+++ 			if ((top_level_config.backoff_cutoff == 15) && (top_level_config.backoff_cutoff > (timeout_arg / 2)))
+++ 				top_level_config.backoff_cutoff = (((unsigned long)(timeout_arg / 2)) == 0) ? timeout_arg : (unsigned long)(timeout_arg / 2);
+++ 
+++ 			for (ip = interfaces; ip; ip = ip -> next) {
+++ 				if (ip->client->config->timeout == 60)
+++ 					ip->client->config->timeout = timeout_arg;
+++ 
+++ 				if ((ip->client->config->reboot_timeout == 10) && (ip->client->config->reboot_timeout > ip->client->config->timeout))
+++ 					ip->client->config->reboot_timeout = ip->client->config->timeout;
+++ 
+++ 				if ((ip->client->config->backoff_cutoff == 15) && (ip->client->config->backoff_cutoff > top_level_config.backoff_cutoff))
+++ 					ip->client->config->backoff_cutoff = top_level_config.backoff_cutoff;
+++ 			}
+++ 		}
+++ 
+++ 		if ((dhclient_request_options != 0) && (top_level_config.requested_options != default_requested_options)) {
+++ 			for (ip = interfaces; ip; ip = ip -> next) {
+++ 				if (ip->client->config->requested_options == default_requested_options)
+++ 					ip->client->config->requested_options = top_level_config.requested_options;
+++ 			}
+++ 		}
+++ 
+++ 		free(arg_conf);
+++ 		arg_conf = NULL;
+++ 		arg_conf_len = 0;
+++ 	}
+++ 
++  	/* Parse the lease database. */
++  	read_client_leases ();
+   
+-+ #ifdef LIBDHCP
+-+ #include "isc-dhcp/libdhcp_control.h"
+-+ LIBDHCP_Control *libdhcp_control;
+-+ static void libdhcp_dispatch(void)
+-+   {
+-+          struct timeval tv = { 0, 0 }, *tvp;
+-+          isc_result_t status;
+-+ 
+-+          /* Wait for a packet, or a timeout, or libdhcp being finished */
+-+          do {
+-+                  tvp = process_outstanding_timeouts(&tv);
+-+                  status = omapi_one_dispatch(0, tvp);
+-+ 		 
+-+ 		 if (libdhcp_control && ((status == ISC_R_TIMEDOUT) || (libdhcp_control->timeout && (time(NULL) >= (libdhcp_control->timeout + libdhcp_control->now))))) {
+-+ 		         if (libdhcp_control->callback)
+-+ 		                 libdhcp_control->callback(libdhcp_control, DHC_TIMEDOUT, NULL);
+-+ 			 
+-+ 			 break;
+-+ 		 }
+-+ 	 } while ((status != ISC_R_TIMEDOUT) && ((!libdhcp_control) || (!(libdhcp_control->finished))));
+-+   }
+-+ 
+-+ extern void omapi_free_all_pointers(void);
+-+ 
+-+ __attribute__ ((visibility ("default")))
+-+ int dhcpv4_client (libdhcp_ctl, argc, argv, envp)
+-+        LIBDHCP_Control *libdhcp_ctl;
+-+ #else
+-  int main (argc, argv, envp)
+-+ #endif
+-  	int argc;
+-  	char **argv, **envp;
+-  {
+-+ #ifdef LIBDHCP
+-+   libdhcp_control = libdhcp_ctl;
+-+ #endif
+-  	int fd;
+-  	int i;
+-  	struct servent *ent;
+diff -rupN dhcp-3.1-ESV-R3_orig/common/conflex.c dhcp-3.1-ESV-R3/common/conflex.c
+--- dhcp-3.1-ESV-R3_orig/common/conflex.c	2011-10-10 10:43:30.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/conflex.c	2011-10-10 10:46:14.000000000 -0400
+@@ -599,6 +599,8 @@ static enum dhcp_token intern (atom, dfv
+ 			return BALANCE;
+ 		if (!strcasecmp (atom + 1, "ound"))
+ 			return BOUND;
++		if (!strcasecmp (atom + 1, "ootp-broadcast-always"))
++			return BOOTP_BROADCAST_ALWAYS;
+ 		break;
+ 	      case 'c':
+ 		if (!strcasecmp(atom + 1, "ase"))
+diff -rupN dhcp-3.1-ESV-R3_orig/common/conflex.c.orig dhcp-3.1-ESV-R3/common/conflex.c.orig
+--- dhcp-3.1-ESV-R3_orig/common/conflex.c.orig	2009-09-01 16:32:27.000000000 -0400
++++ dhcp-3.1-ESV-R3/common/conflex.c.orig	2011-10-10 10:46:12.000000000 -0400
+@@ -47,6 +47,7 @@ static enum dhcp_token read_string PROTO
+ static enum dhcp_token read_number PROTO ((int, struct parse *));
+ static enum dhcp_token read_num_or_name PROTO ((int, struct parse *));
+ static enum dhcp_token intern PROTO ((unsigned char *, enum dhcp_token));
++static int read_function PROTO ((struct parse *));
+ 
+ isc_result_t new_parse (cfile, file, inbuf, buflen, name, eolp)
+ 	struct parse **cfile;
+@@ -74,6 +75,10 @@ isc_result_t new_parse (cfile, file, inb
+ 	tmp -> file = file;
+ 	tmp -> eol_token = eolp;
+ 
++	if (file != -1) {
++		tmp -> read_function = read_function;;
++	}
++
+ 	tmp -> bufix = 0;
+ 	tmp -> buflen = buflen;
+ 	if (inbuf) {
+@@ -113,22 +118,11 @@ static int get_char (cfile)
+ 	int c;
+ 
+ 	if (cfile -> bufix == cfile -> buflen) {
+-		if (cfile -> file != -1) {
+-			cfile -> buflen =
+-				read (cfile -> file,
+-				      cfile -> inbuf, cfile -> bufsiz);
+-			if (cfile -> buflen == 0) {
+-				c = EOF;
+-				cfile -> bufix = 0;
+-			} else if (cfile -> buflen < 0) {
+-				c = EOF;
+-				cfile -> bufix = cfile -> buflen = 0;
+-			} else {
+-				c = cfile -> inbuf [0];
+-				cfile -> bufix = 1;
+-			}
+-		} else
++		if (cfile -> read_function) {
++			c = cfile -> read_function (cfile);
++		} else {
+ 			c = EOF;
++		}
+ 	} else {
+ 		c = cfile -> inbuf [cfile -> bufix];
+ 		cfile -> bufix++;
+@@ -1236,3 +1230,23 @@ static enum dhcp_token intern (atom, dfv
+ 	}
+ 	return dfv;
+ }
++
++static int
++read_function (struct parse * cfile)
++{
++	int c;
++
++	cfile -> buflen = read (cfile -> file, cfile -> inbuf, cfile -> bufsiz);
++	if (cfile -> buflen == 0) {
++		c = EOF;
++		cfile -> bufix = 0;
++	} else if (cfile -> buflen < 0) {
++		c = EOF;
++		cfile -> bufix = cfile -> buflen = 0;
++	} else {
++		c = cfile -> inbuf [0];
++		cfile -> bufix = 1;
++	}
++
++	return c;
++}
+diff -rupN dhcp-3.1-ESV-R3_orig/includes/dhcpd.h dhcp-3.1-ESV-R3/includes/dhcpd.h
+--- dhcp-3.1-ESV-R3_orig/includes/dhcpd.h	2011-10-10 10:43:32.000000000 -0400
++++ dhcp-3.1-ESV-R3/includes/dhcpd.h	2011-10-10 10:46:14.000000000 -0400
+@@ -934,6 +934,9 @@ struct client_config {
+ 	int do_forward_update;		/* If nonzero, and if we have the
+ 					   information we need, update the
+ 					   A record for the address we get. */
++
++	int bootp_broadcast_always;	/* If nonzero, always set the BOOTP_BROADCAST
++					   flag in requests */
+ };
+ 
+ /* Per-interface state used in the dhcp client... */
+diff -rupN dhcp-3.1-ESV-R3_orig/includes/dhcpd.h.orig dhcp-3.1-ESV-R3/includes/dhcpd.h.orig
+--- dhcp-3.1-ESV-R3_orig/includes/dhcpd.h.orig	2011-10-10 10:43:32.000000000 -0400
++++ dhcp-3.1-ESV-R3/includes/dhcpd.h.orig	2011-10-10 10:46:14.000000000 -0400
+@@ -1018,14 +1018,6 @@ struct hardware_link {
+ 
+ typedef void (*tvref_t)(void *, void *, const char *, int);
+ typedef void (*tvunref_t)(void *, const char *, int);
+-struct timeout {
+-	struct timeout *next;
+-	TIME when;
+-	void (*func) PROTO ((void *));
+-	void *what;
+-	tvref_t ref;
+-	tvunref_t unref;
+-};
+ 
+ struct protocol {
+ 	struct protocol *next;
+@@ -1986,7 +1978,6 @@ extern void (*bootp_packet_handler) PROT
+ 					    struct dhcp_packet *, unsigned,
+ 					    unsigned int,
+ 					    struct iaddr, struct hardware *));
+-extern struct timeout *timeouts;
+ extern omapi_object_type_t *dhcp_type_interface;
+ #if defined (TRACING)
+ trace_type_t *interface_trace;
+diff -rupN dhcp-3.1-ESV-R3_orig/includes/dhctoken.h dhcp-3.1-ESV-R3/includes/dhctoken.h
+--- dhcp-3.1-ESV-R3_orig/includes/dhctoken.h	2009-09-01 16:32:27.000000000 -0400
++++ dhcp-3.1-ESV-R3/includes/dhctoken.h	2011-10-10 11:25:02.000000000 -0400
+@@ -326,6 +326,7 @@ enum dhcp_token {
+ 	DOMAIN_LIST = 630,
+ 	LEASEQUERY = 631,
+ 	EXECUTE = 632,
++	BOOTP_BROADCAST_ALWAYS = 633,
+ 	CONFLICT_DONE = 660
+ };
+ 
