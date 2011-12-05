@@ -7,7 +7,7 @@ loadSuperClass('jvmpackage')
 class IcedTea(JVMPackageRecipe, CPackageRecipe):
 
     name = 'icedtea'
-    version = '1.6.0.0_b22_1.10.3'
+    version = '1.6.0.0_b22_1.10.4'
 
     vendor = 'icedtea'
     release = '1.6.0'
@@ -27,10 +27,10 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         'libXext:devel', 'libXi:devel', 'libXinerama:devellib', 'libXp:devel',
         'libXrender:devel', 'libxslt:runtime', 'libXt:devel', 'libXtst:devel',
         'nspr:devel', 'nspr:devel', 'openmotif:devel', 'pango:devel',
-        'pkgconfig:devel', 'procps:runtime', 'unzip:runtime',
+        'pkgconfig:devel', 'procps:runtime', 'unzip:runtime', 'setarch:runtime',
         'util-linux:runtime', 'wget:runtime', 'which:runtime', 'xcb-util:devel',
         'xulrunner:devel', 'xulrunner:lib', 'zip:runtime', 'zlib:devel',
-        'zlib:devel', 'nss:devel', 'xz:runtime', 
+        'zlib:devel', 'nss:devel', 'xz:runtime', 'ant:runtime', 'ca-certificates:config',
     ]
 
     def setup(r):
@@ -38,14 +38,11 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         r.JVMInit()
         r.JVMProfile()
 
-        # parallelization doesn't look sane
-        r.disableParallelMake()
-
         # For bootstrap
         fedora_version = '1.6.0.0-36.b17.fc12'
         fedora_site = 'http://download.fedora.redhat.com/pub/fedora/linux/updates/12'
 
-        ant = 'apache-ant-1.7.1'
+        ant = 'apache-ant-1.8.2'
         ant_site = 'http://www.apache.org/dist/ant/binaries/'
 
         xalan = 'xalan-j_2_7_1'
@@ -74,9 +71,9 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         r.addSource(ecj_jar, dest='ecj.jar')
 
         for f in ('jdk6-jaxws-b20.zip', 'jdk6-jaf-b20.zip', 'jaxp144_01.zip'):
-            r.addSource('http://icedtea.classpath.org/download/drops/'+f, dir='drops/')
+            r.addSource('http://icedtea.classpath.org/download/drops/'+f)
 
-        r.addArchive(ant_site+ant+'-bin.tar.gz', dir='%(maindir)s')
+        # r.addArchive(ant_site+ant+'-bin.tar.gz', dir='%(maindir)s')
         r.addArchive(xalan_site+xalan+'-bin.zip', dir='%(maindir)s')
 
         jarch = ('x86_64','i686')[Arch.x86==True]
@@ -98,21 +95,25 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         if Arch.x86_64:
             openjdk_home += '.x86_64'
 
-        bootstrap_path='PATH='+openjdk_home+'/bin:'+openjdk_home+'/jre/bin:%(builddir)s/'+ant+'/bin:$PATH'
+        bootstrap_path='CLASSPATH='' PATH='+openjdk_home+'/bin:'+openjdk_home+'/jre/bin:%(builddir)s/'+ant+'/bin:$PATH'
+
+        r.addSource('http://pkgs.fedoraproject.org/repo/pkgs/java-1.6.0-openjdk/hotspot.tar.gz/369ad745bf697d525d1a00fc09906829/hotspot.tar.gz',
+                    dir = 'drops/')
 
         conf = (
             '--without-rhino '
             '--enable-pulse-java '
-            '--with-ant-home=%(builddir)s/'+ant+' '
+            # '--with-ant-home=%(builddir)s/'+ant+' '
             '--with-xalan2-jar=%(builddir)s/'+xalan+'/xalan.jar '
             '--with-xalan2-serializer-jar=%(builddir)s/'+xalan+'/serializer.jar '
             '--with-xerces2-jar=%(builddir)s/'+xalan+'/xercesImpl.jar '
             '--with-jdk-home='+openjdk_home+' '
-            # '--with-hotspot-build=hs20 '
+            '--with-hotspot-build=hs20 '
             # '--with-hotspot-src-zip=http://hg.openjdk.java.net/hsx/hsx20/master/archive/hotspot.tar.gz '
-            # '--with-jaf-drop-zip=https://jax-ws.dev.java.net/files/documents/4202/150725/jdk6-jaf-b20.zip '
-            # '--with-jaxp-drop-zip=https://jaxp.dev.java.net/files/documents/913/150648/jaxp144_01.zip '
-            # '--with-jaxws-drop-zip=https://jax-ws.dev.java.net/files/documents/4202/150724/jdk6-jaxws-b20.zip '
+            '--with-hotspot-src-zip=%(builddir)s/drops/hotspot.tar.gz '
+            '--with-jaxp-drop-zip=%(builddir)s/jaxp144_01.zip '
+            '--with-jaxws-drop-zip=%(builddir)s/jdk6-jaxws-b20.zip '
+            '--with-jaf-drop-zip=%(builddir)s/jdk6-jaf-b20.zip '
             '--with-ecj-jar=%(builddir)s/ecj.jar '
         )
 
@@ -135,19 +136,11 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
 
         r.Install('openjdk.build/j2sdk-image/*', '%(jdkhome)s/')
 
-        r.Symlink(
-            '%(jrelibdir)s/IcedTeaPlugin.so',
-            '%(libdir)s/mozilla/plugins/libjavaplugin.so',
-        )
-
-        r.JVMPolicy()
-
-        # icedteaplugin
-        # FIXME: keep old naming scheme for now. getting new one once we're sure
-        # of no side effects
-        r.ComponentSpec('%(name)s-gcjwebplugin:runtime', '%(libdir)s/mozilla/')
-        # r.ComponentSpec('%(name)s-icedteaplugin:runtime', '%(libdir)s/mozilla/')
-        r.DanglingSymlinks(exceptions='%(libdir)s/mozilla/plugins/libjavaplugin.so')
+        # own it
+        r.MakeDirs('%(sysconfdir)s/.java')
+        r.MakeDirs('%(sysconfdir)s/.java/.systemPrefs')
+        r.ExcludeDirectories(exceptions = '%(sysconfdir)s/.java/')
+        r.PackageSpec('icedtea-jre', '%(sysconfdir)s/.java/')
 
         # Tweaks for ca-certificates
         # XXX this shouldn't be needed at all
@@ -159,3 +152,5 @@ class IcedTea(JVMPackageRecipe, CPackageRecipe):
         
         # r.Requires('ca-certificates:config', 'icedtea-jre:runtime')
         r.DanglingSymlinks(exceptions='%(libdir)s/jvm/java-1.6.0-icedtea/jre/lib/security/cacerts')
+
+        r.JVMPolicy()
