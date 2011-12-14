@@ -59,10 +59,23 @@ class Chromium(AutoPackageRecipe):
                      'libXinerama:devel',
                      'speex:devel',
                      'pulseaudio:devel',
+                     'unzip:runtime',
+                     'elfutils:devel',
+                     'libelf:devel',
                     ]
+
+    if Arch.x86_64:
+        # NaCl build expects it ...
+        buildRequires += ['zlib:lib[is:x86]']
+
 
     def setup(r):
         r.addArchive('http://gsdview.appspot.com/chromium-browser-official/%(name)s-'+ r.baseVersion +'.tar.bz2')
+        r.addArchive('http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/nacl_sdk.zip',
+                     dir = '%%(name)s-%s' % r.baseVersion)
+
+        # needed in order to NaCl build to proceed
+        r.macros.cflags  = re.sub('-fstack-protector', '', r.macros.cflags)
 
         r.macros.gypDefines =  ('release_extra_cflags=\"%(cflags)s \" '
                                 'no_strict_aliasing=1 '
@@ -78,8 +91,6 @@ class Chromium(AutoPackageRecipe):
                                 # until https://bugzilla.mozilla.org/show_bug.cgi?id=547312
                                 # http://crbug.com/58087
                                 'use_system_ssl=0 '
-                                # busted in upstream tarballs atm
-                                'disable_nacl=1 '
 
                                 'ffmpeg_branding=Chrome '
                                 'proprietary_codecs=1 '
@@ -121,6 +132,12 @@ class Chromium(AutoPackageRecipe):
                   # 'chromium_build/third_party/zlib/zconf.h')
                   'third_party/zlib/zconf.h')
 
+        r.ManualConfigure('update pepper_16',
+                          configureName = 'naclsdk',
+                          dir = 'nacl_sdk')
+        r.Symlink('../../nacl_sdk/pepper_16/toolchain/linux_x86_newlib',
+                  'native_client/toolchain/linux_x86_newlib')
+
         r.Run("GYP_DEFINES=\'%(gypDefines)s\'  GYP_GENERATORS=make "
               "build/gyp_chromium "
               " build/all.gyp --depth=. ",
@@ -149,11 +166,14 @@ class Chromium(AutoPackageRecipe):
                       'chrome',
                       'chrome_sandbox',
                       'chromedriver',
-                      #'libppGoogleNaClPluginChrome.so',
-                      #'nacl_irt_x86_*.nexe',
                       # bellow needed while we use internal ffmpeg
                       'libffmpegsumo.so',
                       # 'ffmpegsumo_nolink'
+                      # NaCl bits
+                      'nacl_helper',
+                      'nacl_helper_bootstrap',
+                      'libppGoogleNaClPluginChrome.so',
+                      'nacl_irt_x86_*.nexe',
                       ]
 
         r.MakeDirs('%(libdir)s/chromium-browser')
