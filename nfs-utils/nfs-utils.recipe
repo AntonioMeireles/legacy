@@ -1,0 +1,154 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
+loadSuperClass('rpmpackage')
+class NfsUtils(RPMPackageRecipe, CPackageRecipe):
+    name = 'nfs-utils'
+    version = '1.0.10'
+
+    buildRequires = [ 'libevent:devel', 'libnfsidmap:devel', 'krb5:devel',
+        'tcp_wrappers:devel', 'autoconf:runtime', 'automake:runtime',
+        'libgssapi:devel', 'librpcsecgss:devel', 'libtool:runtime',
+        'userspace-kernel-headers:devel', 'e2fsprogs:devel',
+        'pkgconfig:devel', ]
+
+    rpmRelease = '4.fc7'
+    rpmSources = [ 'nfs.init', 'nfslock.init', 'rpcsvcgssd.init',
+                   'rpcgssd.init', 'rpcidmapd.init', ]
+    rpmPatches = [ 'nfs-utils-1.0.5-statdpath.patch',
+                   'nfs-utils-1.0.6-mountd.patch',
+                   'nfs-utils-1.0.6-idmap.conf.patch',
+                   'nfs-utils-1.0.6-gssd_mixed_case.patch',
+                   'nfs-utils-1.0.8-privports.patch',
+                   'nfs-utils-1.0.9-krb5-memory.patch',
+                   'nfs-utils-1.0.9-idmapd-scandir-leak.patch',
+                   'nfs-utils-1.0.9-idmap-dirscancb-listloop.patch',
+                   'nfs-utils-1.0.9-mount-options-v3.patch',
+                   'nfs-utils-1.0.9-lazy-umount.patch',
+                   'nfs-utils-1.0.9-mount-sloppy.patch',
+                   'nfs-utils-1.0.9-mount-man-nfs.patch',
+                   'nfs-utils-1.0.9-return-mount-error.patch',
+                   'nfs-utils-1.0.9-nfsmount-authnone.patch',
+                   'nfs-utils-1.0.9-mount-remount.patch',
+                   'nfs-utils-1.0.10-export-nosubtree.patch',
+                   'nfs-utils-1.0.10-mount-nfsvers.patch',
+                   'nfs-utils-1.0.10-udp-no-connect.patch',
+                   'nfs-utils-1.0.9-compile.patch', ]
+
+    def setup(r):
+        r.disableParallelMake()
+        r.unpack()
+        # Source: ftp://nfs.sourceforge.net/pub/nfs/
+        r.addArchive('nfs.doc.tar.gz', rpm=r.srpm, dir=r.theMainDir)
+        r.addPatch('configure.in.tools')
+        r.addAction("sed -i '/# chkconfig:/s/ 14/ 09/g' nfslock.init")
+
+        # newer versions of autotools actually check for multilib systems, and
+        # we're patching *.in files
+        r.addAction('rm -f configure')
+        r.addAction('sh -x autogen.sh')
+
+        # RPL-2868
+        r.addPatch('CVE-2008-4552.patch')
+
+        r.Configure('--enable-nfsv4 --enable-gss --enable-mount '
+                    '--enable-secure-statd ',
+                    preConfigure='ac_cv_func_innetgr=yes')
+
+        r.Make()
+
+        r.MakeInstall('prefix=%(prefix)s')
+
+        r.Install('tools/rpcdebug/rpcdebug', '%(essentialsbindir)s/')
+        r.Install('tools/rpcdebug/rpcdebug', '%(essentialsbindir)s/')
+        r.Install('nfs.init', '%(initdir)s/nfs', mode=0755)
+        r.Install('nfslock.init', '%(initdir)s/nfslock', mode=0755)
+        r.Install('rpcsvcgssd.init', '%(initdir)s/rpcsvcgssd', mode=0755)
+        r.Install('rpcgssd.init', '%(initdir)s/rpcgssd', mode=0755)
+        r.Install('rpcidmapd.init', '%(initdir)s/rpcidmapd', mode=0755)
+        r.Install('utils/idmapd/idmapd.conf', '%(sysconfdir)s/')
+        r.Create('%(localstatedir)s/lib/nfs/rmtab')
+        r.Move('%(sbindir)s/rpc.{lockd,statd}', '%(essentialsbindir)s/')
+        r.MakeDirs('%(localstatedir)s/lib/nfs/statd', mode=0700)
+
+        r.Move('%(sbindir)s/{,u}mount.nfs{,4}', '%(essentialsbindir)s/')
+        r.SetModes('%(essentialsbindir)s/{,u}mount.nfs{,4}', 04755)
+        r.Symlink('mount.nfs.8', '%(mandir)s/man8/mount.nfs4.8')
+        r.Symlink('umount.nfs.8', '%(mandir)s/man8/umount.nfs4.8')
+
+        r.Remove('%(mandir)s/man8/{,rpc.}rquotad*', '%(sbindir)s/rpc.rquotad')
+
+        r.UtilizeUser('nobody', '%(sbindir)s/rpc.idmapd')
+        r.UtilizeUser('nfsnobody', '%(essentialsbindir)s/exportfs')
+        r.Ownership('rpcuser', 'rpcuser', '%(localstatedir)s/lib/nfs/statd')
+
+        r.TagSpec('initscript', '%(initdir)s/')
+        r.Doc('nfs/*.html', 'nfs/*.ps', 'linux-nfs/*')
+
+        # files that don't need to be packaged
+        r.Remove('%(localstatedir)s/lib/nfs/sm{,.bak}', recursive=True)
+
+        r.Requires('portmap:runtime', '%(essentialsbindir)s/rpc.statd')
+
+        # rPath bug #489; prevents runtime error about not finding this dir
+        for neededDir in ('%(localstatedir)s/lib/nfs/v4recovery',
+                          '%(localstatedir)s/lib/nfs/rpc_pipefs',): # RPL-2147
+            r.MakeDirs(neededDir)
+            r.ExcludeDirectories(exceptions=neededDir)
+
+        # start initscripts by default (RPL-418)
+        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/nfs')
+
+        r.PackageSpec('nfs-server',
+                '%(mandir)s/man5/exports.5.gz',
+                '%(mandir)s/man7/nfsd.7.gz',
+                '%(mandir)s/man8/exportfs.8.gz',
+                '%(mandir)s/man8/mountd.8.gz',
+                '%(mandir)s/man8/nfsd.8.gz',
+                '%(mandir)s/man8/rpc.mountd.8.gz',
+                '%(mandir)s/man8/rpc.nfsd.8.gz',
+                '%(mandir)s/man8/rpc.svcgssd.8.gz',
+                '%(mandir)s/man8/svcgssd.8.gz',
+                '%(localstatedir)s/lib/nfs/etab',
+                '%(localstatedir)s/lib/nfs/rmtab',
+                '%(localstatedir)s/lib/nfs/state',
+                '%(localstatedir)s/lib/nfs/xtab',
+                '%(initdir)s/nfs',
+                '%(initdir)s/rpcsvcgssd',
+                '%(sbindir)s/exportfs',
+                '%(sbindir)s/rpc.nfsd',
+                '%(sbindir)s/rpc.mountd',
+                '%(sbindir)s/rpc.svcgssd',
+                )
+        r.PackageSpec('nfs-client',
+                '%(mandir)s/man8/gssd.8.gz',
+                '%(mandir)s/man8/mount.nfs.8.gz',
+                '%(mandir)s/man8/mount.nfs4.8.gz',
+                '%(mandir)s/man8/nhfs.*.8.gz',
+                '%(mandir)s/man8/rpc.gssd.8.gz',
+                '%(mandir)s/man8/showmount.8.gz',
+                '%(mandir)s/man8/umount.nfs.8.gz',
+                '%(mandir)s/man8/umount.nfs4.8.gz',
+                '%(initdir)s/rpcgssd',
+                '%(essentialsbindir)s/mount.nfs',
+                '%(essentialsbindir)s/mount.nfs4',
+                '%(essentialsbindir)s/umount.nfs',
+                '%(essentialsbindir)s/umount.nfs4',
+                '%(sbindir)s/gss_clnt_send_err',
+                '%(sbindir)s/gss_destroy_creds',
+                '%(sbindir)s/nhfs.*',
+                '%(sbindir)s/rpc.gssd',
+                '%(sbindir)s/showmount',
+                )
+        #common:
+        #lockd
+        #statd
+        #idmapd
+        #nfs
+        #nfsstat
+        #rpcdebug
+        r.Requires('nfs-utils:runtime', '%(essentialsbindir)s/mount.nfs')
+        r.Requires('nfs-utils:runtime', '%(sbindir)s/rpc.mountd')
