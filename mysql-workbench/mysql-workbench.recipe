@@ -1,0 +1,33 @@
+class MySQLWorkbench(AutoPackageRecipe):
+
+    name = 'mysql-workbench'
+    version = '5.2.36'
+
+    buildRequires = [
+        'autoconf:runtime', 'automake:runtime', 'libtool:runtime', 'libzip:devel',
+        'gcc-c++:runtime', 'libxml2:devel', 'libsigc++:devel', 'libglade:devel', 'gtkmm:devel', 
+        'freeglut:devel', 'MesaGLw:devel', 'mysql:devel', 'util-linux:devel', 'lua:devel', 
+        'pcre:devel', 'libgnome:devel', 'pexpect:python', 'sqlite:devel', 'python:devel', 
+        'libgnome-keyring:devel', 'google-ctemplate:devel', 'boost:devel', 'Mesa:devel',
+        'openssl:devel'
+    ]
+
+    def unpack(r):
+        # MySQL-Workbench expects libGL.so to be in libdir (/usr/lib{,64}/libGL.so), with no option to configure.
+        # Bug:  http://bugs.mysql.com/63818 , submitted 20111219
+        r.macros.ldflags += ' $(pkg-config --libs-only-L gl)'
+        r.addArchive('http://mysql.he.net/Downloads/MySQLGUITools/%(name)s-gpl-%(version)s-src.tar.gz')
+        # Lot's of Makefile.am's don't add @PCRE_CFLAGS@'s substitution to CFLAGS though code the Makefiles build
+        # requires these substitutions. This wouldn't be noticible on distributions which provide pcre.h directly
+        # in /usr/include/, but for Foresight where pcre.h is in /usr/include/pcre/ it becomes a problem.  We could just
+        # add -I/usr/include/pcre to CFLAGS via r.macros.cflags, but that doesn't help fix the bug in the automake 
+        # configuration.
+        # Bug: http://bugs.mysql.com/63819 , submitted 20111221 
+        r.addPatch('pcre_cflags_fix.patch')
+
+    def configure(r):
+        r.Configure(configureName='autogen.sh')
+
+    def policy(r):
+        # This is required for workbench's SSH tunnel functionality.  Not sure why it's not found by PythonRequires.
+        r.Requires('paramiko:python', '%(datadir)s/%(name)s/.*py$')
