@@ -4,14 +4,15 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-class Lxc(CPackageRecipe):
+class Lxc(AutoPackageRecipe):
     name = 'lxc'
-    version = '0.6.3'
+    version = '0.7.5'
 
     buildRequires = [
         'docbook-utils:runtime',
         'opensp:runtime',
         'libcap:devel',
+        'libcap:runtime',
         'perl:devel',
       ]
 
@@ -22,7 +23,7 @@ class Lxc(CPackageRecipe):
             'libtool:runtime',
           ]
 
-    def setup(r):
+    def unpack(r):
         if '+git' in r.version:
             rev = ('lxc_' + r.version.replace('_', '-'
                     ).replace('+git', '+').replace('.', '_'))
@@ -36,15 +37,23 @@ class Lxc(CPackageRecipe):
         # on anything older than this, and until/unless runtime
         # uname checking is implemented, we need this to avoid a
         # long hang on container shutdown
-        r.Configure('--with-kernel-release=2.6.29')
-        r.Make()
-        r.MakeInstall()
 
-        # Rebuild lxc-init linked statically against liblxc
-        r.Run('gcc %(cflags)s %(ldflags)s -Isrc -Lsrc/lxc/.libs src/lxc/lxc_init.c -o lxc-init -static -llxc -dynamic')
-        r.Install('lxc-init', '%(bindir)s/lxc-init')
+    def configure(r):
+        r.Configure(' --with-kernel-release=2.6.29 '
+                    ' --disable-rpath '
+                    ' --with-config-path=%(sysconfdir)s/%(name)s'
+                    ' --enable-examples')
+        r.MakeDirs('%(sysconfdir)s/%(name)s')
 
-        # Move lxc-init to the :init component so it can be included in
-        # appliances without extra baggage.
-        r.ComponentSpec('init', '%(bindir)s/lxc-init')
-        r.Requires('%(bindir)s/lxc-init', '%(bindir)s/lxc-execute')
+        # XXX do we really need this in FLland ?!
+        # # Rebuild lxc-init linked statically against liblxc
+        # r.Run('gcc %(cflags)s %(ldflags)s -Isrc -Lsrc/lxc/.libs src/lxc/lxc_init.c -o lxc-init -static -llxc -dynamic')
+        # r.Install('lxc-init', '%(bindir)s/lxc-init')
+
+        # # Move lxc-init to the :init component so it can be included in
+        # # appliances without extra baggage.
+        # r.ComponentSpec('init', '%(bindir)s/lxc-init')
+        # r.Requires('%(bindir)s/lxc-init', '%(bindir)s/lxc-execute')
+
+    def policy(r):
+        r.ExcludeDirectories(exceptions = '%(sysconfdir)s/%(name)s')
