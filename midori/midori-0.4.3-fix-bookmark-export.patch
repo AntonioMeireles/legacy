@@ -1,0 +1,155 @@
+commit 81250720de8e60f23b92f2598cb3565ba2c41200
+Author: Christian Dywan <christian@twotoasts.de>
+Date:   Tue Jan 3 21:15:19 2012 +0100
+
+    Introduce midori_array_query_recursive
+    
+    This effectively fixes bookmark export.
+    
+    Fixes: https://bugs.launchpad.net/bugs/906837
+
+diff --git a/midori/midori-array.c b/midori/midori-array.c
+index 1567ce5..4139386 100644
+--- a/midori/midori-array.c
++++ b/midori/midori-array.c
+@@ -1067,28 +1067,32 @@ katze_array_from_sqlite (sqlite3*     db,
+ }
+ 
+ /**
+- * midori_array_query:
++ * midori_array_query_recursive:
+  * @array: the main bookmark array
+  * @fields: comma separated list of fields
+  * @condition: condition, like "folder = '%q'"
+  * @value: a value to be inserted if @condition contains %q
++ * @recursive: if %TRUE include children
+  *
+  * Stores the result in a #KatzeArray.
+  *
+  * Return value: a #KatzeArray on success, %NULL otherwise
+  *
+- * Since: 0.4.3
++ * Since: 0.4.4
+  **/
+ KatzeArray*
+-midori_array_query (KatzeArray*  bookmarks,
+-                    const gchar* fields,
+-                    const gchar* condition,
+-                    const gchar* value)
++midori_array_query_recursive (KatzeArray*  bookmarks,
++                              const gchar* fields,
++                              const gchar* condition,
++                              const gchar* value,
++                              gboolean     recursive)
+ {
+     sqlite3* db;
+     gchar* sqlcmd;
+     char* sqlcmd_value;
+     KatzeArray* array;
++    KatzeItem* item;
++    GList* list;
+ 
+     g_return_val_if_fail (KATZE_IS_ARRAY (bookmarks), NULL);
+     g_return_val_if_fail (fields, NULL);
+@@ -1108,6 +1112,47 @@ midori_array_query (KatzeArray*  bookmarks,
+     else
+         array = katze_array_from_sqlite (db, sqlcmd);
+     g_free (sqlcmd);
++
++    if (!recursive)
++        return array;
++
++    KATZE_ARRAY_FOREACH_ITEM_L (item, array, list)
++    {
++        if (KATZE_ITEM_IS_FOLDER (item))
++        {
++            KatzeArray* subarray = midori_array_query_recursive (bookmarks,
++                fields, "folder='%q'", item->name, TRUE);
++            katze_item_set_name (KATZE_ITEM (subarray), item->name);
++            katze_array_add_item (array, subarray);
++        }
++        else
++            katze_array_add_item (array, item);
++    }
++    g_list_free (list);
+     return array;
+ }
+ 
++/**
++ * midori_array_query:
++ * @array: the main bookmark array
++ * @fields: comma separated list of fields
++ * @condition: condition, like "folder = '%q'"
++ * @value: a value to be inserted if @condition contains %q
++ *
++ * Stores the result in a #KatzeArray.
++ *
++ * Return value: a #KatzeArray on success, %NULL otherwise
++ *
++ * Since: 0.4.3
++ *
++ * Deprecated: 0.4.4: Use midori_array_query_recursive() instead.
++ **/
++KatzeArray*
++midori_array_query (KatzeArray*  bookmarks,
++                    const gchar* fields,
++                    const gchar* condition,
++                    const gchar* value)
++{
++    return midori_array_query_recursive (bookmarks, fields, condition, value, FALSE);
++}
++
+diff --git a/midori/midori-array.h b/midori/midori-array.h
+index 35b4e17..1ff7863 100644
+--- a/midori/midori-array.h
++++ b/midori/midori-array.h
+@@ -37,6 +37,13 @@ midori_array_query     (KatzeArray*  array,
+                         const gchar* value);
+ 
+ KatzeArray*
++midori_array_query_recursive (KatzeArray*  array,
++                              const gchar* fields,
++                              const gchar* condition,
++                              const gchar* value,
++                              gboolean     recursive);
++
++KatzeArray*
+ katze_array_from_sqlite (sqlite3*     db,
+                          const gchar* sqlcmd);
+ 
+diff --git a/midori/midori-browser.c b/midori/midori-browser.c
+index d037a2c..15f96e2 100644
+--- a/midori/midori-browser.c
++++ b/midori/midori-browser.c
+@@ -178,11 +178,6 @@ midori_bookmarks_import_array_db (sqlite3*    db,
+                                   gchar*      folder);
+ 
+ void
+-midori_bookmarks_export_array_db (sqlite3*     db,
+-                                  KatzeArray*  array,
+-                                  const gchar* folder);
+-
+-void
+ midori_browser_open_bookmark (MidoriBrowser* browser,
+                               KatzeItem*     item);
+ 
+@@ -4348,7 +4343,6 @@ _action_bookmarks_export_activate (GtkAction*     action,
+     const gchar* format;
+     gchar* path = NULL;
+     GError* error;
+-    sqlite3* db;
+     KatzeArray* bookmarks;
+ 
+     if (!browser->bookmarks || !gtk_widget_get_visible (GTK_WIDGET (browser)))
+@@ -4389,9 +4383,8 @@ wrong_format:
+         return;
+ 
+     error = NULL;
+-    db = g_object_get_data (G_OBJECT (browser->history), "db");
+-    bookmarks = katze_array_new (KATZE_TYPE_ARRAY);
+-    midori_bookmarks_export_array_db (db, bookmarks, "");
++    bookmarks = midori_array_query_recursive (browser->bookmarks,
++        "*", "folder='%q'", "", TRUE);
+     if (!midori_array_to_file (bookmarks, path, format, &error))
+     {
+         sokoke_message_dialog (GTK_MESSAGE_ERROR,
