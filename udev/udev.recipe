@@ -10,6 +10,7 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
     version = '167'
     rpmRelease = '6.fc15'
 
+
     buildRequires = [ 'sysfsutils:devel', 'pkgconfig:devel', 'glib:runtime',
                       'bison:runtime', 'pam:devel', 'chkconfig:runtime', 'libxslt:runtime',
                       'gperf:runtime', 'usbutils:runtime', 'usbutils:devellib',
@@ -44,8 +45,9 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
 
         r.unpack()
 
+        r.addSource('udev-post.init')
+
         # addons and extra features
-        
         r.macros.udev_scriptdir='/lib/udev'
         r.Run('autoreconf -i; automake; libtoolize -f -c')
 
@@ -67,6 +69,9 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         r.MakeDirs('%(sysconfdir)s/udev/{rules.d,scripts,devices,makedev.d}')
         r.MakeDirs('%(sysconfdir)s/dev.d/')
         r.Create('%(sysconfdir)s/scsi_id.config')
+        r.InitialContents('%(sysconfdir)s/scsi_id.config')
+
+        r.InitialContents('%(sysconfdir)s/udev/udev.conf')
 
         # force relative symlinks
         r.Symlink('/lib/udev/scsi_id', '/sbin/scsi_id')
@@ -74,8 +79,7 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
 
         r.MakeDirs('%(sysconfdir)s/udev/devices')
 
-
-        r.MakeDirs('%(udev_scriptdir)s/{,devices}')
+        r.MakeDirs('%(udev_scriptdir)s/{,devices,devices/net,devices/pts,devices/shm,devices/hugepages}')
         r.MakeDirs('%(datadir)s/udev')
         r.MakeDirs('/lib/firmware', mode = 0755)
 
@@ -84,8 +88,18 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         r.MakeDirs('%(initdir)s')
         r.MakeDirs('/var/lib/udev/makedev.d')
 
+        # as we 're still in SysV initscripts machinery ... 
+        r.Install('udev-post.init',
+                  '%(initdir)s/udev-post',
+                  mode = 0755)
 
-        for g in ['cdrom', 'tape', 'dialout', 'video', 'audio']:
+        for x in range(0, 8):
+            r.MakeDevices('%(udev_scriptdir)s/devices/loop' + str(x),
+                          'b', 7, x, 'root', 'disk',
+                          mode = 0640,
+                          package = 'udev:lib')
+
+        for g in ['cdrom', 'tape', 'dialout', 'video', 'audio', 'disk', ]:
             r.UtilizeGroup(g, '/sbin/udevd')
 
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/udev/rules.d')
@@ -94,10 +108,9 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/udev/makedev.d')
         r.ExcludeDirectories(exceptions='%(sysconfdir)s/dev.d')
         r.ExcludeDirectories(exceptions='/lib/firmware')
-        r.ExcludeDirectories(exceptions='/lib/udev/devices')
+        r.ExcludeDirectories(exceptions='/lib/udev/.*')
         r.ExcludeDirectories(exceptions='/usr/share/udev')
         r.ExcludeDirectories(exceptions='/var/lib/udev/makedev.d')
-
 
         # FIXME: find a better way, if any
         r.addSource('udev.tagdescription', macros=True,
@@ -113,11 +126,9 @@ class Udev(RPMPackageRecipe,CPackageRecipe):
         r.ComponentSpec('runtime', '/lib/udev/.*')
         # to avoid clashes in :lib under multilib setups
         r.ComponentSpec('runtime', '/usr/lib/ConsoleKit/.*')
-        r.PackageSpec('gudev', '%(lib)s/libg.*')
-        r.PackageSpec('gudev', '%(libdir)s/(libg|girep|gudev|pkgconfig/gudev).*')
-        r.PackageSpec('gudev', '%(datadir)s/(gir|gtk-doc/).*')      
-
-
+        r.PackageSpec('gudev', '.*(GU|gu)dev.*')
+        r.Requires('udev:devel', 'gudev:devel')
         r.NonBinariesInBindirs(exceptions='%(udev_scriptdir)s/.*')
 
     
+        
