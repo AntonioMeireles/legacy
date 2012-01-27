@@ -1,6 +1,6 @@
 class GoogleEarth(AutoPackageRecipe):
     name = 'google-earth'
-    version = '6.0.0.1735'
+    version = '6.1.0.5001'
 
 
     buildRequires = [ 'bash:runtime', 'fontconfig:devel', 'freetype:devel',
@@ -13,45 +13,41 @@ class GoogleEarth(AutoPackageRecipe):
                       'libXi:devel', 'libXrandr:devel', 'libgcc:devellib', 'libstdc++:devel',
                       'qt4-core:lib', 'qt4-gui:lib', 'qt4:devel', 'libgcc:lib', 'libstdc++:lib']
 
-    installPath = "/opt/"
-    installPath2 = "/opt/google-earth/"
-
     def setup(r):
-
-        r.addSource('http://dl.google.com/earth/client/current/GoogleEarthLinux.bin')
-        r.addSource('googleearth.desktop')
-        r.Desktopfile('googleearth.desktop')
-
-        r.Run(r"""
-        sh GoogleEarthLinux.bin --nox11  --nochown --noexec --target %(builddir)s/ 
-        """)
-        r.MakeDirs('/opt/%(name)s')
-
-        r.Run("tar -xf googleearth-data.tar -C %(destdir)s/opt/%(name)s/")
-        r.SetModes('/opt/%(name)s/gpsbabel', 0755)
-        r.Run("tar -xf googleearth-linux-x86.tar -C %(destdir)s/opt/%(name)s/")
-
-        r.Remove('{plugins,qt.conf}', recursive =True )
-
+        if Arch.x86:
+            r.addArchive('http://dl.google.com/dl/earth/client/current/google-earth-stable_current_i386.rpm',
+                         dir = '%(destdir)s')
+        else:
+            r.addArchive('http://dl.google.com/dl/earth/client/current/google-earth-stable_current_x86_64.rpm',
+                         dir = '%(destdir)s')
+       
         r.addSource('googleearth', macros = True)
-        r.Install('googleearth','%(bindir)s/googleearth', mode = 0755)
+        r.addSource('google-earth.desktop')
+        r.Install('googleearth',
+                  '%(bindir)s/%(name)s',
+                  mode = 0755)
+        
+        r.Remove('%(sysconfdir)s/', recursive = True)
 
-        r.Symlink('%(bindir)s/googleearth', '%(bindir)s/google-earth')
-
-        r.Symlink('%(libdir)s/qt4/plugins/styles', '/opt/%(name)s/plugins/')
-        r.DanglingSymlinks(exceptions='/opt/%(name)s/plugins/.*')
-
-        r.Install('googleearth-icon.png', '%(datadir)s/pixmaps/', mode = 0644)
+        r.Desktopfile('google-earth.desktop')
+        
+        r.Symlink('%(bindir)s/google-earth', '%(bindir)s/googleearth')
 
         # stuff we have and that works, and so we wipe it to make pkg smaller...
-        r.Remove('/opt/%(name)s/lib{crypto,z,curl,GLU,Qt}.*', allowNoMatch = True)
+        r.Remove('/opt/google/earth/free/{qt.conf,plugins}', recursive = True)
+        r.Symlink('%(libdir)s/qt4/plugins/', '/opt/google/earth/free/plugins')
+        r.DanglingSymlinks(exceptions='/opt/google/earth/free/.*')
+        r.Remove('/opt/google/earth/free/{{lib{crypto,z,curl,GLU,Qt}.*},google-earth.desktop}', recursive = True)
 
-        for x in [ 'libz']:
-            r.Requires(exceptDeps='soname:\ ELF32.*%s.*' % x )
-            r.Provides(exceptDeps='soname:\ ELF32.*%s.*' % x)
+        for x in ['16', '22', '24', '32', '48', '64', '128',]:
+            r.Move('/opt/google/earth/free/product_logo_%s.png' % x,
+                   '%%(datadir)s/pixmaps/google-earth-%s.png' % x)
+
+        r.Move('/opt/google/earth/free/product_logo_32.xpm',
+               '%(datadir)s/pixmaps/google-earth.xpm')
 
         # make sure global fl settings are consumed
-        r.Create('/opt/%(name)s/qt.conf', mode = 0644,
+        r.Create('/opt/google/earth/free/qt.conf', mode = 0644,
                  contents = """
 [Paths]
 Documentation=%(docdir)s/
@@ -66,9 +62,4 @@ ModuleFiles=%(libdir)s/pango/1.6.0/modules/
 [PangoX]
 AliasFiles=/etc/pango/pangox.aliases
 """)
-        # 
-        # FIXME - THIS DO NOT BELONG HERE
-        r.ScriptPreErase(contents="#!/bin/bash\n if [ -f /lib/ld-lsb.so.3 ]; then rm -f /lib/ld-lsb.so.3 ; fi ")
-        r.ScriptPostInstall(contents="#!/bin/bash\n if [ ! -f /lib/ld-lsb.so.3 ]; then ln -s /lib/ld-linux.so.2 /lib/ld-lsb.so.3 ; fi ")
-        r.ScriptPostUpdate(contents="#!/bin/bash\n if [ ! -f /lib/ld-lsb.so.3 ]; then ln -s /lib/ld-linux.so.2 /lib/ld-lsb.so.3 ; fi ")
 
