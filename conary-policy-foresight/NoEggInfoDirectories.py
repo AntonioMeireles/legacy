@@ -36,7 +36,8 @@ class NoEggInfoDirectories(policy.DestdirPolicy):
     No exceptions to this policy should be allowed.
     """
     processUnmodified = False
-    invariantinclusions = [ (r'.*\.egg-info$, stat.S_IFDIR') ]
+    invariantinclusions = [ (r'%(libdir)s/python.*\.egg-info$', stat.S_IFDIR),
+                            ]
 
     def doFile(self, filename):
         self.error("egg-info %s improperly packaged as directory rather than file" % filename)

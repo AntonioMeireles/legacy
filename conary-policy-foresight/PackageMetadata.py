@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2008 The Foresight Linux Project
+# Copyright (c) 2008-2012 The Foresight Linux Project
 #
 # This program is distributed under the terms of the Common Public License,
 # version 1.0. A copy of this license should have been distributed with this
@@ -14,6 +14,11 @@
 
 
 from conary.build import policy
+# FIXME get around conary sillyness, until it's patched upstream
+import sys
+if '/usr/lib/conary/policy' not in sys.path:
+    sys.path.append('/usr/lib/conary/policy')
+
 from metadata import _BaseMetadata
 
 class SetPackageMetadataFromRecipe(policy.DestdirPolicy):
