@@ -8,35 +8,30 @@
 
 class Sword(CPackageRecipe):
     name = "sword"
-    version = "1.6.2"
+    version = "1.6.2+r2679"
 
     buildRequires = ['clucene:devel', 'curl:devel', 'libstdc++:devel',
                      'openssl:devel', 'pkgconfig:devel', 'zlib:devel', 
-                     'icu:runtime', 'icu:devel', 
-                     'autoconf:runtime', 'automake:runtime', 'libtool:runtime',
+                     'icu:runtime', 'icu:devel', 'cmake:runtime',
+                     'libtool:runtime',
                      'cppunit:devel', 'php:runtime', 'python:devel',
                      'swig:runtime', 'perl:devel']
 
     def setup(r):
         r.macros.majversion = '.'.join(r.version.split('.')[0:2])
+        r.macros.rev = r.version[-4:]
         r.macros.url = 'http://crosswire.org/ftpmirror/pub/sword/source'
-        r.addArchive('%(url)s/v%(majversion)s/sword-%(version)s.tar.gz')
-        r.addPatch('curl_720_workaround.patch')
-        r.Replace('#include <curl\/types\.h>', '', 'src/mgr/curlftpt.cpp')
-        r.Replace('#include <curl\/types\.h>', '', 'src/mgr/curlhttpt.cpp')
-
-        r.Configure('--disable-static --with-icu --with-clucene')
-        r.Make()
-        r.MakeInstall()
+        r.addSvnSnapshot('http://crosswire.org/svn/sword/trunk/', revision='%(rev)s')
+        r.addPatch('cmake_libdir.patch')
+        #r.addArchive('%(url)s/v%(majversion)s/sword-%(version)s.tar.gz')
+        r.macros.cmake_args = ' -DSWORD_BINDINGS=Python'
+        if Arch.x86_64:
+            r.macros.cmake_args += ' -DLIB_SUFFIX=64'
+        r.CMake('%(cmake_args)s', objDir='build')
+        r.Make(dir='build')
+        r.MakeInstall(dir='build')
         # Only python bindings atm until 
-        # I found out how to make the rest compile
-        r.Replace('ac_sword_dir\/lib', 'ac_sword_dir/%(lib)s', 'bindings/swig/package/sword.m4')
-        r.Run('./autogen.sh', dir='bindings/swig/package')
-        # Don't use rpath!
-        r.Configure(' --with-sword-dir=%(destdir)s/%(prefix)s', dir='bindings/swig/package')
-        r.Make('pythonswig', dir='bindings/swig/package')
-        r.Make('python_make', dir='bindings/swig/package')
-        r.PythonSetup('install', dir='bindings/swig/package/python/')
+        r.PythonSetup('install', dir='build/bindings/swig/python/')
 
         r.MakeDirs('%(datadir)s/sword/modules')
         r.ExcludeDirectories(exceptions='%(datadir)s/sword/modules')
