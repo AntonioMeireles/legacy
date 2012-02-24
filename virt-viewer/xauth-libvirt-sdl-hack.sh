@@ -15,11 +15,7 @@
 # make a ~/.Xauthority symlink since that's what libvirt will configure
 # by default when using an SDL Display
 
-if [ -f "$HOME/.Xauthority" ]; then
-  rm "$HOME/.Xauthority"
-fi
-
 if [ -n "$XAUTHORITY" ]; then
-  ln -s "$XAUTHORITY" "$HOME/.Xauthority"
+  ln -sf "$XAUTHORITY" "$HOME/.Xauthority"
 fi
 
