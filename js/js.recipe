@@ -1,55 +1,20 @@
 #
-# Copyright (c) 2007-2008 Foresight Linux
+# Copyright (c) 2007-2012 Foresight Linux
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class JS(RPMPackageRecipe,AutoPackageRecipe):
+class JS(CPackageRecipe):
 
     name = 'js'
-    version = '1.70'
-    realVersion = '1.7.0'
-    rpmRelease = '3.fc10'
-    rpmPatches = [ 'js-1.7.0-make.patch',
-                   'js-shlib.patch',
-                   'js-1.5-va_copy.patch',
-                   'js-ldflags.patch',
-                   'js-1.7.0-threadsafe.patch',
-                   'js-1.60-ncurses.patch',]
+    version = '1.8.5'
+ 
+    buildRequires = ['ncurses:devel', 'nspr:devel', 'readline:devel', 'libstdc++:devel']
 
-    tarballName = '%(name)s-' + realVersion + '.tar.gz'
-
-    buildRequires = ['ncurses:devel', 'nspr:devel', 'readline:devel']
-
-    def unpack(r):
-        RPMPackageRecipe.unpack(r)
-        r.macros.version = r.realVersion
-        r.Create('libjs.pc', contents = """
-prefix=%(prefix)s
-exec_prefix=%(prefix)s
-libdir=%(libdir)s
-includedir=%(includedir)s
-
-Name: libjs
-Description: JS library
-Requires:
-Version: %(version)s
-Libs: -L${libdir}s -ljs
-Cflags: -I${includedir}
-""")
-    def configure(r):
-        pass
-
-    def make(r):
-        r.Environment('BUILD_OPT', '1')
-        r.Make('-C src -f Makefile.ref JS_THREADSAFE="1"  XCFLAGS="%(optflags)s -fPIC"  BUILD_OPT="1"'
-               ' JS_READLINE="1"')
-
-    def makeinstall(r):
-        r.Install('libjs.pc', '%(libdir)s/pkgconfig/', mode = 0644)
-        r.Install('src/Linux_All_OPT.OBJ/{js,jscpucfg}', '%(bindir)s/', mode = 0755)
-        r.Install('src/Linux_All_OPT.OBJ/libjs.a', '%(libdir)s/', mode = 0644)
-        r.Install('src/Linux_All_OPT.OBJ/libjs.so', '%(libdir)s/libjs.so.1', mode = 0755)
-        r.Symlink('%(libdir)s/libjs.so.1', '%(libdir)s/libjs.so')
-        r.Install('src/{js*.h,js.msg,*.tbl,Linux_All_OPT.OBJ/jsautocfg.h}', '%(includedir)s/', mode = 0644)
+    def setup(r):
+        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/js/js185-1.0.0.tar.gz')
+        r.addPatch('js185-destdir.patch', dir='js/src')
+        r.Configure('--enable-threadsafe --prefix=%(prefix)s --with-system-nspr', dir='js/src')
+        r.Make(dir='js/src')
+        r.MakeInstall(dir='js/src')
+        r.Install('js/src/shell/js', '%(bindir)s/')
