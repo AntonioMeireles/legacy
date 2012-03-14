@@ -8,12 +8,18 @@ loadSuperClass('rpmpackage')
 class Plymouth(RPMPackageRecipe, AutoPackageRecipe):
     name = 'plymouth'
     version = '0.8.4'
-    rpmRelease = '0.20110822.3.fc16'
+    rpmRelease = '0.20110510.2.fc15'
+    # Killing plymouthd solves issues when patch is enabled.
+    # When patch is disabled, users will see a warning on the boot console.
+    # "Warning: dev (tty1) tty->count(4) != #fd's(3) in tty_release_dev"
+    # is shown on my system -- /ermo, 2010-09
+    #rpmPatches = ['lock-tty.patch'] 
     rpmSources = [ 'boot-duration',
                    'plymouth-update-initrd',
                    'plymouth-set-default-plugin',
                    'charge.plymouth']
 
+    rpmPatches = [ 'fix-frozen-input.patch' ]
 
     buildRequires = [ 'atk:devel', 'cairo:devel', 'expat:devel',
                       'fontconfig:devel', 'freetype:devel', 'glib:devel',
@@ -29,18 +35,17 @@ class Plymouth(RPMPackageRecipe, AutoPackageRecipe):
                       'libdrm:devel']
 
     def configure(r):
-        r.Replace('fade-in', 'spinner', 'src/plymouthd.defaults')
+        r.Replace('fade-in', 'charge', 'src/plymouthd.defaults')
         r.addSource('plymouth-bootloader.conf',
                     dest='%(sysconfdir)s/bootloader.d/')
-        r.addSource('default.plymouth')
-        r.addSource('distributor-logo.scalable.png', dest='%(datadir)s/pixmaps/', mode=0644)
 
 	# FL friendly colors for the text progress bar
 	r.addPatch('ply-text-progress-bar-colors.patch')
 
         r.Configure( ' --enable-tracing'
                      ' --disable-tests'
-                     ' --with-logo=%(datadir)s/pixmaps/distributor-logo.scalable.png'
+                     ' --without-default-plugin'
+                     ' --with-logo=%(datadir)s/pixmaps/system-logo-white.png'
                      ' --disable-gdm-transition'
                      ' --with-system-root-install'
                      ' --with-rhgb-compat-link'
@@ -58,7 +63,6 @@ class Plymouth(RPMPackageRecipe, AutoPackageRecipe):
         # 
         r.MakeDirs('%(datadir)s/plymouth/themes/charge')
         r.Install('charge.plymouth', '%(datadir)s/plymouth/themes/charge/')
-        r.Install('default.plymouth', '%(datadir)s/plymouth/themes/')
         r.Copy('%(datadir)s/plymouth/themes/glow/{box,bullet,entry,lock}.png',
                '%(datadir)s/plymouth/themes/charge/')
 
