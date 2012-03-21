@@ -15,7 +15,7 @@ class GroupDesktopPlatform(GroupRecipe):
 
     Flags.local_tools = True
     depCheck = True
-    # we handle this on the group-{gnome,xfce,dist}-dist stage
+    # we handle this on the group-{gnome,lxde,xfce,dist}-dist stage
     checkPathConflicts = False
     checkOnlyByDefaultDeps = True
     requireLatest = False
@@ -54,6 +54,12 @@ class GroupDesktopPlatform(GroupRecipe):
         'group-xfce-extras',
     ]
 
+    lxdegroups = [
+        'group-lxde',
+        'group-lxde-core',
+        'group-lxde-apps',
+        'group-lxde-extras',
+    ]
 
     rplLabel = 'conary.rpath.com@rpl:2-qa'
     rplLabelCompat = 'conary.rpath.com@rpl:1-compat'
@@ -279,7 +285,7 @@ class GroupDesktopPlatform(GroupRecipe):
         # making sure a user who is trying to install -devel-groups
         # doesn't get them stripped due to the excludeTroves default
         # settings we have in stock non devel installs
-        for edition in ['gnome', 'kde', 'xfce']:
+        for edition in ['gnome', 'kde', 'lxde', 'xfce']:
             r.addPreUpdateScript('fl2-devel-groups-pre-update.script',
                                  groupName = 'group-' + edition + '-dist-devel')
             r.addPreUpdateScript('fl2-devel-groups-pre-update.script',
@@ -296,7 +302,7 @@ class GroupDesktopPlatform(GroupRecipe):
         r.flCreateGroup('group-supported-stuff-extra', parentGroup='group-desktop-platform', dynamicGroup = False)
         # here goes everything that isn't fit for any other group but _is_ in our labels
         # devel groups skel
-        for ed in ['gnome', 'kde', 'xfce']:
+        for ed in ['gnome', 'kde', 'lxde', 'xfce']:
             r.flCreateGroup('group-%s-devel' % ed, parentGroup='group-desktop-platform',
                             dynamicGroup = True,
                             depCheck=False, autoResolve = False, checkPathConflicts=True
@@ -1770,6 +1776,103 @@ class GroupDesktopPlatform(GroupRecipe):
             r.flAdd(p, groupName='group-xfce-extras')
 
         # end of xfce block
+        
+        #
+        # lxde block
+        #
+
+        # Create group-lxde, which all other lxde groups become children of
+        r.flCreateGroup('group-lxde', parentGroup='group-desktop-platform', depCheck=False)
+        r.flCreateGroup('group-lxde-core', parentGroup='group-lxde', depCheck=False)
+        lxde = [
+            'leafpad',
+            'file-roller',
+            'gpicview',
+            'libfm',
+            'lxappearance',
+            'lxde-common',
+            'lxde-icon-theme',
+            'lxdm',
+            'lxpanel',
+            'lxmenu-data',
+            'lxrandr',
+            'lxsession',
+            'xfce4-notifyd',
+            'lxtask',
+            'lxterminal',
+            'menu-cache',
+            'pcmanfm',
+            'volumeicon' ]
+
+        for p in lxde:
+            r.flAdd(p, groupName='group-lxde-core')
+
+        # these aren't lxde packages, but are needed
+        gnomepackages = [
+            'gamin',
+            'gtk-engines',
+            'metacity',
+            'gdm',
+            'gnome-session',
+            'libgnome-background',
+            'gnome-settings-daemon', # needed by gdm
+            'hicolor-icon-theme',
+###            'gnome-packagekit',
+            'polkit-gnome',
+            'network-manager-applet',
+            'shared-mime-info',
+            'indicator-messages',
+            'libproxy',
+            ('libproxy-gnome', 'libproxy'),
+            ('libproxy-networkmanager', 'libproxy'),
+            ('libproxy-mozjs', 'libproxy'),
+            ('libproxy-webkit', 'libproxy'),
+        ]
+
+        for p in gnomepackages:
+            r.flAdd(p, groupName='group-lxde')
+
+        # satisfy dependencies
+        for p in [
+            # misc
+            'libcddb',
+            'libcdio',
+            'libsexy',
+            'librsvg', # cheese, abiword, gdm, ...
+            'glitz',
+            'gst-plugins-base', # exaile, totem, parole
+            'gst-plugins-good',
+            # gdm 
+            'iso-codes',
+            'at-spi',
+            'gnome-icon-theme',
+            ]:
+            r.flAdd(p, groupName='group-lxde')
+
+        r.flCreateGroup('group-lxde-apps', parentGroup='group-lxde', depCheck=False)
+        # some other applications we want, might go in different groups later.
+        for p in [
+            'chromium',
+            ('PackageKit','PackageKit'),
+            ('PackageKit-command-not-found','PackageKit'),
+            'gnome-packagekit',
+            'gvfs', 'gnome-disk-utility',
+            ]:
+            r.flAdd(p, groupName='group-lxde-apps')
+
+        # multimedia applications for lxde edition.
+        for p in [
+            'pulseaudio',
+            'pragha',
+            'totem',
+            'cheese',
+            'xfburn',
+            ]:
+            r.flAdd(p, groupName='group-lxde-apps')
+        # end of group-lxde-apps
+        #
+        # end of lxde block
+        #
 
         #
         # kde block
@@ -4893,8 +4996,17 @@ class GroupDesktopPlatform(GroupRecipe):
         # This is a hack to make xfce edition have Xfce as default login
         # after installation, by creating a .dmrc for new users.
         r.flAdd('xfce-default-session', groupName='group-xfce-dist')
+        
+        # Define LXDE Edition
+        r.flCreateGroup('group-lxde-dist', parentGroup='group-desktop-platform',
+                        checkOnlyByDefaultDeps=False,
+                        # checkOnlyByDefaultDeps=True,
 
-
+                        depCheck=True, autoResolve=True, checkPathConflicts=True,
+                        dynamicGroup = True)
+        r.addNewGroup('group-desktop-common', groupName='group-lxde-dist')
+        r.addNewGroup('group-lxde', groupName='group-lxde-dist')
+        r.addNewGroup('group-pidgin', groupName='group-lxde-dist')
 
         # XXX order key
         def trimStockGroups(groupName, ed):
@@ -4941,13 +5053,13 @@ class GroupDesktopPlatform(GroupRecipe):
                     if not ignoreGroup(g[0].name):
                         trimStockGroups(g[0].name, ed)
 
-        # :devel{,lib} stuff in group-{gnome,kde,xfce}-dist 
-        # gets copyed to group-{gnome,kde,xfce}-dist-devel 
+        # :devel{,lib} stuff in group-{gnome,kde,lxde,xfce}-dist 
+        # gets copyed to group-{gnome,kde,lxde,xfce}-dist-devel 
         # but not erased as we have inner groups that belong
         # to more than one -dist group 
         
 
-        for edition in ['gnome', 'kde', 'xfce']:
+        for edition in ['gnome', 'kde', 'lxde', 'xfce']:
             r.addNewGroup('group-supported-stuff-extra',  groupName='group-%s-dist' % edition, byDefault=False)
 
             r.flCreateGroup('group-' + edition + '-dist-devel', parentGroup='group-desktop-platform',
