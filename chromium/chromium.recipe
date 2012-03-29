@@ -1,7 +1,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '17.0.963.84' 
+    baseVersion = '18.0.1025.146' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
@@ -62,6 +62,7 @@ class Chromium(AutoPackageRecipe):
                      'unzip:runtime',
                      'elfutils:devel',
                      'libelf:devel',
+                     'udev:devel',
                     ]
 
     if Arch.x86_64:
@@ -74,8 +75,8 @@ class Chromium(AutoPackageRecipe):
         r.addArchive('http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/nacl_sdk.zip',
                      dir = '%%(name)s-%s' % r.baseVersion)
         r.addPatch('chromium-media-no-sse-r0.patch')
-        r.addPatch('nacl-cflags-remove-fstack-protector.patch', dir = 'native_client')
-
+        # Fix JPEG image rendering problem (patch from Gentoo bug #393471)
+        r.addPatch('chromium-revert-jpeg-swizzle-r2.patch')
         # needed in order to NaCl build to proceed
         r.macros.cflags  = re.sub('-fstack-protector', '', r.macros.cflags)
 
@@ -100,12 +101,12 @@ class Chromium(AutoPackageRecipe):
                                 # we are at icu-4.4.x. builtin at 4.6
                                 'use_system_icu=0 '
                                 'use_cups=1 '
-                                # system's libjpeg induces rendering messes
-                                'use_system_libjpeg=0 '
+                                'use_system_libjpeg=1 '
                                 'use_system_libxml=1 '
                                 'use_system_libxslt=1 '
                                 'use_system_bzip2=1 '
-                                'use_system_flac=1 '
+                                # until we bump system ...
+                                'use_system_flac=0 '
                                 'use_system_speex=1 '
                                 'use_system_libevent=1 '
                                 'use_system_libpng=1 ' 
@@ -137,10 +138,10 @@ class Chromium(AutoPackageRecipe):
                   # 'chromium_build/third_party/zlib/zconf.h')
                   'third_party/zlib/zconf.h')
 
-        r.ManualConfigure('update pepper_17',
+        r.ManualConfigure('update pepper_18',
                           configureName = 'naclsdk',
                           dir = 'nacl_sdk')
-        r.Symlink('../../nacl_sdk/pepper_17/toolchain/linux_x86_newlib',
+        r.Symlink('../../nacl_sdk/pepper_18/toolchain/linux_x86_newlib',
                   'native_client/toolchain/linux_x86_newlib')
 
         r.Run("GYP_DEFINES=\'%(gypDefines)s\'  GYP_GENERATORS=make "
