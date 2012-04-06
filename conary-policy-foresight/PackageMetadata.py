@@ -28,10 +28,7 @@ class SetPackageMetadataFromRecipe(policy.DestdirPolicy):
         if  hasattr(self.recipe, 'packageSummary'):
             if not hasattr(self.recipe, 'packageDescription'):
                 self.recipe.packageDescription =  ''
-                self.info('Package description incomplete; packageSummary defined but not packageDescription... please consider fixing it')
             self.recipe.Description(shortDesc =  self.recipe.packageSummary, longDesc =  self.recipe.packageDescription, macros = True)
-        else:
-            self.info('Package descriptions are not set; Application metadata is critical for a good user experience. Please consider fixing it')
 
 
 class SetupRecipeMetadata(_BaseMetadata):
