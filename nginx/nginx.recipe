@@ -1,0 +1,65 @@
+# when changing this package, keep Fedora's packaging in mind; see
+# http://koji.fedoraproject.org/koji/packageinfo?packageID=2638
+# for the latest
+
+class nginx(AutoPackageRecipe):
+    name = 'nginx'
+    version = '1.0.14'
+
+    buildRequires = [
+        'openssl:devel',
+        'zlib:devel',
+        'bzip2:devel',
+        'libxml2:devel',
+        'libxslt:devel',
+        'pcre:devel',
+        'readline:devel',
+    ]
+
+    def unpack(r):
+        r.addArchive('http://nginx.org/download/', keyid='A1C052F8')
+
+    def configure(r):
+        r.macros.thisdatadir = '%(datadir)s/%(name)s'
+        r.macros.thisconfdir = '%(sysconfdir)s/nginx'
+        r.macros.thishomedir = '%(localstatedir)s/lib/nginx'
+        r.macros.thislogdir  = '%(localstatedir)s/log/nginx'
+        r.macros.thiswebroot = '%(thisdatadir)s/html'
+        r.macros.thistmpdir  = '%(thishomedir)s/tmp'
+        r.ManualConfigure('--prefix=%(thisdatadir)s'
+                          ' --sbin-path=%(sbindir)s/nginx'
+                          ' --conf-path=%(thisconfdir)s/nginx.conf'
+                          ' --error-log-path=%(thislogdir)s/error.log'
+                          ' --pid-path=%(localstatedir)s/run/nginx.pid'
+                          ' --lock-path=%(localstatedir)s/run/lock/subsys/nginx'
+                          ' --user=nginx --group=nginx'
+                          ' --with-file-aio'
+                          ' --with-ipv6'
+                          ' --with-http_ssl_module'
+                          ' --with-http_dav_module'
+                          ' --with-http_xslt_module'
+                          ' --with-cc-opt="%(optflags)s $(pcre-config --cflags)"')
+
+    def makeinstall(r):
+        r.MakeInstall('INSTALLDIRS=vendor')
+        r.MakeDirs('%(thistmpdir)s')
+        r.Create('%(sysconfdir)s/logrotate.d/nginx', contents='''%(thislogdir)s/*log {
+    daily
+    rotate 10
+    missingok
+    notifempty
+    compress
+    sharedscripts
+    postrotate
+        %(initdir)s/nginx reopen_logs
+    endscript
+}
+''')
+
+    def policy(r):
+        r.ExcludeDirectories(exceptions='%(thisdatadir)s')
+        r.ExcludeDirectories(exceptions='%(thistmpdir)s')
+        r.ExcludeDirectories(exceptions='%(thislogdir)s')
+        r.Ownership('nginx', 'nginx', '%(thisdatadir)s', '%(thistmpdir)s')
+        r.UtilizeUser('nginx', '%(sysconfdir)s/nginx/nginx.conf')
+        r.ComponentSpec('doc', '%(thisconfdir)s/.*\.default')
