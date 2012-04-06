@@ -82,31 +82,42 @@ class Wine(AutoPackageRecipe):
     def unpack(r):
         r.macros.version = r.version.replace('_', '-')
         r.addArchive('http://prdownloads.sourceforge.net/wine/')
-        r.addSource('wine.desktop', dir = '%(datadir)s/applications/', mode = 0644)
         r.addSource('http://winetricks.org/winetricks', dir = '%(bindir)s/', mode = 0755)
         r.addSource('http://downloads.sourceforge.net/wine/wine_gecko-1.5-x86.msi', dir = '%(datadir)s/wine/gecko/', mode = 0755)
+        r.addSource('http://downloads.sourceforge.net/wine/wine_gecko-1.5-x86_64.msi', dir = '%(datadir)s/wine/gecko/', mode = 0755, use=Arch.x86_64)
         r.addSource('wine-uninstaller.desktop', dir = '%(datadir)s/applications', mode = 0644)
         r.addSource('wine-winecfg.desktop', dir = '%(datadir)s/applications', mode = 0644)
         r.addSource('wine.init', dir = '%(initdir)s/wine', mode = 0755)
         r.addSource('wine.menu', dir = '%(sysconfdir)s/xdg/menus/applications-merged', mode = 0644)
+        r.addSource('wine.systemd', dir = '%(sysconfdir)s/binfmt.d', mode = 0644)
         r.addSource('wine.directory', dir = '%(sysconfdir)s/desktop-directories/Wine.directory', mode = 0644)
         r.addSource('winecfg.png', dir = '%(datadir)s/icons/hicolor/scalable/apps')
         r.addSource('msiexec.png', dir = '%(datadir)s/icons/hicolor/scalable/apps')
         r.addSource('oic_winlogo.png', dir = '%(datadir)s/icons/hicolor/scalable/apps')
+        r.addSource('wine-32.conf', dir = '%(sysconfdir)s/ld.so.conf.d', mode = 0644)
+        r.addSource('wine-64.conf', dir = '%(sysconfdir)s/ld.so.conf.d', mode = 0644, use=Arch.x86_64)
 
 
     def configure(r):
         # r.macros.cflags += ' -fno-tree-fre -fno-tree-pr '
+        r.Run('export CFLAGS="${CFLAGS/-D_FORTIFY_SOURCE=2/} -D_FORTIFY_SOURCE=0"')
+        r.Run('export CXXFLAGS="${CFLAGS/-D_FORTIFY_SOURCE=2/} -D_FORTIFY_SOURCE=0"')
         r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d '
         r.Environment('LDFLAGS','%(ldflags)s')
         r.Remove('config.cache')
         r.Run('autoconf')
+        
+        if Arch.x86_64: 
+            r.macros.win64 = '--enable-win64'
+        else: 
+            r.macros.win64 = ''
+        
         r.Configure(' --sysconfdir=%(sysconfdir)s/wine'
-                    ' --disable-static --enable-opengl'
                     ' --x-includes=%(includedir)s'
                     ' --x-libraries=%(libdir)s'
                     ' --disable-tests'
-                    ' --enable-maintainer-mode'
+                    ' --libdir=%(libdir)s'
+                    ' %(win64)s'
                     )
 
     def makeinstall(r):
@@ -117,7 +128,7 @@ class Wine(AutoPackageRecipe):
 
     def policy(r):
         r.CheckSonames(exceptions='%(libdir)s/libwine.*')
-        r.TagSpec('desktop-file', '%(datadir)s/applications/wine.desktop')
+        #r.TagSpec('desktop-file', '%(datadir)s/applications/wine.desktop')
         # r.Requires('soname: libuuid.so.1(SysV UUID_1.0 x86)', '%(bindir)s/wine')
         # UUID_1.0 isn't available in old libuuid from e2fsprogs and we want this 
         # to behave when is rebuilt against it
