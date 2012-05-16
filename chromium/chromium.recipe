@@ -1,7 +1,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '19.0.1084.47' 
+    baseVersion = '19.0.1084.48' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = ['depot_tools:runtime',
@@ -75,10 +75,8 @@ class Chromium(AutoPackageRecipe):
         r.addArchive('http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/nacl_sdk.zip',
                      dir = '%%(name)s-%s' % r.baseVersion)
         
-        # Add missing include that defines OS_POSIX
-        r.addAction(""" sed -i '1 i\
-    #include "build/build_config.h"' \
-            chrome/browser/diagnostics/diagnostics_main.cc""")
+        r.addSource('sqlite-3.7.6.3-fix-out-of-scope-memory-reference.patch')
+        r.addAction('patch -i "%%(builddir)s/%%(name)s-%s/sqlite-3.7.6.3-fix-out-of-scope-memory-reference.patch" third_party/sqlite/amalgamation/sqlite3.c' % r.baseVersion )
 
         # needed in order to NaCl build to proceed
         r.macros.cflags  = re.sub('-fstack-protector', '', r.macros.cflags)
@@ -128,6 +126,9 @@ class Chromium(AutoPackageRecipe):
                                 'disable_sse2=1 '
                                 # to get around build issues. 
                                 'v8_use_snapshot=0 '
+
+                                'linux_use_gold_binary=0 '
+                                'linux_use_gold_flags=0 '
                                 )
         if Arch.x86_64:
             r.macros.gypDefines += 'target_arch=x64 '
@@ -141,6 +142,8 @@ class Chromium(AutoPackageRecipe):
                   '',
                   # 'chromium_build/third_party/zlib/zconf.h')
                   'third_party/zlib/zconf.h')
+        # http://code.google.com/p/chromium/issues/detail?id=109527
+        # r.Replace('glib/gutils.h', 'glib.h', 'ui/base/l10n/l10n_util.cc')
 
         r.ManualConfigure('update pepper_19',
                           configureName = 'naclsdk',
