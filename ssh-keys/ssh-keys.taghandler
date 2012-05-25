@@ -1,0 +1,75 @@
+#!/bin/bash
+
+if [ $# -lt 2 ]; then
+    echo "not enough arguments: $0 $*" >&2
+    exit 1
+fi
+
+type="$1"
+shift
+action="$1"
+shift
+
+do_recompute_authfile()
+{
+    for fname in "$@"; do
+        [ -f "$fname" ] || continue
+        # Extract dirname
+        dirname="${fname%/*}"
+        # Filename should be user
+        username="${dirname##*/}"
+        userdir=$(getent passwd "$username" | cut -d: -f6)
+        [ "$userdir" = "" ] && continue
+        sshkeydir="$userdir/.ssh"
+        install -d -o "$username" -m 0700 "$sshkeydir"
+        akfile="$sshkeydir/authorized_keys"
+        tmpakfile=$(mktemp --tmpdir="$sshkeydir" -t authorized_keys.XXXXXXXX)
+        # Create the authorized_keys file if it doesn't exist (instead of
+        # trying to concatenate the existing one with the new file)
+        cat "$fname" >> "$akfile"
+        sort -u "$akfile" > "$tmpakfile" && mv "$tmpakfile" "$akfile"
+        chmod 0600 "$akfile"
+        chown "$username" "$akfile"
+    done
+    exit 0
+}
+
+do_erase_key()
+{
+    # Key removal not implemented yet
+    exit 0
+}
+
+case $type in 
+    files)
+        case $action in
+            update)
+                do_recompute_authfile "$@"
+            ;;
+            remove)
+                do_erase_key "$@"
+            ;;
+            *)
+                echo "ERROR: taghandler $0 invoked for an action ($action) that is not handled" 1>&2
+                exit 1
+            ;;
+        esac
+        ;;
+    handler)
+        case $action in
+            update)
+                [ -d /etc/ssh/keys.d ] && do_recompute_authfile $(find /etc/ssh/keys.d -name \*.pub)
+            ;;
+            *)
+                echo "ERROR: taghandler $0 invoked for an action ($action) that is not handled" 1>&2
+                exit 1
+            ;;
+        esac
+        ;;
+    *)
+        echo "ERROR: taghandler $0 invoked for a type ($type) that is not handled" 1>&2
+        exit 1
+        ;;
+esac
+
+exit 0
