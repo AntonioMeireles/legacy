@@ -131,6 +131,25 @@ class KernelPackageRecipe(CPackageRecipe):
         r.build() # extra build actions go here
         r.policyBase()
         r.policy() # extra policy goes here
+        
+    def _getCfgVer(r):
+        # Have to calculate the kver early because by the time addConfigs runs
+        # all the macros need to already be defined.
+        flags = ['']
+        if Flags.debug:
+            flags.append('debug')
+        if Flags.smp:
+            flags.append('smp')
+        if Flags.pae:
+            flags.append('pae')
+        if Flags.numa:
+            flags.append('numa')
+        flags.append(r.macros.gccver)
+        for basearch, flaglist, dictlist in r.configs:
+            if True and Arch[basearch]:
+                flags.append(basearch)
+                break
+        return '.'.join(flags)
 
     def setMacros(r):
         # set most custom macros; see setImageTargetMacro() for imagetarget
@@ -161,10 +180,12 @@ class KernelPackageRecipe(CPackageRecipe):
 
         # r.macros.cfgver is set later while creating configurations
         # This works because macros have delayed evaluation
+        r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
+        r.macros.cfgver = r._getCfgVer()
         r.macros.localversion = '-%(serial)s-foresight.%(cfgver)s'
         r.macros.kver = '%(archive_version)s%(localversion)s'
         r.macros.sourcever = '%(version)s-%(serial)s'
-        r.macros.gccver = 'gcc%s' %'.'.join(Gcc.version.split('.')[0:2])
+        print 'kver =', r.macros.kver
 
         # get the last 64 (UTS_LEN) or fewer characters of the parts of
         # the buildLabel to use instead of the username and hostname the
@@ -586,9 +607,7 @@ class addConfigs(action.RecipeAction):
                 # specific comes along later
                 util.copyfile(config.filename(self.confdir),
                     '%(builddir)s/%(maindir)s/.config' %self.recipe.macros)
-                self.recipe.macros.cfgver = config.unamePrefix+config.unameArch
                 self.recipe.kernelConfig = config
-                print 'building with cfgver = "%s"' %self.recipe.macros.cfgver
 
     def getConfig(self):
         f = self.lookaside.findAll(self.recipe.cfg, self.recipe.laReposCache,
