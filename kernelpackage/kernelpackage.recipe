@@ -11,11 +11,19 @@ class KernelPackageRecipe(CPackageRecipe):
     buildRequires = [ 'perl:runtime', 'perl:perl',
                       'module-init-tools:runtime',
                       # for 'hostname' cmd
-                      'net-tools:runtime', ]
+                      'net-tools:runtime', 
+                      # for perf and cpupower
+                      'elfutils:devel', 'libelf:devel',
+                      'newt:devel', 'python:devel', 
+                      'slang:devel', 'audit:python',
+                      'chkconfig:runtime', 'gettext:runtime',
+                      'intltool:runtime', 'perl:devel',
+                      'wxPython:python', 'pciutils:devel',]
 
     name = 'kernelpackage'
     version = '0.0.0'
     longterm = False
+
     #serial = '1'
     # If you are not trying to manage binary kernel module compatibility,
     # then do not set a serial string, and the source count will be used
@@ -127,6 +135,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.createLocalVersion()
         r.configure() # manually generated .config's go here
         r.buildBase() # includes installation
+        r.buildPerfAndTools()
         r.buildAtaModuleMap() # may be overridden if modules.libata not needed
         r.build() # extra build actions go here
         r.policyBase()
@@ -343,6 +352,68 @@ class KernelPackageRecipe(CPackageRecipe):
         if Arch.x86_64:
             r.Provides('abi: ELF32(SysV x86)', '/boot/vmlinu.*')
             r.Provides('abi: ELF64(SysV x86_64)', '/boot/vmlinu.*')
+
+    def buildPerfAndTools(r):
+        # FIXME 
+        # i'm not specially happy about doing this here... (a la RH)
+        # ideally we'll do later this in a separate package (kernel-tools ?)
+        # that subclasses kernel class. 
+        #
+        # cpupower
+        r.Make('CPUFREQ_BENCH=false', dir = 'tools/power/cpupower')
+        r.MakeInstall('CPUFREQ_BENCH=false libdir=%(libdir)s mandir=%(mandir)s',
+                      dir = 'tools/power/cpupower',
+                      package = 'kernel-tools')
+        # this will fail for non x86 arches...
+        if Arch.x86:
+            dpath = 'tools/power/cpupower/debug/i386'
+        elif Arch.x86_64:
+            dpath = 'tools/power/cpupower/debug/x86_64'
+
+        r.Make('centrino-decode powernow-k8-decode', dir = dpath)
+
+        r.MakeDirs('%(mandir)s/man8')
+        r.MakeDirs('%(bindir)s')
+        for d in [ 'x86_energy_perf_policy/',
+                   'turbostat',]:
+            r.Make(dir = 'tools/power/x86/%s' % d)
+            # busted upstream
+            r.Replace('/usr/', '%(destdir)s/%(prefix)s/',
+                      'tools/power/x86/%s/Makefile' %d)
+            r.MakeInstall(dir = 'tools/power/x86/%s' % d)
+
+        for f in ['centrino-decode', 'powernow-k8-decode']:
+            r.Install(dpath + '/%s' % f,
+                      '%(bindir)s/',
+                      package = 'kernel-tools')
+
+        cpupowerDefaultCfg = ("""# See 'cpupower help' and cpupower(1) for more info\n"""
+                              """CPUPOWER_START_OPTS="frequency-set -g ondemand\n" """)
+
+        r.Create('%(sysconfdir)s/sysconfig/cpupower',
+                 contents = cpupowerDefaultCfg, mode = 0644,
+                 package = 'kernel-tools')
+        r.addSource('cpupower.init')
+        r.Install('cpupower.init', '%(initdir)s/cpupower',
+                  mode = 0755, package = 'kernel-tools')
+        # perf
+        r.Make('-s V=1 HAVE_CPLUS_DEMANGLE=1 all prefix=%(prefix)s', dir = 'tools/perf')
+        r.Make('-s V=1 HAVE_CPLUS_DEMANGLE=1 man prefix=%(prefix)s', dir = 'tools/perf')
+        
+        r.MakeInstall(' -s V=1 prefix=%(prefix)s mandir=%(mandir)s HAVE_CPLUS_DEMANGLE=1 '
+                      ' EXTRA_CFLAGS="-Wno-error=array-bounds"',
+                      dir = 'tools/perf', package = 'perf')
+        r.MakeInstall(' -s V=1 prefix=%(prefix)s mandir=%(mandir)s HAVE_CPLUS_DEMANGLE=1 '
+                      ' EXTRA_CFLAGS="-Wno-error=array-bounds"',
+                      installtarget= 'install-man',
+                      dir = 'tools/perf',
+                      package = 'perf')
+        r.MakeInstall(installtarget='install-python_ext',
+                      dir = 'tools/perf',
+                      package = 'perf')
+        r.Doc('tools/perf/{CREDITS,Documentation/{perfconfig.example,examples.txt}}',
+              package = 'perf')
+        r.Remove('%(libdir)s/python%(pyver)s/site-packages/*.egg-info')
 
     def buildAtaModuleMap(r):
         # find libata modules
