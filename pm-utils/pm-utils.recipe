@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2005-2007 rPath, Inc.
+#               2007-2012 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
@@ -7,12 +8,16 @@
 loadSuperClass('rpmpackage')
 class PMUtils(RPMPackageRecipe, AutoPackageRecipe):
     name = 'pm-utils'
-    version = '1.3.1'
-    rpmRelease = '4.fc14'
-    rpmPatches = [ ]
-    rpmSources = [ 'pm-utils-99hd-apm-restore',
-                   'pm-utils-hd-apm-restore.conf',
-                   'pm-utils-bugreport-info.sh' ]
+    version = '1.4.1'
+    rpmRelease = '13.fc16'
+    rpmPatches = [ 'pm-utils-1.4.1-init-logfile-append.patch',
+                   'pm-utils-1.4.1-networkmanager-typo-fix.patch',
+                   'pm-utils-1.4.1-grub2.patch',
+                   'pm-utils-1.4.1-hook-exit-code-log.patch',
+                   'pm-utils-1.4.1-nm_method.patch',
+                   ]
+    rpmSources = [ 'pm-utils-bugreport-info.sh',
+                   ]
     
     buildRequires = [ 'pkgconfig:devel', 'pciutils:devel', 'xmlto:runtime', ]
 
@@ -29,25 +34,26 @@ class PMUtils(RPMPackageRecipe, AutoPackageRecipe):
         r.DanglingSymlinks(exceptions='%(bindir)s/pm.*')
 
         r.MakeDirs('%(localstatedir)s/run/pm-utils/locks')
-        r.MakeDirs('%(localstatedir)s/run/pm-utils/storage')
+        r.MakeDirs('%(localstatedir)s/run/pm-utils/pm-suspend')
+        r.MakeDirs('%(localstatedir)s/run/pm-utils/pm-powersave')
 
-        r.Install('pm-utils-99hd-apm-restore', '%(libdir)s/pm-utils/sleep.d/99hd-apm-restore.hook', mode = 0755)
-        r.Install('pm-utils-hd-apm-restore.conf', '%(sysconfdir)s/pm-utils-hd-apm-restore.conf', mode = 0644)
+        r.Create('%(localstatedir)s/run/pm-utils/locks/pm-suspend.lock')
+        r.Create('%(localstatedir)s/run/pm-utils/locks/pm-powersave.lock')
+
+        r.MakeDirs('%(localstatedir)s/run/pm-utils/pm-suspend,/storage')
+        r.MakeDirs('%(localstatedir)s/run/pm-utils/pm-powersave/storage')
+
+        r.Remove('%(localstatedir)s/run/pm-utils/pm-suspend/storage/*', allowNoMatch = True)
+        r.Remove('%(localstatedir)s/run/pm-utils/pm-powersave/storage/*', allowNoMatch = True)
+        r.Remove('%(libdir)s/pm-utils/power.d/*')
+
         r.Install('pm-utils-bugreport-info.sh', '%(bindir)s/pm-utils-bugreport-info.sh', mode = 0755)
 
-        r.ExcludeDirectories(exceptions = ['%(sysconfdir)s/pm/.*', '%(localstatedir)s/run/pm-utils/.*'])
+        r.ExcludeDirectories(exceptions = ['%(sysconfdir)s/pm/.*', '%(localstatedir)s/run/pm-utils/.*',
+                                           '%(libdir)s/pm-utils/power.d'])
 
         r.Create('%(localstatedir)s/log/pm-suspend.log', mode = 0600)
         r.InitialContents('%(localstatedir)s/log/pm-suspend.log')
-
-        # xhci hack
-        # the 2.6.35.x kernel trees we are shipping have issues with xhci (usb3 support) which means that 
-        # out of the box suspend/resume is busted
-        # Previously we (as RH) shipped with xchci support disabled byDefault. as more and more hw supports
-        # USB3 this is a big inconvenience. we now ship xchci support enabled byDefault and trick bellow will
-        # assure proper suspend/resume
-        r.Create('%(sysconfdir)s/pm/config.d/xhci', contents = 'SUSPEND_MODULES="xhci-hcd xhci"\n', mode = 0644)
-        r.Config(exceptions='%(sysconfdir)s/pm/config.d/xhci')
 
         # migration helpers
         # versions up to 1.2.5-1-1 had a few badly placed files
