@@ -1,24 +1,83 @@
 class MySQLWorkbench(AutoPackageRecipe):
 
     name = 'mysql-workbench'
-    version = '5.2.39'
+    version = '5.2.40'
 
     buildRequires = [
-        'autoconf:runtime', 'automake:runtime', 'libtool:runtime', 'libzip:devel',
-        'gcc-c++:runtime', 'libxml2:devel', 'libsigc++:devel', 'libglade:devel', 'gtkmm:devel', 
-        'freeglut:devel', 'MesaGLw:devel', 'mysql:devel', 'util-linux:devel', 'lua:devel', 
-        'pcre:devel', 'libgnome:devel', 'pexpect:python', 'sqlite:devel', 'python:devel', 
-        'libgnome-keyring:devel', 'google-ctemplate:devel', 'boost:devel', 'Mesa:devel',
-        'openssl:devel'
+        'libzip:devel', 'gcc-c++:runtime', 'libxml2:devel', 'libsigc++:devel', 
+        'gtkmm:devel', 'mysql:devel', 'util-linux:devel', 'pcre:devel', 
+        'pexpect:python', 'sqlite:devel', 'python:devel',
+        'google-ctemplate:devel', 'Mesa:devel', 'openssl:devel',
+        'boost:devel', 'autoconf:runtime', 'automake:runtime',
+        'libtool:runtime', 'lua:devel'
     ]
 
+    # On non-Gnome systems, Gnome Keyring is not used, so password "keyring" functionality
+    # is disabled.
+    if Use.gnome:
+        buildRequires.append('libgnome-keyring:devel')
+
+    # Open source licenses which cover various included components.
+
+    extraConf = ' --enable-codecoverage --enable-grt-generation'
+    extraConf += ' --enable-mysql-utilities --with-pic'
+
+    # Build requires rmake says I don't need. Putting them here fore now.
+    #buildRequires  += [
+    #    'MesaGLw:devel', freeglut:devel'
+    #    'libglade:devel', 'libgnome:devel'
+    #]
+
+    
     def unpack(r):
         r.addArchive('http://mysql.he.net/Downloads/MySQLGUITools/%(name)s-gpl-%(version)s-src.tar.gz')
+        # Patch to work around bug #65898 submitted 20120714
+        r.addPatch('mysql-workbench-aclocal.patch')
+        # Patch to work around MySQL bug Bug #65900 submitted 20120714.
+        r.addPatch('mysql-workbench-maintainer-mode.patch')
 
     def configure(r):
-        r.Configure(configureName='autogen.sh')
+        r.Environment('ACLOCAL_AMFLAGS', '" -I m4"') 
+        r.Run('aclocal')
+        r.Configure(r.extraConf, configureName='autogen.sh')
+
 
     def policy(r):
         # This is required for workbench's SSH tunnel functionality.  Not sure why it's not found by PythonRequires.
         r.Requires('paramiko:python', '%(datadir)s/%(name)s/.*py$')
         r.ComponentSpec('%(name)s:lib', '%(libdir)s/%(name)s/.*so$')
+        #r.Licenses(
+        #    ['Open', 'BSF-1.0', 'MPL-1.1', 'BSD', 'ISC', 'MIT', 'GPL-2', 'LGPL-2.1', 'Lua-5.0',
+        #    'Public Domain', 'PSF', 'SLL']
+        #)
+        r.Description(shortDesc=r.summary(), longDesc=r.description()) 
+
+    def summary(r):
+        packageSummary = "MySQL Workbench is the standard, comprehensive GUI tool suite offered by Oracle for MySQL."
+        packageSummary += " With it, one can visually Administer servers, design schemas and develop SQL queries within"
+        packageSummary += " a single, unified GUI tool.  Released under the GPL"
+        return packageSummary
+
+    def description(r):
+        packageDescription = "Design:\n"
+        packageDescription += "    MySQL Workbench contains powerful modeling tools which allow DBAs or architects visually"
+        packageDescription += " create complex EER models, reverse engineer existing schemas, and forward engineer alterations"
+        packageDescription += " to existing schemas.  This handles key change management and documentation tasks which are"
+        packageDescription += " otherwise both time consuming, error prone, and technically challenging.\n"
+        packageDescription += "Development:\n"
+        packageDescription += "    MySQL Workbench provides tools for creating, executing, and optimizing queries, complete"
+        packageDescription += " syntax highlighting amd a re-usable statement history. A panel for selecting connections to"
+        packageDescription += " multiple servers is also provided, along with an object broswer allowing the query designer"
+        packageDescription += " to browse the schemas of connected databases at a glance.\n"
+        packageDescription += "Administration\n"
+        packageDescription += "    MySQL Workbench gives DBAs the tools required to obtain instant insignt into MySQL server"
+        packageDescription += " health, performance metrics, and tunable parameters.  It also provides a database user and"
+        packageDescription += " permissions administration tool, a visual configuration file editor, and a data import/export"
+        packageDescription += " tool."
+        packageDescription += "MySQL Workbench Product Site:  http://www.mysql.com/products/community/"
+        packageDescription += "MySQL Workbench Manual: http://dev.mysql.com/doc/workbench/en/index.html"
+        packageDescription += "This software is distributed under the GNU General Public License, Version 2, June 1991."
+        packageDescription += "http://www.gnu.org/licenses/gpl-2.0.html"
+        packageDescription += "Some bundled software is redistributed under different licenses."
+        return packageDescription
+
