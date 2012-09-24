@@ -2,7 +2,7 @@
 #
 # wpa_supplicant 
 #
-# chkconfig:   345 23 88
+# chkconfig:   - 23 88
 # description: wpa_supplicant is a WPA Supplicant for Linux, BSD and \
 #     Windows with support for WPA and WPA2 (IEEE 802.11i / RSN). Supplicant \
 #     is the IEEE 802.1X/WPA component that is used in the client stations. \
@@ -15,7 +15,7 @@
 # Provides: wpa_supplicant
 # Required-Start: $local_fs messagebus
 # Required-Stop: $local_fs messagebus
-# Default-Start: 3 4 5
+# Default-Start:
 # Default-Stop: 0 1 6
 # Short-Description: start and stop wpa_supplicant
 # Description: wpa_supplicant is a tool for connecting to wireless networks
