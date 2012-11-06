@@ -1,19 +1,20 @@
 #
 # Copyright (c) 2007-2008 rPath, Inc.
+#               2008-2012 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 loadInstalled('nspr')
 class NSS(CPackageRecipe):
     name = 'nss'
-    version = '3.13.3'
-    # rpmRelease = '4.fc14'
+    version = '3.14'
+
     buildRequires = [ 'nspr:devel', 'perl:runtime', 'sqlite:devel', 'zlib:devel']
 
     def setup(r):
         r.disableParallelMake()
-        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_13_3_RTM/src/')
-        r.addArchive('%(name)s-pem-20101125.tar.bz2', dir = '%(name)s-%(version)s/')
+        r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_RTM/src/')
+        r.addArchive('%(name)s-pem-20120811.tar.bz2', dir = '%(name)s-%(version)s/')
         r.addSource('mkpkgconfigfiles.sh', macros = True)
         r.addSource('nss.pc.in')
         r.addSource('nss-config.in')
@@ -21,29 +22,30 @@ class NSS(CPackageRecipe):
         r.addSource('nss-util-config.in')
         r.addSource('nss-softokn.pc.in')
         r.addSource('nss-softokn-config.in')
-        vmajor, vminor, vpatch = r.version.split('.')
+    
+        vmajor, vminor = r.version.split('.')
+        vpatch = '0'
+        # vmajor, vminor, vpatch = r.version.split('.')
+
         # https://bugzilla.mozilla.org/show_bug.cgi?id=367577
-        r.addPatch('https://bugzilla.mozilla.org/attachment.cgi?id=252152',
-                   dir = 'mozilla')
+        # r.addPatch('https://bugzilla.mozilla.org/attachment.cgi?id=252152',
+        #           dir = 'mozilla')
 
         # taken from nss pk from RH
-        for p in [ 'renegotiate-transitional.patch',
+        for p in [ #'add-relro-linker-option.patch',
+                   'renegotiate-transitional.patch',
                    'nss-enable-pem.patch',
-                   'nsspem-642433.patch',
                    'nss-539183.patch',
-                   '0001-Bug-695011-PEM-logging.patch',
                    'nss-646045.patch',
-                   'nsspem-createobject-initialize-pointer.patch',
-                   '0001-libnsspem-rhbz-734760.patch',
-                   'nsspem-init-inform-not-thread-safe.patch',
+                   # must statically link pem against the freebl in the buildroot
+                   # Needed only when freebl on tree has newe APIS
                    # 'nsspem-use-system-freebl.patch',
-                   'nofipstest.patch',
-                   'nsspem-bz754771.patch',
-                   'nss-ssl-cbc-random-iv-off-by-default.patch',
-                   'bz784672-protect-against-calls-before-nss_init.patch',
-                   'Bug-800674-Unable-to-contact-LDAP-Server-during-winsync.patch',
-                   'Bug-800682-Qpid-AMQP-daemon-fails-to-load-after-nss-update.patch',
-                   'Bug-800676-nss-workaround-for-freebl-bug-that-causes-openswan-to-drop-connections.patch', 
+                   # This patch is currently meant for stable branches
+                   # 'nss-ssl-cbc-random-iv-off-by-default.patch',
+                   # TODO: Remove this patch when the ocsp test are fixed
+                   'nss-3.14.0.0-disble-ocsp-test.patch',
+                   # upstream: https://bugzilla.mozilla.org/show_bug.cgi?id=357025
+                   'Bug-872124-fix-pk11wrap-locking.patch',
                    ]:
             r.addPatch(p, dir='mozilla')
 
@@ -242,23 +244,23 @@ class NSS(CPackageRecipe):
 
         r.Requires('nss:runtime', '%(taghandlerdir)s/nss_shlibsign')
 
-        for file in [ 'libsoftokn3', 'libnssdbm3' ]:
-            sign = '%(libdir)s/' + file + '.chk'
-            so = '%(libdir)s/' + file + '.so'
-            r.Create(sign)
-            r.Transient(sign)
-            # r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so + ' -o %(destdir)s/'+ sign)
-            r.Symlink(sign, '/%(lib)s/' + file + '.chk')
-            r.TagSpec('nss_shlibsign', so)
+        # for file in [ 'libsoftokn3', 'libnssdbm3' ]:
+        #     sign = '%(libdir)s/' + file + '.chk'
+        #     so = '%(libdir)s/' + file + '.so'
+        #     r.Create(sign)
+        #     r.Transient(sign)
+        #     # r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so + ' -o %(destdir)s/'+ sign)
+        #     r.Symlink(sign, '/%(lib)s/' + file + '.chk')
+        #     r.TagSpec('nss_shlibsign', so)
 
-        for file in [ 'libfreebl3',]:
-            sign = '/%(lib)s/' + file + '.chk'
-            so = '/%(lib)s/' + file + '.so'
-            r.Create(sign)
-            r.Transient(sign)
-            # r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so + ' -o %(destdir)s/'+ sign)
-            r.Symlink(sign, '%(libdir)s/' + file + '.chk')
-            r.TagSpec('nss_shlibsign', so)
+        # for file in [ 'libfreebl3',]:
+        #     sign = '/%(lib)s/' + file + '.chk'
+        #     so = '/%(lib)s/' + file + '.so'
+        #     r.Create(sign)
+        #     r.Transient(sign)
+        #     # r.Run('%(destdir)s%(unsupported_tools_directory)s/shlibsign -v -i  %(destdir)s/' + so + ' -o %(destdir)s/'+ sign)
+        #     r.Symlink(sign, '%(libdir)s/' + file + '.chk')
+        #     r.TagSpec('nss_shlibsign', so)
 
         r.Requires('ca-certificates:config', 'nss:config')
 
