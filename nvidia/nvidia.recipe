@@ -5,7 +5,7 @@
 #
 class Nvidia(CPackageRecipe):
     name = 'nvidia'
-    version = '304.64'
+    version = '310.19'
 
     buildRequires = ['atk:devel', 'chkconfig:runtime', 'glib:devel',
                      'gtk:devel', 'libX11:devel', 'libXext:devel',
@@ -42,7 +42,7 @@ class Nvidia(CPackageRecipe):
         r.Remove('%(root)s/kernel', recursive = True)
 
         #
-        r.Install('%(root)s/nvidia-{smi,settings,xconfig,bug-report.sh}',
+        r.Install('%(root)s/nvidia-{smi,cuda-proxy-{control,server},settings,xconfig,bug-report.sh,debugdump}',
                   '%(bindir)s/', mode = 0755)
 
         ## headers
@@ -52,19 +52,22 @@ class Nvidia(CPackageRecipe):
         r.Install('%(root)s/libnvidia-c*', '%(libdir)s/')
         r.Install('%(root)s/libnvidia-ml*', '%(libdir)s/')
         r.Install('%(root)s/libcuda.*', '%(libdir)s/')
+        r.Install('%(root)s/libnvcuvid.*', '%(libdir)s/')
         # libvdpau.so.** not installed per upstream behaviour up from 260.19.12
-        r.Install('%(root)s/libvdpau_nv*', '%(libdir)s/')
+        r.Install('%(root)s/libvdpau_*', '%(libdir)s/')
         r.Install('%(root)s/libOpenCL*', '%(libdir)s/')
         if Arch.x86_64:
             r.Install('%(root)s/32/libnvidia-c*', '%(lib32)s/')
             r.Install('%(root)s/32/libcuda.*', '%(lib32)s/')
+            r.Install('%(root)s/libnvcuvid.*', '%(lib32)s/')
             # libvdpau.so.* not installed per upstream behaviour up from 260.19.12
-            r.Install('%(root)s/32/libvdpau_nv*', '%(lib32)s/')
+            r.Install('%(root)s/32/libvdpau_*', '%(lib32)s/')
             r.Install('%(root)s/32/libOpenCL.*', '%(lib32)s/')
 
         #
         r.Install('%(root)s/libGL.*', '%(libdir)s/xorg.nvidia.3d/')
-        r.Install('%(root)s/libXvMCNVIDIA.*', '%(libdir)s/xorg.nvidia.3d/')
+        # gone from 310.19
+        #  r.Install('%(root)s/libXvMCNVIDIA.*', '%(libdir)s/xorg.nvidia.3d/')
         r.Install('%(root)s/libnvidia-tls.*', '%(libdir)s/xorg.nvidia.3d/')
         r.Install('%(root)s/tls/libnvidia-tls.*', '%(libdir)s/xorg.nvidia.3d/tls/')
         r.Install('%(root)s/libnvidia-wfb.*', '%(libdir)s/xorg/modules/updates/')
@@ -122,7 +125,7 @@ class Nvidia(CPackageRecipe):
 
         r.ComponentSpec('lib', 'libglx.so')
         r.ComponentSpec('lib', 'libGL.so')
-        r.ComponentSpec('lib', 'libXvMCNVIDIA.a')
+#        r.ComponentSpec('lib', 'libXvMCNVIDIA.a')
 
         # The kernel side is in nvidia-kernel, and we need the kernel
         # modules that match this version exactly
@@ -161,12 +164,12 @@ class Nvidia(CPackageRecipe):
         r.EnforceSonameBuildRequirements(exceptions='.*')
 
         if Arch.x86_64:
-             r.Requires(exceptDeps=r'soname\:\ ELF64\/libnvidia\-glcore\.so\.304\.64\(SysV\ x86\_64\)')
-             r.Requires(exceptDeps=r'soname\:\ ELF64\/libnvidia\-tls\.so\.304\.64\(SysV\ x86\_64\)')
+             r.Requires(exceptDeps=r'soname\:\ ELF64\/libnvidia\-glcore\.so\.310\.19\(SysV\ x86\_64\)')
+             r.Requires(exceptDeps=r'soname\:\ ELF64\/libnvidia\-tls\.so\.310\.19\(SysV\ x86\_64\)')
              r.Requires(exceptDeps=r'soname\:\ ELF64\/libnvidia\-ml\.so\.1\(SysV\ x86\_64\)')
 
-        r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-tls\.so\.304\.64\(SysV\ x86\)')
-        r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-glcore\.so\.304\.64\(SysV\ x86\)')
+        r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-tls\.so\.310\.19\(SysV\ x86\)')
+        r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-glcore\.so\.310\.19\(SysV\ x86\)')
         r.Requires(exceptDeps=r'soname\:\ ELF32\/libnvidia\-ml\.so\.1\(SysV\ x86\)')
 
         # take nouveau drm kmod out of way ...
@@ -181,11 +184,11 @@ class Nvidia(CPackageRecipe):
         # libvdpau* not installed per upstream behaviour up from 260.19.12 so ...
         # we expect stock one to be present
 
-        r.Symlink('%(libdir)s/libvdpau_nvidia.so.1', '%(libdir)s/libvdpau_nvidia.so')
         if Arch.x86_64:
-            r.Symlink('%(lib32)s/libvdpau_nvidia.so.1', '%(lib32)s/libvdpau_nvidia.so')
             r.Requires('soname: libvdpau.so.1(SysV x86_64)', '%(libdir)s/.*')
-            r.Requires('soname: libvdpau.so.1(SysV x86)', '%(lib32)s/.*')
-        else:
-            r.Requires('soname: libvdpau.so.1(SysV x86)', '%(libdir)s/.*')
+            r.Requires('soname: libvdpau.so.1.0.0(SysV x86)', '%(lib32)s/.*')
+            # XXX line bellow in an artifact of line above. shouldn't be needed AT ALL
+            r.Requires(exceptDeps=r'soname\:\ ELF64\/libvdpau\.so\.1\.0\.0\(SysV\ x86\ x86\_64\)')
+        elif Arch.x86:
+            r.Requires('soname: libvdpau.so.1.0.0(SysV x86)', '%(libdir)s/.*')
 
