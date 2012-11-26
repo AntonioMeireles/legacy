@@ -5,19 +5,15 @@
 #
 
 loadInstalled('python')
-loadSuperClass('rpmpackage')
-class Mailman(RPMPackageRecipe, CPackageRecipe):
+class Mailman(CPackageRecipe):
     name = 'mailman'
-    version = '2.1.9'
-    rpmUpVer = '2.1.8'
-    rpmRelease = '3.1'
-
+    version = '2.1.15'
     buildRequires = [ 'python:devel', 'automake:runtime',
-                      'autoconf:runtime', 'perl:lib' ]
+                      'autoconf:runtime', 'perl:devel' ]
 
     def setup(r):
-        r.macros.python = '%(bindir)s/python'
-        r.macros.pyver = Python.majversion
+        r.macros.python = '%(bindir)s/python%(pyver)s'
+
         # First, where documents are stored.  Affects where icons are placed.
         r.macros.contentdir = '%(servicedir)s/www'
 
@@ -37,22 +33,35 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
 
 
         r.addSource('mm_cfg.py')
-        r.addSource('httpd-mailman.conf', rpm=r.srpm)
-        r.addSource('mailman.logrotate', rpm=r.srpm)
+        r.addSource('httpd-mailman.conf')
+        r.addSource('mailman.logrotate')
 
         # ftp.gnu.org tends to be far behind, fetch from sf instead
-        r.addArchive('mirror://sourceforge/mailman/')
+        r.addArchive('ftp://ftp.gnu.org/pub/gnu/%(name)s/')
         r.addPatch('mailman-2.1-permissions.patch')
 
-        # RPL-2207 CVE-2008-0564
-        # patch was provided via email by upstream,
-        # and will be included in the next upstream release
-        r.addPatch('mailman-2.1.9-fix-XSS.patch')
+        for p in [ 'mailman-2.1.12-multimail.patch',
+                   'mailman-2.1-mailmanctl-status.patch',
+                   
+                   'mailman-2.1.10-ctypefix.patch',
+                   'mailman-2.1.11-cron.patch',
+                   # 'mailman-2.1.13-FHS.patch',
+                   'mailman-2.1.13-archive-reply.patch',
+                   'mailman-2.1.9-LC_CTYPE.patch',
+                   'mailman-2.1.13-env-python.patch',
+                   'mailman-2.1.9-ctypo-new.patch',
+                   'mailman-2.1.9-unicode.patch',
+                   'mailman-python-compile.patch',
+                   'mailman-2.1.11-fhsinit.patch',
+                   # 'mailman-2.1.12-initcleanup.patch',
+                   # 'mailman-2.1.12-init-not-on.patch',
+                   ]:
+            r.addPatch(p)
 
         r.Run('rm -f configure')
         r.Run('aclocal')
         r.Run('autoconf')
-        r.ManualConfigure('--prefix=%(mmdir)s'
+        r.ManualConfigure(' --prefix=%(mmdir)s'
                           ' --with-var-prefix=%(varmmdir)s'
                           ' --with-python=%(python)s'
                           ' --with-mail-gid=%(mailgroup)s'
@@ -60,7 +69,8 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
                           ' --with-cgi-gid=%(cgigroup)s'
                           ' --with-mailhost=localhost.localdomain'
                           ' --with-urlhost=localhost.localdomain'
-                          ' --without-permcheck')
+                          ' --without-permcheck'
+                          ' --with-queue-dir=%(queuedir)s')
 
         # RPL-1456
         r.Replace('@LOG_DIR@', '%(logdir)s', 'mailman.logrotate')
@@ -68,6 +78,12 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
 
         r.Replace('@LOGDIR@', '%(logdir)s', 'mm_cfg.py')
         r.Copy('mm_cfg.py', 'Mailman/mm_cfg.py.dist')
+
+        # XXX this shouldn't be needed at all. it is
+        r.Replace(('EMAILPKG=', 'EMAILPKG=email-2.5.8'),
+                  ('JACODECSPKG=','JACODECSPKG=JapaneseCodecs-1.4.11'),
+                  ('KOCODECSPKG=', 'KOCODECSPKG=KoreanCodecs-2.0.5'),
+                  'misc/Makefile')
 
         # mailman sets CFLAGS within Makefile to be equal to
         # -g -O2 $(DEFS), where DEFS contains a bunch of necessary -D lines
@@ -83,8 +99,10 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
             (r'\$\(PYTHON\) -c .*compileall.*', ''),
             ('bin/update', 'true'),
             'Makefile')
-        r.Run('make install prefix=%(destdir)s%(mmdir)s'
-              ' var_prefix=%(destdir)s%(varmmdir)s')
+
+        r.Run('make install DESTDIR=%(destdir)s',
+              ' prefix=%(mmdir)s'
+              ' var_prefix=%(varmmdir)s')
 
         # Compile python files correctly for %(destdir)s
         r.CompilePython('%(varmmdir)s')
@@ -97,7 +115,7 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
 
         # Use /etc/cron.d, which needs a user specification
         r.Move('%(mmdir)s/cron/crontab.in', '%(sysconfdir)s/cron.d/mailman')
-        r.Replace(r'\* \* /', '* * mailman /', '%(sysconfdir)s/cron.d/mailman')
+        # r.Replace(r'\* \* /', '* * mailman /', '%(sysconfdir)s/cron.d/mailman')
         r.Requires('vixie-cron:runtime', '%(sysconfdir)s/cron.d/mailman')
 
         # Install the httpd configuration file.
@@ -145,7 +163,7 @@ class Mailman(RPMPackageRecipe, CPackageRecipe):
             '%(mmdir)s/Mailman/{Archiver,Bouncers,Cgi,Commands,'
                                'Gui,Handlers,Logging,MTA,Queue}',
             '%(mmdir)s/{archives,bin,cgi-bin,cron,data,mail,'
-                       'messages,pythonlib}',
+                               'messages,pythonlib}',
             '%(mmdir)s/messages/*/LC_MESSAGES',
             '%(mmdir)s/pythonlib/{email,japanese,korean,lib}',
             '%(mmdir)s/pythonlib/japanese/aliases',
