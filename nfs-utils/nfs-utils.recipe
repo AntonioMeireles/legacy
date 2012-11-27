@@ -7,59 +7,56 @@
 loadSuperClass('rpmpackage')
 class NfsUtils(RPMPackageRecipe, CPackageRecipe):
     name = 'nfs-utils'
-    version = '1.0.10'
+    version = '1.2.3'
 
     buildRequires = [ 'libevent:devel', 'libnfsidmap:devel', 'krb5:devel',
         'tcp_wrappers:devel', 'autoconf:runtime', 'automake:runtime',
         'libgssapi:devel', 'librpcsecgss:devel', 'libtool:runtime',
         'userspace-kernel-headers:devel', 'e2fsprogs:devel',
-        'pkgconfig:devel', ]
+        'pkgconfig:devel','keyutils:devel','libcap:devel', 'libtirpc:devel', 'python:devel', 'util-linux:devel' ]
 
-    rpmRelease = '4.fc7'
+    rpmRelease = '7.el6'
+    #rpmUpVer = '1.2.3'
     rpmSources = [ 'nfs.init', 'nfslock.init', 'rpcsvcgssd.init',
-                   'rpcgssd.init', 'rpcidmapd.init', ]
-    rpmPatches = [ 'nfs-utils-1.0.5-statdpath.patch',
-                   'nfs-utils-1.0.6-mountd.patch',
-                   'nfs-utils-1.0.6-idmap.conf.patch',
-                   'nfs-utils-1.0.6-gssd_mixed_case.patch',
-                   'nfs-utils-1.0.8-privports.patch',
-                   'nfs-utils-1.0.9-krb5-memory.patch',
-                   'nfs-utils-1.0.9-idmapd-scandir-leak.patch',
-                   'nfs-utils-1.0.9-idmap-dirscancb-listloop.patch',
-                   'nfs-utils-1.0.9-mount-options-v3.patch',
-                   'nfs-utils-1.0.9-lazy-umount.patch',
-                   'nfs-utils-1.0.9-mount-sloppy.patch',
-                   'nfs-utils-1.0.9-mount-man-nfs.patch',
-                   'nfs-utils-1.0.9-return-mount-error.patch',
-                   'nfs-utils-1.0.9-nfsmount-authnone.patch',
-                   'nfs-utils-1.0.9-mount-remount.patch',
-                   'nfs-utils-1.0.10-export-nosubtree.patch',
-                   'nfs-utils-1.0.10-mount-nfsvers.patch',
-                   'nfs-utils-1.0.10-udp-no-connect.patch',
-                   'nfs-utils-1.0.9-compile.patch', ]
-
+                   'rpcgssd.init', 'rpcidmapd.init','nfs.sysconfig' ]
+    rpmPatches = [ 'nfs-utils-1.2.4-rc5.patch',
+                   'nfs-utils-1.2.3-krb5-ad-style.patch',
+                   'nfs-utils-1.2.3-rpcsvcgssd-segfault.patch',
+                   'nfs-utils-1.2.1-statdpath-man.patch',
+                   'nfs-utils-1.2.2-statdpath.patch',
+                   'nfs-utils-1.2.1-exp-subtree-warn-off.patch',
+                   'nfs-utils-1.2.3-nfsidmap-disable.patch',
+                   ]
+    isRHEL = True
+    rhel_url = 'ftp://ftp.redhat.com/redhat/linux/enterprise/6Server/en/os/SRPMS/%(name)s-%(version)s-%(rpmRelease)s.src.rpm'
     def setup(r):
+
+        r.macros.cflags += ' -fpie -D_FILE_OFFSET_BITS=64'
         r.disableParallelMake()
         r.unpack()
         # Source: ftp://nfs.sourceforge.net/pub/nfs/
-        r.addArchive('nfs.doc.tar.gz', rpm=r.srpm, dir=r.theMainDir)
-        r.addPatch('configure.in.tools')
+        #r.addArchive('nfs.doc.tar.gz', rpm=r.srpm, dir=r.theMainDir)
         r.addAction("sed -i '/# chkconfig:/s/ 14/ 09/g' nfslock.init")
-
+        # added by openfiler to fix RPC MTAB mount error
+        r.addSource('idmapd.conf')
+        r.addSource('sysconfig.nfs')
         # newer versions of autotools actually check for multilib systems, and
         # we're patching *.in files
         r.addAction('rm -f configure')
         r.addAction('sh -x autogen.sh')
 
-        # RPL-2868
-        r.addPatch('CVE-2008-4552.patch')
 
-        # adapt to new glibc that requires mode with O_CREAT
-        r.addPatch('https://bugzilla.redhat.com/attachment.cgi?id=161425')
-
-        r.Configure('--enable-nfsv4 --enable-gss --enable-mount '
-                    '--enable-secure-statd ',
+        # TODO: enable gss once new kerberos (1.9 from rhel 6) has been built 
+        r.Configure(' --enable-ipv6'
+                    ' --disable-nfsidmap'
+                    ' --enable-gss=no'
+                    ' --enable-nfsv4'
+                    ' --enable-mount '
+                    ' --enable-mountconfig'
+                    ' --with-statdpath=/var/lib/nfs/statd ',
                     preConfigure='ac_cv_func_innetgr=yes')
+
+        r.Run("sed -i -e 's/env python/python/' mountstats.py", dir='tools/mountstats')
 
         r.Make()
 
@@ -72,38 +69,49 @@ class NfsUtils(RPMPackageRecipe, CPackageRecipe):
         r.Install('rpcsvcgssd.init', '%(initdir)s/rpcsvcgssd', mode=0755)
         r.Install('rpcgssd.init', '%(initdir)s/rpcgssd', mode=0755)
         r.Install('rpcidmapd.init', '%(initdir)s/rpcidmapd', mode=0755)
-        r.Install('utils/idmapd/idmapd.conf', '%(sysconfdir)s/')
+        r.Install('idmapd.conf','%(sysconfdir)s/')
+        r.Install('nfs.sysconfig','%(sysconfdir)s/sysconfig/nfs', mode=0644)
+        r.Install('utils/mount/nfsmount.conf', '%(sysconfdir)s/nfsmount.conf', mode=0644)
+        #r.Install('utils/idmapd/idmapd.conf', '%(sysconfdir)s/')
         r.Create('%(localstatedir)s/lib/nfs/rmtab')
-        r.Move('%(sbindir)s/rpc.{lockd,statd}', '%(essentialsbindir)s/')
-        r.MakeDirs('%(localstatedir)s/lib/nfs/statd', mode=0700)
+        r.Move('%(sbindir)s/rpc.statd', '%(essentialsbindir)s/')
+        #r.MakeDirs('%(localstatedir)s/lib/nfs/statd', mode=0700)
 
-        r.Move('%(sbindir)s/{,u}mount.nfs{,4}', '%(essentialsbindir)s/')
         r.SetModes('%(essentialsbindir)s/{,u}mount.nfs{,4}', 04755)
         r.Symlink('mount.nfs.8', '%(mandir)s/man8/mount.nfs4.8')
         r.Symlink('umount.nfs.8', '%(mandir)s/man8/umount.nfs4.8')
 
-        r.Remove('%(mandir)s/man8/{,rpc.}rquotad*', '%(sbindir)s/rpc.rquotad')
-
         r.UtilizeUser('nobody', '%(sbindir)s/rpc.idmapd')
         r.UtilizeUser('nfsnobody', '%(essentialsbindir)s/exportfs')
         r.Ownership('rpcuser', 'rpcuser', '%(localstatedir)s/lib/nfs/statd')
+        r.Ownership('rpcuser','rpcuser', '%(localstatedir)s/lib/nfs/state')
+        r.SetModes('%(localstatedir)s/lib/nfs/state', 00644)
+        
+
 
         r.TagSpec('initscript', '%(initdir)s/')
         r.Doc('nfs/*.html', 'nfs/*.ps', 'linux-nfs/*')
 
         # files that don't need to be packaged
-        r.Remove('%(localstatedir)s/lib/nfs/sm{,.bak}', recursive=True)
+        #r.Remove('%(localstatedir)s/lib/nfs/sm{,.bak}', recursive=True)
 
-        r.Requires('portmap:runtime', '%(essentialsbindir)s/rpc.statd')
 
         # rPath bug #489; prevents runtime error about not finding this dir
-        for neededDir in ('%(localstatedir)s/lib/nfs/v4recovery',
-                          '%(localstatedir)s/lib/nfs/rpc_pipefs',): # RPL-2147
+        for neededDir in ('%(localstatedir)s/lib/nfs/v4recovery', '%(localstatedir)s/lib/nfs/statd/sm',
+                          '%(localstatedir)s/lib/nfs/statd/sm.bak',
+                          '%(localstatedir)s/lib/rpc_pipefs',): # RPL-2147
             r.MakeDirs(neededDir)
             r.ExcludeDirectories(exceptions=neededDir)
+        for rpcuserDir in ('%(localstatedir)s/lib/nfs/statd/sm', '%(localstatedir)s/lib/nfs/statd/sm.bak', 
+                           '%(localstatedir)s/lib/nfs/statd'):
+            r.Ownership('rpcuser','rpcuser',rpcuserDir)
+            r.Requires('info-rpcuser:user', rpcuserDir)
+
+        for statdDir in ['%(localstatedir)s/lib/nfs/statd', '%(localstatedir)s/lib/nfs/statd/sm*']:
+            r.SetModes(statdDir, 00700)
 
         # start initscripts by default (RPL-418)
-        r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/nfs')
+        #r.Replace('chkconfig: -', 'chkconfig: 345', '%(initdir)s/nfs')
 
         r.PackageSpec('nfs-server',
                 '%(mandir)s/man5/exports.5.gz',
@@ -130,7 +138,6 @@ class NfsUtils(RPMPackageRecipe, CPackageRecipe):
                 '%(mandir)s/man8/gssd.8.gz',
                 '%(mandir)s/man8/mount.nfs.8.gz',
                 '%(mandir)s/man8/mount.nfs4.8.gz',
-                '%(mandir)s/man8/nhfs.*.8.gz',
                 '%(mandir)s/man8/rpc.gssd.8.gz',
                 '%(mandir)s/man8/showmount.8.gz',
                 '%(mandir)s/man8/umount.nfs.8.gz',
@@ -142,12 +149,10 @@ class NfsUtils(RPMPackageRecipe, CPackageRecipe):
                 '%(essentialsbindir)s/umount.nfs4',
                 '%(sbindir)s/gss_clnt_send_err',
                 '%(sbindir)s/gss_destroy_creds',
-                '%(sbindir)s/nhfs.*',
                 '%(sbindir)s/rpc.gssd',
                 '%(sbindir)s/showmount',
                 )
         #common:
-        #lockd
         #statd
         #idmapd
         #nfs
@@ -155,3 +160,10 @@ class NfsUtils(RPMPackageRecipe, CPackageRecipe):
         #rpcdebug
         r.Requires('nfs-utils:runtime', '%(essentialsbindir)s/mount.nfs')
         r.Requires('nfs-utils:runtime', '%(sbindir)s/rpc.mountd')
+        for dep in ['lib','config']:
+            r.Requires('libtirpc:'+dep, '%(sbindir)s/rpc.nfsd')
+        r.Requires('rpcbind:runtime', '%(essentialsbindir)s/rpc.statd')
+         
+        for dirPath in ['xtab','etab','rmtab', 'state']: 
+            r.Config('%(localstatedir)s/lib/nfs/'+dirPath)
+        r.NormalizePythonInterpreterVersion(versionMap=(('%(bindir)s/python', '%(bindir)s/python2.6'),))
