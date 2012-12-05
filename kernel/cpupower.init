@@ -27,23 +27,54 @@ DAEMON=cpupower
 exec=/usr/bin/cpupower
 prog=cpupower
 
+CPUFREQ_SYSFS_PATH="/sys/devices/system/cpu/cpu0/cpufreq"
+
+function load_cpufreq_driver()
+{
+    CPUFREQ_MODULES="acpi_cpufreq speedstep_ich speedstep_smi powernow_k8 powernow_k7 powernow_k6 cpufreq_nforce2 pcc-cpufreq p4_clockmod longrun longhaul"
+    CPUFREQ_MODULES_GREP="^acpi_cpufreq\|^speedstep_ich\|^speedstep-smi\|^powernow_k8\|^powernow_k7\|^powernow_k6\|^cpufreq_nforce2\|^pcc_cpufreq\|^p4_clockmod\|^longrun\|^longhaul"
+
+    # if the drivers are compiled in, $CPUFREQ_SYSFS_PATH already exists
+    if [ ! -d $CPUFREQ_SYSFS_PATH ]; then
+        # test for already loaded modules
+        ALREADY_LOADED_MODS=`grep $CPUFREQ_MODULES_GREP /proc/modules`
+        if [ -z "$ALREADY_LOADED_MODS" ] ; then
+            for MODULE in $CPUFREQ_MODULES; do
+                modprobe $MODULE &>/dev/null
+                RETVAL=$?
+                [ "$RETVAL" = 0 ] && break
+            done
+            # skip if no module could be loaded!
+            if [ "$RETVAL" != 0 ]; then
+                rmmod speedstep_lib cpufreq_stats freq_table 2>/dev/null
+                return $RETVAL
+            fi
+        fi
+    fi
+    return 0
+}
+
 check() {
 	# Check that we're a privileged user
 	[ $(id -u) -eq 0 ] || exit 4
-	
 	# Check if daemon binary is executable
 	[ -x $exec ] || exit 5
 }
 
 start () {
-	check
-	echo -n $"Starting $prog: "
-	modprobe acpi-cpufreq
-	daemon $DAEMON  $CPUPOWER_START_OPTS
-        retval=$?
-	echo
-	[ $retval -eq 0 ] 
-	return $retval
+    check
+    echo $"Starting $prog: "
+    load_cpufreq_driver
+    if [ "$?" != 0 ]; then
+        echo " - hardware support not available"
+        exit
+    fi
+    
+    daemon $DAEMON  $CPUPOWER_START_OPTS
+    retval=$?
+    echo
+    [ $retval -eq 0 ] 
+    return $retval
 }
 
 case "$1" in
