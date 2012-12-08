@@ -1,12 +1,39 @@
 #
-# Copyright (c) 2011 Foresight Linux
+# Copyright (c) 2011-2012 Foresight Linux
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
+from conary.build import build
+
+# The distutils/setup-tools compatibility hack breaks Cython's
+# setup.py becuase it wants __file__ defined.
+# This is a temporary hack to work around it: correct fix is in
+# Conary and is probably to use distutils only if explicitly
+# requested for a very old package.
+class MyPythonSetup(build.PythonSetup):
+    '''
+    Override setting of pythonsetup
+    '''
+    template = (
+        '%%(cdcmd)s'
+        ' CFLAGS="%%(cflags)s" CXXFLAGS="%%(cflags)s %%(cxxflags)s"'
+        ' CPPFLAGS="%%(cppflags)s"'
+        ' LDFLAGS="%%(ldflags)s" CC=%%(cc)s CXX=%%(cxx)s'
+        ' %%(mypythonsetup)s'
+        ' %(action)s'
+        ' --prefix=%%(prefix)s'
+        ' %%(purelib)s'
+        ' %%(platlib)s'
+        ' %%(data)s'
+        ' --root=%%(rootdir)s'
+        ' %%(arguments)s'
+    )
+
+
 class xpra(CPackageRecipe):
     name = 'xpra'
-    version = '0.3.2'
+    version = '0.7.5'
 
     buildRequires = [
         'cython:runtime', 'PIL:python', 'atk:devel',
@@ -18,7 +45,6 @@ class xpra(CPackageRecipe):
         'pango:devel', 'pkgconfig:devel',
         'pycairo:python', 'pygobject:python', 'pygobject:devel',
         'pygtk:python', 'pygtk:devel', 'python:devel',
-
         'ffmpeg:devel', 'libappindicator:python', 'libvpx:devel', 'x264:devel',
         'desktop-file-utils:runtime',
     ]
@@ -26,11 +52,11 @@ class xpra(CPackageRecipe):
     def setup(r):
         r.addArchive('http://xpra.org/src/')
 
-        r.Remove('build', recursive = True)
-        r.Remove('install', recursive = True)
-        r.Run('python%(pyver)s make_constants_pxi.py wimpiggy/lowlevel/constants.txt wimpiggy/lowlevel/constants.pxi')
-        r.PythonSetup(data = '')
-        
+        # Should be r.PythonSetup() when it is fixed
+        r.macros.mypythonsetup = 'python%(pyver)s setup.py'
+        r.extraBuild(MyPythonSetup(r, data=''))
+        #r.PythonSetup(data = '')
+
         # parti and xpra both depend on wimpiggy, but xpra does not depend on parti
         r.PackageSpec('parti', '.*parti.*')
         r.PackageSpec('wimpiggy', '.*wimpiggy.*')
