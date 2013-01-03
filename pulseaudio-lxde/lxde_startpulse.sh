@@ -1,4 +1,3 @@
 #!/bin/sh
-pulseaudio --kill
-pulseaudio -D --high-priority --start
+pulseaudio -D --high-priority
 pactl load-module module-x11-xsmp
