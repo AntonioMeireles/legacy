@@ -169,7 +169,9 @@ class KernelPackageRecipe(CPackageRecipe):
         r.macros.level = r.version.split('.')[0]
         r.macros.patchlevel = r.version.split('.')[1]
         r.macros.sublevel = r.version.split('.')[2].split('_')[0]
-        r.macros.lastlevel = r.version.split('.')[3].split('_')[0]
+
+        if int(r.macros.level) < 3:
+            r.macros.lastlevel = r.version.split('.')[3].split('_')[0]
 
         # Versions of Conary since 1.2.6 print the methods that are
         # called, but hasattr always returns a proxy function, so
@@ -247,7 +249,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.addAction('chmod -R go-w .')
 
     def addNonInteractiveConfig(r):
-        if int(r.macros.sublevel) < 38:
+        if int(r.macros.level) < 3 and int(r.macros.sublevel) < 38:
             # avoid requests for interactive response
             r.addPatch('linux-2.6-build-nonintconfig.patch')
         # upstreamed in 38+ kernels
@@ -272,8 +274,8 @@ class KernelPackageRecipe(CPackageRecipe):
         #r.addAction('sed -i "s/^PATCHLEVEL.*/PATCHLEVEL = %(patchlevel)s/" Makefile')
         # Override any "-pre" or premature increment of SUBLEVEL from patches
         #r.addAction('sed -i "s/^SUBLEVEL.*/SUBLEVEL = %(sublevel)s/" Makefile')
-
-        r.addAction('sed -i "s/^EXTRAVERSION.*/EXTRAVERSION = .%(lastlevel)s/" Makefile')
+        if int(r.macros.level) < 3:
+            r.addAction('sed -i "s/^EXTRAVERSION.*/EXTRAVERSION = .%(lastlevel)s/" Makefile')
 
         # Since we will get kernel-source:tree out of this tree, clean it up
         r.addAction('find . -name "*.orig" | xargs rm -f')
@@ -293,7 +295,7 @@ class KernelPackageRecipe(CPackageRecipe):
         r.addConfiguration()
 
         # complements addNonInteractiveConfig()
-        if int(r.macros.sublevel) < 38:
+        if int(r.macros.level) < 3 and  int(r.macros.sublevel) < 38:
             r.macros.makeCfg = 'nonint_oldconfig'
         else: 
             r.macros.makeCfg = 'oldnoconfig'
@@ -514,8 +516,15 @@ class CreateBuildTree(build.BuildAction):
         # timestamps work out for dependencies when building against this tree
 
         util.copytree(bldincdir, destdir)
-        util.copytree('arch/%s/include/asm' % arch, destincdir)
-        os.symlink(destincdir +'/asm', 'asm-%s' % arch)
+
+        if (macros.level % macros > 3) or ((macros.level % macros < 3) and (macros.sublevel % macros ) > 43):
+
+            if os.path.exists('arch/%s/include/' % arch):
+                util.copytree('arch/%s/include/' % arch,
+                              destdir +'arch/%s/'%arch)
+        else:
+            util.copytree('arch/%s/include/asm' % arch, destincdir)
+            os.symlink(destincdir +'/asm', 'asm-%s' % arch)
 
     def copyDepinfo(self, data, dirname, names):
         destdir, srclen, timestamp, arch, regex = data
