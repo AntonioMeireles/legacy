@@ -7,43 +7,54 @@
 loadSuperClass('kernelmodulepackage')
 class BroadcomWlKmod(KernelModulePackageRecipe):
     name = 'broadcom-wl-kmod'
-    version =  '5.100.82.112'
+    version =  '6.20.155.1'
 
     def unpack(r):
-        r.macros.version = r.version.replace('.', '_')
+        # r.macros.version = r.version.replace('.', '_')
+        # 
+        # http://www.hackermusings.com/2013/02/better-wireless-drivers-for-the-bcm4331/
+        # ...
+        # r.addArchive('https://www.broadcom.com/docs/linux_sta/'
+        #              'hybrid-portsrc_x86_32-v%(version)s.tar.gz',
+        #              use=Arch.x86, dir = '%(name)s-%(version)s')
+        # r.addArchive('https://www.broadcom.com/docs/linux_sta/'
+        #              'hybrid-portsrc_x86_64-v%(version)s.tar.gz',
+        #              use=Arch.x86_64, dir = '%(name)s-%(version)s')
+        r.addArchive('https://launchpad.net/ubuntu/+archive/primary/+files/bcmwl_%(version)s+bdcom.orig.tar.gz')
+        r.addSource('LICENSE')
 
-        r.addArchive('https://www.broadcom.com/docs/linux_sta/'
-                     'hybrid-portsrc_x86_32-v%(version)s.tar.gz',
-                     use=Arch.x86, dir = '%(name)s-%(version)s')
-        r.addArchive('https://www.broadcom.com/docs/linux_sta/'
-                     'hybrid-portsrc_x86_64-v%(version)s.tar.gz',
-                     use=Arch.x86_64, dir = '%(name)s-%(version)s')
-
+        if Arch.x86_64:
+            r.macros.binarch = 'x86_64'
+        else:
+            r.macros.binarch = 'i386'
         # upstream patches
-        for p in [ 'broadcom-sta-5.100.82.111-linux-3.0.patch',
-                   'broadcom-sta-5.100.82.112-linux-2.6.39.patch',
-                   'broadcom-sta-5.100.82.112-linux-3.2.patch',
-                   'broadcom-sta-5.10.91.9-license.patch',
-                   '04-linux-semaphore-include.patch',
-                   '05-user_ioctl.patch',
-                   '09-3.4.0.patch',
-                   'broadcom-wl-5.100.82.112-kernel-3.8.patch',
-                   'broadcom-wl-5.100.82.112-kernel-3.9.patch',
-                   ]:
-            r.addPatch(p)
-        
+        # addapted
+        r.addPatch('0002-Makefile.patch', macros = True)
+        # verbatin from https://launchpad.net/ubuntu/+source/bcmwl/6.20.155.1+bdcom-0ubuntu6
+        for p in [ '0001-MODULE_LICENSE.patch',
+                   '0003-Make-up-for-missing-init_MUTEX.patch',
+                   '0004-Add-support-for-Linux-3.2.patch',
+                   '0005-add-support-for-linux-3.4.0.patch',
+                   '0006-add-support-for-linux-3.8.0.patch',
+                   '0007-nl80211-move-scan-API-to-wdev.patch',
+               ]:
+            r.addPatch(p, dir = 'src')
+        r.Replace('\$\(src\)', '%(builddir)s/src/', 'Makefile')
+        r.Replace('\+\=\ src\/',  '+= src/src/', 'Makefile' )
+
     def build(r):
+        r.macros.ksrcdir = '/lib/modules/%(kver)s/build'
+
+        r.Environment('KBASE', '/lib/modules/%(kver)s/')
+
         r.Make("-C '/lib/modules/%(kver)s/build' M=`pwd`")
 
     def install(r):
         r.macros.moduledir = r.moduleDir
         r.Install('*.ko', '/lib/modules/%(kver)s/%(moduledir)s/')
-        # blacklist bcma ...
-        r.Create('%(sysconfdir)s/modprobe.d/blacklist-bcma.conf',
-                 mode = 0644,
-                 contents = 'blacklist bcma')
 
     def policy(r):
+        r.Doc('LICENSE')
         # We want to make sure that the userspace code can require the
         # matching kernel-space code
         r.ComponentProvides('%(version)s')
