@@ -7,7 +7,7 @@
 import datetime
 class Chromium(AutoPackageRecipe):
     name = 'chromium'
-    baseVersion = '25.0.1364.173' 
+    baseVersion = '26.0.1410.54' 
     version = baseVersion + '+' + datetime.date.today().strftime("%Y.%m.%d")
 
     buildRequires = [ 'depot_tools:runtime',
@@ -71,6 +71,8 @@ class Chromium(AutoPackageRecipe):
                       'udev:devel',
                       'nacl-toolchain-newlib:devel',
                       'pciutils:devel',
+                      'libopus:devel',
+                      'speech-dispatcher:devel',
                       # 'harfbuzz:devel'
                     ]
 
@@ -80,17 +82,20 @@ class Chromium(AutoPackageRecipe):
 
 
     def setup(r):
-        r.addArchive('http://gsdview.appspot.com/chromium-browser-official/%(name)s-'+ r.baseVersion +'.tar.bz2')
+        r.addArchive('http://gsdview.appspot.com/chromium-browser-official/%(name)s-'+ r.baseVersion +'.tar.xz')
         r.addArchive('http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/nacl_sdk.zip',
                      dir = '%%(name)s-%s' % r.baseVersion)
         
         r.addSource('chromium.default')
 
         r.addPatch('chromium-ppapi-r0.patch')
-        r.addPatch('chromium-no-pnacl-r0.patch')
-        # our png too old
-        # r.addPatch('chromium-system-libpng-r0.patch')
-        
+
+
+        # Fix header location for speech-dispatcher 0.8 (patch from PLD Linux)
+        # r.addPatch('chromium-26.0.1410.43-speechd-0.8.patch')
+        # http://code.google.com/p/chromium/issues/detail?id=178626
+        r.addPatch('chromium-26.0.1410.43-audio-buffer-size.patch')
+
         # Decrease debuginfo verbosity to reduce memory consumption even more
         # to avoid running into 4 GB ar format limit
         # https://bugs.webkit.org/show_bug.cgi?id=91154 
@@ -116,6 +121,7 @@ class Chromium(AutoPackageRecipe):
                                 'use_system_libvpx=0 '
                                 # system's one works but flacky ...
                                 'use_system_ffmpeg=0 '
+
                                 # until http://crbug.com/22208
                                 'use_system_sqlite=0 '
                                 # https://bugzilla.mozilla.org/show_bug.cgi?id=547312 is fixed now...
@@ -143,11 +149,19 @@ class Chromium(AutoPackageRecipe):
                                 # we need a newer ICU ...
                                 # 'use_system_harfbuzz=1 '
                                 'linux_link_gnome_keyring=1 '
+                                'linux_link_gsettings=1 '
+                                'linux_link_libpci=1 '
+
+                                'linux_link_libspeechd=1 '
+
                                 'use_gconf=0 '
                                 'use_cups=1 '
                                 'werror= '
                                 'gcc_version=44 '
                                 'use_system_yasm=1 '
+                                'use_system_webp=1 '
+                                'use_system_opus=1 '
+                                'disable_newlib_untar=1 '
                                 # 
                                 'linux_strip_binary=1 '
                                 'remove_webcore_debug_symbols=1 '
@@ -182,13 +196,9 @@ class Chromium(AutoPackageRecipe):
 
         # Prepare NaCL bits toolchain comming from nacl-toolchain-newlib
         # as if the build system wasn't dumb and tortuous enough ...
-        r.MakeDirs('sdk')
-        r.MakeDirs('native_client/toolchain/.tars')
-        r.Run(""" 
-        cp -a %(libdir)s/nacl-toolchain-newlib sdk/nacl-sdk;
-        tar czf native_client/toolchain/.tars/naclsdk_linux_x86.tgz sdk;
-        rm -rf sdk;
-        """)
+        r.MakeDirs('out/Release/obj/gen/sdk/toolchain')
+        r.Run('cp -a %(libdir)s/nacl-toolchain-newlib out/Release/obj/gen/sdk/toolchain/linux_x86_newlib')
+        r.Create('out/Release/obj/gen/sdk/toolchain/linux_x86_newlib/stamp.untar')
 
         r.Run("GYP_DEFINES=\'%(gypDefines)s\'  GYP_GENERATORS=make "
               "build/gyp_chromium "
