@@ -1,11 +1,12 @@
 #!/usr/bin/python
-## -*- coding: utf-8 -*-
-## Copyright (C) 2001, 2004, 2008, 2012 Red Hat, Inc.
-## Copyright (C) 2001 Trond Eivind GlomsrÃ¸d <teg@redhat.com>
+## Copyright (C) 2001 Red Hat, Inc.
+## Copyright (C) 2001 Trond Eivind Glomsrød <teg@redhat.com>
 
-## This program is free software: you can redistribute it and/or modify
+## v0.2 - 2001-08-21
+
+## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
-## the Free Software Foundation, either version 3 of the License, or
+## the Free Software Foundation; either version 2 of the License, or
 ## (at your option) any later version.
 
 ## This program is distributed in the hope that it will be useful,
@@ -14,7 +15,8 @@
 ## GNU General Public License for more details.
 
 ## You should have received a copy of the GNU General Public License
-## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 """
 A msghack replacement
@@ -340,36 +342,16 @@ class GTMaster:
             res=res+str(message)+"\n"
         return res
 
-def printUsage():
-    "Print the usage messages"
-    print "Usage: ", str(sys.argv[0])," [OPTION] file.po [ref.po]\n\
-This program can be used to alter .po files in ways no sane mind would think about.\n\
-    -o                result will be written to FILE\n\
-    --invert          invert a po file by switching msgid and msgstr\n\
-    --master          join any number of files in a master-formatted catalog\n\
-    --empty           empty the contents of the .po file, creating a .pot\n\
-    --append          append entries from ref.po that don't exist in file.po\n\
-\n\
-Note: It is just a replacement of msghack for backward support.\n"
-
 
 if __name__=="__main__":
     output=None
     res=None
     if("-o") in sys.argv:
-	if (len(sys.argv)<=sys.argv.index("-o")+1):
-		print "file.po and ref.po are not specified!\n"
-		printUsage()
-		exit(1)
-	output=sys.argv[sys.argv.index("-o")+1]
+        output=sys.argv[sys.argv.index("-o")+1]
         sys.argv.remove("-o")
-	sys.argv.remove(output)
+        sys.argv.remove(output)
     if("--invert") in sys.argv:
-	if (len(sys.argv)<=sys.argv.index("--invert")+1):
-	    print "file.po is not specified!\n"
-	    printUsage()
-	    exit(1)
-	file=sys.argv[sys.argv.index("--invert")+1]
+        file=sys.argv[sys.argv.index("--invert")+1]
         gtf=GTFile(file)
         res1=gtf.msgidDupes()
         if res1:
@@ -377,30 +359,18 @@ if __name__=="__main__":
             sys.exit(1)
         res=str(gtf.invertedStrings())
     elif("--empty") in sys.argv:
-	if (len(sys.argv)<=sys.argv.index("--empty")+1):
-	    print "file.po is not specified!\n"
-	    printUsage()
-	    exit(1)
-	file=sys.argv[sys.argv.index("--empty")+1]
+        file=sys.argv[sys.argv.index("--empty")+1]
         gtf=GTFile(file)
         res=str(gtf.emptyMsgStrings())
     elif("--master") in sys.argv:
-	if (len(sys.argv)<=sys.argv.index("--master")+1):
-	    print "file.po is not specified!\n"
-	    printUsage()
-	    exit(1)
-	loc=sys.argv.index("--master")+1
+        loc=sys.argv.index("--master")+1
         gtfs=[]
         for file in sys.argv[loc:]:
             gtfs.append(GTFile(file))
         master=GTMaster(gtfs)
         res=str(master)
     elif("--append") in sys.argv:
-	if (len(sys.argv)<=sys.argv.index("--append")+2):
-	    print "file.po and/or ref.po are not specified!\n"
-	    printUsage()
-	    exit(1)
-	file=sys.argv[sys.argv.index("--append")+1]
+        file=sys.argv[sys.argv.index("--append")+1]
         file2=sys.argv[sys.argv.index("--append")+2]
         gtf=GTFile(file)
         gtf2=GTFile(file2)
@@ -408,7 +378,17 @@ if __name__=="__main__":
         res=str(gtf)
     else:
         #print "Not implemented: "+str(sys.argv)
-	printUsage()
+        print "\
+Usage: ", str(sys.argv[0])," [OPTION] file.po [ref.po]\n\
+This program can be used to alter .po files in ways no sane mind would think about.\n\
+      -o                result will be written to FILE\n\
+      --invert          invert a po file by switching msgid and msgstr\n\
+      --master          join any number of files in a master-formatted catalog\n\
+      --empty           empty the contents of the .po file, creating a .pot\n\
+      --append          append entries from ref.po that don't exist in file.po\n\
+\n\
+Note: It is just a replacement of msghack for backward support.\n\
+"
         sys.exit(1)
     if not output:
         print res

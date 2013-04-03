@@ -1,51 +1,49 @@
 #
 # Copyright (c) 2004-2007 rPath, Inc.
-#               2012-2013 The Foresight Linux Project
 # This file is distributed under the terms of the MIT License.
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
 class Gettext(CPackageRecipe):
     name = 'gettext'
-    version = '0.18.2.1'
+    version = '0.17'
 
     # needs info-file tag description from the install-info package
     # texlive and emacs will create a build req loop
-    buildRequires = [ 'install-info:runtime', 'libstdc++:devel',
-                      'perl:runtime', 'texinfo:runtime', 'zlib:devel',
-                      'bison:runtime', 'acl:devel', 'libgomp:devellib',
+    buildRequires = [ 'install-info:runtime', 'libstdc++:devel', 'expat:devel',
+        'perl:runtime', 'texinfo:runtime', 'zlib:devel', 'bison:runtime', 'acl:devel', 
                       'glib:devel', 'intltool:runtime', 'libcroco:devel',
-                      'ncurses:devel', 'python:devel', 'emacs:runtime', ]
+                      'mono:cil', 'mono:devel', 'mono:runtime', 'ncurses:devel',
+                      'python:devel', ]
 
     def setup(r):
+        r.disableParallelMake()
         r.addArchive('http://ftp.gnu.org/gnu/gettext/')
-
+        r.addSource('po-mode-init.el')
         r.addSource('msghack.py')
+        r.addPatch('gettext-0.16-broken-expat-dynload.patch')
 
-        r.Configure(' --without-included-gettext --enable-nls'
-                    ' --disable-java --disable-native-java'
-                    ' --with-pic --disable-csharp --disable-rpath ')
+        r.Configure(' --without-included-gettext --with-libexpat --enable-nls --disable-java --disable-openmp')
         r.Make()
-
-        r.MakeInstall(' lispdir=%(datadir)s/emacs/site-lisp/gettext'
-                      ' aclocaldir=%(datadir)s/aclocal'
-                      ' EXAMPLESFILES="" ')
+        r.MakeInstall('lispdir=%(datadir)s/emacs/site-lisp'
+                      ' aclocaldir=%(datadir)s/aclocal')
         r.Move('%(bindir)s/gettext', '%(essentialbindir)s/')
-
         r.Symlink('%(essentialbindir)s/gettext', '%(bindir)s/gettext')
-
         r.Install('msghack.py', '%(bindir)s/msghack', mode=0755)
-
-        r.Move('%(datadir)s/emacs/site-lisp/gettext/start-po.el',
-               '%(datadir)s/emacs/site-lisp/site-start.d/')
-
-        r.Remove('/usr/doc', '%(datadir)s/doc/gettext/{javadoc,examples}/',
-                 recursive=True)
-        r.AutoDoc(exceptions = 'gettext-tools/examples/.*')
-
+        r.Install('po-mode-init.el',
+                  '%(datadir)s/emacs/site-lisp/site-start.d/')
+        r.Remove('%(includedir)s/libintl.h')
+        r.Remove('/usr/doc', '%(datadir)s/emacs', recursive=1)
         r.Remove('%(libdir)s/libintl.{,l}a',
                  '%(datadir)s/locale/locale.alias')
         r.Remove('%(datadir)s/gettext/javaversion.class')
-
         r.ExcludeDirectories(exceptions='%(datadir)s/locale/en@boldquot(/LC_MESSAGES)?')
         r.ExcludeDirectories(exceptions='%(datadir)s/locale/en@quot(/LC_MESSAGES)?')
+
+        # FL-2240 
+        # FIXME find out _why_ conary-policy not doing is job here
+        # as it should
+        r.ComponentSpec('cil',
+                        '%(libdir)s/GNU.Gettext.dll',
+                        '%(libdir)s/gettext/.*.exe' )
+                        
