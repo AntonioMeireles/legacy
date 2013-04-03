@@ -7,41 +7,50 @@
 loadSuperClass('rpmpackage')
 class Parted(RPMPackageRecipe,CPackageRecipe):
     name = 'parted'
-    version = '1.8.8'
-    rpmRelease = '17.fc11'
-    rpmPatches = [ '%(name)s-1.8.8-xvd.patch',
-                   '%(name)s-1.8.8-devmapper-header.patch',
-                   '%(name)s-1.8.8-noinst-headers.patch',
-                   '%(name)s-1.8.8-manpage.patch',
-                   '%(name)s-1.8.8-gcc-4.3.patch',
-                   '%(name)s-1.8.8-nofixgpt.patch',
-                   '%(name)s-1.8.8-alpha.patch',
-                   '%(name)s-1.8.8-dospartrec.patch',
-                   '%(name)s-1.8.8-appletv.patch',
-                   '%(name)s-1.8.8-s390-compile.patch',
-                   '%(name)s-1.8.8-sparc-enableraid.patch',
-                   '%(name)s-1.8.8-avoid-none-stat.patch',
-                   '%(name)s-1.8.8-newgcc4.4.patch',
-                   '%(name)s-1.8.8-return-error-update-mode.patch',
-                   '%(name)s-1.8.8-virtio.patch',
-                   '%(name)s-1.8.8-dos-label-swap.patch',
-                   '%(name)s-1.8.8-msdos-metadata.patch'] 
+    version = '3.1'
+    rpmRelease = '10.fc18'
+    rpmPatches = [ 'parted-3.0-libparted-copy-pmbr_boot-when-duplicating-GPT-disk.patch',
+                   'parted-3.1-libparted-check-PMBR-before-GPT-partition-table-8052.patch',
+                   'parted-3.1-tests-add-t0301-overwrite-gpt-pmbr.sh.patch',
+                   'parted-3.1-libparted-Fix-endian-error-with-FirstUsableLBA.patch',
+                   'parted-2.1-libparted-use-dm_udev_wait-698121.patch',
+                   'parted-3.1-libparted-use-largest_partnum-in-dm_reread_part_tabl.patch',
+                   'parted-3.1-test-creating-20-device-mapper-partitions.patch',
+                   'parted-3.1-libparted-preserve-the-uuid-on-dm-partitions.patch',
+                   'parted-3.1-tests-Make-sure-dm-UUIDs-are-not-erased.patch',
+                   'parted-3.1-libparted-reallocate-buf-after-_disk_analyse_block_s.patch',
+                   'parted-3.1-tests-cleanup-losetup-usage.patch',
+                   'parted-3.1-libparted-add-support-for-implicit-FBA-DASD-partitions.patch',
+                   'parted-3.1-libparted-add-support-for-EAV-DASD-partitions.patch',
+                   'parted-3.1-libparted-don-t-canonicalize-dev-md-paths.patch',
+                   'parted-3.1-libparted-mklabel-eav.patch',
+                   'parted-3.1-avoid-dasd-as-default-file-image-type.patch',
+    ] 
 
     buildRequires = [ 'e2fsprogs:devel', 'libtool:runtime',
                       'install-info:runtime', 'autoconf:runtime', 'automake:runtime',
                       'xdelta:devel', 'gettext:devel', 'libtool:runtime',
                       'readline:devel', 'libtermcap:devel', 'ncurses:devel',
                       'pkgconfig:devel', 'check:devel', 'device-mapper:devel',
-                      'gettext:runtime', 'intltool:runtime', 'util-linux:devel']
-
+                      'gettext:runtime', 'intltool:runtime', 'util-linux:devel',
+                      ]
     def setup(r):
         RPMPackageRecipe.unpack(r)
-
+        r.Run('autoreconf -fi')
+        r.macros.cflags += ' -Wno-unused-but-set-variable'
         if 'LINGUAS' in os.environ:
             del os.environ['LINGUAS']
 
         r.Configure(' --enable-device-mapper  --enable-shared --enable-part-static --enable-pc98=no'
                     ' --enable-Werror=no --disable-dynamic-loading --with-readline')
-        r.Make('LIBTOOL=/usr/bin/libtool', preMake='tagname=CC')
-        r.MakeInstall('LIBTOOL=/usr/bin/libtool MKINSTALLDIRS=`pwd`/mkinstalldirs', preMake='tagname=CC')
+
+        r.Replace(('^hardcode_libdir_flag_spec=.*',
+                   'hardcode_libdir_flag_spec=""'),
+                  ('^runpath_var=LD_RUN_PATH',
+                   'runpath_var=DIE_RPATH_DIE'),
+                  'libtool')
+
+        r.Make('V=1')
+        r.MakeInstall()
+
         r.Doc('doc/API', 'doc/FAT')
