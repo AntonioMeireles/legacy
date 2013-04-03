@@ -23,21 +23,38 @@ do_recompute_authfile()
         sshkeydir="$userdir/.ssh"
         install -d -o "$username" -m 0700 "$sshkeydir"
         akfile="$sshkeydir/authorized_keys"
+
         tmpakfile=$(mktemp --tmpdir="$sshkeydir" -t authorized_keys.XXXXXXXX)
+        chmod 0600 "$tmpakfile"
+        chown "$username" "$tmpakfile"
         # Create the authorized_keys file if it doesn't exist (instead of
         # trying to concatenate the existing one with the new file)
         cat "$fname" >> "$akfile"
         sort -u "$akfile" > "$tmpakfile" && mv "$tmpakfile" "$akfile"
-        chmod 0600 "$akfile"
-        chown "$username" "$akfile"
     done
-    exit 0
 }
 
 do_erase_key()
 {
-    # Key removal not implemented yet
-    exit 0
+    for fname in "$@"; do
+        [ -f "$fname" ] || continue
+        # Extract dirname
+        dirname="${fname%/*}"
+        # Filename should be user
+        username="${dirname##*/}"
+        userdir=$(getent passwd "$username" | cut -d: -f6)
+        [ "$userdir" = "" ] && continue
+        sshkeydir="$userdir/.ssh"
+        [ -d "$sshkeydir" ] || continue
+        akfile="$sshkeydir/authorized_keys"
+        [ -f "$akfile" ] || continue
+
+        tmpakfile=$(mktemp --tmpdir="$sshkeydir" -t authorized_keys.XXXXXXXX)
+        chmod 0600 "$tmpakfile"
+        chown "$username" "$tmpakfile"
+        comm -2 -3 "$akfile" $fname | sort -u > "$tmpakfile"
+        mv "$tmpakfile" "$akfile"
+    done
 }
 
 case $type in 
@@ -46,7 +63,9 @@ case $type in
             update)
                 do_recompute_authfile "$@"
             ;;
-            remove)
+            preremove|preupdate)
+                # pre-update needs to remove the old key; update will add
+                # the new key afterward
                 do_erase_key "$@"
             ;;
             *)
