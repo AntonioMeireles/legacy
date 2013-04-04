@@ -4,10 +4,10 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class Httpd(RPMPackageRecipe, CPackageRecipe):
+#loadSuperClass('rpmpackage')
+class Httpd(CPackageRecipe):
     name = 'httpd'
-    version = '2.2.9'
+    version = '2.2.24'
 
     buildRequires = [ 'db:devel', 'expat:devel', 'findutils:runtime',
                       'perl:runtime', 'pkgconfig:devel', 'e2fsprogs:devel',
@@ -24,28 +24,25 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
     # work around issues in rmake.
     buildRequires.append('mailcap:config')
 
-    rpmRelease = '4'
-    rpmUpVer = '2.2.9'
-    externalArchive = 'http://archive.apache.org/dist/httpd/'
-    rpmPatches = []
-
-    oldrpm = 'http://archives.fedoraproject.org/pub/archive/fedora/linux/core/6/source/SRPMS/httpd-2.2.3-5.src.rpm' 
-    rhel5rpm = 'ftp://ftp.redhat.com/redhat/linux/enterprise/5Server/en/os/SRPMS/httpd-2.2.3-43.el5_5.3.src.rpm'
-
+    # srpm = 'ftp://ftp.redhat.com/redhat/linux/enterprise/5Server/en/os/SRPMS/httpd-2.2.3-76.el5_9.src.rpm'
+    srpm = 'http://koji.rutgers.edu/packages/httpd/2.2.24/1.ru6/src/httpd-2.2.24-1.ru6.src.rpm'
     def setup(r):
-        r.unpack()
+        r.addArchive('http://archive.apache.org/dist/httpd/')
         r.macros.contentdir = '%(servicedir)s/www'
         r.macros.suexec_caller = 'apache'
         r.macros.mmn = '20051115'
         r.macros.vstring = 'rPath'
-        r.macros.distro = 'rPath Release 2'
+        r.macros.distro = 'Foresight Linux'
         r.macros.htconfdir = '%(sysconfdir)s/httpd'
-        r.macros.cflags += " -DSSL_EXPERIMENTAL_ENGINE"
+        #        r.macros.cflags += " -DSSL_EXPERIMENTAL_ENGINE -fno-strict-aliasing "
+        r.macros.cflags += " -fno-strict-aliasing "
         # point to the correct libtool
         r.macros.apr_libtool = "$(apr-1-config --apr-libtool | sed -e 's|/bin/sh ||')"
         r.macros.oldapachedir = '/usr/local/apache2'
         r.macros.cflags += " $(pkg-config --cflags openssl)"
         r.macros.ssl_libs = " $(pkg-config --libs openssl)"
+
+        r.Environment('SH_LDFLAGS', '-Wl,-z,relro')
 
         r.addSource("Makefile.ssl")
         r.addSource("modssl-req.conf")
@@ -53,58 +50,33 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
         r.addSource('index.html')
         r.addSource('httpd.logrotate', rpm=r.srpm)
         r.addSource("httpd.init.patch", macros=True)
-        r.addSource('httpd.init', rpm=r.srpm,
-                    apply="patch httpd.init httpd.init.patch")
+        r.addSource('httpd.init', rpm=r.srpm,)
+#                    apply="patch httpd.init httpd.init.patch")
         r.addSource('httpd.conf', rpm=r.srpm)
         r.addSource('ssl.conf', rpm=r.srpm,
                     apply="sed -i -e 's,/etc/pki/tls,/etc/ssl,g' ssl.conf")
         r.addSource('welcome.conf', rpm=r.srpm)
-        r.addSource('migration.xml', rpm=r.oldrpm)
-        r.addSource('migration.css', rpm=r.oldrpm)
-        r.addSource('html.xsl', rpm=r.oldrpm)
+
         r.addSource('README.confd', rpm=r.srpm)
 
-        r.addPatch('CVE-2011-3368.patch')
 
         r.addSource('httpd-2.0.48-release.patch', rpm=r.srpm)
         r.addPatch('config.layout.rpath', level=0, macros=True)
         r.addPatch('httpd.conf.openoffice.patch', backup='.openoffice')
-        r.addPatch('httpd-2.2.0-authnoprov.patch', rpm=r.srpm) # RPL-2263
 
-        # RPL-2708 CVE-2008-2939
-        r.addPatch('http://svn.apache.org/viewvc/httpd/httpd/branches/2.2.x/modules/proxy/mod_proxy_ftp.c?r1=682870&r2=682869&pathrev=682870&view=patch', level=4)
-
-        # RPL-3107 (CVE-2009-1891)
-        r.addPatch('http://svn.apache.org/viewvc/httpd/httpd/branches/2.2.x/server/core_filters.c?r1=421103&r2=791454&pathrev=791454&view=patch', level=4)
-
-        # RPL-3079 (CVE-2009-1890)
-        r.addPatch('http://svn.apache.org/viewvc/httpd/httpd/branches/2.2.x/modules/proxy/mod_proxy_http.c?r1=768504&r2=790914&view=patch', level=4)
-
-        # RPL-3061 (CVE-2009-1195)
-        r.addPatch('httpd-2.2.9-CVE-2009-1195.patch')
-
-        # Modified patches from RHEL5 
-        r.addPatch('httpd-2.2.3-CVE-2009-3555.patch')
         
-        # Unmodified patches from RHEL5
-        r.addPatch('httpd-2.2.3-CVE-2009-3094.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2009-3095.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-ssicompat.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2009-3555-p2.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2010-0408.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2010-0434.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2010-1452.patch', rpm=r.rhel5rpm)
-        r.addPatch('httpd-2.2.3-CVE-2010-2791.patch', rpm=r.rhel5rpm)
-
-        r.addPatch('http://anonscm.debian.org/viewvc/pkg-apache/branches/lenny-apache2/patches/'
-                   '082_CVE-2011-3192.dpatch?revision=1343&view=co',
-                   extraArgs = '-F3')
-        r.addPatch('httpd-2.2.3-cachehardmax.patch')
+        # Unmodified patches from 'RHEL6'ified 2.2.x
+        # (taken from http://koji.rutgers.edu/koji/buildinfo?buildID=2934')
+        for patch in [ 'httpd-2.1.10-apctl.patch',
+                       'httpd-2.1.10-apxs.patch',
+                       'httpd-2.2.9-deplibs.patch',
+                       'httpd-2.1.10-disablemods.patch',
+                       'httpd-2.1.10-layout.patch',
+                        ]: 
+            r.addPatch(patch, rpm=r.srpm)
 
         r.Replace(r'@RELEASE@', '%(vstring)s', 'httpd-2.0.48-release.patch')
         r.Run('patch -p1 < httpd-2.0.48-release.patch')
-
-        
 
         r.Replace('/var', '%(servicedir)s', 'httpd.conf')
 
@@ -120,37 +92,39 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
            exit 1
         fi""")
 
+
         r.Run("echo Building for '%(distro)s' with MMN %(mmn)s and vendor string '%(vstring)s'")
-
         r.Run('./buildconf')
-        # Before configure; fix location of build dir in generated apxs
-        r.Replace(r'\@exp_installbuilddir\@', '%(libdir)s/httpd/build',
-                  'support/apxs.in')
-
-        # forcibly prevent use of bundled apr, apr-util
-        r.Remove('srclib/{apr,apr-util}', recursive=True)
-
-        # Build the migration guide
-        # update location of migration guide in apachectl
-        r.Replace(r'@DISTRO@', '%(distro)s', 'migration.xml')
-        r.Run("xmlto --skip-validation -x html.xsl html-nochunks migration.xml")
+        # forcibly prevent use of bundled apr, apr-util, pcre
+        r.Remove('srclib/{apr,apr-util,pcre}', recursive=True)
 
         # enable optional modules only for main build
         r.mpmbuild('prefork',
                    ' --enable-mods-shared=all'
-                   ' --enable-ssl --with-ssl'
+                   ' --enable-ssl'
+                   ' --with-ssl'
                    ' --enable-distcache'
+                   ' --enable-proxy'
+                   ' --enable-cache'
+                   ' --enable-mem-cache'
+                   ' --enable-file-cache'
+                   ' --enable-disk-cache'
+                   ' --enable-disk-cache'
                    ' --enable-deflate'
-                   ' --enable-proxy --enable-proxy-connect'
-                   ' --enable-proxy-http --enable-proxy-ftp'
-                   ' --enable-cache --enable-mem-cache'
-                   ' --enable-file-cache --enable-disk-cache'
-                   ' --enable-ldap --enable-auth-ldap'
-                   ' --enable-pie --with-pcre'
+                   ' --enable-proxy-connect'
+                   ' --enable-proxy-http'
+                   ' --enable-proxy-ftp'
+                   ' --enable-ldap'
+                   ' --enable-auth-ldap'
+                   ' --enable-pie'
+                   ' --with-pcre'
                    ' --enable-logio'
                    ' --enable-so'
+                   ' --enable-cgid'
+                   ' --enable-authn-anon'
                    ' --enable-authn-alias'
-                   ' --enable-authnz-ldap')
+                   ' --enable-authnz-ldap'
+        )
 
         # To prevent most modules being built statically into httpd.worker,
         # easiest way seems to be enable them shared.
@@ -234,7 +208,6 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
               '-I\$(APR_INCLUDEDIR) -I%(includedir)s/openssl|g"'
         ' %(destdir)s%(libdir)s/httpd/build/config_vars.mk')
 
-        r.Doc('migration.html', 'migration.css')
         r.Doc('ABOUT_APACHE', 'VERSIONING')
 
         r.SetModes('%(sbindir)s/suexec', 04510)
@@ -245,9 +218,6 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
         r.Ownership('apache', 'apache',
                     '%(localstatedir)s/lib/dav',
                     '%(localstatedir)s/cache/mod_proxy')
-
-        r.ComponentSpec('manual', '%(contentdir)s/manual/')
-        r.ByDefault(exceptions=[':manual'])
 
         # PACKAGE: mod_ssl
         r.PackageSpec('mod_ssl',
@@ -323,21 +293,37 @@ class Httpd(RPMPackageRecipe, CPackageRecipe):
 
         r.SetModes('%(sbindir)s/envvars', '%(sbindir)s/envvars-std', 0755)
 
+        r.MakeDirs('%(localstatedir)s/run/httpd')
+        r.ExcludeDirectories(exceptions='%(localstatedir)s/run/httpd')
+
     def mpmbuild(r, target, extraConfig):
         r.Run('mkdir ' + target)
-        r.ManualConfigure(
-                ' --enable-layout=rPath'
-                ' --with-mpm=' + target +
-                ' --with-apr=%(prefix)s --with-apr-util=%(prefix)s'
-                ' --enable-suexec --with-suexec'
-                ' --with-suexec-caller=%(suexec_caller)s'
-                ' --with-suexec-docroot=%(contentdir)s'
-                ' --with-suexec-logfile=%(localstatedir)s/log/httpd/suexec.log'
-                ' --with-suexec-bin=%(sbindir)s/suexec'
-                ' --with-suexec-uidmin=500 --with-suexec-gidmin=100 '
-                + extraConfig,
-                configureName='../configure',
-                dir=target,
-                preConfigure='SSL_LIBS="%(ssl_libs)s" '
-                             'CFLAGS=$(echo "%(cflags)s")')
+        r.ManualConfigure(' --enable-layout=rPath'
+                          ' --with-pcre'
+                          ' --with-mpm=' + target +
+                          ' --with-apr=%(prefix)s --with-apr-util=%(prefix)s'
+                          ' --enable-suexec --with-suexec'
+                          ' --with-suexec-caller=%(suexec_caller)s'
+                          ' --with-suexec-docroot=%(contentdir)s'
+                          ' --with-suexec-logfile=%(localstatedir)s/log/httpd/suexec.log'
+                          ' --with-suexec-bin=%(sbindir)s/suexec'
+                          ' --with-suexec-uidmin=500 --with-suexec-gidmin=100 '
+                          ' --prefix=%(sysconfdir)s/httpd'
+                          ' --exec-prefix=%(prefix)s '
+                          ' --bindir=%(bindir)s '
+                          ' --sbindir=%(sbindir)s '
+                          ' --mandir=%(mandir)s '
+                          ' --libdir=%(libdir)s '
+                          ' --localstatedir=%(localstatedir)s'
+                          ' --sysconfdir=%(sysconfdir)s/httpd/conf '
+                          ' --includedir=%(includedir)s/httpd '
+                          ' --libexecdir=%(libdir)s/httpd/modules '
+                          ' --datadir=%(contentdir)s '
+                          ' --with-installbuilddir=%(libdir)s/httpd/build ' 
+
+                          + extraConfig,
+                          configureName='../configure',
+                          dir=target,
+                          preConfigure='SSL_LIBS="%(ssl_libs)s" '
+                          'CFLAGS=$(echo "%(cflags)s")')
         r.Make(dir=target, preMake="SSL_LIBS='%(ssl_libs)s'")
