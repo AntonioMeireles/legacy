@@ -18,15 +18,15 @@ do_recompute_authfile()
         dirname="${fname%/*}"
         # Filename should be user
         username="${dirname##*/}"
-        userdir=$(getent passwd "$username" | cut -d: -f6)
-        [ "$userdir" = "" ] && continue
+        IFS=: read gid userdir < <(getent passwd "$username" | cut -d: -f4,6)
+        [ -z "$userdir" ] && continue
         sshkeydir="$userdir/.ssh"
-        install -d -o "$username" -m 0700 "$sshkeydir"
+        install -d -o "$username" -g "$gid" -m 0700 "$sshkeydir"
         akfile="$sshkeydir/authorized_keys"
 
         tmpakfile=$(mktemp --tmpdir="$sshkeydir" -t authorized_keys.XXXXXXXX)
         chmod 0600 "$tmpakfile"
-        chown "$username" "$tmpakfile"
+        chown "$username:$gid" "$tmpakfile"
         # Create the authorized_keys file if it doesn't exist (instead of
         # trying to concatenate the existing one with the new file)
         cat "$fname" >> "$akfile"
@@ -42,8 +42,8 @@ do_erase_key()
         dirname="${fname%/*}"
         # Filename should be user
         username="${dirname##*/}"
-        userdir=$(getent passwd "$username" | cut -d: -f6)
-        [ "$userdir" = "" ] && continue
+        IFS=: read gid userdir < <(getent passwd "$username" | cut -d: -f4,6)
+        [ -z "$userdir" ] && continue
         sshkeydir="$userdir/.ssh"
         [ -d "$sshkeydir" ] || continue
         akfile="$sshkeydir/authorized_keys"
@@ -51,7 +51,7 @@ do_erase_key()
 
         tmpakfile=$(mktemp --tmpdir="$sshkeydir" -t authorized_keys.XXXXXXXX)
         chmod 0600 "$tmpakfile"
-        chown "$username" "$tmpakfile"
+        chown "$username:$gid" "$tmpakfile"
         comm -2 -3 <(sort -u "$akfile") <(sort -u "$fname") > "$tmpakfile"
         mv "$tmpakfile" "$akfile"
     done
