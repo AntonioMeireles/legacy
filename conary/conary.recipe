@@ -3,7 +3,7 @@
 #               2007-2013 The Foresight Linux Project
 #                     
 # This file is distributed under the terms of the MIT License.
-# A copy is available at http://www.rpath.com/permanent/mit-license.html
+# A copy is available at http://www.foresightlinux.org/licenses/mit-license/
 #
 
 loadInstalled('python')
@@ -23,6 +23,8 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
                       'robj:python', 'xobj:python', 'python-webob:python',
                       # needed to generate the bash-completion scripts
                       'rmake:python',
+                      # for the docs
+                      'epydoc:runtime',
                     ]
     def setup(r):
         r.setDefaultPython()
@@ -63,6 +65,8 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
         # to an address that is not available anymore
         r.addPatch('genmodel-offer-fix.patch')
 
+        r.addSource('docs.html')
+
         # Use embedded sqlite
         r.addArchive('http://sqlite.org/%(sqlite)s.tar.gz',
                      dir='%(maindir)s/conary/pysqlite3/')
@@ -90,6 +94,8 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
         r.Make(dir='conary-bash-completion-0.2')
         r.MakeInstall(dir='conary-bash-completion-0.2')
 
+        r.Replace('___VERSION___', '%(version)s', 'docs.html')
+        
         # %(x11prefix)s deprecated in rPL2 (CNY-1205)
         r.Replace('^x11prefix.*$', 'x11prefix = \'%(exec_prefix)s\'',
                   'config/macros')
@@ -113,7 +119,6 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
         else:
             preMake = ''
 
-
         # Build internal sqlite library for Conary to use
         r.Configure('--disable-shared --enable-threadsafe',
                     dir='conary/pysqlite3/%(sqlite)s')
@@ -121,6 +126,16 @@ class Conary(CPackageRecipe, Python.VersionMixIn):
 
         r.Make('libdir=%(libdir)s' + conf, preMake=preMake)
         r.MakeInstall('libdir=%(libdir)s', preMake=preMake)
+
+        r.Make('docs')
+        docsDestiny = '/srv/www/html/ConaryDocumentation/' 
+        r.MakeDirs(docsDestiny)
+        for dir in [ 'developer_api', 'public_api']:
+            r.Install('doc/%s' % dir , docsDestiny, mode = 0644,
+                      package = ':devel')
+        r.Install('docs.html',
+                  '%sindex.html' % docsDestiny,
+                  package = ':devel')
 
         r.Create('%(sysconfdir)s/conaryrc',
                  contents='includeConfigFile %(sysconfdir)s/conary/config.d/*\n')
