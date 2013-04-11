@@ -1,40 +1,67 @@
+#
+# Copyright (c) 2004-2008 rPath, Inc.
+# This file is distributed under the terms of the MIT License.
+# A copy is available at http://www.rpath.com/permanent/mit-license.html
+#
+
 class Mysql(CPackageRecipe):
     name = 'mysql'
-    version = '5.5.19'
+    version = '5.0.88'
 
-    buildRequires = [ 'gperf:runtime', 'perl:runtime',
+    buildRequires = [ 'gperf:runtime', 'perl:runtime', 'readline:devel',
         'ncurses:devel', 'zlib:devel', 'libtool:runtime', 'time:runtime',
         'gcc:devel', 'gcc-c++:runtime', 'libstdc++:devel', 'openssl:devel',
         'bison:runtime', 'net-tools:runtime', 'util-linux:runtime', 'perl:lib',
-        'procps:runtime', 'install-info:runtime', 'bash:runtime', 'libtermcap:devel',
-        'autoconf:runtime',  'automake:runtime', 'm4:runtime', 'cmake:runtime']
+        'procps:runtime', 'install-info:runtime', 'bash:runtime', 'krb5:devel',]
 
     def setup(r):
         # this is for downloading the "enterprise" version
         #r.addArchive('ftp://ftp.mysql.com/pub/%(name)s/src/')
         # download location for the "community" version
-        r.macros.majorversion = r.version[:r.version.rindex('.')]
-        r.addArchive('http://downloads.mysql.com/archives/mysql-%(majorversion)s/mysql-%(version)s.tar.gz')
-        r.addSource('my.cnf', dest='%(sysconfdir)s/', mode=0644)
-        r.addSource('mysql.init', dest='%(initdir)s/mysql', mode=0755)
-        r.addSource('mysql.logrotate', dest='%(sysconfdir)s/logrotate.d/', mode=0644)
+        r.addArchive('ftp://mirror.services.wisc.edu/mirrors/mysql/Downloads/MySQL-%(major_version)s/')
+        r.addSource('mysql.init', macros=True,
+                    dest='%(initdir)s/mysqld', mode=0755)
+        r.addSource('mysql.logrotate', macros=True,
+                    dest='%(sysconfdir)s/logrotate.d/mysqld', mode=0644)
+        r.addSource('my.cnf', macros=True,
+                    dest='%(sysconfdir)s/my.cnf', mode=0644)
+
+        # RPL-2188. this fixes a bug where mysql cannot create a database in
+        # traditional mode.  Fixed in 5.0.67 and later.
+        # r.addPatch('mysql-5.0.51-traditional.patch')
 
         r.macros.cflags += ' -O2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fwrapv'
         r.macros.cxxflags += ' -fno-rtti -fno-exceptions -felide-constructors'
         r.macros.mysqldir = '%(servicedir)s/mysql'
 
-        r.CMake(
-            ' -DMANUFACTURER:STRING="Foresight Linux"'
-            ' -DWITH_ARCHIVE_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_BLACKHOLE_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_FEDERATED_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_INNOBASE_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_PARTITION_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_PERFSCHEMA_STORAGE_ENGINE:BOOL=ON'
-            ' -DWITH_PIC:BOOL=ON'
-            ' -DWITH_READLINE:BOOL=ON'
-            ' -DWITH_SSL:STRING=system'
-        )
+        r.Configure(
+            '--enable-assembler '
+            '--with-extra-charsets=all '
+            '--localstatedir=%(mysqldir)s '
+            '--libexecdir=%(sbindir)s '
+            '--with-mysqld-user="mysql" '
+            '--with-unix-socket-path=%(mysqldir)s/mysql.sock '
+
+            '--with-berkeley-db '
+            '--with-archive-storage-engine '
+            '--with-innodb '
+            '--with-federated-storage-engine '
+            '--with-query-cache '
+            '--with-big-tables '
+            '--without-embedded-server '
+
+            '--with-readline '
+            '--with-openssl '
+            '--enable-local-infile '
+            '--enable-shared '
+            '--enable-largefile '
+            '--enable-thread-safe-client '
+            '--with-gnu-ld '
+
+            '--without-debug '
+            '--with-bench '
+            )
+
         # mysql forces a lib/mysql path in mysql config and that is wrong on 64bit
         r.Replace('^fix_path pkglibdir \$pkglibdir_rel lib/mysql lib$', '', 'scripts/mysql_config.sh')
         r.Make()
@@ -45,7 +72,6 @@ class Mysql(CPackageRecipe):
         #r.TestSuite('.', 'make test')
 
         r.MakeInstall()
-        r.Move('%(prefix)s/scripts/mysql_install_db', '%(bindir)s/')
         r.Install('include/my_config.h', '%(includedir)s/mysql/')
 
         r.MakeDirs('%(localstatedir)s/run/mysqld',
@@ -85,6 +111,7 @@ class Mysql(CPackageRecipe):
                         "%(bindir)s/mysql_config")
 
         r.PackageSpec('mysql-server',
+                      '%(sysconfdir)s/my.cnf',
                       'support-files/*.cnf',
                       '%(bindir)s/safe_mysqld',
                       '%(mandir)s.*/safe_mysqld.*',
@@ -132,11 +159,12 @@ class Mysql(CPackageRecipe):
                       '%(sbindir)s/.*',
                       '%(initdir)s/mysqld',
                       '%(mysqldir)s',
+                      '%(sysconfdir)s/logrotate.d/mysqld',
                       '%(localstatedir)s/run/mysqld',
                       '%(localstatedir)s/log/mysqld.log',
                       )
         r.Requires('mysql:runtime', '%(sbindir)s/.*')
+        r.TagSpec('initscript', '%(initdir)s/')
 
         r.PackageSpec('mysql-bench',
                       '%(datadir)s/sql-bench/.*')
-
