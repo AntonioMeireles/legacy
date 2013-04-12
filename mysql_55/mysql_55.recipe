@@ -3,12 +3,14 @@ class Mysql(CPackageRecipe):
     version = '5.5.19'
     upstreamName = 'mysql'
 
-    buildRequires = [ 'gperf:runtime', 'perl:runtime',
+    buildRequires = [ 
+        'gperf:runtime', 'perl:runtime', 'cmake:runtime', 'readline:devel',
         'ncurses:devel', 'zlib:devel', 'libtool:runtime', 'time:runtime',
         'gcc:devel', 'gcc-c++:runtime', 'libstdc++:devel', 'openssl:devel',
         'bison:runtime', 'net-tools:runtime', 'util-linux:runtime', 'perl:lib',
         'procps:runtime', 'install-info:runtime', 'bash:runtime', 'libtermcap:devel',
-        'autoconf:runtime',  'automake:runtime', 'm4:runtime', 'cmake:runtime']
+        'autoconf:runtime',  'automake:runtime', 'm4:runtime'
+    ]
 
     def setup(r):
         # this is for downloading the "enterprise" version
@@ -18,7 +20,7 @@ class Mysql(CPackageRecipe):
         r.macros.name = r.upstreamName
         r.addArchive('http://downloads.mysql.com/archives/%(name)s-%(majorversion)s/')
         r.addSource('my.cnf', dest='%(sysconfdir)s/', mode=0644)
-        r.addSource('mysql.init', dest='%(initdir)s/mysql', mode=0755)
+        r.addSource('mysql.init', dest='%(initdir)s/mysql', mode=0755, macros=True)
         r.addSource('mysql.logrotate', dest='%(sysconfdir)s/logrotate.d/', mode=0644)
 
         r.macros.cflags += ' -O2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fwrapv'
@@ -36,6 +38,7 @@ class Mysql(CPackageRecipe):
             ' -DWITH_PIC:BOOL=ON'
             ' -DWITH_READLINE:BOOL=ON'
             ' -DWITH_SSL:STRING=system'
+            ' -DINSTALL_LIBDIR="%(libdir)s"'
         )
         # mysql forces a lib/mysql path in mysql config and that is wrong on 64bit
         r.Replace('^fix_path pkglibdir \$pkglibdir_rel lib/mysql lib$', '', 'scripts/mysql_config.sh')
@@ -47,6 +50,13 @@ class Mysql(CPackageRecipe):
         #r.TestSuite('.', 'make test')
 
         r.MakeInstall()
+        # Temporary fix until someone at Oracle fixes libmysqlservices.so, then
+        # the next three lines can be axed. 
+        r.Run('ls -l %(libdir)s/*')
+        r.Move('%(libdir)s/libmysqlservices.so', '%(libdir)s/libmysqlservices.so.18.0.0')
+        r.Symlink('%(libdir)s/libmysqlservices.so.18.0.0', '%(libdir)s/libmysqlservices.so.18')
+        r.Symlink('%(libdir)s/libmysqlservices.so.18.0.0', '%(libdir)s/libmysqlservices.so')
+
         r.Move('%(prefix)s/scripts/mysql_install_db', '%(bindir)s/')
         r.Install('include/my_config.h', '%(includedir)s/mysql/')
 
@@ -60,7 +70,6 @@ class Mysql(CPackageRecipe):
 
         r.Create('%(localstatedir)s/log/mysqld.log', mode=0640)
         r.Ownership('mysql', 'mysql', '%(localstatedir)s/log/mysqld.log')
-        r.ExcludeDirectories(exceptions='%(localstatedir)s/log/mysqld.log')
 
         r.Ownership('mysql', 'mysql', '%(mysqldir)s')
         r.ExcludeDirectories(exceptions='%(mysqldir)s')
@@ -77,6 +86,7 @@ class Mysql(CPackageRecipe):
 
         r.Doc('COPYING*', 'support-files/*.cnf')
 
+        r.Config(exceptions='%(initdir)s/.*')
         r.SharedLibrary(subtrees='%(libdir)s/mysql/')
 
         r.ComponentSpec("test",
