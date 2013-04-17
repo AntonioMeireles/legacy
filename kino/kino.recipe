@@ -9,31 +9,46 @@ class kino(AutoPackageRecipe):
     version = '1.3.4'
 
     buildRequires = ['a52dec:devel','alsa-lib:devel', 'atk:devel', 'cairo:devel',
-                'expat:devel', 'desktop-file-utils:runtime', 'fontconfig:devel',
-                'faac:devel', 'faad2:devel', 'freetype:devel', # 'ffmpeg:devel',
-                'glib:devel', 'gettext:runtime', 'Mesa:devel', 'Mesa:devellib',
-                'gtk:devel', 'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXext:devel', 
-                'libogg:devel', 'libquicktime:devel', 'libtheora:devel', 'libvorbis:devel',
-                'libXrender:devel', 'libXv:devel', 'libavc1394:devel', 'libdv:devel',
-                'libglade:devel', 'libiec61883:devel', 'libpng:devellib', 'libraw1394:devel',
-                'libsamplerate:devel', 'libstdc++:devel', 'libxml2:devel', 'pango:devel', 
-                'perl:devel', 'perl:lib', 'pkgconfig:devel', 'shared-mime-info:runtime', 
-                'x264:devel', 'xvidcore:devel', 'zlib:devel', 'intltool:runtime']
+                     'expat:devel', 'desktop-file-utils:runtime', 'fontconfig:devel',
+                     'faac:devel', 'faad2:devel', 'freetype:devel', 'ffmpeg:devel',
+                     'glib:devel', 'gettext:runtime', 'Mesa:devel', 'Mesa:devellib',
+                     'gtk:devel', 'libICE:devel', 'libSM:devel', 'libX11:devel', 'libXext:devel', 
+                     'libogg:devel', 'libquicktime:devel', 'libtheora:devel', 'libvorbis:devel',
+                     'libXrender:devel', 'libXv:devel', 'libavc1394:devel', 'libdv:devel',
+                     'libglade:devel', 'libiec61883:devel', 'libpng:devellib', 'libraw1394:devel',
+                     'libsamplerate:devel', 'libstdc++:devel', 'libxml2:devel', 'pango:devel', 
+                     'perl:devel', 'perl:lib', 'pkgconfig:devel', 'shared-mime-info:runtime', 
+                     'x264:devel', 'xvidcore:devel', 'zlib:devel', 'intltool:runtime',
+                     'automake:runtime', 'autoconf:runtime', 'libtool:runtime', 'libtool:devel', ]
 
     def unpack(r):
         r.addArchive('mirror://sourceforge/%(name)s/%(name)s-%(version)s.tar.gz')
-        # build fix. taken from gentoo
-        r.addPatch('kino-1.3.4-v4l1.patch')
+        # taken from http://svnweb.mageia.org/packages/cauldron/kino/current/
+        for patch in [ 'kino-1.3.4-fix-desktop-file.patch',
+                       'kino-1.3.2-fix-str-fmt.patch',
+                       'kino-1.3.4-use-soundwrapper.patch',
+                       'kino-1.3.4-videodev.h.patch',
+                       'kino-1.3.4-ffmpeg0.8.patch',
+                       'kino-1.3.4-libav-0.8.patch',
+                       'kino-1.3.4-automake-1.13.patch',
+                       'kino-1.3.4-link.patch',                       
+                       ]:
+            r.addPatch(patch)
+        r.Run('autoreconf -fi')
 
     def configure(r):
+        r.Replace('vcodec h264', 'vcodec libx264', 'scripts/exports/*', allowNoChange = True)
+        r.Replace('acodec mp3', 'acodec libmp3lame', 'scripts/exports/ffmpeg_mp3.sh', allowNoChange = True)
 
-        r.Replace('quicktime.h','lqt/quicktime.h','src/filehandler.h',lines=182)
-        # use local ffmpeg until we get it to work with our own...
-        # r.Configure(' --disable-local-ffmpeg --enable-quicktime --mandir=/usr/share/man')
-        r.Configure(' --enable-quicktime --mandir=%(mandir)s')
+        r.macros.cppflags += ' -I%(includedir)s/libavcodec -I%(includedir)s/libavdevice -I%(includedir)s/libavformat -I%(includedir)s/libavcodec -I%(includedir)s/libpostproc -I%(includedir)s/libswscale'
+
+        r.Configure(' --with-quicktime --disable-local-ffmpeg --mandir=%(mandir)s')
         r.macros.ldflags += ' -L%(libdir)s/xorg.mesa.3d/ '
 
     def policy(r):
+        r.Remove('%(sysconfdir)s/hotplug/', recursive = True)
+        r.Remove('%(libdir)s/hotplug')
+
         r.Remove('%(bindir)s/kino2raw')
         r.Symlink('%(bindir)s/kino', '%(bindir)s/kino2raw')
         r.Requires('ffmpeg:runtime','%(bindir)s/kino')
