@@ -36,13 +36,19 @@ class ConaryProxy(PackageRecipe):
         r.Requires('mod_ssl:runtime', '%(proxydir)s/')
         # r.Requires('mod_wsgi:lib', '%(proxydir)s/')
 
+        # * memcached can speed up repository access, but will not
+        #   be run by default (running it is left to the user)
         # 
-        # (re)start memcached
-        # (re)start httpd
+        # * gracefully restart httpd if it is already running
+        #   (if httpd is not running, the proxyMap falls back to DIRECT)
+        #   - The rationale is that we can't just restart httpd
+        #     unconditionally if, say, the user relies on httpd
+        #     not being started (for whatever reason).
         #
-        # order matters
+        # NOTE: If using memcached, it should be started prior
+        #       to restarting httpd gracefully (order matters)
+        #
         postScript = ('#!/bin/bash\n'
-                      '/sbin/service memcached restart\n'
-                      '/sbin/service httpd restart\n')
+                      '/sbin/service httpd condgraceful\n')
         r.ScriptPostInstall(contents=postScript)
         r.ScriptPostUpdate(contents=postScript)
