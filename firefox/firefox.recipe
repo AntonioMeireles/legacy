@@ -7,7 +7,7 @@
 loadSuperClass('rpmpackage')
 class FireFox(RPMPackageRecipe, AutoPackageRecipe):
     name = 'firefox'
-    version = '20.0'
+    version = '21.0'
     rpmRelease = '1.fc18'
     buildRequires = ['atk:devel', 'autoconf:runtime',
                      # 'xulrunner:devel',
@@ -32,16 +32,18 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
                      'autoconf213:runtime',
                      # for hostname
                      'net-tools:runtime',
-
+                     # XXX this needs py27, just for the build.
+                     # XXX right now we hack this thru the context
+                     # 'python-ply:python',
                      ]
 
     tarballName = 'firefox-%(version)s.source.tar.bz2'
-    rpmArchives = ['firefox-langpacks-%(version)s-20130401.tar.xz']
+    rpmArchives = ['firefox-langpacks-%(version)s-20130514.tar.xz']
     rpmSources = [ 'firefox.sh.in', 'firefox-redhat-default-prefs.js', 'firefox.1']
     rpmPatches = [ 'firefox-5.0-asciidel.patch',
                    'firefox-15.0-enable-addons.patch',
-                   'mozilla-239254.patch',
-                   ]
+                   'firefox-packager-build.patch',
+    ]
 
     def setup(r):
         # XXX FIXME check if we still _really_ need of this tag-handler machinery
@@ -52,7 +54,7 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
 
         # upstream fix for busted UI rendering in HiDPI envs in 20.x
         # https://bugzilla.mozilla.org/show_bug.cgi?id=840881
-        r.addPatch('https://bug840881.bugzilla.mozilla.org/attachment.cgi?id=734380&action=diff&collapsed=&context=patch&format=raw&headers=1')
+#        r.addPatch('https://bug840881.bugzilla.mozilla.org/attachment.cgi?id=734380&action=diff&collapsed=&context=patch&format=raw&headers=1')
 
         # r.macros.version = '4.0'
         # macros bellow called by taghandler
@@ -76,6 +78,10 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         r.addSource('fl.mozconfig', macros=True)
         r.Copy('fl.mozconfig', '.mozconfig')
 
+        # XXX should not be needed but it is so that inside rMake
+        # shell is detected by the new py27 based build machinery
+        r.Environment('SHELL', '%(bindir)s/bash')
+
         r.Environment('mozdir','%(libdir)s/%(name)s-%(version)s')
         r.macros.mozdir = '%(libdir)s/%(name)s-%(version)s'
 
@@ -88,14 +94,14 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
 
         # set up our default preferences
         # place the preferences
-        r.Copy('%(name)s-redhat-default-prefs.js', 'dist/bin/defaults/pref/all-foresight.js')
+        r.Copy('%(name)s-redhat-default-prefs.js', 'dist/bin/browser/defaults/preferences/all-foresight.js')
 
-        r.Replace('@BINPATH@/@PREF_DIR@/firefox.js',
-                  '@BINPATH@/@PREF_DIR@/all-foresight.js\n'
-                  '@BINPATH@/@PREF_DIR@/firefox.js',
+        r.Replace('@BINPATH@/browser/@PREF_DIR@/firefox.js',
+                  '@BINPATH@/browser/@PREF_DIR@/all-foresight.js\n'
+                  '@BINPATH@/browser/@PREF_DIR@/firefox.js',
                   'browser/installer/package-manifest.in')
         
-        r.Create('dist/bin/defaults/pref/firefox-l10n.js', 
+        r.Create('dist/bin/browser/defaults/preferences/firefox-l10n.js', 
                  contents = (""" pref("general.useragent.locale", "chrome://global/locale/intl.properties");\n"""
                              """ // Use LANG environment variable to choose locale\n"""
                              """ pref("intl.locale.matchOS", true);\n """
@@ -105,7 +111,7 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
                              """ pref("extensions.autoDisableScopes", 11);\n """
                              """ pref("extensions.shownSelectionUI", true);\n"""))
 
-        r.Create('dist/bin/chrome/en-US/locale/branding/browserconfig.properties',
+        r.Create('dist/bin/browser/chrome/en-US/locale/branding/browserconfig.properties',
                  contents = 'browser.startup.homepage=http://www.foresightlinux.org')
 
         r.MakeInstall()
@@ -140,7 +146,7 @@ for langpack in `ls firefox-langpacks/*.xpi`; do
   unzip $langpack -d $extensionID
   find $extensionID -type f | xargs chmod 644
   sed -i -e "s|browser.startup.homepage.*$|browser.startup.homepage=http://www.foresightlinux.org|g;" \
-     $extensionID/chrome/$language/locale/branding/browserconfig.properties
+     $extensionID/browser/chrome/$language/locale/branding//browserconfig.properties
 
   cd $extensionID
   zip -r9mX ../${extensionID}.xpi *
@@ -158,6 +164,9 @@ done
             r.Run("""mkdir -p ./%s"""  % dd , dir = '%(destdir)s' )
             r.ExcludeDirectories(exceptions = dd)
 
+
+        r.MakeDirs('%(mozdir)s/browser/defaults/preferences')
+        r.ExcludeDirectories(exceptions = '%(mozdir)s/browser/defaults/preferences')
 
         # r.Create('%(mozdir)s/components/compreg.dat')
         r.Create('%(mozdir)s/components/xpti.dat')
