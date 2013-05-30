@@ -8,9 +8,12 @@ class cgit(CPackageRecipe):
         'util-linux:runtime',
         'which:runtime',
         'zlib:devel',
+        'perl:devel',
     ]
     
     def setup(r):
+        # install-man does not thread too well...
+        r.disableParallelMake()
         r.addGitSnapshot('http://git.zx2c4.com/cgit',
                          tag='%(version)s')
         # "manual git submodule" implementation for addGitSnapshot
@@ -21,6 +24,12 @@ class cgit(CPackageRecipe):
         r.addGitSnapshot('git://git.kernel.org/pub/scm/git/git.git',
                          tag='%(gittag)s', dir='%(maindir)s/tempgit')
         r.addAction('rmdir git; mv tempgit/cgit* ./git; rmdir tempgit')
+
+        # so that our uptodate highlight behaves. taken from rh
+        r.addPatch('cgit-0.9.1-highlightv3.patch')
+        # handpicked from upstream while 0.9.3 isn't out
+        # http://git.zx2c4.com/cgit/commit/?id=7fb12a8ee0789e3eab2680ae6c3fde0f0f233d22
+        r.addPatch('http://git.zx2c4.com/cgit/patch/?id=7fb12a8ee0789e3eab2680ae6c3fde0f0f233d22')
 
         r.Create('cgit.conf',
                  contents='CGIT_SCRIPT_PATH = /srv/www/htdocs/cgit')
@@ -41,7 +50,13 @@ class cgit(CPackageRecipe):
 
         r.Make()
         r.MakeInstall()
-        # I give up for now making asciidoc work.  Fix it if you want to.
-        #r.MakeInstall('install-man')
+
+        r.MakeInstall('install-man')
 
         r.AutoDoc(exceptions='git/.*')
+
+        r.Requires('src-highlight:runtime', 'cgit:runtime')
+
+        # this expects py3 and wasn't in 0.9.1, and naturally policy rants
+        # we are supposed to survive without it for now
+        r.Remove('/usr/lib/cgit/filters/syntax-highlighting.py')
