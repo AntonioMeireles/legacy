@@ -1,0 +1,81 @@
+# HG changeset patch
+# User Michael Tharp <michael.tharp@sas.com>
+# Date 1370355633 0
+# Node ID fecc5bc04e172375bff54f6dad6716ab85c41961
+# Parent  e4f9703f67deb3e2db3cc5d1a93f870941b5320f
+chroothelper: move busybox somewhere that won't interfere with usrmerge distros
+
+diff -r e4f9703f67deb3e2db3cc5d1a93f870941b5320f -r fecc5bc04e172375bff54f6dad6716ab85c41961 NEWS.src/misc-usrmerge.bugfix
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/NEWS.src/misc-usrmerge.bugfix	Tue Jun 04 14:20:33 2013 +0000
+@@ -0,0 +1,1 @@
++Improved compatibility with "usrmerge" Linux distributions
+diff -r e4f9703f67deb3e2db3cc5d1a93f870941b5320f -r fecc5bc04e172375bff54f6dad6716ab85c41961 commands/chroothelper.c
+--- a/commands/chroothelper.c	Wed May 29 19:15:08 2013 +0000
++++ b/commands/chroothelper.c	Tue Jun 04 14:20:33 2013 +0000
+@@ -368,8 +368,7 @@
+             }
+             pid = fork();
+             if (pid == 0) {
+-                execl("/sbin/busybox", "/sbin/busybox", "rm", "-rf", 
+-                      childPath, NULL);
++                execl(BUSYBOX, "busybox", "rm", "-rf", childPath, NULL);
+                 /* this will not return unless error */
+                 perror("execl");
+                 _exit(1);
+@@ -395,7 +394,11 @@
+         printf("deleting other files owned by  uid=%d\n", myUid);
+     pid = fork();
+     if (pid == 0) {
+-        execl("/sbin/busybox", "/sbin/busybox",  "sh", "-c", "/sbin/busybox find / | /sbin/busybox sh -c 'while read file; do if `/sbin/busybox test -O $file`; then /sbin/busybox rm -rf $file; fi; done'", NULL);
++        execl(BUSYBOX, "busybox",  "sh", "-c",
++                BUSYBOX " find / | "
++                BUSYBOX " sh -c 'while read file; do "
++                    "if `" BUSYBOX " test -O $file`; "
++                    "then " BUSYBOX " rm -rf $file; fi; done'", NULL);
+         /* this will not return unless error */
+         perror("execl");
+         _exit(1);
+diff -r e4f9703f67deb3e2db3cc5d1a93f870941b5320f -r fecc5bc04e172375bff54f6dad6716ab85c41961 commands/chroothelper.h.in
+--- a/commands/chroothelper.h.in	Wed May 29 19:15:08 2013 +0000
++++ b/commands/chroothelper.h.in	Tue Jun 04 14:20:33 2013 +0000
+@@ -23,6 +23,7 @@
+ #define CHROOT_SERVER_PATH RMAKE_PATH "@chrootserver@"
+ #define CHROOT_CAP_DEFINITION RMAKE_PATH "/file-capabilities"
+ #define CONARY_EXEC_PATH "/usr/bin/conary"
++#define BUSYBOX "/rbin/busybox"
+ 
+ struct devinfo_t {
+         char* path;
+diff -r e4f9703f67deb3e2db3cc5d1a93f870941b5320f -r fecc5bc04e172375bff54f6dad6716ab85c41961 rmake/worker/chroot/rootfactory.py
+--- a/rmake/worker/chroot/rootfactory.py	Wed May 29 19:15:08 2013 +0000
++++ b/rmake/worker/chroot/rootfactory.py	Tue Jun 04 14:20:33 2013 +0000
+@@ -331,6 +331,8 @@
+ 
+ class rMakeChroot(ConaryBasedChroot):
+ 
++    busyboxDir = '/rbin'
++
+     def __init__(self,
+             buildTrove,
+             chrootHelperPath,
+@@ -498,7 +500,7 @@
+         if self.canChroot():
+             if self._lock(root, fcntl.LOCK_EX):
+                 self.logger.info('Running chroot helper to unmount...')
+-                util.mkdirChain(root + '/sbin')
++                util.mkdirChain(root + self.busyboxDir)
+                 rc = os.system('%s --unmount %s' % (self.chrootHelperPath, root))
+                 if rc:
+                     if raiseError:
+@@ -518,8 +520,8 @@
+                         "by another process")
+                 return False
+             self.logger.info('Running chroot helper to clean/unmount...')
+-            util.mkdirChain(root + '/sbin')
+-            shutil.copy('/sbin/busybox', root + '/sbin/busybox')
++            util.mkdirChain(root + self.busyboxDir)
++            shutil.copy('/sbin/busybox', root + self.busyboxDir + '/busybox')
+             rc = os.system('%s %s --clean' % (self.chrootHelperPath, root))
+             if rc:
+                 if raiseError:
