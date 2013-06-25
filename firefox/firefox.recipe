@@ -7,8 +7,8 @@
 loadSuperClass('rpmpackage')
 class FireFox(RPMPackageRecipe, AutoPackageRecipe):
     name = 'firefox'
-    version = '21.0'
-    rpmRelease = '3.fc18'
+    version = '22.0'
+    rpmRelease = '1.fc18'
     buildRequires = ['atk:devel', 'autoconf:runtime',
                      # 'xulrunner:devel',
                      # 'xulrunner20:devel',
@@ -38,11 +38,10 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
                      ]
 
     tarballName = 'firefox-%(version)s.source.tar.bz2'
-    rpmArchives = ['firefox-langpacks-%(version)s-20130514.tar.xz']
+    rpmArchives = ['firefox-langpacks-%(version)s-20130621.tar.xz']
     rpmSources = [ 'firefox.sh.in', 'firefox-redhat-default-prefs.js', 'firefox.1']
     rpmPatches = [ 'firefox-5.0-asciidel.patch',
                    'firefox-15.0-enable-addons.patch',
-                   'firefox-packager-build.patch',
     ]
 
     def setup(r):
@@ -51,10 +50,6 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         RPMPackageRecipe.unpack(r)
         # https://bugzilla.mozilla.org/show_bug.cgi?id=722975
         r.addPatch('https://bug722975.bugzilla.mozilla.org/attachment.cgi?id=595000')
-
-        # upstream fix for busted UI rendering in HiDPI envs in 20.x
-        # https://bugzilla.mozilla.org/show_bug.cgi?id=840881
-#        r.addPatch('https://bug840881.bugzilla.mozilla.org/attachment.cgi?id=734380&action=diff&collapsed=&context=patch&format=raw&headers=1')
 
         # r.macros.version = '4.0'
         # macros bellow called by taghandler
@@ -79,13 +74,20 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         r.Copy('fl.mozconfig', '.mozconfig')
 
         # XXX should not be needed but it is so that inside rMake
-        # shell is detected by the new py27 based build machinery
+        # shell, and term are detected by the new py27 based build machinery
         r.Environment('SHELL', '%(bindir)s/bash')
+        r.Environment('TERM', 'xterm')
 
         r.Environment('mozdir','%(libdir)s/%(name)s-%(version)s')
         r.macros.mozdir = '%(libdir)s/%(name)s-%(version)s'
 
         r.macros.ldflags += ' -Wl,-rpath,%(mozdir)s '
+
+        # HACK ALERT. THIS SHOULD HAD NOT BE NEEDED
+        # https://bugzilla.mozilla.org/show_bug.cgi?id=850088 supposed to have been fixed
+        r.Replace('sys\.exit\(1\)', 'sys.exit(0)', 'js/src/config/check-sync-dirs.py')
+        # even so above only usefull with bellow :/
+        r.disableParallelMake()
 
         # https://bugzilla.mozilla.org/show_bug.cgi?id=824381
         r.MakeDirs('js/src/.deps')
