@@ -27,7 +27,7 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
                      'libgnomecanvas:devel', 'libgnomeui:devel', 'libxml2:devel', 'unzip:runtime',
                      'startup-notification:devel', 'libXinerama:devel', 'dbus-glib:devel',
                      'dbus:devel', 'libnotify:devel', 'xz:runtime', 'libvpx:devel',
-                     'python:devel', 'pixman:devel', 'libffi:devel',
+                     'python:devel', 'pixman:devel', 'libffi:devel', 'pulseaudio:devel',
                      # for JIT enabling patch
                      'autoconf213:runtime',
                      # for hostname
@@ -50,6 +50,8 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         RPMPackageRecipe.unpack(r)
         # https://bugzilla.mozilla.org/show_bug.cgi?id=722975
         r.addPatch('https://bug722975.bugzilla.mozilla.org/attachment.cgi?id=595000')
+        # from upstream
+        r.addPatch('firefox-22.0-do-not-fallback-to-manual-proxy-settings.patch')
 
         # r.macros.version = '4.0'
         # macros bellow called by taghandler
@@ -70,29 +72,27 @@ class FireFox(RPMPackageRecipe, AutoPackageRecipe):
         #  libasound.so.2: cannot open shared object file: No such file or directory
         r.Requires('alsa-lib:lib', '%(taghandlerdir)s/.*')
 
-        r.addSource('fl.mozconfig', macros=True)
-        r.Copy('fl.mozconfig', '.mozconfig')
+        r.addSource('fl.mozconfig', dest='.mozconfig', macros=True)
 
         # XXX should not be needed but it is so that inside rMake
         # shell, and term are detected by the new py27 based build machinery
-        r.Environment('SHELL', '%(bindir)s/bash')
-        r.Environment('TERM', 'xterm')
-
+        r.Environment('SHELL', '%(essentialbindir)s/bash')
+        r.Environment('TERM', 'vt100')
+        #
         r.Environment('mozdir','%(libdir)s/%(name)s-%(version)s')
         r.macros.mozdir = '%(libdir)s/%(name)s-%(version)s'
 
         r.macros.ldflags += ' -Wl,-rpath,%(mozdir)s '
+        r.Environment('MOZ_MAKE_FLAGS', '%(parallelmflags)s')
 
         # HACK ALERT. THIS SHOULD HAD NOT BE NEEDED
         # https://bugzilla.mozilla.org/show_bug.cgi?id=850088 supposed to have been fixed
         r.Replace('sys\.exit\(1\)', 'sys.exit(0)', 'js/src/config/check-sync-dirs.py')
-        # even so above only usefull with bellow :/
-        r.disableParallelMake()
 
         # https://bugzilla.mozilla.org/show_bug.cgi?id=824381
         r.MakeDirs('js/src/.deps')
-
-        r.Make('-f client.mk build  MOZ_MAKE_FLAGS="%(parallelmflags)s" MOZ_SERVICES_SYNC="1" STRIP="/bin/true" ')
+        #
+        r.Make('-f client.mk build  MOZ_SERVICES_SYNC="1" STRIP="/bin/true" ')
 
         # set up our default preferences
         # place the preferences
