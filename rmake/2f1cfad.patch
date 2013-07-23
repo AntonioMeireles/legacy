@@ -1,0 +1,327 @@
+# HG changeset patch
+# User Michael Tharp <mtharp@rpath.com>
+# Date 1351108522 14400
+# Node ID 2f1cfadbc4796de8a69e2176aed2148fb2e9b00e
+# Parent  ca51679bfbef7268d32a19c0e7dc573350f67fab
+Initial implementation of a resolver cache
+
+This saves buildrequire resolve jobs in a filesystem-based cache so that
+identical initial conditions can be started immediately.
+
+Still missing: jobs that hit the cache don't log the list of troves
+being installed at the end
+
+diff --git a/rmake/build/builder.py b/rmake/build/builder.py
+--- a/rmake/build/builder.py
++++ b/rmake/build/builder.py
+@@ -233,9 +233,13 @@
+         logDir = self.serverCfg.getBuildLogDir(self.job.jobId)
+         util.mkdirChain(logDir)
+         specialTroves = [ x for x in buildTroves if x.isSpecial() ]
++        resolverCachePath = (self.serverCfg.useResolverCache
++                and self.serverCfg.getResolverCachePath())
+         self.dh = dephandler.DependencyHandler(self.job.getPublisher(),
+                 self.logger, regularTroves, specialTroves, logDir,
+-                dumbMode=self.buildCfg.isolateTroves)
++                dumbMode=self.buildCfg.isolateTroves,
++                resolverCachePath=resolverCachePath,
++                )
+         if not self._checkBuildSanity(buildTroves):
+             return False
+         return True
+diff --git a/rmake/build/dephandler.py b/rmake/build/dephandler.py
+--- a/rmake/build/dephandler.py
++++ b/rmake/build/dephandler.py
+@@ -20,12 +20,17 @@
+ Dependency Handler and DependencyState classes
+ """
+ 
++import errno
+ import itertools
++import os
+ import sys
+ import traceback
++import xmlrpclib
+ 
+ from conary.deps import deps
++from conary.lib import digestlib
+ from conary.lib import graph
++from conary.lib import util
+ from conary import display
+ from conary import trove
+ from conary import versions
+@@ -70,6 +75,20 @@
+         # only important when cross compiling for your current arch.
+         return self.crossTroves
+ 
++    def getJobHash(self):
++        # Disqualify anything other than a simple, isolated build.
++        if self.inCycle or self.builtTroves or self.crossTroves:
++            return None
++        # Hash all the inputs to the resolver so that the result can be cached.
++        inputs = [
++                '\0'.join(sorted(self.trove.getBuildRequirements())),
++                '\0'.join(sorted(self.trove.getCrossRequirements())),
++                '\0'.join(str(x) for x in self.buildCfg.flavor),
++                '\1'.join('\0'.join(sorted(str(y) for y in x))
++                    for x in self.buildCfg.resolveTroveTups),
++                ]
++        return digestlib.sha1('\2'.join(inputs)).hexdigest()
++
+     def __freeze__(self):
+         d = dict(trove=freeze('BuildTrove', self.trove),
+                  buildCfg=freeze('BuildConfiguration', self.buildCfg),
+@@ -427,7 +446,7 @@
+         Updates what troves are buildable based on dependency information.
+     """
+     def __init__(self, statusLog, logger, buildTroves, specialTroves,
+-            logDir=None, dumbMode=False):
++            logDir=None, dumbMode=False, resolverCachePath=None):
+         self.depState = DependencyBasedBuildState(buildTroves, specialTroves,
+                                                   logger)
+         self.logger = logger
+@@ -445,6 +464,10 @@
+         self._possibleDuplicates = {}
+         self._prebuiltBinaries = set()
+         self._hasPrimaryTroves = self.depState.hasPrimaryTroves
++        if resolverCachePath:
++            self._resolverCache = ResolverCache(resolverCachePath)
++        else:
++            self._resolverCache = None
+ 
+         statusLog.subscribe(statusLog.TROVE_BUILT, self.troveBuilt)
+         statusLog.subscribe(statusLog.TROVE_PREPARED, self.trovePrepared)
+@@ -694,8 +717,16 @@
+             builtTroves = self.depState.getAllBinaries()
+             crossTroves = []
+ 
+-        return ResolveJob(buildTrove, buildTrove.cfg, builtTroves, crossTroves,
++        job = ResolveJob(buildTrove, buildTrove.cfg, builtTroves, crossTroves,
+                           inCycle=inCycle)
++        if self._resolverCache:
++            hash = job.getJobHash()
++            result = self._resolverCache.get(hash)
++            if result:
++                self.logger.info("Using cached resolver result %s", hash)
++                self.resolutionComplete(buildTrove, result)
++                return None
++        return job
+ 
+     def prioritize(self, trv):
+         self.priorities.append(trv)
+@@ -906,6 +937,8 @@
+         if trv in self.priorities:
+             self.priorities.remove(trv)
+         if results.success:
++            if self._resolverCache:
++                self._resolverCache.put(results)
+             buildReqs = results.getBuildReqs()
+             crossReqs = results.getCrossReqs()
+             bootstrapReqs = results.getBootstrapReqs()
+@@ -1088,3 +1121,30 @@
+             results = resolver.resolve(resolveJob)
+             resolveJob.getTrove().troveResolved(results)
+             count += 1
++
++
++class ResolverCache(object):
++
++    def __init__(self, path):
++        self.path = path
++
++    def get(self, hash):
++        path = os.path.join(self.path, hash)
++        try:
++            fobj = open(path)
++        except IOError, err:
++            if err.args[0] == errno.ENOENT:
++                return None
++            raise
++        result = xmlrpclib.loads(fobj.read())[0][0]
++        fobj.close()
++        return thaw('ResolveResult', result)
++
++    def put(self, result):
++        if not result.jobHash:
++            return
++        path = os.path.join(self.path, result.jobHash)
++        result = freeze('ResolveResult', result)
++        fobj = util.AtomicFile(path, chmod=0644)
++        fobj.write(xmlrpclib.dumps((result,)))
++        fobj.commit()
+diff --git a/rmake/server/daemon.py b/rmake/server/daemon.py
+--- a/rmake/server/daemon.py
++++ b/rmake/server/daemon.py
+@@ -45,7 +45,8 @@
+ 
+     def runCommand(self, daemon, cfg, argSet, args):
+         for dir in (cfg.getReposDir(), cfg.getBuildLogDir(),
+-                    cfg.getDbContentsPath(), cfg.getProxyDir()):
++                    cfg.getDbContentsPath(), cfg.getProxyDir(),
++                    cfg.getResolverCachePath()):
+             if os.path.exists(dir):
+                 print "Deleting %s" % dir
+                 shutil.rmtree(dir)
+diff --git a/rmake/server/servercfg.py b/rmake/server/servercfg.py
+--- a/rmake/server/servercfg.py
++++ b/rmake/server/servercfg.py
+@@ -181,6 +181,7 @@
+     sslCertPath       = (CfgPath, '/srv/rmake/certs/rmake-server-cert.pem')
+     caCertPath        = CfgPath
+     reposUser         = CfgUserInfo
++    useResolverCache  = (CfgBool, True)
+ 
+     dbPath            = dbstore.CfgDriver
+ 
+@@ -275,6 +276,9 @@
+     def getSubscriberLogPath(self):
+         return self.logDir + '/subscriber.log'
+ 
++    def getResolverCachePath(self):
++        return self.serverDir + '/resolvercache'
++
+     def getRepositoryMap(self):
+         url = self.translateUrl(self.reposUrl)
+         return { self.reposName : url }
+@@ -364,6 +368,9 @@
+                 log.error('user "%s" cannot write to %s at %s - cannot start server' % (currUser, path, self[path]))
+                 sys.exit(1)
+ 
++        if self.useResolverCache:
++            util.mkdirChain(self.getResolverCachePath())
++
+     def reposRequiresSsl(self):
+         return urllib.splittype(self.reposUrl)[0] == 'https'
+ 
+diff --git a/rmake/worker/resolver.py b/rmake/worker/resolver.py
+--- a/rmake/worker/resolver.py
++++ b/rmake/worker/resolver.py
+@@ -21,13 +21,12 @@
+ import time
+ 
+ from conary import conaryclient
+-from conary.conaryclient import resolve
+ from conary.deps import deps
+ from conary.lib import log
+ from conary.local import database
+ from conary.repository import trovesource
+ 
+-from rmake.lib import apiutils, flavorutil, recipeutil
++from rmake.lib import flavorutil, recipeutil
+ from rmake.lib.apiutils import register, freeze, thaw
+ from rmake.worker import resolvesource
+ 
+@@ -40,6 +39,7 @@
+         self.missingBuildReqs = []
+         self.missingDeps = []
+         self.inCycle = inCycle
++        self.jobHash = None
+ 
+     def getBuildReqs(self):
+         assert(self.success)
+@@ -127,7 +127,10 @@
+         else:
+             builtTroveTups = resolveJob.getBuiltTroves()
+ 
+-        builtTroves = self.repos.getTroves(builtTroveTups, withFiles=False)
++        if cfg.isolateTroves:
++            builtTroves = []
++        else:
++            builtTroves = self.repos.getTroves(builtTroveTups, withFiles=False)
+         builtTroveSource = resolvesource.BuiltTroveSource(builtTroves,
+                                                           self.repos)
+         if builtTroves:
+@@ -227,7 +230,7 @@
+         self.logger.debug('   finding buildreqs for %s....' % trv.getName())
+         self.logger.debug('   resolving deps for %s...' % trv.getName())
+         start = time.time()
+-        buildReqJobs = crossReqJobs = bootstrapJobs = []
++        buildReqJobs = crossReqJobs = bootstrapJobs = set()
+         if buildReqs:
+             success, results = self._resolve(cfg, resolveResult, trv,
+                                              searchSource, resolveSource,
+@@ -266,6 +269,14 @@
+                 searchSource.close()
+                 resolveSource.close()
+                 return resolveResult
++
++        if (searchSource.mainSource
++                and False not in searchSource.mainSource.hasTroves(
++                    [(x[0], x[2][0], x[2][1]) for x in
++                        bootstrapJobs | buildReqJobs | crossReqJobs])):
++            # All troves came from resolveTroves therefore the result is
++            # cacheable.
++            resolveResult.jobHash = resolveJob.getJobHash()
+         client.close()
+         searchSource.close()
+         resolveSource.close()
+@@ -284,6 +295,9 @@
+             self.logger.info('\n    '.join(['%s=%s[%s]' % (x[0],
+                                                           x[2][0], x[2][1])
+                                for x in sorted(buildReqJobs)]))
++        if resolveResult.jobHash:
++            self.logger.info("Resolve result can be cached, hash key is %s",
++                    resolveResult.jobHash)
+         resolveResult.troveResolved(buildReqJobs, crossReqJobs, bootstrapJobs)
+         return resolveResult
+ 
+@@ -293,8 +307,6 @@
+         resolveSource.setLabelPath(installLabelPath)
+         client = conaryclient.ConaryClient(cfg)
+ 
+-        finalToInstall = {}
+-
+         # we allow build requirements to be matched against anywhere on the
+         # install label.  Create a list of all of this trove's labels,
+         # from latest on branch to earliest to use as search labels.
+diff --git a/rmake/worker/resolvesource.py b/rmake/worker/resolvesource.py
+--- a/rmake/worker/resolvesource.py
++++ b/rmake/worker/resolvesource.py
+@@ -16,13 +16,12 @@
+ #
+ 
+ 
+-import copy
+ import itertools
+ from conary.deps import deps
+ from conary.local import deptable
+ 
+ from conary.conaryclient import resolve
+-from conary.repository import findtrove,trovesource
++from conary.repository import trovesource
+ 
+ from rmake.lib import flavorutil
+ 
+@@ -183,7 +182,6 @@
+         else:
+             map = {}
+             newQuery = list(query)
+-            labelDict = {}
+             names = [(x[0], x[1][0], x[1][2]) for x in enumerate(query)]
+             for idx, name, flavor in names:
+                 labels = set(x[1].trailingLabel() for x in
+@@ -286,7 +284,7 @@
+                 results.setdefault(troveSpec, []).extend(troveTups)
+         if not allowMissing:
+             for troveSpec in troveSpecs:
+-                assert(troveSpec in finalResults)
++                assert(troveSpec in results)
+         return results
+ 
+     def resolveDependencies(self, label, depList, *args, **kw):
+@@ -330,7 +328,6 @@
+             self.resolveTroveSource = troveListList
+         else:
+             if troveListList:
+-                troveSources = []
+                 for troveList in troveListList:
+                     allTroves = [ x.getNameVersionFlavor() for x in troveList ]
+                     childTroves = itertools.chain(*
+@@ -425,7 +422,6 @@
+             if depSet not in suggMap2:
+                 suggMap2[depSet] = [[] for x in depSet.iterDeps() ]
+         for depSet, results in suggMap.iteritems():
+-            finalResults = []
+             mainResults = suggMap2[depSet]
+             for troveList1, troveList2 in itertools.izip(results, mainResults):
+                 troveList2.extend(troveList1)

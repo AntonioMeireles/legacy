@@ -7,8 +7,8 @@
 
 class RmakeRecipe(CPackageRecipe):
     name = 'rmake'
-    version = '2.0.10'
-    tag = '5b540d553099'
+    version = '2.0.11'
+    tag = 'fecc5bc' 
 
     if tag:
         version += '+' + tag
@@ -21,30 +21,17 @@ class RmakeRecipe(CPackageRecipe):
                       'desktop-file-utils:runtime', 'python:devel', 
                       ]
     def setup(r):
-        if r.tag:
-            r.addMercurialSnapshot('http://hg.rpath.com/rmake-2.0/',
-                                   tag=r.tag)
-        else:
-            r.addArchive('ftp://download.rpath.com/rmake/')
+        r.addMercurialSnapshot('https://bitbucket.org/rpathsync/rmake-2',
+                               tag=r.tag)
 
-        # # handpicked from upstream
-        # scmUrl = 'https://bitbucket.org/rpathsync/rmake-2/commits'
-        # https://bitbucket.org/rpathsync/rmake-2/commits/fecc5bc04e172375bff54f6dad6716ab85c41961/raw/
-        # #  chroothelper: move busybox somewhere that won't interfere with usrmerge distros 
-        # # conary 2.5 compat
-        # for commit in [ 'fecc5bc04e172375bff54f6dad6716ab85c41961', 
-        #                 'e19f59c0f80da4e8b4f61e696416737cf3cde451',
-        #             ]:
-        #    r.addPatch('%s/%s/raw/' % (scmUrl, commit))
-        # FIXME above gets us ..
-        # error: The following file names conflict (cvc does not currently
-        # support multiple files with the same name from different locations):
-        # https://bitbucket.org/rpathsync/rmake-2/commits/fecc5bc04e172375bff54f6dad6716ab85c41961/raw/
-        # https://bitbucket.org/rpathsync/rmake-2/commits/e19f59c0f80da4e8b4f61e696416737cf3cde451/raw/
-        # plan b is ...
-        r.addPatch('fecc5bc04e172375bff54f6dad6716ab85c41961.patch')
-        r.addPatch('e19f59c0f80da4e8b4f61e696416737cf3cde451.patch')
-        
+        # revert the new resolver cache as it's busted big at least
+        # in foresight
+        for commit in [ '73d9766',
+                        '535af99',
+                        '2f1cfad', ]:
+            r.addPatch('%s.patch' % commit, 
+                       extraArgs='-R')
+
         r.addSource('server.conf', dest='%(sysconfdir)s/rmake/serverrc',
                     macros=True)
         r.addSource('client.conf', dest='%(sysconfdir)s/rmake/rmakerc',
@@ -96,7 +83,7 @@ class RmakeRecipe(CPackageRecipe):
         r.UtilizeUser('rmake-chroot', '%(libexecdir)s/rmake/chroothelper')
         r.UtilizeGroup('rmake-chroot', '%(libexecdir)s/rmake/chroothelper')
         r.Doc('extra/plugins/*.py')
-        r.Doc('EULA_Conary_Dual_License.txt')
+        r.Doc('*icense.txt')
 
         ## package rmake-proxy
         r.macros.proxydir = '%(servicedir)s/rmake-proxy'
@@ -184,3 +171,9 @@ serverName localhost
 
         # Avoid rpl-2-py26 <-> fl:2 compatibility issues
         r.Requires(exceptDeps='file: /etc/init.d/functions')
+
+        # for now 
+        r.Remove('%(sysconfdir)s/conary-repos/', recursive = True)
+        r.Remove('%(sysconfdir)s/nginx', recursive = True)
+        r.Remove('%(sysconfdir)s/cron.daily/rmake-repos-cleanup')
+        
