@@ -7,7 +7,7 @@
 loadInstalled('nspr')
 class NSS(CPackageRecipe):
     name = 'nss'
-    version = '3.14.3'
+    version = '3.15.1'
 
     buildRequires = [ 'nspr:devel', 'perl:runtime', 'sqlite:devel', 'zlib:devel']
 
@@ -17,7 +17,7 @@ class NSS(CPackageRecipe):
         r.addArchive('http://ftp.mozilla.org/pub/mozilla.org/security/'
                      'nss/releases/NSS_%s_%s_%s_RTM/src/' % (vmajor, vminor, vpatch))
 
-        r.addArchive('%(name)s-pem-20120811.tar.bz2', dir = '%(name)s-%(version)s/')
+        r.addArchive('%(name)s-pem-20130405.tar.bz2', dir = '%(name)s-%(version)s/')
         r.addSource('mkpkgconfigfiles.sh', macros = True)
         r.addSource('nss.pc.in')
         r.addSource('nss-config.in')
@@ -46,11 +46,25 @@ class NSS(CPackageRecipe):
                    # This patch is currently meant for stable branches
                    # 'nss-ssl-cbc-random-iv-off-by-default.patch',
                    # TODO: Remove this patch when the ocsp test are fixed
-                   'nss-3.14.0.0-disble-ocsp-test.patch',
+                'nss-3.14.0.0-disble-ocsp-test.patch',
+                '0001-sync-up-with-upstream-softokn-changes.patch',
+                'Bug-896651-pem-dont-trash-keys-on-failed-login.patch',
+                # The ocsp stapling tests currently require access to the
+                # kuix.de test server but koji forbids outbount connections
+                'disable-ocsp-stapling-tests.patch',
+                # Fedora / RHEL-only patch, the templates directory was originally introduced to support mod_revocator
+                'utilwrap-include-templates.patch',
+                # TODO submit this patch upstream
+                'nss-versus-softoken-tests.patch',
+                # TODO remove when we switch to building nss without softoken
+                'nss-skip-bltest-and-fipstest.patch',
+                'iquote.patch',
 
-                   ]:
-            r.addPatch(p, dir='mozilla')
-        r.addPatch('https://raw.github.com/PhantomX/slackbuilds/master/nss/patches/0001-sync-up-with-upstream-softokn-changes.patch')
+        ]:
+            r.addPatch(p) # , dir='mozilla')
+
+
+#        r.addPatch('https://raw.github.com/PhantomX/slackbuilds/master/nss/patches/0001-sync-up-with-upstream-softokn-changes.patch')
 
         # tweak softtokn .in
         r.Replace(('@MOD_MAJOR_VERSION@', vmajor),
@@ -86,7 +100,7 @@ class NSS(CPackageRecipe):
         r.Environment('NSPR_LIB_DIR','%(libdir)s')
 
         r.Environment('NSS_USE_SYSTEM_SQLITE', '1')
-        
+
         ## Add custom CA certificates
         # First, obtain a DER file of the root certificate and feed
         # it to addbuiltin, which is provided by this package:
@@ -108,16 +122,19 @@ class NSS(CPackageRecipe):
         #        r.Make('generate', dir='mozilla/security/nss/lib/ckfw/builtins')
 
         r.Environment('NSS_ENABLE_ECC', '1')
+        # r.Environment('NSS_ECC_MORE_THAN_SUITE_B', '1')
         # r.Environment('NSDISTMODE', 'copy')
 
-        r.Make(dir='mozilla/security/coreconf')
-        r.Make(dir='mozilla/security/dbm')
-        r.Make(dir='mozilla/security/nss')
+        r.Make(dir='nss/coreconf')
+        r.Make(dir='nss/lib/dbm')
+        r.Make(dir='nss/')
 
         r.MakeDirs('%(libdir)s/pkgconfig')
         # Set up our package files
         r.macros.nspr_version = Nspr.version
 
+        r.MakeDirs('mozilla/dist/')
+        r.Replace('mozilla/security/nss/lib', 'nss/lib', 'mkpkgconfigfiles.sh')
         r.Run('sh %(builddir)s/mkpkgconfigfiles.sh')
 
         r.Install('mozilla/dist/pkgconfig/*.pc', '%(libdir)s/pkgconfig/', mode=0644)
@@ -145,12 +162,12 @@ class NSS(CPackageRecipe):
                       'libnssdbm3.so',
                       'libfreebl.a',
                       ]:
-            r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '%(libdir)s/', mode=0755)
+            r.Install('dist/*.OBJ/lib/%s' % file, '%(libdir)s/', mode=0755)
 
         # softokn
         for file in [ 'libfreebl3.so',
                       ]:
-            r.Install('mozilla/dist/*.OBJ/lib/%s' % file, '/%(lib)s/', mode=0755)
+            r.Install('dist/*.OBJ/lib/%s' % file, '/%(lib)s/', mode=0755)
             r.Symlink('/%(lib)s/' + file, '%(libdir)s/' + file)
 
         # Install the empty NSS db files
@@ -187,7 +204,7 @@ class NSS(CPackageRecipe):
                       'libnssb.a',
                       'libnssckfw.a'
                       ]:
-            r.Install('mozilla/dist/*.OBJ/lib/%s' % file,
+            r.Install('dist/*.OBJ/lib/%s' % file,
                       '%(libdir)s/',
                       mode=0755)
 
@@ -201,7 +218,7 @@ class NSS(CPackageRecipe):
                       'signver',
                       'ssltap'
                       ]:
-            r.Install('mozilla/dist/*.OBJ/bin/%s' % file,
+            r.Install('dist/*.OBJ/bin/%s' % file,
                       '%(bindir)s/',
                       mode=0755)
 
@@ -220,16 +237,16 @@ class NSS(CPackageRecipe):
                       # softokn
                       'shlibsign',
                       ]:
-            r.Install('mozilla/dist/*.OBJ/bin/%s' % file,
+            r.Install('dist/*.OBJ/bin/%s' % file,
                       '%(unsupported_tools_directory)s/',
                       package=':runtime',
                       mode=0755)
 
         # Copy the include files we want
-        r.Install('mozilla/dist/public/nss/*.h', '%(includedir)s/nss3/')
+        r.Install('dist/public/nss/*.h', '%(includedir)s/nss3/')
 
         # softokn
-        r.Install('mozilla/dist/private/nss/blapi.h', '%(includedir)s/nss3/')
+        r.Install('dist/private/nss/blapi.h', '%(includedir)s/nss3/')
 
         r.Config(exceptions = '%(sysconfdir)s/pki/nssdb/.*')
         r.InitialContents('%(sysconfdir)s/pki/nssdb/.*')
