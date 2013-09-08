@@ -1,15 +1,18 @@
-class MySQLWorkbench(AutoPackageRecipe):
+class MySQLWorkbench(CPackageRecipe):
 
     name = 'mysql-workbench'
-    version = '5.2.40'
+    version = '6.0.6'
 
     buildRequires = [
         'libzip:devel', 'gcc-c++:runtime', 'libxml2:devel', 'libsigc++:devel', 
         'gtkmm:devel', 'mysql:devel', 'util-linux:devel', 'pcre:devel', 
         'pexpect:python', 'sqlite:devel', 'python:devel',
         'google-ctemplate:devel', 'Mesa:devel', 'openssl:devel',
-        'boost:devel', 'autoconf:runtime', 'automake:runtime',
-        'libtool:runtime', 'lua:devel'
+        'boost:devel', 'libtool:runtime', 'lua:devel', 'tinyxml:devel', 
+        'libiodbc:devel', 'python-sqlite:python', 'mysql-connector-c++',
+        'cmake:runtime', 'pcre-c++:devel', 'vsqlite++:devel',
+        # Autoreconf is called early in the build in some subdirs.
+        'autoconf:runtime'
     ]
 
     # On non-Gnome systems, Gnome Keyring is not used, so password "keyring" functionality
@@ -17,39 +20,25 @@ class MySQLWorkbench(AutoPackageRecipe):
     if Use.gnome:
         buildRequires.append('libgnome-keyring:devel')
 
-    # Open source licenses which cover various included components.
+    def setup(r):
+        #Disable parallel build.
+        r.unpack()
+        r.build()
+        r.policy()
 
-    extraConf = ' --enable-codecoverage --enable-grt-generation'
-    extraConf += ' --enable-mysql-utilities --with-pic'
-
-    # Build requires rmake says I don't need. Putting them here fore now.
-    #buildRequires  += [
-    #    'MesaGLw:devel', freeglut:devel'
-    #    'libglade:devel', 'libgnome:devel'
-    #]
-
-    
     def unpack(r):
-        r.addArchive('http://mysql.he.net/Downloads/MySQLGUITools/%(name)s-gpl-%(version)s-src.tar.gz')
-        # Patch to work around bug #65898 submitted 20120714
-        r.addPatch('mysql-workbench-aclocal.patch')
-        # Patch to work around MySQL bug Bug #65900 submitted 20120714.
-        r.addPatch('mysql-workbench-maintainer-mode.patch')
+        r.addArchive('http://mysql.he.net/Downloads/MySQLGUITools/%(name)s-community-%(version)s-src.tar.gz')
 
-    def configure(r):
-        r.Environment('ACLOCAL_AMFLAGS', '" -I m4"') 
-        r.Run('aclocal')
-        r.Configure(r.extraConf, configureName='autogen.sh')
-
+    def build(r):
+        r.macros.parallelmflags = ''
+        r.CMake(objDir='build')
+        r.Make(dir='build')
+        r.MakeInstall(dir='build')
 
     def policy(r):
         # This is required for workbench's SSH tunnel functionality.  Not sure why it's not found by PythonRequires.
         r.Requires('paramiko:python', '%(datadir)s/%(name)s/.*py$')
         r.ComponentSpec('%(name)s:lib', '%(libdir)s/%(name)s/.*so$')
-        #r.Licenses(
-        #    ['Open', 'BSF-1.0', 'MPL-1.1', 'BSD', 'ISC', 'MIT', 'GPL-2', 'LGPL-2.1', 'Lua-5.0',
-        #    'Public Domain', 'PSF', 'SLL']
-        #)
         r.Description(shortDesc=r.summary(), longDesc=r.description()) 
 
     def summary(r):
