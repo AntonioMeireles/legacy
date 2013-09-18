@@ -9,21 +9,22 @@ import re
 loadSuperClass('rpmpackage')
 class Thunderbird(RPMPackageRecipe, AutoPackageRecipe):
     name = 'thunderbird'
-    version = '17.0.8'
-    rpmRelease = '1.fc18'
+    version = '24.0'
+    rpmRelease = '1.fc19'
 
-    rpmArchives = [ '%(name)s-langpacks-%(version)s-20130805.tar.xz',
+    rpmArchives = [ '%(name)s-langpacks-%(version)s-20130916.tar.xz',
                     ]
 
     rpmSources = [ '%(name)s.desktop', 
                    'thunderbird.sh.in', 
                    'thunderbird-redhat-default-prefs.js',
                    'thunderbird-mozconfig',
-                   'mozilla-791626.patch',
+                   'xulrunner-24.0-jemalloc-ppc.patch',
+                   'xulrunner-10.0-gcc47.patch',
                    ]
-    rpmPatches = [ 
-                   'thunderbird-8.0-enable-addons.patch',
-                   ]
+    rpmPatches = [ 'thunderbird-8.0-enable-addons.patch',
+    
+    ]
 
     tarballName = '%(name)s-%(version)s.source.tar.bz2'
 
@@ -41,22 +42,22 @@ class Thunderbird(RPMPackageRecipe, AutoPackageRecipe):
         'libxml2:devel', 'ORBit2:devel', 'popt:devel', 'gawk:runtime', 
         'expat:devel', 'libjpeg:devel', 'unzip:runtime', 'libXinerama:devel',
         'alsa-lib:devel', 'dbus-glib:devel', 'libnotify:devel', 'python:devel',
-        'curl:devel',
+        'curl:devel', 'gstreamer:devel', 'gst-plugins-base:devel',
         # they are still locked in the middle ages
         'autoconf213:runtime', 'xz:runtime', 'startup-notification:devel',
         'yasm:runtime', 'Mesa:devel', 'libvpx:devel',
-	# for hostname                                                                                                                                                                 
+	# for hostname
         'net-tools:runtime',
-
         ]
 
     def configure(r):
-
-        r.addPatch('mozilla-791626.patch', sourceDir = '.', dir = 'mozilla')
-
-
         r.macros.mozappdir = '%(libdir)s/%(name)s-%(version)s'
         r.macros.ldflags += ' -Wl,-rpath,%(mozappdir)s '
+        r.macros.cxxflags += ' -fpermissive '
+
+        r.addPatch('xulrunner-24.0-jemalloc-ppc.patch', sourceDir = '.', dir = 'mozilla')
+        r.addPatch('xulrunner-10.0-gcc47.patch', sourceDir = '.', dir = 'mozilla')
+        
         r.Replace('disable-gnomevfs', 'disable-gnomevfs\nac_add_options --with-system-nss\nac_add_options --with-system-nspr\n', 
                   'thunderbird-mozconfig')
         r.Copy('thunderbird-mozconfig', '.mozconfig')
@@ -73,9 +74,20 @@ class Thunderbird(RPMPackageRecipe, AutoPackageRecipe):
                   'include $(topsrcdir)/config/rules.mk\nMOZ_APP_VERSION="%(version)s"',
                   'mail/installer/Makefile.in')
 
-        # https://bugzilla.mozilla.org/show_bug.cgi?id=736961
-        # build fix
-        #        r.addPatch('https://bug736961.bugzilla.mozilla.org/attachment.cgi?id=623068') 
+        # XXX should not be needed but it is so that inside rMake
+        # shell, and term are detected by the new py27 based build machinery
+        r.Environment('SHELL', '%(essentialbindir)s/bash')
+        r.Environment('TERM', 'vt100')
+
+        # HACK ALERT. THIS SHOULD HAD NOT BE NEEDED
+        # https://bugzilla.mozilla.org/show_bug.cgi?id=850088 supposed to have been fixed
+        r.Replace('sys\.exit\(1\)', 'sys.exit(0)', 'mozilla/js/src/config/check-sync-dirs.py')
+
+        # keep older gcc happy
+        for f in [ 'mailnews/compose/public/nsIMsgSend.idl',
+                   'mailnews/compose/src/nsMsgAttachmentHandler.cpp',
+                   'mailnews/compose/src/nsMsgSend.cpp',]:
+            r.Replace('nsMsgAttachmentHandler>>', 'nsMsgAttachmentHandler> >', f)            
 
     def make(r):
         r.Make('-f client.mk build', preMake = 'MAKE="gmake %(parallelmflags)s"')
