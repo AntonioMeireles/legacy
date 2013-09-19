@@ -1,7 +1,7 @@
 #!/bin/sh
 
 branch=$(grep -m 1 ^branch CONARY)
-date=$(date +%Y.%m.%d-%k:%m.%S)
+date=$(date +%Y.%m.%d-%k:%M.%S)
 touch $date.log
 ln -sf $date.log log 
 case $branch in
