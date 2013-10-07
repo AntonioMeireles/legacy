@@ -1,36 +1,38 @@
 #
-# Copyright (c) 2008 - 2010 Foresight Linux Project
+# Copyright (c) 2008 - 2013 The Foresight Linux Project
 # Copyright (c) 2005-2009 rPath, Inc.
 #
 # This file is distributed under the terms of the MIT License.
-# A copy is available at http://www.rpath.com/permanent/mit-license.html
+# A copy is available at http://www.foresightlinux.org/licenses/mit-license/
 #
 
 class Sword(CPackageRecipe):
     name = "sword"
-    version = "1.6.2+r2679"
+    version = "1.7.0"
+    #version = "1.6.904+r2983"
 
     buildRequires = ['clucene:devel', 'curl:devel', 'libstdc++:devel',
                      'openssl:devel', 'pkgconfig:devel', 'zlib:devel', 
                      'icu:runtime', 'icu:devel', 'cmake:runtime',
-                     'libtool:runtime',
+                     'libtool:runtime', 'chrpath:runtime',
                      'cppunit:devel', 'php:runtime', 'python:devel',
-                     'swig:runtime', 'perl:devel']
+                     'swig:runtime', 'perl:devel', 'perl:runtime']
 
     def setup(r):
-        r.macros.majversion = '.'.join(r.version.split('.')[0:2])
-        r.macros.rev = r.version[-4:]
-        r.macros.url = 'http://crosswire.org/ftpmirror/pub/sword/source'
-        r.addSvnSnapshot('http://crosswire.org/svn/sword/trunk/', revision='%(rev)s')
-        r.addPatch('cmake_libdir.patch')
-        #r.addArchive('%(url)s/v%(majversion)s/sword-%(version)s.tar.gz')
-        r.macros.cmake_args = ' -DSWORD_BINDINGS=Python'
-        if Arch.x86_64:
-            r.macros.cmake_args += ' -DLIB_SUFFIX=64'
+        if "+r" in r.version: 
+            r.macros.rev = r.version[-4:]
+            r.addSvnSnapshot('http://crosswire.org/svn/sword/trunk/', revision='%(rev)s')
+        else:
+            r.macros.url = 'http://crosswire.org/ftpmirror/pub/sword/source'
+            r.addArchive('%(url)s/v%(major_version)s/sword-%(version)s.tar.gz')
+        #r.macros.sitepkgs = '%(libdir)s/python%(pyver)s/site-packages'
+        r.macros.cmake_args = ' -DSWORD_BINDINGS=Python,Perl -DLIBDIR=%(libdir)s'
+        #r.macros.cmake_args += ' -DSWORD_PYTHON_INSTALL_DIR=%(sitepkgs)s'
         r.CMake('%(cmake_args)s', objDir='build')
         r.Make(dir='build')
+        r.Run('chrpath -d build/bindings/swig/perl/blib/arch/auto/Sword/Sword.so')
         r.MakeInstall(dir='build')
-        # Only python bindings atm until 
+        # python needs some extra handling
         r.PythonSetup('install', dir='build/bindings/swig/python/')
 
         r.MakeDirs('%(datadir)s/sword/modules')
