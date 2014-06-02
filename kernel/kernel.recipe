@@ -8,68 +8,52 @@ loadInstalled('open-vm-tools')
 loadSuperClass('kernelpackage')
 class Kernel(KernelPackageRecipe):
     name = 'kernel'
-    version = '3.4.91'
-    vMajor, vMinor, patchLevel = version.split('.')
-    realVersion = version
-    fakedVersion = '2.6.4%s.%s' %(vMinor, patchLevel)
+    version = '3.10.40'
+    #version = '3.13.3'
+    kS = version.split('.')
+    vMajor = kS[0]
+    vMinor = kS[1]
+    testing = ''
+    try:
+        patchLevel = kS[2]
+    except IndexError:
+        patchLevel = '0'
+
+    if patchLevel[0]=='r':
+        testing="testing/"
+        realVersion = vMajor + '.' + vMinor + '-' + patchLevel
+        fakedVersion = vMajor + '.' + vMinor + '.' + '0-' + patchLevel
+    else:
+        fakedVersion = None
+        realVersion = version
+    #fMinor = 40 + int(vMinor)
+    #fakedVersion = '2.6.%s.%s' %(fMinor, patchLevel)
     longterm = False
 
     def unpackBase(r):
                 r.addArchive(
                     'http://ftp.kernel.org/pub/linux/kernel'
-                    '/v3.x/linux-%s.tar.xz' % r.realVersion,
+                    '/v3.x/%slinux-%s.tar.xz' % (r.testing,r.realVersion),
                     keyid='517D0F0E'
                     )
 
     def setMacros(r):
-        r.version = r.fakedVersion
-        r.macros.version = r.version
+        if r.fakedVersion:
+            r.version = r.fakedVersion
+            r.macros.version = r.version
         KernelPackageRecipe.setMacros(r)
 
     def unpack(r):        
-        # r.addPatch('git-linus.diff')
-        r.addPatch('force-version-2.6.patch')
-        r.addPatch('linux-2.6-makefile-after_link.patch') 
-        # r.addPatch('linux-2.6-compile-fixes.patch')
-        # r.addPatch('linux-2.6-upstream-reverts.patch', extraArgs='-R')
+        #r.addPatch('force-version-2.6.patch')
+        # from lkml
+#        r.addPatch('ax88179_178a_resume.patch')
 
-        r.addPatch('taint-vbox.patch')
-        r.addPatch('jbd-jbd2-validate-sb-s_first-in-journal_get_superblo.patch')
-        r.addPatch('linux-2.6-defaults-acpi-video.patch')
-        r.addPatch('linux-2.6-acpi-video-dos.patch')
-        r.addPatch('linux-2.6-acpi-debug-infinite-loop.patch')
-        r.addPatch('acpi-sony-nonvs-blacklist.patch')
-        r.addPatch('linux-2.6-input-kill-stupid-messages.patch')
-        r.addPatch('die-floppy-die.patch')
-        r.addPatch('linux-2.6.30-no-pcspkr-modalias.patch')
-        r.addPatch('linux-2.6-serial-460800.patch')
-        r.addPatch('linux-2.6-silence-noise.patch')
-        r.addPatch('linux-2.6-silence-fbcon-logo.patch')
-        r.addPatch('linux-2.6-crash-driver.patch')
-        r.addPatch('linux-2.6-e1000-ich9-montevina.patch')
-        # r.addPatch('drm-intel-next.patch')
-        r.addPatch('drm-i915-dp-stfu.patch')
-        r.addPatch('drm-i915-fbc-stfu.patch')
-        r.addPatch('linux-2.6-intel-iommu-igfx.patch')
-        r.addPatch('linux-2.6-silence-acpi-blacklist.patch')
-        r.addPatch('quite-apm.patch')
-        r.addPatch('drivers-media-update.patch')
-        r.addPatch('disable-i8042-check-on-apple-mac.patch')
-        r.addPatch('dmar-disable-when-ricoh-multifunction.patch')
-        r.addPatch('lis3-improve-handling-of-null-rate.patch')
-        r.addPatch('ips-noirq.patch')
-        r.addPatch('uprobes-3.4-backport.patch')
-        r.addPatch('uprobes-3.4-tip.patch')
-        r.addPatch('uprobes-task_work_add-generic-process-context-callbacks.patch')
-        r.addPatch('unhandled-irqs-switch-to-polling.patch')
-        r.addPatch('weird-root-dentry-name-debug.patch')
-        r.addPatch('debug-808990.patch')
-        r.addPatch('atl1c_net_next_update-3.4.patch')
-        r.addPatch('crypto-testmgr-allow-aesni-intel-and-ghash_clmulni-intel.patch')
-        r.addPatch('crypto-aesni-intel-fix-wrong-kfree-pointer.patch')
-
+        # to build with older headers
+        #r.addPatch('turbostat-makefile.diff')
+ 
         # https://lkml.org/lkml/2012/7/6/198
         r.addPatch('upstreamable-tools_power-buildfixes.patch')
+        r.Remove('tools/perf/scripts/perl/Perf-Trace-Util/Context.c')
 
         # VMware support
         r.macros.ovmtoolsver = OpenVmTools.version.replace('_', '-')
@@ -82,9 +66,9 @@ class Kernel(KernelPackageRecipe):
         # keep a backup of the original font for comparison purposes. 
         # -- /ermo
         r.addSource('terminus_font_8x16.c', dest = 'drivers/video/console/')
-        r.Copy('drivers/video/console/font_8x16.c', 'drivers/video/console/font_8x16.c.org')
+#        r.Copy('drivers/video/console/font_8x16.c', 'drivers/video/console/font_8x16.c.org')
         # Comment out the line below to keep original VGA font.
-        r.Copy('drivers/video/console/terminus_font_8x16.c', 'drivers/video/console/font_8x16.c')
+#        r.Copy('drivers/video/console/terminus_font_8x16.c', 'drivers/video/console/font_8x16.c')
 
     def addConfiguration(r):
         r.addSource('kernel-foresight-i686.config',
@@ -106,9 +90,26 @@ class Kernel(KernelPackageRecipe):
             r.Replace('%s=.*' % st,
                       '# %s is not set' % st,
                       '.config') 
+        # bellow _may_ needed so that broadcom wl
+        # fully behaves with WPA auth...
+        # or st in [ 'CONFIG_HOSTAP', ]:
+        # r.Replace('.*%s.*' % st,
+        #           '%s=y' % st, '.config')
         #
         for st in [ 'CONFIG_ACPI_PROCFS_POWER',
                     'CONFIG_ACPI_PROC_EVENT', ]:
+            r.Replace('.*%s.*' % st,
+                      '%s=y' % st, '.config')
+        # 
+        for st in [ 'CONFIG_MODULE_SIG',
+                    # above disables modules signing
+        ]: 
+            r.Replace('%s=.*' % st,
+                      '# %s is not set' % st,
+                      '.config') 
+        # enable intel's PSTATE tricks.
+        # this is an edgy kernel after all
+        for st in [ 'CONFIG_X86_INTEL_PSTATE', ]:
             r.Replace('.*%s.*' % st,
                       '%s=y' % st, '.config')
         
@@ -116,24 +117,25 @@ class Kernel(KernelPackageRecipe):
         pass
 
     def build(r):
-        # Build VMware kernel modules
-        r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
+        pass
+        # # Build VMware kernel modules
+        # r.macros.kmoddir = '/lib/modules/%(kver)s/kernel/'
 
-        for m in ('drivers/misc/vmci',
-                  'drivers/misc/vmsync',
-                  'drivers/net/vmxnet',
-                  'drivers/net/vsock',
-                  'fs/vmblock',
-                  'fs/vmhgfs'):
-            module = os.path.basename(m)
-            modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
-            r.Run('make -C %(builddir)s SUBDIRS=$PWD SRCROOT=$PWD/.'
-                  ' MODULEBUILDDIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s/modules/linux'
-                  ' OVT_SOURCE_DIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s',
-                  ' VM_KBUILD=26 '
-                  ' CC_OPTS=-DVMW_HAVE_EPOLL'
-                  ' modules',
-                  dir=modsrc)
+        # for m in ('drivers/misc/vmci',
+        #           'drivers/misc/vmsync',
+        #           'drivers/net/vmxnet',
+        #            'drivers/net/vsock',
+        #           'fs/vmblock',
+        #            'fs/vmhgfs'):
+        #     module = os.path.basename(m)
+        #     modsrc = 'open-vm-tools-%(ovmtoolsver)s/modules/linux/' + module + '/'
+        #     r.Run('make -C %(builddir)s SUBDIRS=$PWD SRCROOT=$PWD/.'
+        #           ' MODULEBUILDDIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s/modules/linux'
+        #            ' OVT_SOURCE_DIR=%(builddir)s/open-vm-tools-%(ovmtoolsver)s',
+        #            ' VM_KBUILD=26 '
+        #            ' CC_OPTS=-DVMW_HAVE_EPOLL'
+        #            ' modules',
+        #           dir=modsrc)
 
-            kmod = module + '.ko'
-            r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod)
+        #     kmod = module + '.ko'
+        #     r.Install(modsrc + kmod, '%(kmoddir)s' + m + '/' + kmod)
