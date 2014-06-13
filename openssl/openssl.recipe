@@ -4,22 +4,10 @@
 # A copy is available at http://www.rpath.com/permanent/mit-license.html
 #
 
-loadSuperClass('rpmpackage')
-class OpenSSL(RPMPackageRecipe, CPackageRecipe):
+class OpenSSL(CPackageRecipe):
     name = 'openssl'
     version = '0.9.8g'
     certsdir = '%(sysconfdir)s/ssl/certs'
-
-    isUpdate = True
-    distroVersion = '10'
-    rpmRelease = '12.fc10'
-
-    rpmPatches = [
-        'openssl-0.9.8a-link-krb5.patch',
-        'openssl-0.9.8g-ipv6-apps.patch',
-        'openssl-0.9.8g-shlib-version.patch',
-        'openssl-0.9.8g-soversion.patch',
-    ]
 
     buildRequires = [ 'perl:runtime',
                       'sed:runtime', 'mktemp:runtime', 'zlib:devel' ]
@@ -28,42 +16,25 @@ class OpenSSL(RPMPackageRecipe, CPackageRecipe):
 
     buildRequires.append('zlib:devel')
 
-    # XXX
-    # XXX this has to be built under an rpl2 context (as newer binutils doesn't
-    # XXX like this too much ... (using it would force defaulting to no-asm ...)
-    # XXX 
-
     def setup(r):
         r.disableParallelMake()
         r.macros.solibbase = re.sub('[a-zA-Z]*', '', r.version)
         r.macros.certsdir = r.certsdir
 
-        # Add back signature verification if CNY-2420 is fixed
-        r.addArchive('http://www.openssl.org/source/') #, keyid='9C58A66D')
-
-        for patch in r.rpmPatches:
-            r.addPatch(patch, rpm=r.srpm)
-
-        for patch in [ 'openssl-0.9.8-flags-priority.dif',
-                       'non-exec-stack.diff',
-                       'openssl-0.9.8a.ca-app-segfault.bug128655.dif',
-                       'bswap.diff',
-                       'openssl-0.9.8g-fix_dh_for_certain_moduli.patch',
-                       'openssl-CVE-2008-0891.patch', # RPL-2569
-                       'openssl-CVE-2008-1672.patch', # RPL-2569
-                       'openssl-0.9.8g-CVE-2008-5077.patch', # RPL-2942
-                       'openssl-CVE-2009-0590.patch',        # RPL-2997
-                       'openssl-CVE-2009-0789.patch',
-                       'openssl-CVE-2009-1377.patch',
-                       'openssl-CVE-2009-1378.patch',
-                       'openssl-CVE-2009-1379.patch',
-                       'openssl-CVE-2009-1386.patch',         # RPL-3287  RPL-3288
-                       'openssl-CVE-2009-1387.patch',
-                   ]:
-            r.addPatch(patch)
+        r.addGitSnapshot('git://git.openssl.org/openssl.git',
+                         branch='OpenSSL_0_9_8-stable')
 
         # RPL-2519
         r.addPatch('openssl-0.9.8g-Configure-libresolv.patch')
+
+        # Other adjustments from RH for better compatibility:
+        r.addPatch('openssl-0.9.8a-link-krb5.patch')
+        r.addPatch('openssl-0.9.8g-shlib-version.patch')
+        r.addPatch('openssl-0.9.8g-soversion.patch')
+
+        # Other patches we have carried
+        r.addPatch('non-exec-stack.diff')
+        r.addPatch('bswap.diff')
 
         #Replace the country code in the stock openssl.cnf with --
         r.Replace('AU', '--', 'apps/openssl.cnf')
@@ -71,50 +42,7 @@ class OpenSSL(RPMPackageRecipe, CPackageRecipe):
         #Add a script for generating dummy certificates, useful for initscripts
         r.addSource('gendummycert.sh', mode=0755, dest='%(bindir)s/')
 
-        # RPL-3157
-        r.addPatch('CVE-2009-4355.patch')
-
-        # TLS renegotiation fix
-        r.addPatch('CVE-2009-3555.patch')
-
-        # RPL-3191
-        r.addPatch('openssl-0.9.8g-CVE-2010-0433.patch')
-        r.addPatch('openssl-0.9.8g-CVE-2009-3245.patch')
-
-        # PFM-909
-        r.addPatch('openssl-0.9.8g-CVE-2010-4180.patch')
-        # RPL-3287  RPL-3288
-        r.addPatch('openssl-CVE-2010-0740.patch')
-
-        # XXXX [legacy hell]
-        # the commented patches bellow don't apply straight :( ...
-        for patch in [ 'CVE-2010-2939.patch',
-                       'CVE-2010-3864.patch',
-                       # Only 0.9.8h through 0.9.8q are affected by bellow one
-                       # 'CVE-2011-0014.patch',
-                       'block_diginotar.patch',
-                       'block_digicert_malaysia.patch',
-                       'CVE-2011-1945.patch',
-                       'CVE-2011-3210.patch',
-                       #'CVE-2011-4108.patch',
-                       'CVE-2011-4109.patch',
-                       # 'CVE-2011-4619.patch',
-                       'CVE-2011-4576.patch',
-                       # 'CVE-2011-4577.patch',
-                       'dtls-fragment-alert.patch',
-                       # 'CVE-2012-0050.patch',
-                       # 'CVE-2012-0884.patch',
-                       # 'CVE-2012-1165.patch',
-                       'CVE-2012-2110.patch',
-                       'CVE-2012-2131.patch',
-                       'CVE-2012-2333.patch',
-                       # 'CVE-2013-0169.patch',
-                       'CVE-2013-0166.patch',
-                   ]:
-            r.addPatch('http://patch-tracker.debian.org/patch/series/dl/openssl/0.9.8o-4squeeze14/%s' % patch)
-
         r.addPatch('openssl-0.9.7-beta5-version-add-engines.patch')
-        r.addPatch('openssl-0.9.8a-enginesdir.patch')
 
         r.macros.sslflags = ''
 
